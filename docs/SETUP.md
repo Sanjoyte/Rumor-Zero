@@ -127,6 +127,7 @@ Versions are the latest stable releases as of 2026-09-29. Part 0 re-checks patch
 | `gunicorn` | 26.2.0 | Production WSGI server on Render (not used on Windows) |
 | `django-anymail[brevo]` | 15.2 | Sends email through Brevo's HTTPS API. Switchable to Resend later. |
 | `sentry-sdk[django]` | 2.71.0 | Error tracking, active only when `SENTRY_DSN` is set |
+| `Pillow` | 12.3.x (12.3.0 released 2026-07-01; the next quarterly release is due 2026-10-15) | **Added in Part 14B.** Decodes, validates and re-encodes profile photos to WebP, dropping EXIF/GPS. Prebuilt wheels for Windows and Linux (Render), with WebP support built in. |
 
 ### B2. Backend: `backend/requirements-dev.txt` (dev and test only)
 
@@ -148,6 +149,8 @@ Versions are the latest stable releases as of 2026-09-29. Part 0 re-checks patch
 | `django-cors-headers` | Not needed, because the browser talks to one origin (ANALYSIS d) |
 | `django-redis` | Django's built-in `RedisCache` is enough |
 | Celery | Not needed: the queue is a DB table (guide §5.4) |
+| `pillow-heif` | HEIC photos aren't accepted (iPhones convert to JPEG when the file input only accepts JPEG/PNG/WebP) |
+| Object storage / image services (R2, Cloudflare Images, Supabase Storage, Cloudinary) | Profile photos are stored in Postgres (ANALYSIS f-7). R2 needs a payment method, and Cloudflare Images storage is paid. |
 
 ### B3. Frontend: `frontend/package.json`
 
@@ -170,6 +173,12 @@ Versions are the latest stable releases as of 2026-09-29. Part 0 re-checks patch
 | `jsdom`, `vite-tsconfig-paths` | latest at Part 0B | Browser-like test DOM, `@/` imports in tests |
 | `@testing-library/react`, `@testing-library/dom`, `@testing-library/user-event`, `@testing-library/jest-dom` | RTL 16.3.3 + latest | Component testing |
 | `@playwright/test` | 1.63.0 | End-to-end tests. Browsers are installed by `npx playwright install chromium`. |
+| `sharp` (dev) | 0.35.x (0.35.4 today) | **Added in Part 0D.** Renders `design/logo.svg` into the favicon, app icons, share image and email/admin logos (`npm run brand:build`). Prebuilt Windows x64 binaries. Used only by `frontend/scripts/brand/`, never by app code or the Worker bundle. |
+
+**Not used in the frontend (on purpose):**
+- chart libraries (Chart.js, Recharts, d3): the charts are token-built HTML/SVG (Part 11D)
+- `next/image` optimisation: on Cloudflare Workers it needs a Cloudflare Images binding, and the logo and photos are already pre-sized, so plain `<img>` is used
+- SVG optimisers (SVGO): the logo SVG is only checked and cropped, not rewritten
 
 **Loaded at runtime, not from npm:**
 - Google Identity Services: `https://accounts.google.com/gsi/client`
@@ -207,10 +216,22 @@ These are required third-party widgets, loaded only on the auth pages.
 
 Step-by-step setup for each account, and which values to copy, is in `docs/ENV_GUIDE.md`.
 
+The Stitch-only features added on 2026-09-29 need **no new account**:
+- emergency posts, credibility score, reposts, bookmarks, source/DOI and charts are all Django + Postgres;
+- profile photos are stored in Postgres (ANALYSIS f-7);
+- the logo is a file in the repo.
+
 **Things that would cost money (avoided):**
-- **A custom domain.** Needed only for Resend and for "pretty" URLs; the free alternatives are in ANALYSIS c-22 and d.
-- **Cloudflare R2.** Needs a card even for its free tier. Not used in the MVP; the OpenNext cache stays on the default, not R2.
+- **A custom domain.** Needed only for Resend, for "pretty" URLs, and realistically for showing a logo on Google's consent screen (brand verification checks domain ownership, ENV_GUIDE §2.9). The free alternatives are in ANALYSIS c-22 and d.
+- **Cloudflare R2.** Enabling it means completing an "R2 subscription" checkout with a payment method, even for the free tier (re-checked 2026-09-29). Not used: profile photos live in Postgres, and the OpenNext cache stays on the default, not R2.
+- **Cloudflare Images storage.** $5 per 100,000 stored images. Not used.
 - **Vercel Hobby.** Free, but non-commercial use only.
+
+**Free but not used (would be new services):**
+- **Supabase Storage:** 1 GB, no card, but free projects pause after 7 days without activity.
+- **Cloudinary:** 25 credits/month, no card.
+
+They're listed only as fallbacks if profile photos ever outgrow Neon's 0.5 GB. You'd be asked before either is added.
 
 ---
 
@@ -235,4 +256,8 @@ Step-by-step setup for each account, and which values to copy, is in `docs/ENV_G
 - UptimeRobot: <https://uptimerobot.com/pricing/>; cron-job.org: <https://cron-job.org/en/faq/>
 - Google OAuth: <https://support.google.com/cloud/answer/15549049>, <https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid>
 - Public Suffix List: <https://publicsuffix.org/list/public_suffix_list.dat>
+- Pillow: <https://pillow.readthedocs.io/en/stable/releasenotes/index.html>; sharp: <https://www.npmjs.com/package/sharp>, <https://sharp.pixelplumbing.com/install/>
+- Cloudflare R2 (subscription checkout): <https://developers.cloudflare.com/r2/get-started/>, <https://community.cloudflare.com/t/why-using-r2-free-tier-involves-giving-card-info/945179>; Cloudflare Images: <https://developers.cloudflare.com/images/pricing>
+- Supabase pausing: <https://supabase.com/docs/guides/platform/free-project-pausing>; Cloudinary free plan: <https://cloudinary.com/documentation/developer_onboarding_faq_free_plan>
+- Next.js icon and OG file conventions: <https://nextjs.org/docs/app/api-reference/file-conventions/metadata/app-icons>
 - create-next-app folder check: <https://github.com/vercel/next.js/blob/canary/packages/create-next-app/helpers/is-folder-empty.ts>

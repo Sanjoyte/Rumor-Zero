@@ -60,6 +60,7 @@ Gotcha: don't wrap these values in quotes, and don't leave trailing spaces.
 | `DEFAULT_FROM_EMAIL` | `"Rumor Zero <no-reply@example.com>"` | Only shows in the printed email |
 | `BREVO_API_KEY` | *(empty)* | Not used locally |
 | `REPORT_THRESHOLD` … `FEED_CACHE_SECONDS` | defaults | Guide §6.2, §7.2, §9.2; ANALYSIS D7 |
+| `EMERGENCY_DURATION_HOURS` … `EMERGENCY_FALSE_COOLDOWN_DAYS` (6 variables, new on 2026-09-29) | defaults | **Needed for local dev: no action.** Emergency-post limits (ANALYSIS f-1). If your `backend/.env` was copied before they existed, the defaults apply; see §1.8 |
 | `PIPELINE_BACKEND` / `PIPELINE_INLINE_KICK` | `stub` / `True` | Built-in fake pipeline |
 | `PIPELINE_URL` / `PIPELINE_API_KEY` | *(empty)* | Reserved for the future real pipeline |
 | `SENTRY_DSN` | *(empty)* | Sentry off locally |
@@ -133,6 +134,25 @@ Free. No billing account is needed; if Google offers to set one up, choose skip 
 - [ ] `frontend/.env.local`: `PROXY_SHARED_SECRET` identical to the backend's
 - [ ] From Part 3: both Google client ID variables filled in
 - [ ] Nothing from `.env`/`.env.local` pasted into chat, and neither file committed (`git status` should never list them)
+
+### 1.8 Emergency-post limits (new on 2026-09-29): **needed for local dev: no action**
+
+`backend/.env.example` gained a new block, "Emergency posts", with six variables. Every one has a default in code, so a `backend/.env` copied earlier keeps working unchanged.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `EMERGENCY_DURATION_HOURS` | `24` | how long an emergency fact post stays pinned |
+| `EMERGENCY_POSTS_PER_DAY` | `1` | emergency posts per user per rolling 24 h (they also count toward `FACT_POSTS_PER_DAY`) |
+| `EMERGENCY_MIN_ACCOUNT_AGE_DAYS` | `7` | account age needed to post one |
+| `EMERGENCY_MIN_REPUTATION` | `40` | credibility score needed (every account starts at 50) |
+| `EMERGENCY_REPORT_THRESHOLD` | `2` | counting reports that send an **active** emergency to review (instead of `REPORT_THRESHOLD`) |
+| `EMERGENCY_FALSE_COOLDOWN_DAYS` | `30` | emergency-posting ban after one of your emergencies ends FALSE |
+
+- To change a value locally, copy the block from `backend/.env.example` into `backend/.env` and edit it.
+- These are only the **initial** values: like the report thresholds, they're seeded into PlatformSettings, and senior moderators change them later in Django Admin.
+- None of them is secret.
+
+No frontend variable was added. The logo, profile photos, reposts, bookmarks, credibility score and charts need no env values and no new accounts.
 
 ---
 
@@ -279,6 +299,7 @@ Also pick `ADMIN_URL_PATH`: run `py -3.13 -c "import secrets; print('mod-' + sec
    | `GOOGLE_OAUTH_CLIENT_ID` | §1.6 (same client) |
    | `EMAIL_PROVIDER` / `BREVO_API_KEY` / `DEFAULT_FROM_EMAIL` | §2.4 |
    | `REPORT_THRESHOLD` … `FEED_CACHE_SECONDS` | defaults (only initial values) |
+   | `EMERGENCY_DURATION_HOURS` … `EMERGENCY_FALSE_COOLDOWN_DAYS` | **deployment: optional.** Leave them out to use the defaults in §1.8 (only initial values; then Django Admin) |
    | `PIPELINE_BACKEND` / `PIPELINE_INLINE_KICK` | `stub` / `True` |
    | `INTERNAL_CRON_SECRET` | from §2.1 |
    | `SENTRY_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | §2.5 |
@@ -349,8 +370,26 @@ Also pick `ADMIN_URL_PATH`: run `py -3.13 -c "import secrets; print('mod-' + sec
    - **Terms of service:** `<FRONTEND>/terms`
    
    These pages exist from Part 15 and **are required** before publishing. Under **Authorized domains**, add the registrable domain `<subdomain>.workers.dev` (e.g. `rumor-zero.workers.dev`) → **Save**.
-3. **Audience** → **Publish app** → confirm → status **In production**. With only the basic scopes, no Google verification is needed. Unverified apps show no logo on the consent screen, which is fine.
+3. **Audience** → **Publish app** → confirm → status **In production**. With only the basic scopes, no Google verification is needed. The consent screen then shows the app name "Rumor Zero" without a logo, which is fine.
 4. No new variable: `GOOGLE_OAUTH_CLIENT_ID` / `NEXT_PUBLIC_GOOGLE_CLIENT_ID` stay the same client ID.
+
+#### 2.9a (optional) App logo on the consent screen: **deployment only · optional · realistically needs a domain you own**
+
+Google's rules, checked 2026-09-29:
+- The logo must be a **square** JPG, PNG or BMP, **120×120 px** for best results, and **no larger than 1 MB**. It must represent your app and contain no Google marks.
+- The logo (and name) is shown **only after brand verification**. Uploading a logo to an app that is already in production requires that verification.
+- Verification checks that you own the domains of the home page and privacy policy (Google Search Console, at the top private domain).
+  - On a free address like `rumor-zero.<subdomain>.workers.dev`, that domain would be `<subdomain>.workers.dev`, and you can't add DNS records there or serve files at its root. So verification very likely fails.
+  - **Recommendation:** skip this until you own a domain.
+
+If you do it later (for example after buying a domain and moving `<FRONTEND>` to it):
+1. Make sure `frontend/public/brand/google-oauth-logo.png` exists (made by Part 0D: 120×120, the logo on the dark plate).
+2. <https://console.cloud.google.com/auth/branding> (project `Rumor Zero`) → **App logo** → **Change logo** (the logo icon) → upload that file → **Save**.
+3. Update **App home page**, **Privacy policy** and **Terms of service** to the new domain, and add it under **Authorized domains**.
+4. Verify the domain in Google Search Console with the same Google account (Owner or Editor on the project).
+5. **Verification Center** (left menu) → submit for brand verification, and follow Google's prompts. Until it's approved, the consent screen keeps showing no logo, and sign-in keeps working.
+
+Sources: <https://support.google.com/cloud/answer/15549049>, <https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification>
 
 ### 2.10 GitHub → Actions secret and variable for the daily deep-health workflow
 
@@ -429,6 +468,7 @@ If a secret was ever **committed to git**, rotate it **first**, then clean histo
 | `GOOGLE_OAUTH_CLIENT_ID` | backend/.env | Render | 1.6 / 2.9 |
 | `EMAIL_PROVIDER`, `DEFAULT_FROM_EMAIL`, `BREVO_API_KEY` | backend/.env | Render | 1.3 / 2.4 |
 | `REPORT_THRESHOLD`, `REPORT_WINDOW_HOURS`, `REPORT_MIN_ACCOUNT_AGE_HOURS`, `CONFIDENCE_THRESHOLD`, `FACT_POSTS_PER_DAY`, `FEED_CACHE_SECONDS` | backend/.env | Render (initial values; then Django Admin) | 1.3 |
+| `EMERGENCY_DURATION_HOURS`, `EMERGENCY_POSTS_PER_DAY`, `EMERGENCY_MIN_ACCOUNT_AGE_DAYS`, `EMERGENCY_MIN_REPUTATION`, `EMERGENCY_REPORT_THRESHOLD`, `EMERGENCY_FALSE_COOLDOWN_DAYS` (optional; defaults in code) | backend/.env (optional) | Render (optional; initial values; then Django Admin) | 1.8 / 2.6 |
 | `PIPELINE_BACKEND`, `PIPELINE_INLINE_KICK`, `PIPELINE_URL`, `PIPELINE_API_KEY` | backend/.env | Render | 1.3 |
 | `INTERNAL_CRON_SECRET` | backend/.env | Render + GitHub secret + cron-job.org header | 1.2 / 2.1 / 2.10 / 2.12 |
 | `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` | backend/.env | Render | 1.3 / 2.5 |
