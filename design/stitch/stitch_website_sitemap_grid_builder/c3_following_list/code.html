@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Network &amp; Peer Connections - Rumor Zero</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600;700&amp;family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{"colors":{"surface-container":"#eaedff","on-surface":"#131b2e","tertiary-fixed":"#eaddff","on-secondary-fixed-variant":"#004b73","inverse-surface":"#283044","inverse-primary":"#59dbc7","surface-container-lowest":"#ffffff","on-error":"#ffffff","on-primary-fixed-variant":"#005047","on-primary-fixed":"#00201c","primary-container":"#00a896","tertiary":"#732ee4","on-error-container":"#93000a","tertiary-container":"#a87dff","surface-container-high":"#e2e7ff","surface-dim":"#d2d9f4","on-tertiary-container":"#3c0088","surface-container-highest":"#dae2fd","primary-fixed-dim":"#59dbc7","background":"#faf8ff","surface-bright":"#faf8ff","secondary":"#006398","surface-tint":"#006b5f","secondary-fixed-dim":"#93ccff","on-secondary":"#ffffff","surface-variant":"#dae2fd","inverse-on-surface":"#eef0ff","outline-variant":"#bbcac5","surface":"#faf8ff","on-secondary-fixed":"#001d31","on-background":"#131b2e","on-tertiary-fixed":"#25005a","on-tertiary":"#ffffff","on-primary":"#ffffff","tertiary-fixed-dim":"#d2bbff","surface-container-low":"#f2f3ff","secondary-fixed":"#cce5ff","on-primary-container":"#00352e","on-tertiary-fixed-variant":"#5a00c6","primary-fixed":"#79f7e3","on-secondary-container":"#00476e","error":"#ba1a1a","outline":"#6c7a76","secondary-container":"#5bb8fe","primary":"#006b5f","on-surface-variant":"#3c4946","error-container":"#ffdad6","verdict-review":"#F4A261","on-verdict-review":"#9a4a12"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem"},"spacing":{"gutter-mobile":"0.75rem","margin-mobile":"1rem","margin":"2rem","space-md":"0.875rem","space-lg":"1.25rem","space-xl":"2rem","space-xs":"0.25rem","gutter":"1.25rem","space-sm":"0.5rem"},"fontFamily":{"label-metric":["JetBrains Mono"],"claim-headline":["Newsreader"],"display-hero-mobile":["Newsreader"],"headline-sm":["Newsreader"],"claim-opinion":["Newsreader"],"display-hero":["Newsreader"],"body-lg":["Inter"],"headline-md":["Newsreader"],"body-md":["Inter"],"body-sm":["Inter"],"headline-lg":["Newsreader"],"label-code":["JetBrains Mono"],"label-badge":["Inter"]},"fontSize":{"label-metric":["0.875rem",{"lineHeight":"1.25rem","fontWeight":"700"}],"claim-headline":["1.375rem",{"lineHeight":"1.875rem","letterSpacing":"-0.01em","fontWeight":"500"}],"display-hero-mobile":["2.25rem",{"lineHeight":"2.75rem","letterSpacing":"-0.02em","fontWeight":"600"}],"headline-sm":["1.25rem",{"lineHeight":"1.75rem","letterSpacing":"-0.01em","fontWeight":"600"}],"claim-opinion":["1.375rem",{"lineHeight":"1.875rem","letterSpacing":"-0.005em","fontWeight":"400"}],"display-hero":["3.5rem",{"lineHeight":"4rem","letterSpacing":"-0.03em","fontWeight":"600"}],"body-lg":["1.125rem",{"lineHeight":"1.75rem","fontWeight":"400"}],"headline-md":["1.75rem",{"lineHeight":"2.25rem","letterSpacing":"-0.01em","fontWeight":"500"}],"body-md":["0.9375rem",{"lineHeight":"1.5rem","fontWeight":"400"}],"body-sm":["0.8125rem",{"lineHeight":"1.25rem","fontWeight":"400"}],"headline-lg":["2.25rem",{"lineHeight":"2.75rem","letterSpacing":"-0.02em","fontWeight":"500"}],"label-code":["0.75rem",{"lineHeight":"1rem","letterSpacing":"0.06em","fontWeight":"600"}],"label-badge":["0.6875rem",{"lineHeight":"0.875rem","letterSpacing":"0.03em","fontWeight":"600"}]},"maxWidth":{"reading":"760px","wide":"1240px","form":"480px","modal":"620px"}}}}</script>
+</head>
+<body class="bg-surface font-body-md text-on-surface antialiased">
+<!-- BEGIN: RZ app sidebar active=profile -->
+<aside class="fixed left-0 top-0 h-full w-64 bg-surface-container-lowest z-50 flex flex-col justify-between border-r border-outline-variant/30">
+<div class="flex flex-col">
+<div class="h-16 px-space-lg flex items-center gap-space-sm border-b border-outline-variant/30">
+<span class="font-headline-sm text-headline-sm font-bold tracking-tight text-on-surface">Rumor Zero</span>
+</div>
+<div class="p-space-sm flex flex-col gap-space-sm">
+<nav class="flex flex-col gap-space-xs">
+<a class="flex items-center gap-space-sm px-space-md rounded-lg transition-colors py-space-sm font-body-md text-body-md text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface" data-path="home" href="#"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">home</span><span>Home</span></a>
+<a class="flex items-center gap-space-sm px-space-md rounded-lg transition-colors py-space-sm font-body-md text-body-md text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface" data-path="search" href="#"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">search</span><span>Search</span></a>
+<a class="flex items-center gap-space-sm px-space-md rounded-lg transition-colors py-space-sm font-body-md text-body-md text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface" data-path="notifications" href="#"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">notifications</span><span>Notifications</span></a>
+<a aria-current="page" class="flex items-center gap-space-sm px-space-md rounded-lg transition-colors py-space-sm font-body-md text-body-md bg-secondary text-on-secondary font-semibold" data-path="profile" href="#"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">person</span><span>Profile</span></a>
+</nav>
+<div class="pt-space-sm">
+<button class="w-full flex items-center justify-center gap-space-xs px-space-md py-space-sm rounded-lg bg-secondary text-on-secondary hover:bg-on-secondary-container font-body-md text-body-md font-semibold transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/30" type="button"><span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">edit_note</span><span>Submit Claim</span></button>
+</div>
+</div>
+</div>
+<div class="flex flex-col border-t border-outline-variant/30">
+<div class="px-space-sm py-space-xs flex flex-col gap-space-xs">
+<a class="flex items-center gap-space-sm px-space-md rounded-lg transition-colors py-space-xs font-body-sm text-body-sm text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface" data-path="audit-queue" href="#"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">fact_check</span><span>Audit Queue</span></a>
+<a class="flex items-center gap-space-sm px-space-md rounded-lg transition-colors py-space-xs font-body-sm text-body-sm text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface" data-path="settings" href="#"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">settings</span><span>Settings</span></a>
+</div>
+<div class="p-space-md border-t border-outline-variant/30 flex items-center justify-between gap-space-sm bg-surface-container-lowest">
+<div class="flex items-center gap-space-sm min-w-0 flex-1">
+<img alt="Profile" class="w-8 h-8 rounded-full object-cover flex-shrink-0" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCh6TAOM27_TahD4yVCK1Kbz2NZmYB6hoKtCnKWGIrZLl4vpj03qF5L3Mayl6j35FyR_8yQtXWob-T9fKTJdZWT61Pxv0SCTuyIiwZAykR9rbxLhmu8kzvBix-RbrC7HvfhFl1T8SFyKrLoyfmjtR9T4dWNrP_p-Sr0cEvIfZ_Q--Nk6wq9T4IFZXZcu5rAHP8sXEWgOt9_Wd-3N-cwc165x9wKz_OB9FAuFG83xOOjTPNDce0-mW-m">
+<div class="flex flex-col min-w-0">
+<span class="font-body-sm text-body-sm font-semibold text-on-surface truncate">Archivist Ross</span>
+<span class="font-label-code text-label-code text-on-surface-variant truncate">@ross_verify</span>
+</div>
+</div>
+<button aria-label="User menu" class="p-space-xs rounded-lg text-outline hover:text-on-surface hover:bg-surface-container-low transition-colors flex-shrink-0" title="User menu" type="button"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">more_horiz</span></button>
+</div>
+</div>
+</aside>
+<!-- END: RZ app sidebar -->
+<div class="pl-64">
+<!-- BEGIN: RZ app header -->
+<header class="fixed top-0 left-64 right-0 h-16 bg-surface-container-lowest border-b border-outline-variant/30 z-40 px-space-lg flex items-center justify-between gap-space-lg">
+<div class="relative flex-1 max-w-xl">
+<span aria-hidden="true" class="material-symbols-outlined absolute left-space-md top-1/2 -translate-y-1/2 text-outline text-[1.25rem]">search</span>
+<input class="w-full bg-surface-container-low text-on-surface placeholder:text-outline font-body-sm text-body-sm pl-10 pr-space-md py-space-xs rounded-lg border border-outline-variant/30 focus:outline-none focus:ring-0 focus:border-secondary" placeholder="Search verified claims, sources, evidence logs..." type="text">
+</div>
+<div class="flex items-center gap-space-md">
+<button class="flex items-center gap-space-xs px-space-md py-space-xs rounded-full border border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container-low text-on-surface transition-colors" type="button"><span aria-hidden="true" class="material-symbols-outlined text-primary text-[1rem]">verified</span><span class="font-label-code text-label-code uppercase">Verification Ledger</span></button>
+<button aria-label="User profile" class="w-8 h-8 rounded-full bg-inverse-surface text-inverse-on-surface hover:opacity-90 transition-opacity flex items-center justify-center flex-shrink-0 font-label-code text-label-code" title="User profile" type="button">AR</button>
+</div>
+</header>
+<!-- END: RZ app header -->
+<!-- BEGIN: MainContent -->
+<main class="relative pt-16 bg-surface min-h-screen">
+<div class="w-full max-w-reading mx-auto px-space-lg py-space-xl flex flex-col gap-space-lg">
+<!-- Breadcrumb Link -->
+<div>
+<a class="inline-flex items-center font-body-sm text-body-sm font-semibold text-secondary hover:text-on-secondary-container hover:underline" href="#">
+<span class="mr-space-xs">←</span> Back to Dr. Elena Vance (@evance_md)
+        </a>
+</div>
+<!-- Network Header Card -->
+<section class="bg-surface-container-lowest border border-outline-variant/30 rounded-lg p-space-lg" data-purpose="network-header">
+<div class="flex flex-col md:flex-row md:items-center justify-between gap-space-md">
+<div>
+<div class="flex items-center gap-space-sm font-label-code text-label-badge tracking-wider text-outline uppercase">
+<span>ARCHIVAL LEDGER</span>
+<span class="text-outline-variant">•</span>
+<span>NODE 4,921</span>
+<span class="text-outline-variant">•</span>
+<span class="text-primary font-bold inline-flex items-center gap-space-xs">
+<span aria-hidden="true" class="material-symbols-outlined text-[0.75rem]">verified</span>
+                Vetted Network
+              </span>
+</div>
+<h2 class="font-headline-lg text-headline-lg text-on-surface mt-space-xs">Network &amp; Peer Connections</h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-space-xs max-w-xl">
+              Scholarly, institutional, and domain peers contributing primary verification logs to Dr. Vance's epistemic record.
+            </p>
+</div>
+<!-- Metric Badge Box -->
+<div class="bg-surface-container-low border border-outline-variant/30 rounded-lg p-space-md text-center min-w-[140px] shrink-0 self-start md:self-auto">
+<span class="font-label-metric text-headline-sm font-bold text-on-surface leading-tight block">97.2%</span>
+<span class="font-label-code text-label-badge text-on-surface-variant uppercase tracking-wider block">Cohort Trust</span>
+<span class="font-body-sm text-label-badge font-medium text-on-surface-variant block mt-0.5">186 Nodes Active</span>
+</div>
+</div>
+</section>
+<!-- Tabs Navigation -->
+<div class="border-b border-outline-variant/30">
+<div class="flex gap-space-xl">
+<button class="flex items-center gap-space-xs pb-space-md font-label-code text-label-code font-semibold uppercase text-outline hover:text-on-surface transition-colors" type="button">
+<span>Followers</span>
+<span class="font-label-code text-label-code bg-surface-container text-on-surface-variant px-space-xs py-0.5 rounded-lg">1,420</span>
+</button>
+<button class="relative flex items-center gap-space-xs pb-space-md font-label-code text-label-code font-bold uppercase text-on-surface transition-colors" type="button">
+<span>Following</span>
+<span class="font-label-code text-label-code bg-secondary/10 text-secondary px-space-xs py-0.5 rounded-lg">186</span>
+<span class="absolute -bottom-px left-0 right-0 h-[2px] bg-secondary"></span>
+</button>
+</div>
+</div>
+<!-- Filter Controls -->
+<div class="flex flex-wrap items-center gap-space-sm">
+<button class="px-space-md py-space-xs rounded-lg border border-inverse-surface bg-inverse-surface text-inverse-on-surface font-body-sm text-body-sm font-semibold transition-colors" type="button">All</button>
+<button class="px-space-md py-space-xs rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-on-surface-variant hover:bg-surface-container-low font-body-sm text-body-sm font-medium transition-colors" type="button">Institutional Contributors</button>
+<button class="px-space-md py-space-xs rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-on-surface-variant hover:bg-surface-container-low font-body-sm text-body-sm font-medium transition-colors" type="button">Peer Reviewers</button>
+<button class="px-space-md py-space-xs rounded-lg bg-surface-container-lowest border border-outline-variant/50 text-on-surface-variant hover:bg-surface-container-low font-body-sm text-body-sm font-medium transition-colors" type="button">Domain Specialists</button>
+</div>
+<!-- Search Filter Input -->
+<div class="relative">
+<span class="absolute inset-y-0 left-0 pl-space-md flex items-center pointer-events-none text-outline">
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem]">search</span>
+</span>
+<input class="w-full rounded-lg border border-outline-variant/50 bg-surface-container-low pl-10 pr-10 py-space-sm font-body-md text-body-md text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-secondary/20 focus:border-secondary focus:bg-surface-container-lowest" placeholder="Filter people you follow by name, handle, or field..." type="text"/>
+<span class="absolute inset-y-0 right-0 pr-space-md flex items-center pointer-events-none text-outline">
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem]">tune</span>
+</span>
+</div>
+<!-- BEGIN: ConnectionCardsList -->
+<div class="bg-surface-container-lowest border border-outline-variant/30 rounded-lg divide-y divide-outline-variant/30 overflow-hidden" data-purpose="connections-list">
+<!-- Card 1: Dr. Marcus Thorne -->
+<article class="p-space-md hover:bg-surface-container-low/50 transition-colors">
+<div class="flex items-start justify-between gap-space-md">
+<div class="flex gap-space-sm min-w-0">
+<div class="w-10 h-10 rounded-full bg-inverse-surface text-inverse-on-surface flex items-center justify-center flex-shrink-0 font-label-code text-label-code font-bold">
+                MT
+              </div>
+<div class="min-w-0">
+<div class="flex items-center gap-space-xs flex-wrap">
+<h3 class="font-body-md text-body-md font-bold text-on-surface">Dr. Marcus Thorne</h3>
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem] text-primary [font-variation-settings:'FILL'_1]">verified</span>
+<span class="font-label-code text-label-badge text-outline">@mthorne_geo</span>
+</div>
+<p class="font-body-sm text-body-sm text-outline mt-0.5">Volcanology &amp; Plate Tectonics • Pacific Rim Geoscience</p>
+<div class="flex items-center gap-x-space-sm gap-y-space-xs mt-space-xs flex-wrap">
+<span class="inline-flex items-center gap-space-xs px-space-xs py-0.5 rounded-lg border border-primary/30 bg-primary/10 text-primary font-label-badge text-label-badge">
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                    96.4% Audit Trust
+                  </span>
+<span class="font-label-badge text-label-badge font-medium text-on-surface-variant">• 84 Verified Claims</span>
+<span class="px-space-xs py-0.5 rounded-lg border border-outline-variant/30 bg-surface-container text-on-surface-variant font-label-badge text-label-badge">Tier 1 Reviewer</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-space-sm shrink-0">
+<button class="inline-flex items-center justify-center gap-space-xs px-space-md py-space-sm rounded-lg bg-surface-container-lowest text-on-surface border border-outline-variant hover:bg-surface-container-low font-body-md text-body-md font-semibold transition-colors" type="button">
+                Following
+              </button>
+<button aria-label="More options" class="p-space-xs rounded-lg text-outline hover:text-on-surface hover:bg-surface-container-low transition-colors" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">more_horiz</span>
+</button>
+</div>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-space-sm pl-12">
+            Lead Seismologist. Tracking volcanic activity, Pacific subduction tremors, and high-frequency crustal telemetry.
+          </p>
+<div class="flex items-center gap-space-md font-body-sm text-body-sm text-outline mt-space-sm pl-12">
+<span class="flex items-center gap-space-xs">
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem] text-outline">share</span>
+              14 Shared Peer Audits with Dr. Vance
+            </span>
+<span class="text-outline-variant">·</span>
+<span>Last audit logged 3h ago</span>
+</div>
+</article>
+<!-- Card 2: Sarah Lin -->
+<article class="p-space-md hover:bg-surface-container-low/50 transition-colors">
+<div class="flex items-start justify-between gap-space-md">
+<div class="flex gap-space-sm min-w-0">
+<div class="w-10 h-10 rounded-full bg-surface-container-highest text-on-surface flex items-center justify-center flex-shrink-0 font-label-code text-label-code font-bold">
+                SL
+              </div>
+<div class="min-w-0">
+<div class="flex items-center gap-space-xs flex-wrap">
+<h3 class="font-body-md text-body-md font-bold text-on-surface">Sarah Lin</h3>
+<span class="font-label-code text-label-badge text-outline">@slin_econ</span>
+</div>
+<p class="font-body-sm text-body-sm text-outline mt-0.5">Senior Macroeconomics Analyst • Global Supply Indices</p>
+<div class="flex items-center gap-x-space-sm gap-y-space-xs mt-space-xs flex-wrap">
+<span class="inline-flex items-center gap-space-xs px-space-xs py-0.5 rounded-lg border border-primary/30 bg-primary/10 text-primary font-label-badge text-label-badge">
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                    98.1% Audit Trust
+                  </span>
+<span class="font-label-badge text-label-badge font-medium text-on-surface-variant">• 120 Verified Claims</span>
+<span class="px-space-xs py-0.5 rounded-lg border border-outline-variant/30 bg-surface-container text-on-surface-variant font-label-badge text-label-badge">Data Contributor</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-space-sm shrink-0">
+<button class="inline-flex items-center justify-center gap-space-xs px-space-md py-space-sm rounded-lg bg-surface-container-lowest text-on-surface border border-outline-variant hover:bg-surface-container-low font-body-md text-body-md font-semibold transition-colors" type="button">
+                Following
+              </button>
+<button aria-label="More options" class="p-space-xs rounded-lg text-outline hover:text-on-surface hover:bg-surface-container-low transition-colors" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">more_horiz</span>
+</button>
+</div>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-space-sm pl-12">
+            Specializing in semiconductor fab output, critical mineral supply chain tracking, and empirical trade flux metrics.
+          </p>
+<div class="flex items-center gap-space-md font-body-sm text-body-sm text-outline mt-space-sm pl-12">
+<span class="flex items-center gap-space-xs">
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem] text-outline">layers</span>
+              6 Co-verified Fact Trees
+            </span>
+<span class="text-outline-variant">·</span>
+<span>Last audit logged 1d ago</span>
+</div>
+</article>
+<!-- Card 3: Julian Adams -->
+<article class="p-space-md hover:bg-surface-container-low/50 transition-colors">
+<div class="flex items-start justify-between gap-space-md">
+<div class="flex gap-space-sm min-w-0">
+<div class="w-10 h-10 rounded-full bg-inverse-surface text-inverse-on-surface flex items-center justify-center flex-shrink-0 font-label-code text-label-code font-bold">
+                JA
+              </div>
+<div class="min-w-0">
+<div class="flex items-center gap-space-xs flex-wrap">
+<h3 class="font-body-md text-body-md font-bold text-on-surface">Julian Adams</h3>
+<span class="font-label-code text-label-badge text-outline">@jadams_phil</span>
+</div>
+<p class="font-body-sm text-body-sm text-outline mt-0.5">Civic Philosophy &amp; Urban Policy</p>
+<div class="flex items-center gap-x-space-sm gap-y-space-xs mt-space-xs flex-wrap">
+<span class="inline-flex items-center px-space-xs py-0.5 rounded-lg border border-outline-variant bg-surface-container-low text-outline font-label-badge text-label-badge">
+<span class="mr-space-xs text-outline">”</span>
+                    142 Discourse Contributions (Opinions)
+                  </span>
+<span class="px-space-xs py-0.5 rounded-lg border border-outline-variant/30 bg-surface-container-low text-outline font-label-badge text-label-badge">Non-Empirical Node</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-space-sm shrink-0">
+<button class="inline-flex items-center justify-center gap-space-xs px-space-md py-space-sm rounded-lg bg-surface-container-lowest text-on-surface border border-outline-variant hover:bg-surface-container-low font-body-md text-body-md font-semibold transition-colors" type="button">
+                Following
+              </button>
+<button aria-label="More options" class="p-space-xs rounded-lg text-outline hover:text-on-surface hover:bg-surface-container-low transition-colors" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">more_horiz</span>
+</button>
+</div>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-space-sm pl-12">
+            Editor, Urban Ethics Quarterly. Exploring the intersection of empirical transit telemetry and humanistic civic infrastructure.
+          </p>
+<div class="flex items-center gap-space-md font-body-sm text-body-sm text-outline mt-space-sm pl-12">
+<span class="flex items-center gap-space-xs">
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem] text-outline">chat_bubble_outline</span>
+              Curated 29 Discourse Debates
+            </span>
+</div>
+</article>
+<!-- Card 4: International Energy Agency Data Feed -->
+<article class="p-space-md hover:bg-surface-container-low/50 transition-colors">
+<div class="flex items-start justify-between gap-space-md">
+<div class="flex gap-space-sm min-w-0">
+<div class="w-10 h-10 rounded-full bg-secondary text-on-secondary flex items-center justify-center flex-shrink-0 font-label-code text-label-badge font-bold">
+                IEA
+              </div>
+<div class="min-w-0">
+<div class="flex items-center gap-space-xs flex-wrap">
+<h3 class="font-body-md text-body-md font-bold text-on-surface">International Energy Agency Data Feed</h3>
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem] text-primary [font-variation-settings:'FILL'_1]">verified</span>
+<span class="font-label-code text-label-badge text-outline">@iea_official</span>
+</div>
+<p class="font-body-sm text-body-sm text-outline mt-0.5">Official Institutional Node • Automated Evidence Feed</p>
+<div class="flex items-center gap-x-space-sm gap-y-space-xs mt-space-xs flex-wrap">
+<span class="inline-flex items-center gap-space-xs px-space-sm py-0.5 rounded-lg bg-inverse-surface text-inverse-on-surface font-label-badge text-label-badge">
+<span aria-hidden="true" class="material-symbols-outlined text-[0.75rem] text-inverse-on-surface [font-variation-settings:'FILL'_1]">error</span>
+                    Tier 1 Primary Evidence Repository
+                  </span>
+<span class="px-space-xs py-0.5 rounded-lg border border-outline-variant/30 bg-surface-container text-on-surface-variant font-label-code text-label-badge">API Synced</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-space-sm shrink-0">
+<button class="inline-flex items-center justify-center gap-space-xs px-space-md py-space-sm rounded-lg bg-surface-container-lowest text-on-surface border border-outline-variant hover:bg-surface-container-low font-body-md text-body-md font-semibold transition-colors" type="button">
+                Following
+              </button>
+<button aria-label="More options" class="p-space-xs rounded-lg text-outline hover:text-on-surface hover:bg-surface-container-low transition-colors" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">more_horiz</span>
+</button>
+</div>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-space-sm pl-12">
+            Real-time telemetry and verified tabular statistics on global energy transition, grid decarbonization, and regional consumption loads.
+          </p>
+<div class="flex items-center gap-space-md font-body-sm text-body-sm text-outline mt-space-sm pl-12">
+<span class="flex items-center gap-space-xs">
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem] text-outline">description</span>
+              Cited in 312 Platform Verdicts
+            </span>
+<span class="text-outline-variant">·</span>
+<span>Auto-telemetry heartbeat: Normal (3m ago)</span>
+</div>
+</article>
+<!-- Card 5: Dr. Aris Carter -->
+<article class="p-space-md hover:bg-surface-container-low/50 transition-colors">
+<div class="flex items-start justify-between gap-space-md">
+<div class="flex gap-space-sm min-w-0">
+<div class="w-10 h-10 rounded-full bg-inverse-surface text-inverse-on-surface flex items-center justify-center flex-shrink-0 font-label-code text-label-code font-bold">
+                AK
+              </div>
+<div class="min-w-0">
+<div class="flex items-center gap-space-xs flex-wrap">
+<h3 class="font-body-md text-body-md font-bold text-on-surface">Dr. Aris Carter</h3>
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem] text-primary [font-variation-settings:'FILL'_1]">verified</span>
+<span class="font-label-code text-label-badge text-outline">@dr_carter</span>
+</div>
+<p class="font-body-sm text-body-sm text-outline mt-0.5">Cascadia Rapid Observation Cluster</p>
+<div class="flex items-center gap-x-space-sm gap-y-space-xs mt-space-xs flex-wrap">
+<span class="inline-flex items-center gap-space-xs px-space-xs py-0.5 rounded-lg border border-primary/30 bg-primary/10 text-primary font-label-badge text-label-badge">
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                    91.8% Audit Trust
+                  </span>
+<span class="font-label-badge text-label-badge font-medium text-on-surface-variant">• 41 Verified Claims</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-space-sm shrink-0">
+<button class="inline-flex items-center justify-center gap-space-xs px-space-md py-space-sm rounded-lg bg-surface-container-lowest text-on-surface border border-outline-variant hover:bg-surface-container-low font-body-md text-body-md font-semibold transition-colors" type="button">
+                Following
+              </button>
+<button aria-label="More options" class="p-space-xs rounded-lg text-outline hover:text-on-surface hover:bg-surface-container-low transition-colors" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">more_horiz</span>
+</button>
+</div>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-space-sm pl-12">
+            Geophysicist focusing on emergency seismic tremor monitoring and sub-surface fracture telemetry.
+          </p>
+</article>
+</div>
+<!-- END: ConnectionCardsList -->
+<!-- BEGIN: BottomBanner (informational protocol callout: secondary family) -->
+<section class="bg-secondary/10 border border-secondary/30 rounded-lg p-space-lg flex flex-col sm:flex-row sm:items-center justify-between gap-space-md" data-purpose="bottom-callout">
+<div>
+<div class="flex items-center gap-space-xs font-body-sm text-body-sm font-medium text-secondary mb-space-xs">
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem] text-secondary">bolt</span>
+<span>Network Expansion</span>
+</div>
+<h4 class="font-body-md text-body-md font-bold text-on-surface">Looking for more verified contributors?</h4>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">Browse vetted peer reviewers in your discipline via Search →</p>
+</div>
+<div>
+<a class="inline-flex items-center justify-center gap-space-xs px-space-md py-space-sm rounded-lg bg-secondary text-on-secondary hover:bg-on-secondary-container font-body-md text-body-md font-semibold transition-colors shadow-sm whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/30" href="#">
+            Explore Directory →
+          </a>
+</div>
+</section>
+<!-- END: BottomBanner -->
+</div>
+</main>
+<!-- END: MainContent -->
+</div>
+</body></html>

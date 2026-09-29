@@ -1,0 +1,558 @@
+# Rumor Zero: Pre-Build Analysis
+
+**Product:** Rumor Zero · **slug:** `rumor-zero` (use `rumor_zero` only where Python or Postgres requires it)
+**Inputs read:** `docs/fact-based-social-platform-architecture-guide.pdf` (all 32 pages, including Figures 1–2) and every file in `design/stitch/`: 17 `code.html`, 17 `screen.png`, and 2 byte-identical `DESIGN.md` files.
+**Verified on:** 2026-09-29. Versions, prices and free-tier limits below were re-checked on the web that day. Sources are listed in `docs/SETUP.md` and `docs/ENV_GUIDE.md`.
+
+### Machine detected (all install steps target this machine)
+
+| Item | Value |
+|---|---|
+| OS | Windows 11 Pro 10.0.26100, x64 (AMD64) |
+| Shell | Windows PowerShell 5.1 (no PowerShell 7). Git Bash is also present. |
+| Package manager | `winget` available |
+| Already installed | Git 2.56, Docker Desktop (CLI 29.7.2), VS Code |
+| **Not** installed | Python (only the Microsoft Store alias stub), Node.js / npm |
+
+---
+
+## Decisions you need to make
+
+Each decision has a default. The rest of the docs (ARCHITECTURE, task.md) already assume the default, so you only need to act if you want something different.
+
+| # | Decision | Default I used | Section |
+|---|---|---|---|
+| D1 | Auth library. simplejwt's maintainer organisation (Jazzband) is shutting down. django-allauth now has its own JWT support. | **allauth headless + its JWT strategy**, with a thin adapter that puts the refresh token in an httpOnly cookie. simplejwt is dropped. Fallback: simplejwt + custom views. | c-17, d |
+| D2 | Transactional email. **Resend needs a domain you own** before it will send to anyone but you, and Render's free tier **blocks SMTP**. | Local: console backend (free). Production: **Brevo** HTTP API (300/day) with a verified single-sender address. Brevo may rewrite a Gmail "From" to its own shared domain, which hurts deliverability. Switch to Resend if you ever buy a domain (~US$10/yr). | c-22, ENV_GUIDE |
+| D3 | Where the keep-alive and scheduled jobs run. GitHub Actions every 10 min exceeds a private repo's free minutes and is arguably outside GitHub's Actions terms. | **UptimeRobot** (free) pings `/api/health/` every 5 min, which also gives uptime alerts. **cron-job.org** (free) calls the hourly pipeline sweeper. A **daily** GitHub Actions workflow does the "deep" ping (DB + Redis). Works for public or private repos. | c-20 |
+| D10 | Next.js on Cloudflare adapter. Cloudflare's docs now recommend **vinext** (1.0 released 2026-09-28, a Vite re-implementation). OpenNext is the mature path. | **OpenNext (`@opennextjs/cloudflare`) on Workers.** It runs the real Next.js build. Keep the code vinext-portable (no `'use cache'`, no `proxy.ts`/middleware, no R2) so switching later is cheap. | c-23 |
+| D4 | Wording of the "false" badge | **FALSE** (the guide says "Unverified / False"; Stitch says "DEBUNKED") | b-2 |
+| D5 | Stitch features the guide does not have (emergency mode, sources/DOI field, bookmarks, reposts, reputation scores, …) | **Drop for MVP.** All listed in b-3. | b-3 |
+| D6 | Can authors delete their own posts? | Yes, as a **soft delete**: hidden everywhere, but kept for the moderation audit trail. No editing. | b-2 |
+| D7 | Daily limit on fact posts (shown in Stitch composer "3/10 remaining") | **Adopt it** as a config value: `FACT_POSTS_PER_DAY = 10` | b-3 |
+| D8 | Copy tone. Stitch uses jargon ("cryptographic ledger", "epistemic", "dispatch"). | Rewrite in **plain language**, keeping the layout and visual design | b-5 |
+| D9 | Logo | **No logo in MVP.** Use the text wordmark "Rumor Zero". Screenshots show two different emblem tiles and the code shows four, so you choose later. | e |
+
+---
+
+## a) Stitch inventory
+
+### a.1 What the Stitch HTML is built with
+
+- **Tailwind Play CDN**: `<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries">`. It compiles in the browser at runtime and is not for production.
+- **One inline `<script id="tailwind-config">`**, byte-identical in all 17 files. It has `darkMode:"class"` but there are no dark tokens and no `dark:` classes anywhere, so the design is light-only.
+- **Fonts via Google Fonts `<link>` tags:** Inter (400/500/600/700), JetBrains Mono (400/600/700), Newsreader (roman 400/500/600, italic 400, opsz axis). Material Symbols Outlined is loaded **twice**, from two different axis URLs.
+- **One identical `<style>` block:** a margin reset, `overscroll-behavior:none`, and `::-webkit-scrollbar{display:none}`. That last rule hides scrollbars globally, which is an accessibility problem, so we won't port it.
+- **Small inline JS:**
+  - a3 and a6: show/hide password.
+  - a4: resend countdown, plus a "state switcher" design artifact.
+  - b1: tab colour swap. It has a bug: the underline indicator never moves.
+  - Inline `onclick` / `onsubmit="event.preventDefault()"` handlers in a2, a3, a5 and b1.
+- **Inline `style="width:%"`** in b3 (lines 239, 279) and c2 (line 246), for progress bars.
+- **Arbitrary Tailwind values:** icon sizes `text-[0.75rem…2rem]`, `z-[60]`, `h-[2px]`, `-bottom-[15px]`, `[font-variation-settings:'FILL'_1]` and `calc()` offsets. d1 uses `animate-in fade-in zoom-in-95`, which needs the `tailwindcss-animate` plugin. That plugin is not loaded, so those classes do nothing.
+- **No default Tailwind palette** (`slate-*`, `gray-*`, `white`, `black`) is used anywhere. Every colour is a token, as DESIGN.md requires.
+- **Desktop-only app shell:** fixed `w-64` sidebar and `pl-64` content, with no mobile variant. Only a1 is really responsive.
+- **Images:** all `<img>` tags point at `lh3.googleusercontent.com/aida-public/...` (Stitch placeholder photos). There are no logo image files.
+- **Screenshots vs code:** several `screen.png` files show an older iteration.
+  - a1, a2, b2 and d1 have brighter blue buttons and a violet toggle.
+  - The root and b3 screenshots show emblem tiles ("RZ" monogram, checkmark) that are not in the code.
+  - b3's screenshot has a different sidebar ("Feed" instead of "Home").
+  - **`code.html` + `DESIGN.md` are authoritative; screenshots are only a visual reference.**
+
+### a.2 Screens
+
+"Shell" means the logged-in app shell (sidebar + top bar).
+
+| ID | Folder | Screen | Shell | MVP plan |
+|---|---|---|---|---|
+| — | `code.html` (root) | "The Epistemic Charter & Color Architecture": design spec, status taxonomy, lifecycle, FAQ | yes | **Reference only.** Its taxonomy table and FAQ layout get reused for a plain "How verification works" page. |
+| a1 | `a1_logged_out_home` | Logged-out landing: hero, 3 feature cards, 4 sample post cards, footer | no (own navbar/footer) | Convert (simplified), fed by the real public feed |
+| a2 | `a2_sign_up` | Sign-up card: Google button, email, username (+availability), password (+strength), Turnstile note | no | Convert |
+| a3 | `a3_log_in` | Log-in card: error banner, Google, email, password, remember-me, forgot link | no | Convert (drop remember-me and the attempt counter) |
+| a4 | `a4_verify_email` | "Check your inbox": resend with countdown, browse read-only | no | Convert, plus the link-landing states it lacks |
+| a5 | `a5_forgot_password` | Request reset link (success banner shown together with the form) | no | Convert (separate idle and success states) |
+| a6 | `a6_reset_password` | New password + confirm, strength meter | no | Convert |
+| b1 | `b1_home_feed` | Home feed: tabs Following / Recent, inline composer, 5 post cards (verified, debunked, emergency, under review, opinion), "You're caught up" | yes | Convert. Drop emergency, evidence drawers, repost, bookmark. |
+| b2 | `b2_post_composer_modal` | Composer modal: text + 500-char counter, Opinion/Fact segmented control, emergency toggle, source URL, daily quota | yes (inert) | Convert. Drop emergency and source URL. Keep the counter and quota. |
+| b3 | `b3_post_detail_forensic_proof` | Post detail: claim, author, chart, "Verification Ledger" evidence section, appeal button, comments | yes | Convert the claim, verdict block, appeal button and flat comments. Drop the chart, ledger, sources and hashes. |
+| b4 | `b4_search_results` | Search: tabs (Claims / Contributors / Sources), status filter chips, result cards, contributor spotlight, load more | yes | Convert posts tab, a people tab, type/status filter chips, and load more |
+| c1 | `c1_user_profile` | Own profile: header + counts, tabs, pending/verified/emergency/removed cards, 4 side widgets | yes | Convert header, counts, post list, removed tombstone. Drop the side widgets. |
+| c2 | `c2_account_settings` | Settings: identity/ORCID, security (SSO, 2FA, sessions), GDPR export, delete account | yes | Convert a subset: profile fields, email, change password, Google status, export, delete |
+| c3 | `c3_following_list` | Followers / Following tabs, category chips, user rows with trust metrics | yes | Convert tabs and user rows with a Follow/Following button. Drop chips and metrics. |
+| c4 | `c4_notifications` | Notification list: unread chip, mark all read, filter tabs, 7 item types | yes | Convert the list and mark-all-read. Types rebuilt for the MVP. |
+| d1 | `d1_report_post_modal` | Report modal: post preview, 5 reason radios, info callout | yes (inert) | Convert. Plain reason labels; add details textarea and already-reported/success states. |
+| d2 | `d2_moderator_peer_review_queue` | Custom moderation queue with bulk actions, votes, SLA timers | yes | **Do not build.** The guide makes Django Admin the moderation panel. Used as a reference for admin list filters and actions. |
+
+`epistemic_ledger/DESIGN.md` is a duplicate of `design/stitch/DESIGN.md`. Both describe the design system, whose name is "Epistemic Ledger".
+
+### a.3 Reusable components (to become Part 0B/0C components)
+
+| Component | Seen in | Notes for conversion |
+|---|---|---|
+| `AppShell` = `Sidebar` + `TopBar` (+ `UserCard`, `SearchInput`) | root, b1–d2 | Add tablet icon-dock and mobile bottom-nav variants (DESIGN.md "intended behavior"). Remove the "Verification Ledger" pill. Show "Moderation" only to moderators, linking to Django Admin. |
+| `AuthCard` (`max-w-form`) + `BrandEmblem` tile | a2–a6 | Emblem glyphs differ in every file (check, layers, diamond, lock). Use one per state (see e). |
+| `MarketingNav` / `MarketingFooter` | a1 | Footer links cut to About, How verification works, Privacy, Terms |
+| `Button` (primary / secondary / ghost / destructive / icon) | everywhere | Primary = `bg-secondary`. There's one radius (`rounded-lg` = 4px) and one shadow (`shadow-sm`). |
+| `TextField`, `PasswordField` (visibility toggle), `Textarea` (+ counter), `Checkbox`, `RadioCard` list, `Select` | a2, a3, a5, a6, b2, b3, c2, d1, d2 | Bind labels to inputs (`htmlFor`). c2 lacks this. |
+| `PasswordStrengthMeter` (4 segments) | a2, a6 | Stitch is inconsistent: 3/4 means "Strong" in a2 but "Fair" in a6. Use one scale. |
+| `GoogleButton` + "or" `Divider` | a2, a3 | Keep the inline Google "G" SVG (`data-rz-keep`) |
+| `Alert` / `Callout` (info, success, warning, error) | a3, a4, a5, a6, c1, c2, d1 | Tints from verdict families: `secondary/10` info, `error/10` error, `verdict-review/10` warning |
+| `PostCard` with 4px `VerdictStripe` | root, a1, b1, b3, b4, c1, d2 | Core component. Variants: opinion, pending, verified, false, under review, removed (tombstone) |
+| `StatusBadge` (glyph + label + optional %) | root, a1, b1, b3, b4, c1, c4, d2 | See the status table in b-2 |
+| `CategoryChip` (FACT / OPINION) | a1, b1, b3, b4, c1 | Neutral chip |
+| `ActionBar` (like, comment, report, share-link) | a1, b1, b3 | Stitch never shows a real like toggle (b1 uses `fact_check` for the first counter). Define the liked state as a filled glyph in `secondary`. |
+| `Tabs` (underline + count), `SegmentedControl`, `FilterChips` | b1, b4, c1, c3, c4, d2, b2 | Fix the b1 underline bug |
+| `Toggle` switch | b2 | Not needed once emergency mode is dropped. Keep it in the kit for settings. |
+| `Modal` + scrim (`max-w-modal`, `z-[60]`) | b2, d1 | Use the native `<dialog>` for focus trap, Esc and `aria-modal` (d1 lacks `role="dialog"`) |
+| `Avatar` (initials on `inverse-surface`) | everywhere | **Initials only** (text-only rule). Photo `<img>` avatars are dropped. |
+| `CommentItem`, `CommentComposer` | b3 | Flat list, no "Reply" |
+| `UserRow` (+ Follow button) | c3, b4 | |
+| `NotificationItem` | c4 | |
+| `EmptyState` / end-of-list | b1, b4, c4 | Stitch has only "caught up" states. The rest are defined in b-2. |
+| `LoadMore` button | b4 | Cursor pagination |
+| `DangerZone` card | c2 | |
+| `StatTile`, `DataTable`, `Accordion` | root, d2 | Only for the "How verification works" page |
+| Missing everywhere: `Toast`, `Tooltip`, `Skeleton`, `DropdownMenu` | — | Designed from the tokens in Part 0B |
+
+### a.4 Design tokens (from DESIGN.md frontmatter = the coded `tailwind.config`)
+
+**Colors (48 tokens).** Only the verdict families carry chroma. Everything else is neutral.
+
+| Role | Token → hex |
+|---|---|
+| Canvas / surfaces | `surface` / `background` / `surface-bright` #faf8ff · `surface-dim` #d2d9f4 · `surface-container-lowest` #ffffff · `surface-container-low` #f2f3ff · `surface-container` #eaedff · `surface-container-high` #e2e7ff · `surface-container-highest` / `surface-variant` #dae2fd |
+| Text | `on-surface` / `on-background` #131b2e · `on-surface-variant` #3c4946 · `outline` #6c7a76 · `outline-variant` #bbcac5 |
+| Inverse | `inverse-surface` #283044 · `inverse-on-surface` #eef0ff · `inverse-primary` #59dbc7 |
+| **Verified (Fact Teal)** | `primary` / `surface-tint` #006b5f · `on-primary` #ffffff · `primary-container` #00a896 · `on-primary-container` #00352e · `primary-fixed` #79f7e3 · `primary-fixed-dim` #59dbc7 · `on-primary-fixed` #00201c · `on-primary-fixed-variant` #005047 |
+| **Actions (Protocol Blue)** | `secondary` #006398 · `on-secondary` #ffffff · `secondary-container` #5bb8fe · `on-secondary-container` #00476e (hover) · `secondary-fixed` #cce5ff · `secondary-fixed-dim` #93ccff · `on-secondary-fixed` #001d31 · `on-secondary-fixed-variant` #004b73 |
+| Emergency Violet (unused in MVP) | `tertiary` #732ee4 · `on-tertiary` #ffffff · `tertiary-container` #a87dff · `on-tertiary-container` #3c0088 · `tertiary-fixed` #eaddff · `tertiary-fixed-dim` #d2bbff · `on-tertiary-fixed` #25005a · `on-tertiary-fixed-variant` #5a00c6 |
+| **False (Alert Red)** | `error` #ba1a1a · `on-error` #ffffff · `error-container` #ffdad6 · `on-error-container` #93000a |
+| **Under review (Amber)** | `verdict-review` #F4A261 (fills, stripes, borders only; ~1.9:1 on white) · `on-verdict-review` #9a4a12 (all amber text and icons) |
+
+**Typography.** Every size token also sets its weight, line height and tracking.
+
+| Token | Family | Size / line-height | Weight | Tracking | Use |
+|---|---|---|---|---|---|
+| `display-hero` | Newsreader | 3.5rem / 4rem | 600 | -0.03em | marketing hero |
+| `display-hero-mobile` | Newsreader | 2.25rem / 2.75rem | 600 | -0.02em | hero < md |
+| `headline-lg` | Newsreader | 2.25rem / 2.75rem | 500 | -0.02em | page H1 |
+| `headline-md` | Newsreader | 1.75rem / 2.25rem | 500 | -0.01em | auth titles, sections |
+| `headline-sm` | Newsreader | 1.25rem / 1.75rem | 600 | -0.01em | card/modal titles, wordmark |
+| `claim-headline` | Newsreader | 1.375rem / 1.875rem | 500 | -0.01em | **fact** post text (upright) |
+| `claim-opinion` | Newsreader | 1.375rem / 1.875rem | 400 | -0.005em | **opinion** post text (+ `italic`) |
+| `body-lg` | Inter | 1.125rem / 1.75rem | 400 | — | lead paragraphs |
+| `body-md` | Inter | 0.9375rem / 1.5rem | 400 | — | default copy, inputs, buttons |
+| `body-sm` | Inter | 0.8125rem / 1.25rem | 400 | — | secondary copy, helper text |
+| `label-badge` | Inter | 0.6875rem / 0.875rem | 600 | 0.03em | tiny chips |
+| `label-code` | JetBrains Mono | 0.75rem / 1rem | 600 | 0.06em | uppercase system labels, tabs |
+| `label-metric` | JetBrains Mono | 0.875rem / 1.25rem | 700 | — | numbers, confidence % |
+
+**Radii:** `DEFAULT` 0.125rem · `lg` **0.25rem (4px)**, used for every card/button/input/badge · `xl` 0.5rem · `full` 9999px (avatars, dots, toggles, pills). Only `rounded-lg` and `rounded-full` are used.
+**Spacing (named):** `space-xs` 0.25rem · `space-sm` 0.5rem · `space-md` 0.875rem · `space-lg` 1.25rem · `space-xl` 2rem · `gutter` 1.25rem · `gutter-mobile` 0.75rem · `margin` 2rem · `margin-mobile` 1rem.
+**Max widths:** `reading` 760px · `wide` 1240px · `form` 480px · `modal` 620px.
+**Elevation:** 1px hairlines (`outline-variant/30`). `shadow-sm` is the only shadow. Modal scrim is `inverse-surface/40`.
+**Icons:** Material Symbols Outlined, one glyph per concept (list in DESIGN.md › Iconography). Sizes are 0.75–2rem.
+
+### a.5 Converting Stitch to the guide's frontend stack
+
+Target stack: Next.js (App Router, TypeScript, `src/`), Tailwind CSS v4, React components. Exact versions are pinned in SETUP.md.
+
+1. **Tokens → Tailwind v4 `@theme`** in `frontend/src/app/globals.css`. v4 is CSS-first, so no `tailwind.config.js` is needed.
+   - `colors` → `--color-<name>`
+   - `fontFamily` → `--font-<name>`
+   - `fontSize` tuples → `--text-<name>` plus `--text-<name>--line-height` / `--letter-spacing` / `--font-weight`
+   - `borderRadius` → `--radius-lg: 0.25rem` etc.
+   - named spacing → `--spacing-space-md` etc.
+   - `maxWidth` → `--container-reading` etc., which v4's `max-w-*` reads
+   
+   Then **class names from the Stitch HTML keep working as written** (`bg-surface-container-low`, `font-claim-headline text-claim-headline`, `px-space-md`, `max-w-reading`). This is the single biggest conversion saving. Reset the default palette (`--color-*: initial`) so it can't creep back in.
+2. **Plugins:**
+   - `container-queries` is built into v4.
+   - `forms`: add the `@tailwindcss/forms` plugin via `@plugin`, or restyle inputs by hand. Decide in Part 0B.
+   - The CDN script and inline config are deleted.
+3. **Fonts:** load Inter, JetBrains Mono and Newsreader with `next/font/google`. It self-hosts them at build time, so there are no runtime Google requests, no layout shift, and it's free. Material Symbols get self-hosted too (method in SETUP.md Part B), with a small `<Icon name="…"/>` component.
+4. **HTML → JSX:**
+   - `class` → `className`, `for` → `htmlFor`, self-close void tags.
+   - Inline `onclick` scripts → React state.
+   - Inline `style=width%` → a `ProgressBar` component (or a CSS variable).
+   - Repeated markup (sidebar, cards, badges) → components with props, so each screen becomes composition, not copy-paste.
+5. **Remove:** the scrollbar-hiding CSS, all `<img>` avatars (→ `Avatar` initials), sample data, design artifacts (a4 state switcher, d1 "Governance preview" toggle, "Simulate link click"), and the dead `animate-in` classes.
+6. **Add what Stitch lacks:**
+   - responsive shell
+   - loading skeletons, toasts, empty/error states
+   - focus-visible styles
+   - `<dialog>` accessibility
+   - `prefers-reduced-motion` for spinners
+7. **Where it lives:** `frontend/src/components/ui/` for primitives, `frontend/src/components/shell/` for layout, `frontend/src/features/<domain>/` for screen-specific components (see STRUCTURE.md). `design/stitch/` stays read-only as the visual source of truth.
+
+---
+
+## b) Gap report
+
+### b-1 Stitch screens the guide doesn't cover
+
+| Screen | Proposed default (you can override) |
+|---|---|
+| a1 logged-out landing | Build it. Hero + 3 feature cards + a live preview of the public "Recent" feed (4 cards) + footer. |
+| Root "Epistemic Charter" page | Don't build as-is: its content describes features we don't have (emergency, cryptography). Build **"How verification works"** (`/how-it-works`) reusing its taxonomy-table and FAQ layout, with copy rewritten for the real lifecycle. |
+| a5 / a6 password reset | Build them. The guide mentions resets only in passing (4.3); allauth provides the flow. |
+| b1 "Recent wire" tab | Add a public global feed (`GET /api/v1/posts/`, all non-removed posts, newest first). New users with zero follows would otherwise see an empty home feed, and a1 needs it too. |
+| b4 search tabs/filters | Keep a Posts tab (Postgres full-text search) and a People tab (username/display-name prefix match), with filter chips for type (fact/opinion) and status. Drop Primary Sources, certainty sort, and the contributor spotlight. |
+| c2 settings | Keep display name, username, bio (280 chars), email (read-only), change password (email accounts only), "Signed in with Google" status, **download my data (JSON)** and **delete account** (the guide's §16 GDPR/CCPA note). Drop ORCID, affiliation, 2FA, sessions list, and privacy toggles. |
+| c3 following list | Build Followers and Following tabs with user rows and Follow/Following buttons. Drop category chips, in-list filter, trust metrics, and the directory banner. |
+| c4 notifications | Build it. Types: new follower, like, comment, verdict reached, post under review, post removed, appeal resolved. "Mark all as read" and per-item read on click. Drop the filter tabs and "Mentions" (no mentions feature). |
+| d2 moderator queue | **Don't build** (Django Admin per guide §8). Borrow its ideas for the admin: list filters by reason (pipeline / reports / appeal), sort by report count or time in queue, bulk actions (Mark verified, Mark false, Dismiss reports, Remove). |
+
+### b-2 Guide features with no (or incomplete) Stitch design
+
+| Feature | What Stitch has | Proposed default |
+|---|---|---|
+| Fact/opinion selector | b2 segmented control (good) | Keep it. Require an explicit choice (no pre-selection), then submit. Labels: "Opinion" / "Fact". The button reads "Post opinion" or "Post fact — will be checked". |
+| **Pending badge** ("Checking facts…") | Only c1's "Verifying with Ledger Nodes" and the charter's "Verifying" row | Neutral chip with a dashed `outline-variant` border, spinning `progress_activity` glyph (static if reduced-motion), label **CHECKING FACTS…**. Stripe: `outline-variant`. |
+| Verified badge | Yes (`check_circle`, primary) | **VERIFIED 94%**. When a moderator decided it: **VERIFIED · REVIEWED**, no %. |
+| False badge | "DEBUNKED" (`cancel`, error) | **FALSE 88%** (D4). Moderator-decided: **FALSE · REVIEWED**, no %. The claim is **not** struck through (b1 does this), because readers still need to read it. |
+| Under-review badge | Yes (`hourglass_top`, amber) | **UNDER REVIEW**, no % (guide §5.3) |
+| Opinion | Category chip only | **OPINION** chip, no status badge, italic serif text (DESIGN.md) |
+| Removed | c1 tombstone card | Public: the post drops out of feeds and search. Its URL shows "This post was removed by a moderator." Author: same card, plus their text and the reason. |
+| Status updates while pending | "POLLING T+18M" in b1 | Poll `GET /api/v1/posts/status/?ids=…` for visible pending posts every 10 s, backing off to 60 s and stopping after 10 min |
+| Report modal | d1 (good) | Plain-language reasons (b-5). Add an optional "details" textarea, required for "Other". Add states: submitting, success toast, **already reported** (disabled button "You reported this"), and "verify your email to report". |
+| **Appeal ("Request another look")** | Only a button in b3 and c1 | Small modal in the report-modal style with an optional "Why should we look again?" textarea (≤500 chars). The author sees an **APPEAL PENDING** chip (amber). Allowed only on the author's own `verified_false` posts, one open appeal per post, and at most one appeal per post in total (MVP). |
+| Sign-up states | Only happy path + "username available" | Field errors (email taken, username taken/invalid, weak password), Turnstile failure, submit loading/disabled |
+| Log-in states | Error banner | Keep the banner. Drop "Attempt 1 of 5" (the rate limiter answers generically). Add a rate-limited message and a loading state. Drop "Remember me": refresh tokens already last 14 days. |
+| Email verification | a4 "check inbox" only | Add `/verify-email/[key]` landing states: verifying…, **verified** (CTA "Start posting"), **expired/invalid** (CTA "Send a new link"). Add an app-shell banner for unverified users: "Verify your email to post, comment and report" + Resend. |
+| Google sign-in, new user | — | No extra step. The username is auto-generated from the email local part and can be changed in Settings. |
+| Password reset | a5/a6 | a5 split into idle and sent states. Add a6 states: mismatch, weak, expired link, success (→ logged in). |
+| Like | Counts only | Toggle button with an outline glyph; liked = filled `favorite` glyph in `secondary`. Count next to it. |
+| Comments | b3 list + composer | Flat list, newest last, 500-char limit, delete own. Drop Reply, comment IDs, comment likes and comment reports (not in the guide). Moderators can hide comments in the admin. |
+| Follow button | c3 "Following" | Follow (primary) / Following (secondary; hover says "Unfollow") |
+| Empty / loading / error | Almost none | Skeleton cards (`surface-container` blocks), `EmptyState` with a glyph + one line + CTA, and an error `Alert` with "Try again" |
+| 404 / 500 pages | none | Centered auth-card-style message |
+| Toasts | none | `inverse-surface` toast, bottom-center, 4 s |
+| Privacy Policy, Terms | Footer links only | Plain reading-width pages. Placeholder text marked "needs legal review" (guide §16). |
+| Responsive / mobile | Not implemented (DESIGN.md describes intent) | ≥1280px: full rail. 768–1279px: 64px icon dock. <768px: top bar + bottom nav (Home, Search, New post, Notifications, Profile). |
+| Moderation panel | d2 | Django Admin, no design needed. Header text "Rumor Zero moderation". |
+
+### b-3 Stitch features beyond the guide's MVP. Default: drop (D5)
+
+| Feature (Stitch label) | Where | Default |
+|---|---|---|
+| Emergency mode / "Unverified — Emergency" / violet status / fast-track / trust tokens | root, b1, b2, c1, c4, d2 | Drop. Keep the `tertiary` tokens unused. |
+| Source URL / DOI field, CITATION / DATASET / SCOPE buttons, evidence drawers, "N sources" | b1, b2, b3, b4, c1 | Drop. Authors can paste links into the text, which renders as plain text. Revisit with the real pipeline. |
+| File/PDF attachments, dataset uploads, avatar upload, data archive `.zip` | b1, b3, c1, c2, d2 | Drop (text-only). The data export is JSON. |
+| Charts, sparklines, gauges, consensus metrics | b3, b4, c1 | Drop |
+| Hashes, "cryptographically sealed", Merkle, blocks, protocol versions, "Verification Ledger" | everywhere | Drop, including the top-bar pill |
+| Affiliation, credentials, ORCID, role/tier badges, verified-author seal | b1, b3, b4, c1, c2, c3 | Drop. `display_name` + `bio` only. |
+| Reputation ("Audit Trust", "Epistemic Standing", "Credibility Index") | b4, c1, c2, c3 | Drop |
+| Reposts / "Citations" count, bookmarks, share counts | a1, b1, b3 | Drop. Keep a client-side **"Copy link"** action (posts are meant to be shareable, guide §1.1). |
+| Topic tags / "Discourse category" | a1, b1 | Drop |
+| Peer votes, quorum, SLA timers, priority, auditor notes | c1, d2 | Drop |
+| Nested replies, comment likes/reports/IDs | b3 | Drop |
+| "Pending visible only to author" | c1 | **Contradicts guide §5.2** (pending posts are public with a badge). Follow the guide. |
+| "Public engagement disabled during review" | c1 | Drop. Likes and comments are allowed on every visible post. |
+| Daily fact quota "3/10 remaining" | b2 | **Adopt** (D7): `FACT_POSTS_PER_DAY = 10`, shown in the composer |
+| Login "Attempt 1 of 5", "Remember me 30 days" | a3 | Drop |
+| Notification filter tabs, "Mentions", preferences | c4 | Drop |
+| 2FA, sessions list, SSO disconnect | c2 | Drop |
+
+### b-4 Contradictions with "text-only"
+
+- **Photo avatars:** `<img>` from `lh3.googleusercontent.com` in the sidebar of all 11 app-shell files, plus b1 (3 portraits, only `data-alt`, no `alt`), b3, c1 and c4 (2). → **Initials avatars everywhere.** `users.avatar_url` stays reserved for Phase 2.
+- **Charts and data visuals:** b3 bar chart, b4 sparkline SVG, c1 ring gauge, b3/c2 progress bars. → Drop. Progress bars are allowed only as UI (password strength).
+- **Attachments and uploads:** c1 "Raw Telemetry Appendix (PDF, 4.2 MB)", d2 "…Refutation.pdf (2.4 MB)", b1 "DATASET", b3 "Attach data table", c2 avatar upload, c2 ".zip" archive. → Drop.
+- **Brand SVG:** the Google "G" in a2/a3 is a third-party brand mark required on the Google button. It is **allowed**: it is UI, not user content.
+
+### b-5 Copy and terminology (D8)
+
+| Stitch | Proposed |
+|---|---|
+| "Submit Claim", "BROADCAST CLAIM", "Compose dispatch" | "New post" (posts can be opinions too) |
+| "Dispatches" (comments), "Remark" | "Comments", "Comment" |
+| "Audit Queue" | "Moderation" (moderators only; opens Django Admin) |
+| "Following dispatches" / "Recent wire" | "Following" / "Recent" |
+| "Empirical Claim" / "Civic Opinion" | "Fact" / "Opinion" |
+| Report reasons: "Empirical Inaccuracy / Factual Discrepancy", "Decontextualized Citation / Omission", "Harassment or Reputational Defamation", "Inauthentic Network / Coordinated Sybil Activity", "Other Governance Infraction" | "False or inaccurate" (`inaccurate`), "Missing context or misleading" (`misleading`), "Harassment or defamation" (`harassment`), "Spam or fake accounts" (`spam`), "Something else" (`other`, needs details) |
+| "Submit Evidentiary" | "Submit report" |
+| "Cryptographic …", "ledger", "protocol", "epistemic" | Remove |
+
+---
+
+## c) Inconsistencies in the guide, and how they're resolved
+
+**Must fix before coding: data model and routing**
+
+1. **`posts.status` lacks `published`** (§3.2), but §5.1 and §7.2 use it for opinions.
+   → Final enum: `pending | published | verified_true | verified_false | under_review | removed`.
+2. **The report threshold is time-windowed** ("5 reports within a 24-hour window", §6.2), but `report_count` is a lifetime counter (§3.2).
+   → Keep `report_count` as the lifetime counter (display and admin sorting), updated in the same transaction as the insert, as the guide says. The **threshold check is a separate indexed count**:
+   - it counts `reports` rows for that post that are `status='open'` and `counts_toward_threshold=true`, with `created_at >= now() - REPORT_WINDOW_HOURS`;
+   - it runs inside the insert transaction after `SELECT … FOR UPDATE` on the post row, so two simultaneous reports can't both miss the threshold;
+   - index `reports (post_id, created_at)`.
+   
+   It is a count over at most a handful of rows for one post, not a table scan, so the guide's performance concern doesn't apply. Redis is **not** used for correctness: a cache eviction must never lose a report.
+3. **The §7.2 routing reads `flagged_reason` before it is set.** On the report path, the local variable `flagged_reason` was never assigned. The pseudo-code also has three logic bugs:
+   - (a) `verdict='inconclusive'` with high confidence falls into the `else` of the ternary and becomes **`verified_false`**;
+   - (b) a late pipeline result would **overwrite** `under_review` (reports), `removed`, or a moderator's decision;
+   - (c) re-running routing on every report resets opinions to `published`.
+   
+   → Routing becomes a pure function `route(post, event) -> (status, flagged_reason)` that only reads and writes `post.*` fields. Rules:
+   - opinions never enter the pipeline;
+   - pipeline results are ignored for `removed` or moderator-decided posts (`verdict_source='moderator'`);
+   - `inconclusive` → `under_review` (`pipeline`);
+   - a low-confidence result on a post already under review for reports → `flagged_reason='both'`;
+   - crossing the report threshold → `under_review`, with `flagged_reason` = `both` if it was `pipeline`, unchanged if it was `appeal`, otherwise `reports`; it never touches `removed`;
+   - it is idempotent.
+   
+   Full table in ARCHITECTURE.md §4. This function gets exhaustive unit tests.
+4. **Drafting artifact in §5.1 step 2:** "saved with status='verified_true'... actually, more precisely…".
+   → Opinions are saved as `status='published'`. Nothing is ever created as `verified_true`.
+5. **"Dismiss Reports (post stays as-is)" (§8.3)** is ambiguous, because reports have already moved the post to `under_review`.
+   → Store `posts.pre_review_status` when a post enters review, and restore it on dismiss. Mark those reports `status='dismissed'` so they stop counting toward the threshold. If the flag was `both`, dismissing reports leaves the post under review with `flagged_reason='pipeline'`.
+6. **The moderator verdict has no home in the schema.** Figure 2 says the moderator "sets a final label + confidence note", and §5.3 shows a % for every verdict.
+   → Add `posts.verdict_source` (`pipeline | moderator`, nullable) and `posts.verdict_note` (public text, nullable). A moderator-set verdict shows "REVIEWED" with no %, because a pipeline score of 52% on a human-verified post would mislead.
+7. **The appeal path (§8.4) has no schema.**
+   → New table `appeals` (post, author, reason, status `open|upheld|overturned`, resolved_by/at, original_moderator). Add `flagged_reason` value `appeal`. `APPEAL_REQUIRE_DIFFERENT_MODERATOR = True` (senior moderators exempt).
+8. **Missing tables:** notifications (§11), email-verification tokens (§4.3) and appeals are not in §3.
+   → Added to the final schema. Email and reset tokens are handled by allauth (D1): its `EmailAddress` table plus signed, expiring keys.
+9. **`moderation_actions.action = 'escalated'` has no defined flow.**
+   → Admin action "Escalate to senior": sets `posts.escalated_at` and logs the action. Seniors get an "Escalated" list filter.
+10. **`users.role` enum vs "implemented as two Django Groups" (§8.2)** is two sources of truth.
+    → `role` is the source of truth. On save it syncs Group membership and `is_staff` (true for moderator/senior). Only seniors (and the superuser) can edit `role`.
+11. **`users.password_hash` "null if OAuth-only"** vs Django, which stores `password` and marks OAuth-only accounts with an *unusable* password (never NULL).
+    → Use Django's `password` field and `set_unusable_password()`.
+12. **`users.oauth_provider` / `oauth_subject_id`** duplicate django-allauth's `SocialAccount (provider, uid)` table.
+    → Don't add these columns. allauth's table is the record, with a unique `(provider, uid)` pair.
+13. **Thresholds are "Django settings" (§6.2, §7.2) but also "adjusted by Senior Moderators" in the admin (§8.2).** Settings can't be edited at runtime.
+    → Singleton model `PlatformSettings`, editable in the admin by seniors only. It is seeded from env defaults, read through a 60 s cache, and each change is logged.
+14. **Figure 1 draws an arrow from the Next.js frontend to PostgreSQL**, contradicting §2 ("the frontend never touches them").
+    → The frontend never connects to Postgres or Redis. Only via the API.
+15. **Figure 1 draws Object storage → Fact-Check Pipeline.** R2 is Phase 2 and the §7.1 contract passes `content` directly.
+    → No object storage in the MVP.
+16. **§1.4 says Redis holds "sessions" and backs "the background-job queue"**, but §4.6 uses tokens and §5.4 decides on a DB queue.
+    → Redis holds only the short feed cache and rate-limit counters. Admin sessions are DB-backed. The queue is the `posts` table.
+
+**Must fix before coding: auth and security**
+
+17. **Auth libraries.** The guide pairs simplejwt (tokens) with django-allauth (Google).
+    - simplejwt: last release 5.5.1 (Jul 2025), no release supporting Django 6.x, and its home organisation Jazzband is winding down (announced 2026-03-14).
+    - allauth 65.19.5: released 2026-09-28, supports Django 4.2–6.1, and since 65.13 ships **headless mode with a JWT token strategy**, covering signup, login, email verification, password reset, Google ID-token login and rate limits.
+    
+    → **D1 default:** allauth headless (`app` client) + `JWTTokenStrategy` (HS256). No simplejwt. It keeps the guide's design:
+    - 15-min access token held in memory;
+    - 14-day refresh token in an httpOnly cookie;
+    - a thin adapter (~100 lines + tests) moves allauth's `refresh_token` from the JSON body into the cookie and back.
+    
+    Fallback if you want the guide's literal libraries: simplejwt + custom DRF views + `google-auth`.
+18. **CSRF claim (§12):** "Django's CSRF protection still covers the refresh-token cookie endpoint." That's not automatic: DRF/allauth API views are CSRF-exempt.
+    → Explicit protection on the two cookie-reading endpoints (refresh, logout):
+    - `SameSite=Lax` + `Path=/api/auth/`;
+    - `Origin` must equal `FRONTEND_ORIGIN`;
+    - a required custom header `X-Requested-With: rumor-zero`, which a cross-site form cannot send.
+19. **Rate limiter (§4.5):** `django-ratelimit` is effectively unmaintained (last release 2023).
+    → allauth's built-in `ACCOUNT_RATE_LIMITS` for auth endpoints. DRF scoped throttles, backed by the Redis cache, for posting, comments, likes, follows, reports and appeals.
+    
+    Client IP handling: the frontend proxy sends the real client IP in `X-RZ-Client-IP`, plus a shared secret. A small middleware trusts that header only when the secret matches and normalises `REMOTE_ADDR`, so allauth (`ALLAUTH_TRUSTED_PROXY_COUNT=0`) and DRF (`NUM_PROXIES=0`) both see the right IP. Without this, every user shares the proxy's IP and one abuser would rate-limit everyone.
+20. **Keep-alive every 10 min via GitHub Actions (§15.3)** costs about 4,320 jobs/month. Each job is billed as at least 1 minute, and a private repo gets 2,000 free minutes, so it doesn't fit. GitHub also delays scheduled runs at peak times, and in public repos they auto-disable after 60 days without activity.
+    - There's a hidden cost too: if the ping touched the database, Neon would never scale to zero and would burn its monthly compute allowance.
+    
+    - GitHub's terms also restrict Actions to work related to building, testing, deploying or publishing the project.
+    
+    → D3 default:
+    - UptimeRobot (free: 50 monitors, 5-min interval, commercial use allowed) calls `GET /api/health/`, which **executes zero DB queries** (enforced by a test).
+    - cron-job.org (free, custom headers) calls the secret-protected `POST /api/internal/tick/` **hourly**. That is about 24 Neon wake-ups/day, roughly 15 CU-h/month of the 100.
+    - One GitHub Actions workflow runs **daily**, calling `/api/health/deep/` (DB + Redis) so Upstash (archived after 30 days idle) and Neon stay active. About 30 min/month.
+21. **"A worker process run on a schedule" (§5.4):** Render's free tier has **no background workers and no cron jobs**. Those are paid-only; one web service is all you get.
+    → Two ways to process a pending fact post:
+    - (1) **inline kick:** after the post commits, a short background thread in the web process runs the pipeline for that post;
+    - (2) **sweeper:** the secret-protected `POST /api/internal/tick/` processes any leftover `pending` rows with `SELECT … FOR UPDATE SKIP LOCKED` and retries with backoff; it is also available as `manage.py process_pending` for local dev and tests.
+    
+    Same §7.1 contract. No Celery.
+22. **Resend (§4.3, §14)** only sends to your own address until you verify a domain you own. A free `*.onrender.com` or `*.workers.dev` subdomain can't be verified, because you don't control its DNS. **This is the one place the guide quietly assumes a paid domain.**
+    SMTP is not a way around this: Render free web services block outbound ports 25/465/587 (since 2025-09-26), so Gmail SMTP won't work either.
+    
+    → D2 default: local dev uses Django's console email backend. Production uses **Brevo** (free, 300 emails/day, no card, HTTPS API) through `django-anymail`, with a single verified sender address. Swapping providers later is one env var.
+    
+    Alternatives, in order of preference:
+    - (a) buy a domain → Resend (best deliverability);
+    - (b) a free `is-a.dev` subdomain (allows MX/TXT records) → Resend. Its terms limit it to non-commercial, dev-related projects and it can be revoked;
+    - (c) the Gmail API over HTTPS: excellent deliverability, 500/day, but needs a small custom email backend and a one-time OAuth setup.
+23. **Cloudflare deployment (§14):** "Next.js needs the `@cloudflare/next-on-pages` adapter" is out of date. That adapter is deprecated and its repo was archived on 2025-09-29.
+    - Cloudflare Pages is now for static sites only.
+    - Full Next.js runs on **Cloudflare Workers**, via either OpenNext (`@opennextjs/cloudflare`) or Cloudflare's new vinext.
+    - → D10: OpenNext. Free-plan limits that matter: 100,000 Worker requests/day, **10 ms CPU per request**, 50 subrequests per request. The old 3 MiB bundle limit was removed on 2026-09-04 (now 64 MiB).
+    - OpenNext does not guarantee Windows support, so production builds run on Linux: Workers Builds, plus a CI check. Locally you use `next dev`.
+24. **Frontend and backend on different free hosts + `SameSite=Lax` refresh cookie (§4.6, §14):** they are cross-site, so the cookie would never be sent. → Section d.
+
+**Minor: resolved in the docs, no decision needed**
+
+25. §5.1 step 5 says "Verified, Unverified/False": "unverified" is not "false". → Badge labels in b-2 (D4).
+26. §9.2 caches the feed for 20–60 s, while §5.1 wants pending badges to update live. → Status polling uses the uncached `posts/status` endpoint. The feed cache TTL is 30 s.
+27. §3.2 `confidence_score numeric(5,2)` vs the pipeline's "numeric 0–100". → The contract validates the range 0–100 and quantizes to 2 decimals.
+28. §4.1 "username checked for uniqueness as the user types": allauth has no such endpoint. → Add `GET /api/v1/auth/username-available/` (throttled).
+29. §4.4 Google sign-up collects no username, but usernames are required. → Auto-generate one (b-2).
+30. §12 lists DOMPurify: we never render user HTML (plain text only, React escapes it). → Not needed. Add it only if Markdown is ever supported.
+31. §3.5 GIN index on `to_tsvector('english', content)`: Django's `SearchVector` wraps the column in `COALESCE`, so a query won't use that exact index. → A stored generated `search_vector` column (Django `GeneratedField`) with a GIN index on it.
+32. §15.1 "If it passes, Render redeploys": Render deploys on every push unless told otherwise. → Set Render Auto-Deploy to **"After CI Checks Pass"**. Cloudflare Workers Builds deploys on push (acceptable; CI still runs on the PR).
+33. §17 names Jest; the current Next.js docs list Jest and Vitest equally. → **Vitest** + React Testing Library (faster, ESM-native), plus Playwright for E2E as the guide says.
+34. Numbers the guide cites that changed:
+    - Neon now defaults to **Postgres 18** (still 0.5 GB and 100 CU-h/month, no card).
+    - Render's default Python is 3.14. It has 500 build minutes and 5 GB outbound bandwidth per month, and wake-up takes about 1 min.
+    - Upstash is 500K commands/month.
+    - Sentry Developer is 5K errors/month, 1 user.
+    - → Current values in SETUP.md and ENV_GUIDE.md.
+35. **§1.1 wants server-rendered pages** for SEO and link previews, but on free Workers each request gets **10 ms of CPU**. Real OpenNext apps measure 17–21 ms per SSR render and get error 1102.
+    → Rendering strategy:
+    - Static pages (landing shell, how-it-works, privacy, terms) are **prerendered** at build time.
+    - Post detail and profile pages do a **light SSR**: `generateMetadata` for OG tags + the claim text only; the rest hydrates on the client.
+    - All personalised pages are client-rendered through `/api`.
+    - Part 0C adds a CPU check to the deploy smoke test.
+36. **Next.js 16 renamed `middleware.ts` to `proxy.ts`.** Our "proxy" is **not** that file: it is a normal Route Handler we call the **API relay** (`src/app/api/[...path]/route.ts`). `proxy.ts`/middleware stays unused (only experimental on OpenNext).
+
+---
+
+## d) Deployment topology (no owned domain)
+
+### The problem
+
+The frontend is served from `rumor-zero.<account>.workers.dev` and the API from `rumor-zero-api.onrender.com`.
+
+- `workers.dev`, `pages.dev` and `onrender.com` are all on the **Public Suffix List** (checked in the list file on 2026-09-29), so each subdomain counts as its own "site".
+- A refresh cookie set by the API with `SameSite=Lax` is **not sent** on `fetch()` calls from the frontend, which are cross-site.
+- `SameSite=None; Secure` would be sent in some browsers, but Safari (and Firefox's partitioning) blocks or partitions third-party cookies. It would also force CORS-with-credentials and weaken CSRF protection.
+- Only a domain you own could make them same-site, and that costs money.
+
+### Options considered
+
+| Option | Cost | Verdict |
+|---|---|---|
+| Buy a domain; `app.` + `api.` subdomains | ~$10/yr | Cleanest, but **not free** |
+| Refresh token in `localStorage` | free | Rejected: the guide explicitly forbids it (XSS) |
+| `SameSite=None` third-party cookie + CORS credentials | free | Rejected: broken in Safari/Firefox, weaker CSRF posture |
+| **Proxy `/api/*` through the Next.js frontend ("API relay")** | free | **Chosen** |
+
+### Chosen: single origin via an API relay
+
+```
+Browser ──► https://rumor-zero.<acct>.workers.dev   (Next.js on Cloudflare Workers, OpenNext)
+              ├─ pages, static assets (free, don't invoke the Worker)
+              └─ /api/*  ──(API relay Route Handler, server-side fetch)──► https://rumor-zero-api.onrender.com/api/*
+                                                                              (Django + DRF + allauth, Render free)
+Moderators ──► https://rumor-zero-api.onrender.com/<ADMIN_URL_PATH>   (Django Admin, direct, session login)
+```
+
+- **API relay:** a catch-all Route Handler, `frontend/src/app/api/[...path]/route.ts`. It is not Next 16's `proxy.ts`; see c-36.
+  - It forwards the method, body and an **allow-list** of headers (`Authorization`, `Cookie`, `Content-Type`, `Accept`, `Origin`, `X-Requested-With`) to `BACKEND_ORIGIN`.
+  - It uses `redirect: 'manual'` and `duplex: 'half'` for streamed bodies under `next dev`.
+  - It copies back the status, body and **every** `Set-Cookie` via `headers.getSetCookie()`.
+  - It adds `X-RZ-Proxy-Secret: <PROXY_SHARED_SECRET>` and `X-RZ-Client-IP` (from `cf-connecting-ip`, or `x-forwarded-for` locally).
+  - It sets a ~70 s timeout for Render cold starts (~1 min) and returns a friendly `503 {"code":"backend_waking"}` on timeout.
+  
+  Why not `rewrites()`: they do work on OpenNext, but they drop `cf-connecting-ip` and give no header control. Worse, when a Worker calls another Cloudflare-fronted host (Render is behind Cloudflare), `CF-Connecting-IP` arrives as the **Worker's** IP. Without our own client-IP header, every user would look like one IP to the rate limiter. Waiting on `fetch()` doesn't count toward the 10 ms CPU limit, so the relay is cheap.
+- **Cookie:**
+  - The API sets `rz_refresh` with **no `Domain` attribute** and `HttpOnly; Secure; SameSite=Lax; Path=/api/auth/; Max-Age=14d`.
+  - The browser received it from the frontend origin, so it is stored as a **first-party cookie of the frontend host** and sent only to `/api/auth/*` on that host.
+  - Locally, `AUTH_COOKIE_SECURE=False` (plain http://localhost).
+- **Access token:** kept in React state / memory only (guide §4.6) and sent as `Authorization: Bearer …`. After a page reload, the app calls `POST /api/auth/…/refresh` once to get a new one.
+- **CSRF:** described in c-18. No CORS configuration is needed at all: the browser only ever talks to one origin. `django-cors-headers` is dropped.
+- **SSR (see c-35 for the CPU limit):**
+  - Static pages are prerendered.
+  - Post detail `/p/[id]` and profile `/u/[username]` do a light server render (metadata + claim text), calling `BACKEND_ORIGIN` directly, server-to-server and **unauthenticated**, so link previews and SEO work (guide §1.1).
+  - Personalised views (home feed, notifications, settings) render on the client after the token refresh.
+- **Absolute URLs:**
+  - The API never builds links from its own host. Email links use `FRONTEND_ORIGIN`.
+  - Pagination returns an opaque `next_cursor` string instead of a URL. DRF's default `next` URL would point at `onrender.com` and bypass the proxy.
+- **Cost of the choice:**
+  - Every API call also counts as a Worker request (free plan: 100,000/day; static assets don't count).
+  - The biggest consumer is polling. A tab polling notifications every 30 s makes ~2,880 calls/day if left open all day.
+  - Mitigations:
+    - poll only while the tab is visible (`document.visibilityState`);
+    - back off when idle;
+    - pending-status polling stops after 10 min.
+  - Budget: roughly 50–100 daily active users before the cap matters. That is the guide's "early users" stage.
+  - It also adds one network hop (~tens of ms). The backend URL is still public, which is fine since everything there is authenticated or rate-limited too.
+- **Escape hatch when the cap gets close (no code rewrite):**
+  - Bearer-authenticated calls don't need cookies, so the browser can call Render **directly** with CORS (`Authorization` header, no credentials).
+  - Only `refresh` and `logout` must keep using the relay.
+  - The API client takes a base URL per call type, so this is an env change (`NEXT_PUBLIC_API_DIRECT_ORIGIN`) plus `django-cors-headers`. Not used in the MVP.
+- **If you later buy a domain:** point `app.` at Workers and `api.` at Render (custom domains are free on both). Keep the relay or drop it; no auth code changes either way.
+
+### Effect on env vars
+
+| Where | Variable | Why |
+|---|---|---|
+| frontend (server-only) | `BACKEND_ORIGIN` | proxy + SSR target |
+| frontend (server-only, secret) | `PROXY_SHARED_SECRET` | proves requests came through our proxy |
+| frontend (public) | `NEXT_PUBLIC_SITE_URL` | canonical URLs, OG tags |
+| frontend (public) | — (no API URL) | the browser always calls relative `/api/...` |
+| backend | `FRONTEND_ORIGIN` | email links + Origin check on refresh/logout |
+| backend (secret) | `PROXY_SHARED_SECRET` | same value as the frontend |
+| backend | `AUTH_COOKIE_SECURE` | `False` only on local http |
+| backend | `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS` | the Render host (the admin is served there directly) |
+| Google console | Authorized JavaScript origins | the **frontend** origin(s) only. The ID-token flow needs no redirect URI. |
+
+---
+
+## e) Product names and branding in `design/stitch/`
+
+Searched every `.html` and `.md` file (text, `<title>`, logos, `alt`/`data-alt`, `<meta>`, comments, footers, email addresses).
+
+- **"Veritas" (any case): 0 occurrences.**
+- **"Stitch" / "Google Stitch": 0.**
+- **`<meta>` tags:** only `charset` and `viewport`. No product names.
+- **Logos:** there is no image logo. The wordmark is **styled text**, "Rumor Zero" in Newsreader bold (`font-headline-sm`), and **"RUMOR ZERO" in capitals in a1** (lines 23, 371).
+  - ⚠ Emblem tiles differ per file: `check` (a3), `layers` (a4), `diamond` (a5), `lock` (a6).
+  - ⚠ The screenshots show two more marks (an "RZ" monogram tile in `design/stitch/screen.png`, a checkmark tile in b3's `screen.png`) that exist in no code.
+  - **Flagged, not guessed (D9).**
+
+### Alternate or additional product names, taglines and version strings
+
+| File:line | Text | Type | Suggested action |
+|---|---|---|---|
+| a1:386 | "© 2025 Rumor Zero Network Inc. Epistemic rigor and verified citations guaranteed." | fabricated legal entity + claim | → "© 2026 Rumor Zero" (no "Inc." unless one exists; drop "guaranteed") |
+| a1:6 (`<title>`), a1:49 | "The Epistemic Social Protocol" | tagline | decide / replace |
+| a1:373 | "Evidence-First Discourse Network" | tagline | decide / replace |
+| a1:387 | "Strict Hairline Calibration Edition" | design-edition label | remove |
+| a3:28 | "Fact Social" | tagline next to the logo | decide / replace |
+| a3:120, a5:100 | "Rumor Zero Cryptographic Ledger" | sub-brand | remove |
+| a3:120, a5:98 | "Protocol standard 4.1" | version string | remove |
+| b1:76 "PROTOCOL 4.2", b3:366 "Rumor Zero Protocol v4.2", root:75 "SPECIFICATION REV. 4.2", root:608 "PROTOCOL V4.2 PDF" | version strings (they conflict with 4.1) | remove |
+| root:6, root:83, DESIGN.md:212/243 | "The Epistemic Charter" | page name | → "How verification works" |
+| c1:473, d2:72 | "Rumor Zero charter (Section 1.10)" | document name | remove |
+| DESIGN.md:2 (+ folder `epistemic_ledger/`) | "Epistemic Ledger" | design-system name | keep internally (not user-facing) |
+| every shell file (root:61, b1:56, b2:62, b3:56 & 221, b4:61, c1:57, c2:59, c3:60, c4:61, d1:60, d2:57) | "Verification Ledger" | feature name | remove (b-3) |
+| every shell file (root:37, b1:32, …, d2:33) | "Audit Queue" | nav label | → "Moderation" |
+| a6:6 (`<title>`), a6:27 | "Reset Password - Cryptographic Access Control" | **no product name at all** | → "Reset password · Rumor Zero" |
+| a4:6, a5:6 | "A4: Verify Email - Rumor Zero", "A5: Forgot Password — Rumor Zero" | screen codes in titles | → "Verify your email · Rumor Zero" etc. |
+| d1:92 | "Evidentiary Integrity Protocol • D-1 Editorial Governance" | screen code + sub-brand | remove |
+| b1, b3, c1, d2 | *(no `<title>`)* | missing | add "<Page> · Rumor Zero" |
+| HTML comments in shell files, e.g. b1:12 | "RZ app sidebar/header" | internal abbreviation | harmless |
+| b1:525 "#RZ-9984-CASCADIA", b3/c4/d2 "#RZ-2024-8841", a6:111 "#RZ-SEC-9941", d1:197 "#REP-84920", d2:427 "#MOD-TX-2024-L9", b2:75 "#ARC-88219" | "RZ-" record IDs | fake IDs | remove (we use UUIDs, not shown) |
+
+### Domains and email addresses (they imply domains we don't own)
+
+| File:line | Text | Action |
+|---|---|---|
+| a3:72, a4:46, c2:276, c2:295 | `elena.vance@rumorzero.org` | ⚠ implies we own `rumorzero.org`. Use `name@example.com` in placeholders. |
+| a5:65 | `edward.vane@observer-dispatch.org` | replace with `name@example.com` |
+| b2:199 | `https://climate-review.org/vol24/co2-capture` | remove (source field dropped) |
+| c1:261–263 | `doi.org/10.1038/…`, `irena.org/cap23`, `ember-climate.org` | remove (sample content) |
+
+### Third-party names
+
+- **Legitimate UI:** "Continue with Google" + Google "G" (a2:32/38, a3:52), "Turnstile" (a2:99), "Google SSO" (c2:287/294).
+- **Sample content, remove:** "Google Scholar" (c2:381), "ORCID" (c1:409, c2:151/380), with ORCID's published *example* iD 0000-0002-1825-0097; "macOS / Chrome" (c2:325).
+
+### Organisations in sample content (all removed with the sample data)
+
+- **Real:** IEA, IRENA, NOAA, Copernicus, USGS, PNSN, Canadian National Seismograph Network, Federal Reserve, EPA, Eurostat, Ember, Icelandic Met Office, European Commission, Mauna Loa Observatory, **Climeworks** (d2:217), and **"Oxford Institute for Energy Studies"** (b1:167, a real institute used as a fake affiliation).
+- **Fabricated:** "CleanTech Ledger" (b4:257), "Oxford Energy Institute" (c1:108/408, c2:140/201/210), "Pacific Rim Geoscience Network", "Cascadia Rapid Observation Cluster", "Global Supply Indices", "Urban Ethics Quarterly", "Climatology Ring" (c1:205), "Senior Reviewer Board" (c4:231), "Storm Aelia" (root:389).
+
+### Sample people (fictional; never ship as seed data)
+
+- Archivist Ross @ross_verify (the logged-in user in every shell)
+- Dr. Elena Vance @evance_md (also written as the page owner in c1/c2/c4)
+- Dr. Elena Rostova
+- Marcus Thorne @mthorne_geo
+- Sarah Lin @slin_econ
+- Julian Adams @jadams_phil
+- Dr. Aris Carter @dr_carter (initials "AK" in c3, "AC" in d2)
+- @auditor_kyle

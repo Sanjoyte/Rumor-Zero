@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>A4: Verify Email - Rumor Zero</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600;700&amp;family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{"colors":{"surface-container":"#eaedff","on-surface":"#131b2e","tertiary-fixed":"#eaddff","on-secondary-fixed-variant":"#004b73","inverse-surface":"#283044","inverse-primary":"#59dbc7","surface-container-lowest":"#ffffff","on-error":"#ffffff","on-primary-fixed-variant":"#005047","on-primary-fixed":"#00201c","primary-container":"#00a896","tertiary":"#732ee4","on-error-container":"#93000a","tertiary-container":"#a87dff","surface-container-high":"#e2e7ff","surface-dim":"#d2d9f4","on-tertiary-container":"#3c0088","surface-container-highest":"#dae2fd","primary-fixed-dim":"#59dbc7","background":"#faf8ff","surface-bright":"#faf8ff","secondary":"#006398","surface-tint":"#006b5f","secondary-fixed-dim":"#93ccff","on-secondary":"#ffffff","surface-variant":"#dae2fd","inverse-on-surface":"#eef0ff","outline-variant":"#bbcac5","surface":"#faf8ff","on-secondary-fixed":"#001d31","on-background":"#131b2e","on-tertiary-fixed":"#25005a","on-tertiary":"#ffffff","on-primary":"#ffffff","tertiary-fixed-dim":"#d2bbff","surface-container-low":"#f2f3ff","secondary-fixed":"#cce5ff","on-primary-container":"#00352e","on-tertiary-fixed-variant":"#5a00c6","primary-fixed":"#79f7e3","on-secondary-container":"#00476e","error":"#ba1a1a","outline":"#6c7a76","secondary-container":"#5bb8fe","primary":"#006b5f","on-surface-variant":"#3c4946","error-container":"#ffdad6","verdict-review":"#F4A261","on-verdict-review":"#9a4a12"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem"},"spacing":{"gutter-mobile":"0.75rem","margin-mobile":"1rem","margin":"2rem","space-md":"0.875rem","space-lg":"1.25rem","space-xl":"2rem","space-xs":"0.25rem","gutter":"1.25rem","space-sm":"0.5rem"},"fontFamily":{"label-metric":["JetBrains Mono"],"claim-headline":["Newsreader"],"display-hero-mobile":["Newsreader"],"headline-sm":["Newsreader"],"claim-opinion":["Newsreader"],"display-hero":["Newsreader"],"body-lg":["Inter"],"headline-md":["Newsreader"],"body-md":["Inter"],"body-sm":["Inter"],"headline-lg":["Newsreader"],"label-code":["JetBrains Mono"],"label-badge":["Inter"]},"fontSize":{"label-metric":["0.875rem",{"lineHeight":"1.25rem","fontWeight":"700"}],"claim-headline":["1.375rem",{"lineHeight":"1.875rem","letterSpacing":"-0.01em","fontWeight":"500"}],"display-hero-mobile":["2.25rem",{"lineHeight":"2.75rem","letterSpacing":"-0.02em","fontWeight":"600"}],"headline-sm":["1.25rem",{"lineHeight":"1.75rem","letterSpacing":"-0.01em","fontWeight":"600"}],"claim-opinion":["1.375rem",{"lineHeight":"1.875rem","letterSpacing":"-0.005em","fontWeight":"400"}],"display-hero":["3.5rem",{"lineHeight":"4rem","letterSpacing":"-0.03em","fontWeight":"600"}],"body-lg":["1.125rem",{"lineHeight":"1.75rem","fontWeight":"400"}],"headline-md":["1.75rem",{"lineHeight":"2.25rem","letterSpacing":"-0.01em","fontWeight":"500"}],"body-md":["0.9375rem",{"lineHeight":"1.5rem","fontWeight":"400"}],"body-sm":["0.8125rem",{"lineHeight":"1.25rem","fontWeight":"400"}],"headline-lg":["2.25rem",{"lineHeight":"2.75rem","letterSpacing":"-0.02em","fontWeight":"500"}],"label-code":["0.75rem",{"lineHeight":"1rem","letterSpacing":"0.06em","fontWeight":"600"}],"label-badge":["0.6875rem",{"lineHeight":"0.875rem","letterSpacing":"0.03em","fontWeight":"600"}]},"maxWidth":{"reading":"760px","wide":"1240px","form":"480px","modal":"620px"}}}}</script>
+</head>
+<body class="bg-surface font-body-md text-on-surface antialiased min-h-screen flex flex-col items-center justify-between py-space-xl px-space-md">
+<!-- BEGIN: TopStateSwitcher -->
+<!-- Top toggle pill indicator showing pending verification and preview states (segmented control) -->
+<header class="w-full flex justify-center pt-space-sm pb-space-lg" data-purpose="state-switcher">
+<nav aria-label="Verification State Switcher" class="inline-flex items-center p-space-xs rounded-full bg-surface-container font-body-sm text-body-sm font-medium text-on-surface-variant">
+<button aria-pressed="true" class="px-space-md py-space-xs rounded-full bg-surface-container-lowest text-on-surface font-semibold shadow-sm hover:text-on-surface transition-all focus:outline-none focus:ring-2 focus:ring-secondary/30" id="btn-pending-state" type="button">
+        Pending Verification State
+      </button>
+<button aria-pressed="false" class="px-space-md py-space-xs rounded-full text-on-surface-variant hover:text-on-surface transition-colors focus:outline-none focus:ring-2 focus:ring-secondary/30" id="btn-verified-preview" type="button">
+        Verified State Preview
+      </button>
+</nav>
+</header>
+<!-- END: TopStateSwitcher -->
+<!-- BEGIN: MainContent -->
+<!-- Main centered verification card (auth card: max-w-form) -->
+<main class="w-full flex-1 flex flex-col items-center justify-center -mt-space-sm mb-space-lg" data-purpose="verification-container">
+<article class="w-full max-w-form bg-surface-container-lowest rounded-lg p-space-xl sm:p-11 border border-outline-variant/30 shadow-sm text-center transition-all">
+<!-- Rumor Zero Dark Emblem Badge -->
+<div class="flex justify-center mb-space-lg" data-purpose="brand-emblem">
+<div class="w-12 h-12 rounded-lg bg-inverse-surface text-inverse-on-surface flex items-center justify-center">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.5rem]">layers</span>
+</div>
+</div>
+<!-- Heading -->
+<h1 class="font-headline-md text-headline-md text-on-surface mb-space-md">
+        Verify your email
+      </h1>
+<!-- Informative Subtext -->
+<p class="font-body-md text-body-md text-on-surface-variant max-w-sm mx-auto mb-space-lg">
+        We sent a verification link to <span class="font-semibold text-on-surface">elena.vance@rumorzero.org</span>.
+        Click the link to unlock posting and claim evaluation.
+      </p>
+<!-- Limited Access Callout Notice (informational: secondary family) -->
+<aside class="mb-space-lg p-space-md bg-secondary/10 rounded-lg flex items-start text-left gap-space-md border border-secondary/30" data-purpose="feature-restriction-callout">
+<div class="flex-shrink-0 mt-0.5 text-secondary">
+<!-- Shield Icon -->
+<span aria-hidden="true" class="material-symbols-outlined text-[1.25rem] text-secondary [font-variation-settings:'FILL'_1]">shield</span>
+</div>
+<div class="font-body-sm text-body-sm">
+<h2 class="font-body-sm text-body-sm font-semibold text-on-surface">
+            Limited Publishing Access
+          </h2>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-0.5">
+            Verify your email to post and report claims.
+          </p>
+</div>
+</aside>
+<!-- Resend Button with Countdown State (disabled: secondary tint; enabled by script: primary CTA) -->
+<div class="mb-space-md" data-purpose="resend-action">
+<button class="w-full h-11 inline-flex items-center justify-center gap-space-xs px-space-md py-space-sm rounded-lg font-body-md text-body-md font-semibold transition-colors enabled:shadow-sm disabled:bg-secondary/10 disabled:text-secondary disabled:opacity-90 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-secondary/30" disabled="" id="resend-btn" type="button">
+<!-- Clock Icon -->
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem] text-secondary">schedule</span>
+<span id="countdown-label">Resend email (54s)</span>
+</button>
+</div>
+<!-- Spam Warning Disclaimer -->
+<p class="font-body-sm text-body-sm text-outline max-w-xs mx-auto mb-space-xl">
+        Be sure to check your spam or junk folder if you don't see it in a few minutes.
+      </p>
+<!-- Decorative Divider -->
+<hr class="border-t border-outline-variant/30 mb-space-lg"/>
+<!-- Navigation & Secondary Actions -->
+<footer class="flex flex-col items-center gap-space-md" data-purpose="secondary-actions">
+<!-- Read-only access link -->
+<a class="inline-flex items-center font-body-md text-body-md font-medium text-secondary hover:text-on-secondary-container hover:underline transition-colors" href="#readonly">
+          Continue browsing in read-only mode
+          <span aria-hidden="true" class="ml-space-xs font-normal">→</span>
+</a>
+<!-- Testing Simulation Trigger (dev link) -->
+<button class="font-body-sm text-body-sm text-outline hover:text-on-surface-variant underline underline-offset-4 decoration-outline-variant hover:decoration-outline transition-all focus:outline-none focus:ring-2 focus:ring-secondary/30 rounded-lg" id="simulate-click-btn" type="button">
+          Simulate instant link click
+        </button>
+</footer>
+</article>
+</main>
+<!-- END: MainContent -->
+<!-- BEGIN: SecurityFooter -->
+<!-- Bottom status note regarding link expiration and encryption -->
+<footer class="w-full flex justify-center pb-space-sm font-body-sm text-body-sm text-outline text-center" data-purpose="security-notice">
+<div class="inline-flex items-center gap-space-xs">
+<!-- Lock Icon -->
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem] text-outline">lock</span>
+<span>Cryptographically signed links expire 24 hours after dispatch.</span>
+</div>
+</footer>
+<!-- END: SecurityFooter -->
+<!-- BEGIN: PageInteractivity -->
+<script data-purpose="timer-and-switcher">
+    // Optional countdown simulation for realistic fidelity
+    let remainingSeconds = 54;
+    const countdownEl = document.getElementById('countdown-label');
+    const resendBtn = document.getElementById('resend-btn');
+
+    const countdownTimer = setInterval(() => {
+      if (remainingSeconds > 1) {
+        remainingSeconds--;
+        countdownEl.textContent = `Resend email (${remainingSeconds}s)`;
+      } else {
+        clearInterval(countdownTimer);
+        countdownEl.textContent = 'Resend email';
+        resendBtn.disabled = false;
+        resendBtn.classList.remove('disabled:cursor-not-allowed', 'disabled:opacity-90');
+        resendBtn.classList.add('cursor-pointer', 'bg-secondary', 'text-on-secondary', 'hover:bg-on-secondary-container');
+        resendBtn.querySelector('.material-symbols-outlined').classList.remove('text-secondary');
+        resendBtn.querySelector('.material-symbols-outlined').classList.add('text-on-secondary');
+      }
+    }, 1000);
+
+    // Interactive toggle between Preview states
+    const btnPending = document.getElementById('btn-pending-state');
+    const btnVerified = document.getElementById('btn-verified-preview');
+
+    btnVerified.addEventListener('click', () => {
+      btnVerified.classList.add('bg-surface-container-lowest', 'text-on-surface', 'font-semibold', 'shadow-sm');
+      btnVerified.classList.remove('text-on-surface-variant');
+      btnPending.classList.remove('bg-surface-container-lowest', 'text-on-surface', 'font-semibold', 'shadow-sm');
+      btnPending.classList.add('text-on-surface-variant');
+    });
+
+    btnPending.addEventListener('click', () => {
+      btnPending.classList.add('bg-surface-container-lowest', 'text-on-surface', 'font-semibold', 'shadow-sm');
+      btnPending.classList.remove('text-on-surface-variant');
+      btnVerified.classList.remove('bg-surface-container-lowest', 'text-on-surface', 'font-semibold', 'shadow-sm');
+      btnVerified.classList.add('text-on-surface-variant');
+    });
+  </script>
+<!-- END: PageInteractivity -->
+</body></html>

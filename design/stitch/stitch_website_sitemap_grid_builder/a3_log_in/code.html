@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Rumor Zero - Log In</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600;700&amp;family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{"colors":{"surface-container":"#eaedff","on-surface":"#131b2e","tertiary-fixed":"#eaddff","on-secondary-fixed-variant":"#004b73","inverse-surface":"#283044","inverse-primary":"#59dbc7","surface-container-lowest":"#ffffff","on-error":"#ffffff","on-primary-fixed-variant":"#005047","on-primary-fixed":"#00201c","primary-container":"#00a896","tertiary":"#732ee4","on-error-container":"#93000a","tertiary-container":"#a87dff","surface-container-high":"#e2e7ff","surface-dim":"#d2d9f4","on-tertiary-container":"#3c0088","surface-container-highest":"#dae2fd","primary-fixed-dim":"#59dbc7","background":"#faf8ff","surface-bright":"#faf8ff","secondary":"#006398","surface-tint":"#006b5f","secondary-fixed-dim":"#93ccff","on-secondary":"#ffffff","surface-variant":"#dae2fd","inverse-on-surface":"#eef0ff","outline-variant":"#bbcac5","surface":"#faf8ff","on-secondary-fixed":"#001d31","on-background":"#131b2e","on-tertiary-fixed":"#25005a","on-tertiary":"#ffffff","on-primary":"#ffffff","tertiary-fixed-dim":"#d2bbff","surface-container-low":"#f2f3ff","secondary-fixed":"#cce5ff","on-primary-container":"#00352e","on-tertiary-fixed-variant":"#5a00c6","primary-fixed":"#79f7e3","on-secondary-container":"#00476e","error":"#ba1a1a","outline":"#6c7a76","secondary-container":"#5bb8fe","primary":"#006b5f","on-surface-variant":"#3c4946","error-container":"#ffdad6","verdict-review":"#F4A261","on-verdict-review":"#9a4a12"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem"},"spacing":{"gutter-mobile":"0.75rem","margin-mobile":"1rem","margin":"2rem","space-md":"0.875rem","space-lg":"1.25rem","space-xl":"2rem","space-xs":"0.25rem","gutter":"1.25rem","space-sm":"0.5rem"},"fontFamily":{"label-metric":["JetBrains Mono"],"claim-headline":["Newsreader"],"display-hero-mobile":["Newsreader"],"headline-sm":["Newsreader"],"claim-opinion":["Newsreader"],"display-hero":["Newsreader"],"body-lg":["Inter"],"headline-md":["Newsreader"],"body-md":["Inter"],"body-sm":["Inter"],"headline-lg":["Newsreader"],"label-code":["JetBrains Mono"],"label-badge":["Inter"]},"fontSize":{"label-metric":["0.875rem",{"lineHeight":"1.25rem","fontWeight":"700"}],"claim-headline":["1.375rem",{"lineHeight":"1.875rem","letterSpacing":"-0.01em","fontWeight":"500"}],"display-hero-mobile":["2.25rem",{"lineHeight":"2.75rem","letterSpacing":"-0.02em","fontWeight":"600"}],"headline-sm":["1.25rem",{"lineHeight":"1.75rem","letterSpacing":"-0.01em","fontWeight":"600"}],"claim-opinion":["1.375rem",{"lineHeight":"1.875rem","letterSpacing":"-0.005em","fontWeight":"400"}],"display-hero":["3.5rem",{"lineHeight":"4rem","letterSpacing":"-0.03em","fontWeight":"600"}],"body-lg":["1.125rem",{"lineHeight":"1.75rem","fontWeight":"400"}],"headline-md":["1.75rem",{"lineHeight":"2.25rem","letterSpacing":"-0.01em","fontWeight":"500"}],"body-md":["0.9375rem",{"lineHeight":"1.5rem","fontWeight":"400"}],"body-sm":["0.8125rem",{"lineHeight":"1.25rem","fontWeight":"400"}],"headline-lg":["2.25rem",{"lineHeight":"2.75rem","letterSpacing":"-0.02em","fontWeight":"500"}],"label-code":["0.75rem",{"lineHeight":"1rem","letterSpacing":"0.06em","fontWeight":"600"}],"label-badge":["0.6875rem",{"lineHeight":"0.875rem","letterSpacing":"0.03em","fontWeight":"600"}]},"maxWidth":{"reading":"760px","wide":"1240px","form":"480px","modal":"620px"}}}}</script>
+</head>
+<body class="bg-surface font-body-md text-on-surface antialiased min-h-screen flex flex-col items-center justify-center p-space-md sm:p-space-lg">
+<!-- BEGIN: AuthenticationCardWrapper (auth card: max-w-form) -->
+<main class="w-full max-w-form my-auto">
+<!-- Card Container -->
+<div class="bg-surface-container-lowest rounded-lg shadow-sm border border-outline-variant/30 px-space-xl pt-10 pb-9" data-purpose="auth-card">
+<!-- Brand Header -->
+<div class="flex items-center justify-center gap-space-md mb-space-lg" data-purpose="brand-logo">
+<div class="w-12 h-12 rounded-lg bg-inverse-surface text-inverse-on-surface flex items-center justify-center">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.5rem] text-primary-fixed-dim">check</span>
+</div>
+<div class="flex items-baseline gap-space-xs">
+<span class="font-headline-sm text-headline-sm font-bold tracking-tight text-on-surface">Rumor Zero</span>
+<span class="font-label-code text-label-badge font-bold uppercase tracking-widest text-outline">Fact Social</span>
+</div>
+</div>
+<!-- Welcome Headings -->
+<div class="text-center mb-space-lg">
+<h1 class="font-headline-md text-headline-md text-on-surface">Welcome back</h1>
+<p class="font-body-md text-body-md text-outline mt-space-xs">Enter your credentials to access your feed.</p>
+</div>
+<!-- BEGIN: ErrorAlertBanner (error family) -->
+<div class="bg-error/10 border border-error/30 text-error rounded-lg p-space-md mb-space-lg flex items-start gap-space-sm transition-all duration-200" data-purpose="alert-notification" id="error-alert">
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem] mt-0.5 shrink-0 text-error">error</span>
+<div class="flex-1">
+<p class="font-body-sm text-body-sm font-medium text-error">That email and password don't match.</p>
+<p class="font-body-sm text-body-sm text-error mt-0.5">Attempt 1 of 5 before temporary cooling period.</p>
+</div>
+<button aria-label="Dismiss alert" class="text-error hover:text-on-error-container p-0.5 shrink-0 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-secondary/30" onclick="document.getElementById('error-alert').style.display='none'" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem]">close</span>
+</button>
+</div>
+<!-- END: ErrorAlertBanner -->
+<!-- BEGIN: SocialAuthentication -->
+<div class="mb-space-lg" data-purpose="sso-buttons">
+<button class="w-full h-11 inline-flex items-center justify-center gap-space-sm px-space-md py-space-sm rounded-lg bg-surface-container-lowest text-on-surface border border-outline-variant hover:bg-surface-container-low font-body-md text-body-md font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-secondary/30" type="button">
+<!-- Google 'G' Multi-color SVG (brand mark, kept) -->
+<svg aria-hidden="true" class="w-4 h-4 shrink-0" data-rz-keep="brand: Google logo" viewbox="0 0 24 24">
+<path d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.65v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.14z" fill="#4285F4"></path>
+<path d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.24v3.14C3.26 21.36 7.33 24 12 24z" fill="#34A853"></path>
+<path d="M5.28 14.27a7.2 7.2 0 0 1 0-4.54V6.59H1.24a11.96 11.96 0 0 0 0 10.82l4.04-3.14z" fill="#FBBC05"></path>
+<path d="M12 4.77c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.24 6.59l4.04 3.14c.95-2.83 3.6-4.96 6.72-4.96z" fill="#EA4335"></path>
+</svg>
+          Continue with Google
+        </button>
+</div>
+<!-- END: SocialAuthentication -->
+<!-- Divider -->
+<div class="relative flex items-center justify-center mb-space-lg">
+<div class="border-t border-outline-variant/30 w-full"></div>
+<span class="bg-surface-container-lowest px-space-md font-label-code text-label-badge text-outline uppercase whitespace-nowrap absolute">or log in with email</span>
+</div>
+<!-- BEGIN: CredentialsForm -->
+<form action="#" class="space-y-space-md" method="POST" onsubmit="event.preventDefault();">
+<!-- Email Input Field -->
+<div>
+<label class="block font-body-sm text-body-sm font-semibold text-on-surface mb-space-xs" for="email">Email address</label>
+<input class="w-full h-10 px-space-md py-space-sm rounded-lg border border-outline-variant/50 bg-surface-container-low font-body-md text-body-md text-on-surface placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-secondary/20 focus:border-secondary focus:bg-surface-container-lowest transition-colors" id="email" name="email" required="" type="email" value="elena.vance@rumorzero.org"/>
+</div>
+<!-- Password Input Field -->
+<div>
+<label class="block font-body-sm text-body-sm font-semibold text-on-surface mb-space-xs" for="password">Password</label>
+<div class="relative">
+<input class="w-full h-10 pl-space-md pr-10 py-space-sm rounded-lg border border-outline-variant/50 bg-surface-container-low font-body-md text-body-md text-on-surface tracking-widest placeholder:text-outline focus:outline-none focus:ring-2 focus:ring-secondary/20 focus:border-secondary focus:bg-surface-container-lowest transition-colors" id="password" name="password" required="" type="password" value="CorrectHorseBatteryStaple!"/>
+<button aria-label="Toggle password visibility" class="absolute inset-y-0 right-0 pr-space-md flex items-center text-outline hover:text-on-surface-variant focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/30" data-purpose="password-toggle" id="toggle-password" type="button">
+<!-- Eye Off (Slash) Icon -->
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem]" id="eye-off-icon">visibility_off</span>
+<!-- Eye Open Icon (Hidden by default) -->
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem] hidden" id="eye-open-icon">visibility</span>
+</button>
+</div>
+</div>
+<!-- Options Row: Remember Me & Forgot Password -->
+<div class="flex items-center justify-between pt-0.5">
+<label class="flex items-center gap-space-sm cursor-pointer select-none">
+<input checked="" class="w-4 h-4 rounded-lg border-outline-variant text-secondary focus:ring-secondary/30 focus:ring-offset-0 cursor-pointer" type="checkbox"/>
+<span class="font-body-sm text-body-sm text-on-surface-variant">Remember me for 30 days</span>
+</label>
+<a class="font-body-sm text-body-sm font-medium text-secondary hover:underline transition-colors" href="#">Forgot password?</a>
+</div>
+<!-- Submit Button -->
+<div class="pt-space-sm">
+<button class="w-full h-11 inline-flex items-center justify-center gap-space-xs px-space-md py-space-sm rounded-lg bg-secondary text-on-secondary hover:bg-on-secondary-container font-body-md text-body-md font-semibold transition-all shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/30" type="submit">
+<span>Log in</span>
+<span class="leading-none tracking-normal">→</span>
+</button>
+</div>
+</form>
+<!-- END: CredentialsForm -->
+<!-- Security Notice -->
+<div class="flex items-center justify-center gap-space-xs text-outline mt-space-lg mb-space-lg font-body-sm text-body-sm" data-purpose="security-badge">
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem] text-outline shrink-0">shield</span>
+<span>Protected by session rate limiting (Sec 4.5/12)</span>
+</div>
+<!-- Bottom Card Link (Sign Up) -->
+<div class="w-full bg-surface-container-low rounded-lg py-space-md text-center" data-purpose="registration-prompt">
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+          Don't have an account?
+          <a class="font-medium text-secondary hover:underline ml-0.5" href="#">Sign up</a>
+</p>
+</div>
+</div>
+<!-- Protocol Sub-footer -->
+<footer class="mt-space-lg text-center" data-purpose="footer-meta">
+<p class="font-body-sm text-body-sm text-outline tracking-wide">
+        Protocol standard 4.1 • Rumor Zero Cryptographic Ledger
+      </p>
+</footer>
+</main>
+<!-- END: AuthenticationCardWrapper -->
+<!-- Interactive JavaScript for password toggling -->
+<script data-purpose="password-visibility-handler">
+    const toggleBtn = document.getElementById('toggle-password');
+    const pwdInput = document.getElementById('password');
+    const eyeOffIcon = document.getElementById('eye-off-icon');
+    const eyeOpenIcon = document.getElementById('eye-open-icon');
+
+    if (toggleBtn && pwdInput) {
+      toggleBtn.addEventListener('click', () => {
+        const isPassword = pwdInput.type === 'password';
+        pwdInput.type = isPassword ? 'text' : 'password';
+        eyeOffIcon.classList.toggle('hidden', isPassword);
+        eyeOpenIcon.classList.toggle('hidden', !isPassword);
+      });
+    }
+  </script>
+</body></html>
