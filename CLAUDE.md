@@ -98,7 +98,8 @@ npm run brand:build                         # after Part 0D: regenerate every lo
 ## Hard rules
 1. **Never run git commands that change state**: add, commit, push, pull, fetch, merge, rebase, reset, checkout, switch, restore, branch, tag, stash, rm, mv, clean, cherry-pick, revert, config, remote, init, clone. The same goes for `gh` write commands. Read-only git (`status`, `diff`, `log`, `show`) is fine. **The user does all git operations.** `.claude/settings.json` enforces most of this; the rule applies even where it doesn't.
 2. **Never print, log, echo or commit secrets.**
-   - Don't read or write real env files (`backend/.env`, `frontend/.env.local`, `.dev.vars`); they're denied. Edit only `*.env.example`.
+   - Real env files (`backend/.env`, `frontend/.env.local`) may be read or edited only through a permission prompt the user approves (the `ask` rules in `.claude/settings.json`). Never repeat a value from them in chat, command output, logs or other files; refer to variables by name. Change a real env file only when the user asks; new variables still go into `*.env.example` + `docs/ENV_GUIDE.md`.
+   - `.dev.vars`, `.env.development.local`, `.env.test.local`, `.env.production` and `.env.production.local` stay denied. Production secrets never go into any file.
    - Never ask the user to paste a secret into chat.
    - Tests use the test values from the example files. Logs must not contain tokens, passwords or keys.
 3. **Free tier only.** Ask before adding any new external service, SaaS, or paid dependency. Prefer adding no dependency at all, and say why whenever you add one.

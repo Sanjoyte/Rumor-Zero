@@ -7,7 +7,7 @@ Order:
 Every variable in `backend/.env.example` and `frontend/.env.example` appears below. UI paths were checked on 2026-09-29; dashboards change, so if a button has moved, search the page for the setting's name.
 
 > **Ground rules**
-> - **Never paste a secret into a chat with Claude** (or anyone else). Paste secrets only into your local `.env` files or a provider's dashboard. Claude Code is configured so it can't read `backend/.env`, `frontend/.env.local` or `.dev.vars`.
+> - **Never paste a secret into a chat with Claude** (or anyone else). Paste secrets only into your local `.env` files or a provider's dashboard. Claude Code asks your permission before reading or editing `backend/.env` or `frontend/.env.local`, never repeats their values, and can't read `.dev.vars` or `.env.production*` at all.
 > - Local and production secrets are **always different values**. Never reuse a local secret in production.
 > - Wherever a dashboard asks for an app, project or sender **name**, type **`Rumor Zero`**. Where it asks for a URL-bearing **slug**, use `rumor-zero` (or the fallbacks in §2.0).
 

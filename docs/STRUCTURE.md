@@ -10,7 +10,7 @@ Legend:
 ```text
 rumor-zero/
 ├── .claude/
-│   └── settings.json            ✅ Claude Code permissions: denies state-changing git/gh commands and reading real env files
+│   └── settings.json            ✅ Claude Code permissions: denies state-changing git/gh commands, `.dev.vars` and `.env.production*`; asks before reading or editing the real env files
 │                                    (recommended addition, done by you: "Edit(/design/**)" so design/ can't be edited)
 ├── .github/
 │   ├── workflows/
@@ -27,7 +27,7 @@ rumor-zero/
 │
 ├── backend/                     Django project root (cd here to run manage.py)
 │   ├── .env.example             ✅ every backend variable, documented
-│   ├── .env                     you create it (git-ignored; Claude can't read it)
+│   ├── .env                     you create it (git-ignored; Claude asks before reading or editing it)
 │   ├── .python-version          🔨 0A  "3.13"
 │   ├── manage.py                🅐  `django-admin startproject rumor_zero .`
 │   ├── rumor_zero/              🅐  project package (Python needs the underscore)
@@ -66,7 +66,7 @@ rumor-zero/
 ├── frontend/                    Next.js app root (cd here to run npm)
 │   ├── .env.example             ✅ every frontend variable, documented
 │   │                                ⚠ create-next-app refuses a folder containing it: Part 0B moves it aside, scaffolds, moves it back
-│   ├── .env.local               you create it (git-ignored; Claude can't read it)
+│   ├── .env.local               you create it (git-ignored; Claude asks before reading or editing it)
 │   ├── .gitignore               🅑  ⚠ contains `.env*`; Part 0B must append `!.env.example`
 │   ├── .nvmrc                   🔨 0B  "24" (also read by Cloudflare Workers Builds)
 │   ├── package.json             🅑  scripts: dev, build, start, lint (eslint), lint:tokens, typecheck, test (vitest run), test:e2e

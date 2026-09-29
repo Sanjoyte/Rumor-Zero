@@ -780,7 +780,7 @@ Other settings:
 | Brute force | allauth rate limits + DRF throttles on the real client IP (relay header + secret) |
 | Bots / brigading | Turnstile on signup, email verification before writes, new-account report weighting, report throttle |
 | Stolen DB | Argon2id; allauth stores only signed/hashed keys |
-| Secrets | env vars only; `.env*` git-ignored; Claude denied reading real env files; Dependabot |
+| Secrets | env vars only; `.env*` git-ignored; Claude asks before reading or editing local env files; production env files denied; Dependabot |
 | Transport | HTTPS everywhere (Render/Cloudflare TLS); `SECURE_PROXY_SSL_HEADER`, HSTS, secure cookies in prod |
 | Admin exposure | unguessable `ADMIN_URL_PATH`, staff-only, path never public |
 | Uploaded images (profile photos) | decode-and-re-encode with Pillow (JPEG/PNG/WebP in, WebP out); size, pixel and dimension limits before decoding; EXIF/GPS/ICC/XMP dropped; original never stored; served from our origin with `nosniff` + `default-src 'none'; sandbox`; no SVG uploads (§4e) |
