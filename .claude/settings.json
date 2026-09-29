@@ -258,13 +258,17 @@
       "PowerShell(gh variable *)",
       "PowerShell(gh workflow run *)",
       "PowerShell(gh api *)",
-      "Read(**/.env)",
-      "Read(**/.env.local)",
       "Read(**/.env.development.local)",
       "Read(**/.env.test.local)",
       "Read(**/.env.production)",
       "Read(**/.env.production.local)",
       "Read(**/.dev.vars)"
+    ],
+    "ask": [
+      "Read(**/.env)",
+      "Edit(**/.env)",
+      "Read(**/.env.local)",
+      "Edit(**/.env.local)"
     ]
   }
 }
