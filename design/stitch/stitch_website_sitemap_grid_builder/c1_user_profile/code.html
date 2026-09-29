@@ -1,0 +1,485 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<link href="https://fonts.googleapis.com" rel="preconnect">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600;700&amp;family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">tailwind.config={darkMode:"class",theme:{extend:{"colors":{"surface-container":"#eaedff","on-surface":"#131b2e","tertiary-fixed":"#eaddff","on-secondary-fixed-variant":"#004b73","inverse-surface":"#283044","inverse-primary":"#59dbc7","surface-container-lowest":"#ffffff","on-error":"#ffffff","on-primary-fixed-variant":"#005047","on-primary-fixed":"#00201c","primary-container":"#00a896","tertiary":"#732ee4","on-error-container":"#93000a","tertiary-container":"#a87dff","surface-container-high":"#e2e7ff","surface-dim":"#d2d9f4","on-tertiary-container":"#3c0088","surface-container-highest":"#dae2fd","primary-fixed-dim":"#59dbc7","background":"#faf8ff","surface-bright":"#faf8ff","secondary":"#006398","surface-tint":"#006b5f","secondary-fixed-dim":"#93ccff","on-secondary":"#ffffff","surface-variant":"#dae2fd","inverse-on-surface":"#eef0ff","outline-variant":"#bbcac5","surface":"#faf8ff","on-secondary-fixed":"#001d31","on-background":"#131b2e","on-tertiary-fixed":"#25005a","on-tertiary":"#ffffff","on-primary":"#ffffff","tertiary-fixed-dim":"#d2bbff","surface-container-low":"#f2f3ff","secondary-fixed":"#cce5ff","on-primary-container":"#00352e","on-tertiary-fixed-variant":"#5a00c6","primary-fixed":"#79f7e3","on-secondary-container":"#00476e","error":"#ba1a1a","outline":"#6c7a76","secondary-container":"#5bb8fe","primary":"#006b5f","on-surface-variant":"#3c4946","error-container":"#ffdad6","verdict-review":"#F4A261","on-verdict-review":"#9a4a12"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem"},"spacing":{"gutter-mobile":"0.75rem","margin-mobile":"1rem","margin":"2rem","space-md":"0.875rem","space-lg":"1.25rem","space-xl":"2rem","space-xs":"0.25rem","gutter":"1.25rem","space-sm":"0.5rem"},"fontFamily":{"label-metric":["JetBrains Mono"],"claim-headline":["Newsreader"],"display-hero-mobile":["Newsreader"],"headline-sm":["Newsreader"],"claim-opinion":["Newsreader"],"display-hero":["Newsreader"],"body-lg":["Inter"],"headline-md":["Newsreader"],"body-md":["Inter"],"body-sm":["Inter"],"headline-lg":["Newsreader"],"label-code":["JetBrains Mono"],"label-badge":["Inter"]},"fontSize":{"label-metric":["0.875rem",{"lineHeight":"1.25rem","fontWeight":"700"}],"claim-headline":["1.375rem",{"lineHeight":"1.875rem","letterSpacing":"-0.01em","fontWeight":"500"}],"display-hero-mobile":["2.25rem",{"lineHeight":"2.75rem","letterSpacing":"-0.02em","fontWeight":"600"}],"headline-sm":["1.25rem",{"lineHeight":"1.75rem","letterSpacing":"-0.01em","fontWeight":"600"}],"claim-opinion":["1.375rem",{"lineHeight":"1.875rem","letterSpacing":"-0.005em","fontWeight":"400"}],"display-hero":["3.5rem",{"lineHeight":"4rem","letterSpacing":"-0.03em","fontWeight":"600"}],"body-lg":["1.125rem",{"lineHeight":"1.75rem","fontWeight":"400"}],"headline-md":["1.75rem",{"lineHeight":"2.25rem","letterSpacing":"-0.01em","fontWeight":"500"}],"body-md":["0.9375rem",{"lineHeight":"1.5rem","fontWeight":"400"}],"body-sm":["0.8125rem",{"lineHeight":"1.25rem","fontWeight":"400"}],"headline-lg":["2.25rem",{"lineHeight":"2.75rem","letterSpacing":"-0.02em","fontWeight":"500"}],"label-code":["0.75rem",{"lineHeight":"1rem","letterSpacing":"0.06em","fontWeight":"600"}],"label-badge":["0.6875rem",{"lineHeight":"0.875rem","letterSpacing":"0.03em","fontWeight":"600"}]},"maxWidth":{"reading":"760px","wide":"1240px","form":"480px","modal":"620px"}}}}</script>
+</head><body class="bg-surface font-body-md text-on-surface antialiased">
+<!-- BEGIN: RZ app sidebar active=profile -->
+<aside class="fixed left-0 top-0 h-full w-64 bg-surface-container-lowest z-50 flex flex-col justify-between border-r border-outline-variant/30">
+<div class="flex flex-col">
+<div class="h-16 px-space-lg flex items-center gap-space-sm border-b border-outline-variant/30">
+<span class="font-headline-sm text-headline-sm font-bold tracking-tight text-on-surface">Rumor Zero</span>
+</div>
+<div class="p-space-sm flex flex-col gap-space-sm">
+<nav class="flex flex-col gap-space-xs">
+<a class="flex items-center gap-space-sm px-space-md rounded-lg transition-colors py-space-sm font-body-md text-body-md text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface" data-path="home" href="#"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">home</span><span>Home</span></a>
+<a class="flex items-center gap-space-sm px-space-md rounded-lg transition-colors py-space-sm font-body-md text-body-md text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface" data-path="search" href="#"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">search</span><span>Search</span></a>
+<a class="flex items-center gap-space-sm px-space-md rounded-lg transition-colors py-space-sm font-body-md text-body-md text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface" data-path="notifications" href="#"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">notifications</span><span>Notifications</span></a>
+<a aria-current="page" class="flex items-center gap-space-sm px-space-md rounded-lg transition-colors py-space-sm font-body-md text-body-md bg-secondary text-on-secondary font-semibold" data-path="profile" href="#"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">person</span><span>Profile</span></a>
+</nav>
+<div class="pt-space-sm">
+<button class="w-full flex items-center justify-center gap-space-xs px-space-md py-space-sm rounded-lg bg-secondary text-on-secondary hover:bg-on-secondary-container font-body-md text-body-md font-semibold transition-colors shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/30" type="button"><span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">edit_note</span><span>Submit Claim</span></button>
+</div>
+</div>
+</div>
+<div class="flex flex-col border-t border-outline-variant/30">
+<div class="px-space-sm py-space-xs flex flex-col gap-space-xs">
+<a class="flex items-center gap-space-sm px-space-md rounded-lg transition-colors py-space-xs font-body-sm text-body-sm text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface" data-path="audit-queue" href="#"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">fact_check</span><span>Audit Queue</span></a>
+<a class="flex items-center gap-space-sm px-space-md rounded-lg transition-colors py-space-xs font-body-sm text-body-sm text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface" data-path="settings" href="#"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">settings</span><span>Settings</span></a>
+</div>
+<div class="p-space-md border-t border-outline-variant/30 flex items-center justify-between gap-space-sm bg-surface-container-lowest">
+<div class="flex items-center gap-space-sm min-w-0 flex-1">
+<img alt="Profile" class="w-8 h-8 rounded-full object-cover flex-shrink-0" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCh6TAOM27_TahD4yVCK1Kbz2NZmYB6hoKtCnKWGIrZLl4vpj03qF5L3Mayl6j35FyR_8yQtXWob-T9fKTJdZWT61Pxv0SCTuyIiwZAykR9rbxLhmu8kzvBix-RbrC7HvfhFl1T8SFyKrLoyfmjtR9T4dWNrP_p-Sr0cEvIfZ_Q--Nk6wq9T4IFZXZcu5rAHP8sXEWgOt9_Wd-3N-cwc165x9wKz_OB9FAuFG83xOOjTPNDce0-mW-m">
+<div class="flex flex-col min-w-0">
+<span class="font-body-sm text-body-sm font-semibold text-on-surface truncate">Archivist Ross</span>
+<span class="font-label-code text-label-code text-on-surface-variant truncate">@ross_verify</span>
+</div>
+</div>
+<button aria-label="User menu" class="p-space-xs rounded-lg text-outline hover:text-on-surface hover:bg-surface-container-low transition-colors flex-shrink-0" title="User menu" type="button"><span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">more_horiz</span></button>
+</div>
+</div>
+</aside>
+<!-- END: RZ app sidebar -->
+<div class="pl-64">
+<!-- BEGIN: RZ app header -->
+<header class="fixed top-0 left-64 right-0 h-16 bg-surface-container-lowest border-b border-outline-variant/30 z-40 px-space-lg flex items-center justify-between gap-space-lg">
+<div class="relative flex-1 max-w-xl">
+<span aria-hidden="true" class="material-symbols-outlined absolute left-space-md top-1/2 -translate-y-1/2 text-outline text-[1.25rem]">search</span>
+<input class="w-full bg-surface-container-low text-on-surface placeholder:text-outline font-body-sm text-body-sm pl-10 pr-space-md py-space-xs rounded-lg border border-outline-variant/30 focus:outline-none focus:ring-0 focus:border-secondary" placeholder="Search verified claims, sources, evidence logs..." type="text">
+</div>
+<div class="flex items-center gap-space-md">
+<button class="flex items-center gap-space-xs px-space-md py-space-xs rounded-full border border-outline-variant/40 bg-surface-container-lowest hover:bg-surface-container-low text-on-surface transition-colors" type="button"><span aria-hidden="true" class="material-symbols-outlined text-primary text-[1rem]">verified</span><span class="font-label-code text-label-code uppercase">Verification Ledger</span></button>
+<button aria-label="User profile" class="w-8 h-8 rounded-full bg-inverse-surface text-inverse-on-surface hover:opacity-90 transition-opacity flex items-center justify-center flex-shrink-0 font-label-code text-label-code" title="User profile" type="button">AR</button>
+</div>
+</header>
+<!-- END: RZ app header -->
+<main class="relative pt-16 bg-surface min-h-screen"><div class="flex flex-col w-full">
+<div class="w-full max-w-wide mx-auto px-space-lg py-space-xl">
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-space-lg items-start">
+<!-- Primary Main Column (Spine) -->
+<div class="lg:col-span-8 flex flex-col gap-space-lg min-w-0">
+<!-- Profile Header Dossier Card -->
+<section class="bg-surface-container-lowest rounded-lg border border-outline-variant/30 p-space-lg shadow-sm">
+<div class="flex flex-col sm:flex-row items-start justify-between gap-space-md">
+<div class="flex items-start gap-space-md min-w-0">
+<div class="relative flex-shrink-0">
+<img alt="Dr. Elena Vance" class="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover border border-outline-variant/40" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCh6TAOM27_TahD4yVCK1Kbz2NZmYB6hoKtCnKWGIrZLl4vpj03qF5L3Mayl6j35FyR_8yQtXWob-T9fKTJdZWT61Pxv0SCTuyIiwZAykR9rbxLhmu8kzvBix-RbrC7HvfhFl1T8SFyKrLoyfmjtR9T4dWNrP_p-Sr0cEvIfZ_Q--Nk6wq9T4IFZXZcu5rAHP8sXEWgOt9_Wd-3N-cwc165x9wKz_OB9FAuFG83xOOjTPNDce0-mW-m">
+<span class="absolute bottom-0 right-0 bg-surface-container-lowest p-0.5 rounded-full flex items-center justify-center">
+<span aria-hidden="true" class="material-symbols-outlined text-primary text-[1.25rem] [font-variation-settings:'FILL'_1]">verified</span>
+</span>
+</div>
+<div class="flex flex-col min-w-0">
+<div class="flex items-center gap-space-xs flex-wrap">
+<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight">Dr. Elena Vance</h1>
+<span aria-hidden="true" class="material-symbols-outlined text-primary text-[1.25rem] [font-variation-settings:'FILL'_1]">verified</span>
+<span class="px-space-xs py-0.5 bg-surface-container-high text-on-surface-variant border border-outline-variant/30 font-label-code text-label-badge rounded-lg uppercase tracking-wider ml-space-xs">Author</span>
+</div>
+<div class="flex items-center gap-space-xs text-on-surface-variant font-body-sm text-body-sm flex-wrap mt-0.5">
+<span class="font-label-code text-label-code text-secondary font-semibold">@evance_md</span>
+<span class="text-outline-variant">•</span>
+<span class="">Institutional Climatologist</span>
+<span class="text-outline-variant">•</span>
+<span class="">IRENA Fellow</span>
+</div>
+</div>
+</div>
+<!-- Action Buttons -->
+<div class="flex items-center gap-space-xs flex-shrink-0 self-start sm:self-auto">
+<button class="inline-flex items-center justify-center gap-space-xs px-space-md py-space-sm rounded-lg bg-surface-container-lowest text-on-surface border border-outline-variant hover:bg-surface-container-low font-body-md text-body-md font-semibold transition-colors" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">edit</span>
+<span class="">Edit Profile</span>
+</button>
+<button class="w-10 h-10 flex items-center justify-center rounded-lg bg-surface-container-lowest text-on-surface-variant border border-outline-variant hover:bg-surface-container-low hover:text-on-surface transition-colors" title="Share Profile" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">share</span>
+</button>
+<button class="w-10 h-10 flex items-center justify-center rounded-lg bg-surface-container-lowest text-on-surface-variant border border-outline-variant hover:bg-surface-container-low hover:text-on-surface transition-colors" title="More Options" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">more_horiz</span>
+</button>
+</div>
+</div>
+<!-- Academic Bio (measure bounded by the grid column; no layout max-w) -->
+<p class="mt-space-md font-body-md text-body-md text-on-surface/90 leading-relaxed">
+            Senior Climatologist at IRENA &amp; Oxford Energy Institute. Specializing in renewable energy grid transitions, atmospheric carbon metrics, and empirical evidentiary modeling.
+          </p>
+<!-- Attestation Meta Row -->
+<div class="flex items-center gap-space-md flex-wrap mt-space-md pt-space-md text-on-surface-variant font-body-sm text-body-sm">
+<div class="flex items-center gap-space-xs">
+<span aria-hidden="true" class="material-symbols-outlined text-outline text-[1.125rem]">calendar_today</span>
+<span class="">Joined March 2024</span>
+</div>
+<div class="flex items-center gap-space-xs text-primary font-medium">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem] [font-variation-settings:'FILL'_1]">verified</span>
+<span class="font-label-code text-label-code">99.1% Audit Trust Score</span>
+</div>
+<div class="flex items-center gap-space-xs">
+<span aria-hidden="true" class="material-symbols-outlined text-outline text-[1.125rem]">rate_review</span>
+<span class="">14 Peer Reviews Authored</span>
+</div>
+</div>
+<!-- Epistemic Telemetry Counters -->
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-space-sm mt-space-md bg-surface-container-low border border-outline-variant/30 p-space-md rounded-lg">
+<div class="flex flex-col">
+<span class="font-label-metric text-label-metric text-on-surface">1,420</span>
+<span class="font-label-code text-label-badge text-on-surface-variant uppercase tracking-wider mt-0.5">Followers</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-metric text-label-metric text-on-surface">186</span>
+<span class="font-label-code text-label-badge text-on-surface-variant uppercase tracking-wider mt-0.5">Following</span>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center gap-space-xs">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="font-label-metric text-label-metric text-on-surface">68</span>
+</div>
+<span class="font-label-code text-label-badge text-on-surface-variant uppercase tracking-wider mt-0.5">Verified Claims</span>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center gap-space-xs">
+<span class="w-2 h-2 rounded-full bg-error"></span>
+<span class="font-label-metric text-label-metric text-on-surface">0</span>
+</div>
+<span class="font-label-code text-label-badge text-on-surface-variant uppercase tracking-wider mt-0.5">Debunked</span>
+</div>
+</div>
+</section>
+<!-- Segmented Feed Controls & Protocol Alert -->
+<div class="flex flex-col gap-space-sm">
+<div class="flex items-center justify-between flex-wrap gap-space-sm">
+<div class="inline-flex items-center gap-space-xs p-space-xs rounded-full bg-surface-container">
+<button class="px-space-md py-space-xs rounded-full font-body-sm text-body-sm font-medium text-on-surface-variant hover:text-on-surface transition-colors" type="button">
+                Published Claims <span class="font-label-code text-label-code text-outline">(42)</span>
+</button>
+<button class="px-space-md py-space-xs rounded-full font-body-sm text-body-sm font-semibold bg-surface-container-lowest text-on-surface shadow-sm transition-colors" type="button">
+                Pending Verification <span class="font-label-code text-label-code font-bold text-secondary">(2)</span>
+</button>
+<button class="px-space-md py-space-xs rounded-full font-body-sm text-body-sm font-medium text-on-surface-variant hover:text-on-surface transition-colors" type="button">
+                Discourse &amp; Comments <span class="font-label-code text-label-code text-outline">(18)</span>
+</button>
+</div>
+<button class="inline-flex items-center justify-center gap-space-xs px-space-md py-space-sm rounded-lg bg-surface-container-lowest text-on-surface border border-outline-variant hover:bg-surface-container-low font-body-md text-body-md font-semibold transition-colors" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">filter_list</span>
+<span class="">FILTER</span>
+</button>
+</div>
+<!-- Pending Disclaimer Callout -->
+<div class="flex items-center justify-between gap-space-md bg-surface-container-lowest border border-outline-variant/30 px-space-md py-space-sm rounded-lg font-body-sm text-body-sm text-on-surface-variant">
+<div class="flex items-center gap-space-xs">
+<span aria-hidden="true" class="material-symbols-outlined text-outline text-[1.125rem]">lock</span>
+<span class="">Pending items visible only to author prior to consensus ledger indexing.</span>
+</div>
+<a class="font-label-code text-label-code text-secondary font-semibold hover:underline flex-shrink-0" href="#">Protocol Rules</a>
+</div>
+</div>
+<!-- Claim Feed -->
+<div class="flex flex-col gap-space-md">
+<!-- Claim 1: PENDING / VERIFYING STATE (verdict-review stripe) -->
+<article class="relative overflow-hidden rounded-lg border border-outline-variant/30 bg-surface-container-lowest p-space-lg pl-space-xl shadow-sm">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-verdict-review"></div>
+<div class="flex items-center justify-between gap-space-md flex-wrap mb-space-sm font-body-sm text-body-sm">
+<div class="flex items-center gap-space-xs flex-wrap">
+<span class="px-space-sm py-0.5 rounded-lg font-label-code text-label-code uppercase text-outline bg-surface-container-low border border-outline-variant/30">FACT CLAIM</span>
+<span class="flex items-center gap-space-xs text-on-verdict-review font-label-code text-label-code font-semibold">
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem] animate-spin">sync</span>
+                  Verifying with Ledger Nodes
+                </span>
+</div>
+<div class="flex items-center gap-space-xs text-on-surface-variant font-label-code text-label-code">
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem]">hourglass_top</span>
+<span class="">Est. remaining: ~18m</span>
+</div>
+</div>
+<!-- Claim Typography -->
+<p class="font-claim-headline text-claim-headline text-on-surface mb-space-md leading-relaxed">
+              “Preliminary atmospheric carbon capture trial results in Iceland show a 40% reduction in per-ton scrubbing cost over previous geothermal cycles.”
+            </p>
+<!-- Pre-Flight Telemetry Drawer -->
+<div class="bg-surface-container-low border border-outline-variant/30 p-space-md rounded-lg mb-space-md font-body-sm text-body-sm">
+<div class="flex items-start gap-space-xs text-on-surface-variant">
+<span aria-hidden="true" class="material-symbols-outlined text-outline text-[1.125rem] mt-0.5">info</span>
+<span class="">Awaiting 2 independent peer validations from Climatology Ring. Ledger Node Consensus: 3/5 quorum recorded.</span>
+</div>
+</div>
+<!-- Source Attachments -->
+<div class="flex items-center gap-space-xs flex-wrap font-label-code text-label-code text-secondary mb-space-md">
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem]">link</span>
+<a class="hover:underline font-semibold" href="#">doi.org/10.1038/s41558-024-02102</a>
+<span class="text-outline-variant">•</span>
+<span class="text-on-surface-variant">Raw Telemetry Appendix (PDF, 4.2 MB)</span>
+</div>
+<!-- Footer Action Protocol -->
+<div class="flex items-center justify-between flex-wrap gap-space-sm pt-space-xs font-body-sm text-body-sm text-on-surface-variant">
+<div class="flex items-center gap-space-xs">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">comments_disabled</span>
+<span class="">Public engagement disabled during ledger review</span>
+</div>
+<div class="flex items-center gap-space-md">
+<button class="text-error font-body-sm text-body-sm font-semibold hover:underline" type="button">Cancel Submission</button>
+<a class="flex items-center gap-0.5 text-secondary font-body-sm text-body-sm font-semibold hover:underline" href="#">
+<span class="">View Pipeline</span>
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem]">arrow_forward</span>
+</a>
+</div>
+</div>
+</article>
+<!-- Claim 2: VERIFIED STATE (primary stripe) -->
+<article class="relative overflow-hidden rounded-lg border border-outline-variant/30 bg-surface-container-lowest p-space-lg pl-space-xl shadow-sm">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-primary"></div>
+<div class="flex items-center justify-between gap-space-md flex-wrap mb-space-sm font-body-sm text-body-sm">
+<div class="flex items-center gap-space-xs flex-wrap">
+<span class="px-space-sm py-0.5 rounded-lg font-label-code text-label-code uppercase text-outline bg-surface-container-low border border-outline-variant/30">FACT CLAIM</span>
+<span class="inline-flex items-center gap-space-xs px-space-sm py-0.5 rounded-lg font-label-code text-label-code font-bold uppercase border text-primary bg-primary/10 border-primary/30">
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem]">check_circle</span>
+                  Verified True • 94.2% certainty
+                </span>
+</div>
+<div class="flex items-center gap-space-xs text-on-surface-variant font-label-code text-label-code">
+<span class="">Archived 3d ago</span>
+<span class="text-outline-variant">•</span>
+<span class="text-on-surface font-semibold">#RZ-8834</span>
+</div>
+</div>
+<!-- Headline Typography -->
+<p class="font-claim-headline text-claim-headline text-on-surface mb-space-md leading-relaxed">
+              “Global renewable energy additions exceeded 500 GW in 2023, marking the 22nd consecutive year of record deployment across solar and wind sectors.”
+            </p>
+<!-- Synthesized Evidence Dossier Drawer -->
+<div class="bg-surface-container-low border border-outline-variant/30 p-space-md rounded-lg mb-space-md">
+<div class="flex items-center justify-between mb-space-xs flex-wrap gap-space-xs">
+<span class="font-label-code text-label-badge font-bold text-on-surface-variant tracking-wider uppercase">Synthesized Evidence Baseline</span>
+<span class="font-label-code text-label-code text-secondary font-semibold">8 Institutional Citations</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed mb-space-sm">
+                Data corroborated across IEA Renewables 2023 report, IRENA Capacity Statistics, and Eurostat grid feed-in datasets. Zero methodological discrepancies identified.
+              </p>
+<div class="flex flex-wrap items-center gap-x-space-md gap-y-space-xs font-label-code text-label-code text-on-surface-variant">
+<span class="">1. IEA Report (2023) <a class="text-secondary font-semibold hover:underline" href="#">doi:10.1787/d431</a></span>
+<span class="">2. IRENA Stats <a class="text-secondary font-semibold hover:underline" href="#">irena.org/cap23</a></span>
+<span class="">3. Ember Global <a class="text-secondary font-semibold hover:underline" href="#">ember-climate.org</a></span>
+</div>
+</div>
+<!-- Engagement & Audit Link Row -->
+<div class="flex items-center justify-between flex-wrap gap-space-sm pt-space-xs">
+<div class="flex items-center gap-space-md text-outline font-label-code text-label-code">
+<button class="flex items-center gap-space-xs hover:text-on-surface transition-colors" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">fact_check</span>
+<span class="">142</span>
+</button>
+<button class="flex items-center gap-space-xs hover:text-on-surface transition-colors" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">chat_bubble_outline</span>
+<span class="">29</span>
+</button>
+<button class="flex items-center gap-space-xs hover:text-on-surface transition-colors" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">cached</span>
+<span class="">34</span>
+</button>
+</div>
+<a class="flex items-center gap-space-xs text-secondary font-label-code text-label-code font-bold hover:underline" href="#">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">history_edu</span>
+<span class="">Ledger Audit Trail</span>
+</a>
+</div>
+</article>
+<!-- Claim 3: EMERGENCY FAST-TRACK DISPATCH (tertiary stripe) -->
+<article class="relative overflow-hidden rounded-lg border border-outline-variant/30 bg-surface-container-lowest p-space-lg pl-space-xl shadow-sm">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-tertiary"></div>
+<div class="flex items-center justify-between gap-space-md flex-wrap mb-space-sm font-body-sm text-body-sm">
+<div class="flex items-center gap-space-xs flex-wrap">
+<span class="inline-flex items-center gap-space-xs px-space-sm py-0.5 rounded-lg font-label-code text-label-code font-bold uppercase border text-tertiary bg-tertiary/10 border-tertiary/30">
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem]">bolt</span>
+                  EMERGENCY DISPATCH
+                </span>
+<span class="inline-flex items-center gap-space-xs px-space-sm py-0.5 rounded-lg font-label-code text-label-code font-bold uppercase border text-primary bg-primary/10 border-primary/30">
+<span aria-hidden="true" class="material-symbols-outlined text-[0.875rem]">check_circle</span>
+                  Verified 91.5% certainty
+                </span>
+</div>
+<div class="flex items-center gap-space-xs text-tertiary font-label-code text-label-code font-semibold">
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem]">sensors</span>
+<span class="">Direct Sensor Feed</span>
+</div>
+</div>
+<!-- Headline Typography -->
+<p class="font-claim-headline text-claim-headline text-on-surface mb-space-md leading-relaxed">
+              “Anomalous subterranean seismic activity measured at 4.2 Mw near Reykjanes ridge prior to expected eruption cycle.”
+            </p>
+<!-- Sensor Telemetry Box (seismic trace glyph) -->
+<div class="bg-surface-container-low border border-outline-variant/30 p-space-md rounded-lg mb-space-md flex items-center justify-between gap-space-md flex-wrap sm:flex-nowrap">
+<div class="flex items-center gap-space-md min-w-0">
+<div class="w-10 h-10 rounded-lg bg-surface-container-lowest border border-outline-variant/30 flex-shrink-0 flex items-center justify-center">
+<span aria-hidden="true" class="material-symbols-outlined text-secondary text-[1.5rem]">earthquake</span>
+</div>
+<div class="flex flex-col min-w-0">
+<span class="font-body-md text-body-md font-semibold text-on-surface truncate">Icelandic Met Office (IMO) Telemetry</span>
+<span class="font-label-code text-label-code text-on-surface-variant">Borehole strainmeter BHS-04</span>
+</div>
+</div>
+<div class="bg-surface-container-lowest border border-outline-variant/30 px-space-md py-space-xs rounded-lg font-label-code text-label-code font-bold text-on-surface flex-shrink-0">
+                GPS Displacement +12mm/hr
+              </div>
+</div>
+<!-- Footer Interaction Bar -->
+<div class="flex items-center justify-between flex-wrap gap-space-sm pt-space-xs font-body-sm text-body-sm text-on-surface-variant">
+<div class="flex items-center gap-space-md font-label-code text-label-code text-outline">
+<button class="flex items-center gap-space-xs hover:text-on-surface transition-colors" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">fact_check</span>
+<span class="">384</span>
+</button>
+<button class="flex items-center gap-space-xs hover:text-on-surface transition-colors" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">chat_bubble_outline</span>
+<span class="">81</span>
+</button>
+<button class="flex items-center gap-space-xs hover:text-on-surface transition-colors" type="button">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">autorenew</span>
+<span class="">12 Re-audits</span>
+</button>
+</div>
+<span class="font-label-code text-label-code text-on-surface-variant flex items-center gap-space-xs">
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem]">lock_clock</span>
+                Block #1,402,991
+              </span>
+</div>
+</article>
+<!-- Claim 4: CONSOLIDATED / TOMBSTONED NOTICE -->
+<article class="relative overflow-hidden rounded-lg border border-outline-variant/30 bg-surface-container-lowest p-space-md shadow-sm font-body-sm text-body-sm">
+<div class="flex items-center justify-between flex-wrap gap-space-xs mb-space-xs text-on-surface-variant">
+<div class="flex items-center gap-space-xs text-error">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.125rem]">gavel</span>
+<span class="font-body-sm text-body-sm font-semibold">Removed by Moderator • Consolidated Record</span>
+</div>
+<span class="font-label-code text-label-code">Nov 12, 2024</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed mb-space-sm">
+              Post claim removed from public indexing on Nov 12. Original reference preserved for ledger audit ID #RZ-9912. The premise of this carbon-capture dataset was consolidated into master claim <a class="text-secondary font-semibold hover:underline" href="#">#RZ-8834</a> to prevent fragmented consensus weights.
+            </p>
+<div class="flex items-center justify-between flex-wrap gap-space-xs font-label-code text-label-code">
+<a class="text-secondary font-semibold hover:underline flex items-center gap-space-xs" href="#">
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem]">policy</span>
+<span class="">Inspect Moderator Adjudication Report</span>
+</a>
+<button class="text-on-surface-variant hover:text-on-surface transition-colors" type="button">Request Appeal</button>
+</div>
+</article>
+</div>
+</div>
+<!-- Right Inspection Sidecar Column -->
+<div class="lg:col-span-4 flex flex-col gap-space-lg">
+<!-- WIDGET 1: Epistemic Standing -->
+<section class="bg-surface-container-lowest rounded-lg border border-outline-variant/30 p-space-lg shadow-sm">
+<div class="flex items-center justify-between mb-space-md">
+<div class="flex items-center gap-space-xs text-secondary">
+<span aria-hidden="true" class="material-symbols-outlined text-primary text-[1.25rem]">verified</span>
+<h2 class="font-label-code text-label-code font-bold uppercase tracking-wider text-on-surface">Epistemic Standing</h2>
+</div>
+<span class="px-space-sm py-0.5 bg-surface-container text-secondary border border-outline-variant/30 font-label-code text-label-code font-bold rounded-lg">TIER 1 PEER</span>
+</div>
+<div class="flex items-center gap-space-md">
+<!-- Circular Ring Gauge (99%) - data visualization, strokes use currentColor tokens -->
+<div class="relative w-20 h-20 flex-shrink-0 flex items-center justify-center">
+<svg class="w-full h-full transform -rotate-90" data-rz-keep="data visualization: 99% consensus-accuracy ring gauge (a progress ring has no Material Symbols equivalent)" viewBox="0 0 36 36">
+<path class="text-surface-container-highest" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-width="3.5"></path>
+<path class="text-primary" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" stroke-dasharray="99, 100" stroke-linecap="round" stroke-width="3.5"></path>
+</svg>
+<span class="absolute font-label-metric text-label-metric text-on-surface">99%</span>
+</div>
+<div class="flex flex-col">
+<span class="font-body-md text-body-md font-semibold text-on-surface">Consensus Accuracy</span>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-snug mt-0.5">
+                Zero false verifications recorded across 68 published ledger positions.
+              </p>
+</div>
+</div>
+</section>
+<!-- WIDGET 2: Institutional Credentials -->
+<section class="bg-surface-container-lowest rounded-lg border border-outline-variant/30 p-space-lg shadow-sm">
+<div class="flex items-center gap-space-xs text-secondary mb-space-md">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">account_balance</span>
+<h2 class="font-label-code text-label-code font-bold uppercase tracking-wider text-on-surface">Institutional Credentials</h2>
+</div>
+<div class="flex flex-col gap-space-sm">
+<div class="p-space-md bg-surface-container-low border border-outline-variant/30 rounded-lg flex items-start gap-space-sm">
+<span aria-hidden="true" class="material-symbols-outlined text-secondary text-[1.5rem]">apartment</span>
+<div class="flex flex-col min-w-0">
+<span class="font-body-md text-body-md font-semibold text-on-surface truncate">Oxford Energy Institute</span>
+<span class="font-label-code text-label-code text-on-surface-variant mt-0.5">ORCID: 0000-0002-1825</span>
+</div>
+</div>
+<div class="p-space-md bg-surface-container-low border border-outline-variant/30 rounded-lg flex items-start gap-space-sm">
+<span aria-hidden="true" class="material-symbols-outlined text-secondary text-[1.5rem]">school</span>
+<div class="flex flex-col min-w-0">
+<span class="font-body-md text-body-md font-semibold text-on-surface truncate">IRENA Research Fellowship</span>
+<span class="font-label-code text-label-code text-on-surface-variant mt-0.5">Validation Ring 2022–Present</span>
+</div>
+</div>
+</div>
+</section>
+<!-- WIDGET 3: Ledger Reviews -->
+<section class="bg-surface-container-lowest rounded-lg border border-outline-variant/30 p-space-lg shadow-sm">
+<div class="flex items-center justify-between mb-space-md">
+<div class="flex items-center gap-space-xs text-secondary">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">fact_check</span>
+<h2 class="font-label-code text-label-code font-bold uppercase tracking-wider text-on-surface">Ledger Reviews</h2>
+</div>
+<a class="font-label-code text-label-code text-secondary font-semibold hover:underline" href="#">View all 14</a>
+</div>
+<div class="flex flex-col gap-space-md">
+<div class="flex flex-col gap-space-xs">
+<div class="flex items-start justify-between gap-space-sm">
+<span class="font-body-md text-body-md font-medium text-on-surface">North Sea Wind Turbine Output Metrics</span>
+<span class="font-label-code text-label-code text-primary font-bold flex-shrink-0">Voted True</span>
+</div>
+<div class="flex items-center gap-space-xs font-label-code text-label-code text-outline">
+<span class="">#RZ-9702</span>
+<span class="text-outline-variant">•</span>
+<span class="">14d ago</span>
+</div>
+</div>
+<div class="flex flex-col gap-space-xs">
+<div class="flex items-start justify-between gap-space-sm">
+<span class="font-body-md text-body-md font-medium text-on-surface">Lithium Brine Extraction Recovery Rates</span>
+<span class="font-label-code text-label-code text-on-verdict-review font-bold flex-shrink-0">Context Added</span>
+</div>
+<div class="flex items-center gap-space-xs font-label-code text-label-code text-outline">
+<span class="">#RZ-9441</span>
+<span class="text-outline-variant">•</span>
+<span class="">Oct 28</span>
+</div>
+</div>
+<div class="flex flex-col gap-space-xs">
+<div class="flex items-start justify-between gap-space-sm">
+<span class="font-body-md text-body-md font-medium text-on-surface">Permafrost Methane Release Modeling</span>
+<span class="font-label-code text-label-code text-primary font-bold flex-shrink-0">Voted True</span>
+</div>
+<div class="flex items-center gap-space-xs font-label-code text-label-code text-outline">
+<span class="">#RZ-9118</span>
+<span class="text-outline-variant">•</span>
+<span class="">Oct 14</span>
+</div>
+</div>
+</div>
+</section>
+<!-- WIDGET 4: Editorial Ledger Protocol -->
+<section class="bg-surface-container-lowest rounded-lg border border-outline-variant/30 p-space-lg shadow-sm">
+<div class="flex items-center gap-space-xs text-secondary mb-space-sm">
+<span aria-hidden="true" class="material-symbols-outlined text-[1.25rem]">feed</span>
+<h2 class="font-label-code text-label-code font-bold uppercase tracking-wider text-on-surface">Editorial Ledger Protocol</h2>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed mb-space-md">
+            In accordance with Rumor Zero charter Section 1.10, color signifies verifiable consensus, not social endorsement. Pending and tombstoned records preserve ledger integrity.
+          </p>
+<a class="inline-flex items-center gap-space-xs text-secondary font-body-sm text-body-sm font-semibold hover:underline" href="#">
+<span class="">Read Proof-of-Citation Whitepaper</span>
+<span aria-hidden="true" class="material-symbols-outlined text-[1rem]">open_in_new</span>
+</a>
+</section>
+</div>
+</div>
+</div>
+</div></main>
+</div>
+</body></html>

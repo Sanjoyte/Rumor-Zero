@@ -1,0 +1,60 @@
+# Rumor Zero (rumor-zero) - root .gitignore
+# Note: create-next-app writes its own frontend/.gitignore containing ".env*".
+# A nested .gitignore overrides this file, so Part 0B must add "!.env.example"
+# to frontend/.gitignore or the frontend example file will be ignored.
+
+# --- Secrets: real env files are NEVER committed; *.example files ARE ---
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+*.pem
+*.key
+
+# --- Python / Django (backend/) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+backend/staticfiles/
+backend/media/
+*.sqlite3
+
+# --- Node / Next.js / Cloudflare (frontend/) ---
+node_modules/
+.next/
+out/
+.open-next/
+.wrangler/
+*.tsbuildinfo
+npm-debug.log*
+
+# --- Playwright / test output ---
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# --- Local database dumps and logs ---
+*.dump
+*.log
+
+# --- OS / editor noise ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+
+# --- Claude Code: personal, machine-local files (shared settings.json IS committed) ---
+.claude/settings.local.json
+CLAUDE.local.md
