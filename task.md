@@ -22,7 +22,8 @@
 |---|---|---|---|
 | 0A | Backend foundation | SETUP Part A | [ ] |
 | 0B | Frontend foundation & design system | SETUP Part A | [ ] |
-| 0C | App shell, API relay, API client, CI | 0A, 0B | [ ] |
+| 0D | Brand assets & Logo component | 0B | [ ] |
+| 0C | App shell, API relay, API client, CI | 0A, 0B, 0D | [ ] |
 | 1 | Auth core: sign up, log in, tokens, log out | 0C | [ ] |
 | 2 | Email verification & password reset | 1 | [ ] |
 | 3 | Continue with Google | 1 | [ ] |
@@ -30,26 +31,37 @@
 | 5 | Post detail, sharing, deletion, status polling | 4 | [ ] |
 | 6 | Profiles, follows, Following feed | 4 | [ ] |
 | 7 | Likes & comments | 5 | [ ] |
+| 7B | Bookmarks & reposts | 6, 7 | [ ] |
 | 8 | Reporting & threshold | 5 | [ ] |
 | 9 | Fact-check pipeline stub + routing | 8 | [ ] |
 | 10 | Human review panel (Django Admin) | 9 | [ ] |
 | 11 | Appeals & removed-post tombstones | 10 | [ ] |
-| 12 | Search | 6 | [ ] |
-| 13 | Notifications | 7, 10, 11 | [ ] |
-| 14 | Account settings, data export, deletion | 6, 7 | [ ] |
-| 15 | Landing & static pages | 4 | [ ] |
-| 16 | Security pass, load test, E2E hardening | 1–15 | [ ] |
+| 11B | Credibility score | 7B, 10, 11 | [ ] |
+| 11C | Emergency posts | 9, 10, 11B | [ ] |
+| 11D | Charts & stats | 7B, 11B | [ ] |
+| 12 | Search | 6, 11B | [ ] |
+| 13 | Notifications | 7, 7B, 10, 11, 11C | [ ] |
+| 14 | Account settings, data export, deletion | 6, 7, 7B, 11B, 11D | [ ] |
+| 14B | Photo avatars | 14 | [ ] |
+| 15 | Landing & static pages | 4, 11B, 11C | [ ] |
+| 16 | Security pass, load test, E2E hardening | every part above | [ ] |
 | 17 | Deploy backend (Render, Neon, Upstash, Brevo, Sentry) | 16 | [ ] |
 | 18 | Deploy frontend, keep-alive & monitoring | 17 | [ ] |
 
 The order follows the guide's MVP roadmap (§18): setup → auth → posts/feed → follow/like/comment → reports → pipeline stub → review panel → search + notifications → security + load test → launch.
 
 Adjustments for real dependencies:
-- Part 0 is split into three.
+- Part 0 is split into four. 0D (the logo) comes before the shell, so every brand mark uses the real logo from the start (D9).
 - Auth and social are split into sessions of one sitting each.
 - Appeals (guide §8.4) follow the review panel.
+- The Stitch-only features (D5, changed 2026-09-29; ANALYSIS f) come right after what they depend on:
+  - 7B after the social graph and the action bar;
+  - 11B–11D after moderation and appeals, because the credibility score and the emergency rules react to verdicts, removals and appeals;
+  - 14B after the settings page.
+- Their columns are created early (posts in Part 4, users and PlatformSettings in 0A), so the later parts add logic, not risky schema changes.
 - Notifications come after every event source exists.
 - Deployment is last.
+- Suffixed parts (0D, 7B, 11B–11D, 14B) keep the existing numbers unchanged. A planned "0E: swap in the SVG logo" was dropped because `design/logo.svg` arrived before 0D.
 
 ---
 
@@ -78,13 +90,16 @@ Adjustments for real dependencies:
   - production security settings when not DEBUG: `SECURE_PROXY_SSL_HEADER`, HSTS, secure cookies
   - Sentry initialised only if `SENTRY_DSN` is set (`send_default_pii=False`)
   - logging that never prints secrets
-- `accounts.User`, exactly as in ARCHITECTURE §2: UUID, lowercase username validation plus reserved names, lowercase email, role → Groups/`is_staff` sync, `is_email_verified`, `display_name`, `bio`, `avatar_url` (unused). Plus the manager, an admin, and the initial migration.
+- `accounts.User`, exactly as in ARCHITECTURE §2:
+  - UUID, lowercase username validation plus reserved names, lowercase email, role → Groups/`is_staff` sync, `is_email_verified`, `display_name`, `bio`
+  - the fields later parts use, created now so the user table never needs a risky change: `avatar_version` + `avatar_uploads_blocked` (14B), `reputation_score` (default 50, check 0–100) + `reputation_sample` (11B), `emergency_blocked_until` (11C)
+  - plus the manager, an admin, and the initial migration
 - `core`:
   - `/api/health/`: no DB and no session, so **0 queries**
   - `/api/health/deep/`: needs `X-RZ-Cron-Secret`; runs `SELECT 1` and a cache set/get
   - `ClientIPMiddleware` (ARCHITECTURE §1)
   - DRF defaults: JSON only, the custom exception handler that adds `code`, a cursor pagination class returning `next_cursor`, and throttle scopes from ARCHITECTURE §3
-  - `PlatformSettings` singleton, a data migration seeding it from env, and a cached accessor. Seniors-only admin permissions come in Part 10.
+  - `PlatformSettings` singleton with every field in ARCHITECTURE §2 (including the six emergency limits used from 11C), a data migration seeding it from env (a missing `EMERGENCY_*` variable falls back to its default), and a cached accessor. Seniors-only admin permissions come in Part 10.
 
 **Frontend scope:** none.
 **API endpoints:** `GET /api/health/`, `GET /api/health/deep/`.
@@ -93,13 +108,14 @@ Adjustments for real dependencies:
 - [ ] `docker compose up -d` shows both services healthy; `python manage.py migrate` works on an empty DB
 - [ ] `AUTH_USER_MODEL = "accounts.User"` from the very first migration; `createsuperuser` works
 - [ ] Changing `role` updates Group membership and `is_staff`
+- [ ] A `reputation_score` outside 0–100 is rejected by the database; new users start at 50
 - [ ] `/api/health/` returns `{"status":"ok"}` with **0 queries**; `/api/health/deep/` returns 403 without the secret and 200 with it
 - [ ] `X-RZ-Client-IP` is honoured only with the correct `X-RZ-Proxy-Secret`
 - [ ] `python manage.py check --deploy` passes with production-like env values (DEBUG=False, secure cookies, HSTS)
 - [ ] `ruff check .`, `ruff format --check .`, `pytest` and `makemigrations --check --dry-run` are all clean
 - [ ] No secret appears in the repo; any new env var is added to `backend/.env.example` and ENV_GUIDE
 
-**Required tests:** user model (email/username normalisation, reserved names, role sync), health endpoints (query count 0, secret check), ClientIPMiddleware (secret ok / wrong / missing), PlatformSettings accessor (seed, caching), pagination output shape, exception handler `code`.
+**Required tests:** user model (email/username normalisation, reserved names, role sync, `reputation_score` range check), health endpoints (query count 0, secret check), ClientIPMiddleware (secret ok / wrong / missing), PlatformSettings accessor (seed including emergency defaults, caching), pagination output shape, exception handler `code`.
 
 **Recommended models**
 - **Plan:** Opus 5.5 · high. The custom user model and settings layout are painful to change after the first migration.
@@ -115,8 +131,8 @@ Adjustments for real dependencies:
 **Stitch files to convert**
 - `design/stitch/DESIGN.md` (all tokens)
 - Component sources:
-  - `b1_home_feed`: PostCard, StatusBadge, CategoryChip, Tabs
-  - `b2_post_composer_modal`: Modal, SegmentedControl, Textarea + counter, Toggle
+  - `b1_home_feed`: PostCard (including the emergency card's violet stripe and EMERGENCY chip), StatusBadge, CategoryChip, Tabs
+  - `b2_post_composer_modal`: Modal, SegmentedControl, Textarea + counter, Toggle (used by the emergency toggle in 11C)
   - `a2_sign_up`, `a3_log_in`, `a6_reset_password`: TextField, PasswordField, PasswordStrengthMeter, Alert, Button, Divider
   - `d1_report_post_modal`: RadioCard list
   - `b4_search_results`: FilterChips, LoadMore
@@ -143,8 +159,8 @@ Adjustments for real dependencies:
   - Button (primary / secondary / ghost / destructive / icon)
   - TextField, PasswordField, Textarea (counter), Checkbox, RadioCard, Select, Toggle
   - Tabs, SegmentedControl, FilterChips
-  - Card, VerdictStripe, StatusBadge (the ARCHITECTURE §4 badge table), CategoryChip
-  - Avatar (initials only)
+  - Card, VerdictStripe (including the violet emergency stripe), StatusBadge (the ARCHITECTURE §4 badge table, including the EMERGENCY chip), CategoryChip
+  - Avatar: an optional photo `src` (photos arrive in 14B), falling back to initials when there's no `src` or the image fails to load
   - Modal (native `<dialog>`: focus trap, Esc, `aria-modal`)
   - Alert, Toast, Skeleton, EmptyState, LoadMore, ProgressBar, PasswordStrengthMeter
 - Helpers: `lib/cn.ts`, `lib/format.ts` (relative time, compact numbers).
@@ -156,11 +172,13 @@ Adjustments for real dependencies:
 **Acceptance criteria**
 - [ ] `/dev/ui` shows every primitive in every state. PostCard, the sign-up form fields, the d1 radio list and the b2 modal visually match Stitch side by side at 1280 px.
 - [ ] Every Stitch class name used in the components resolves: no missing tokens, no default palette (`npm run lint:tokens` passes)
-- [ ] StatusBadge renders glyph + label (+ % where applicable) for all 8 rows of the ARCHITECTURE §4 badge table
+- [ ] StatusBadge renders glyph + label (+ % where applicable) for all 9 rows of the ARCHITECTURE §4 badge table, using the word FALSE (never "debunked")
+- [ ] PostCard shows the violet stripe and EMERGENCY chip for an active emergency, and the status colour otherwise
+- [ ] Avatar falls back to initials with no `src` and with a broken `src`
 - [ ] `npm run lint`, `npm run typecheck`, `npm test` and `npm run build` pass
 - [ ] `git check-ignore frontend/.env.example` prints nothing (the file is tracked); no frontend CLAUDE.md or AGENTS.md
 
-**Required tests:** a render and variant test per primitive; Modal a11y (role, focus return, Esc); Tabs and SegmentedControl keyboard navigation; PasswordField show/hide; StatusBadge table-driven test; `cn`/`format` unit tests.
+**Required tests:** a render and variant test per primitive; Modal a11y (role, focus return, Esc); Tabs and SegmentedControl keyboard navigation; PasswordField show/hide; StatusBadge table-driven test (including the emergency row); Avatar fallback; `cn`/`format` unit tests.
 
 **Recommended models**
 - **Plan:** Opus 5.5 · medium. The token mapping to Tailwind v4 needs care, but it's mechanical.
@@ -168,26 +186,82 @@ Adjustments for real dependencies:
 
 ---
 
+## Part 0D: Brand assets & Logo component
+**Status:** [ ] Not started
+**Goal:** one logo everywhere (D9). Every derived asset comes from one command and one master file, and one `<Logo/>` component is the only way the UI shows the brand. A later logo change is then: replace `design/logo.svg`, run one command.
+**Depends on:** 0B. Runs before 0C, because the shell uses `<Logo/>`.
+**Stitch files to convert:** none directly. The brand marks it replaces are applied in 0C and listed in ANALYSIS e.2:
+- the sidebar wordmark in every app-shell file
+- a1's "RUMOR ZERO" header/footer
+- a3's `check` tile + wordmark + "Fact Social"
+- the a4 `layers`, a5 `diamond` and a6 `lock` tiles
+
+**Frontend scope**
+- Add `sharp` 0.35.x as a devDependency (SETUP B3). Why: it renders the SVG master to PNG, with prebuilt Windows binaries. Only the brand script imports it, never app code or the Worker bundle.
+- `frontend/scripts/brand/build-brand-assets.mjs` + `brand.config.json`, run as `npm run brand:build`, per ARCHITECTURE §14:
+  - master `design/logo.svg`. The script **only reads** `design/`; it never writes, moves or deletes anything there. `design/logo.png` is not used.
+  - **safety check first:** no `<script>`, `<foreignObject>`, `on*` attributes, external `href`/`xlink:href`, embedded bitmaps or `<text>`, and a `viewBox` must exist. Otherwise the build fails with a clear message.
+  - wordmark: the SVG with its `viewBox` cropped to the artwork plus padding → `public/brand/logo.svg`
+  - mark: the "0" (`path.cls-2`, set in the config) in its own square `viewBox` → `public/brand/mark.svg`
+  - every asset in the ARCHITECTURE §14 table: `favicon.ico` (16/32/48, written by a small tested PNG-in-ICO helper), `icon.svg`, `apple-icon.png`, the three manifest icons, `opengraph-image.png` + `twitter-image.png` (+ `.alt.txt`), `email-logo.png`, `google-oauth-logo.png`, and `backend/apps/core/static/core/brand/logo-admin.png` (creating the folder if needed)
+  - plates use `inverse-surface` `#283044`
+  - `src/lib/brand-assets.json`: the generated list of assets, sizes and plate colour
+  - prints the contrast table from ARCHITECTURE §14. It does not fail on the logo's own contrast (logotypes are exempt), but the numbers must match §14.
+- `src/app/manifest.ts`: name and short name "Rumor Zero", theme/background colour from `brand-assets.json`, the three icons. The favicon, icon, apple-icon and Open Graph tags come from Next.js file conventions in `src/app/`.
+- `src/components/ui/Logo.tsx`:
+  - `variant="wordmark" | "mark"`, `size="sm" | "md" | "lg"` (24/36/48 px tall)
+  - accessible name "Rumor Zero"; `decorative` gives `alt=""` when the name is written next to it
+  - plain `<img>` with width and height (no layout shift, no `next/image` optimisation), never inlined SVG
+- `lint:tokens` allowlist: only `src/lib/brand-assets.json` and `src/app/manifest.ts` may contain brand hex values.
+- Guard test: nothing in `src/` except `Logo.tsx`, `brand-assets.json` and `manifest.ts` references `/brand/`, and nothing re-creates the old text wordmark.
+- `/dev/ui` shows every Logo variant and size on `surface`, `surface-container-lowest` and `inverse-surface`.
+
+**Backend scope:** none. The admin logo file is written here and used in Part 10.
+**API endpoints:** none.
+
+**Acceptance criteria**
+- [ ] `npm run brand:build` regenerates every asset in ARCHITECTURE §14 from `design/logo.svg`, and `git status` shows nothing changed under `design/`
+- [ ] A master with a `<script>`, an external link or a `<text>` element makes the build fail with a clear message
+- [ ] Sizes are exact:
+  - favicon.ico holds 16/32/48
+  - apple-icon is 180×180 and opaque
+  - the manifest icons are 192, 512 and maskable 512, with the mark inside the 80 % safe zone
+  - share images are 1200×630
+  - the Google logo is 120×120 and under 1 MB
+- [ ] `next build` HTML contains the favicon, icon, apple-touch-icon, manifest and `og:image` tags
+- [ ] `<Logo/>` renders with the accessible name "Rumor Zero" (or `alt=""` when decorative) at every size, with no layout shift
+- [ ] The printed contrast table matches ARCHITECTURE §14
+- [ ] The guard test and `lint:tokens` pass; `npm run lint`, `typecheck`, `test` and `build` pass
+
+**Required tests:** SVG safety check (each forbidden construct); mark extraction and viewBox cropping; ICO writer (header and entries); asset dimension tests that read PNG headers (no extra dependency); `brand-assets.json` shape; Logo render, sizes and accessible name; guard test.
+
+**Recommended models**
+- **Plan:** Sonnet 5.5 · medium. A small, well-bounded asset pipeline.
+- **Implement:** Sonnet 5.5 · medium. Straightforward scripting plus one component.
+
+---
+
 ## Part 0C: App shell, API relay, API client, CI
 **Status:** [ ] Not started
 **Goal:** the three page layouts; the single-origin API relay (the core of the free topology); the base API client; and a CI pipeline that also proves the Cloudflare build works on Linux.
-**Depends on:** 0A, 0B.
-**Stitch files to convert:** app shell (sidebar + top bar) from `b1_home_feed`; `MarketingNav`/`MarketingFooter` from `a1_logged_out_home`; auth card layout from `a2_sign_up`.
+**Depends on:** 0A, 0B, 0D.
+**Stitch files to convert:** app shell (sidebar + top bar) from `b1_home_feed`; `MarketingNav`/`MarketingFooter` from `a1_logged_out_home`; auth card layout from `a2_sign_up`. Every brand mark in them (text wordmark, emblem tiles, "Fact Social") becomes `<Logo/>` (ANALYSIS e.2).
 
 **Frontend scope**
 - **API relay** `src/app/api/[...path]/route.ts`, per ANALYSIS d / ARCHITECTURE §1:
-  - handles all methods; allow-lists request headers; sets `X-RZ-Proxy-Secret` and `X-RZ-Client-IP`
-  - streams bodies (`duplex:'half'`), `redirect:'manual'`
-  - copies back every `Set-Cookie` via `getSetCookie()`
+  - handles all methods; allow-lists request headers (including `If-None-Match` and `If-Modified-Since`, for cached profile photos); sets `X-RZ-Proxy-Secret` and `X-RZ-Client-IP`
+  - streams bodies (`duplex:'half'`, also used for photo uploads in 14B), `redirect:'manual'`
+  - copies back every `Set-Cookie` via `getSetCookie()`, plus an allow-list of response headers: `Content-Type`, `Content-Length`, `Cache-Control`, `ETag`, `Last-Modified`, `Content-Disposition`, `X-Content-Type-Options`, `Content-Security-Policy`, `Retry-After`
   - ~70 s timeout, returning `503 backend_waking`
   - never forwards `Host` or hop-by-hop headers
 - `src/lib/api/client.ts`: relative `/api` base, JSON helpers, error normalisation for both the DRF and allauth shapes, and a 401 hook (refresh is wired in Part 1). `types.ts` holds the Post and User shapes from ARCHITECTURE §9.
 - `src/lib/auth/AuthProvider.tsx` skeleton: in-memory token store, plus a refresh-lock helper built on the Web Locks API.
 - **Shell components:**
   - `AppShell`: ≥1280 px full rail; 768–1279 px icon dock; <768 px top bar + bottom nav
-  - `Sidebar`: Home, Search, Notifications, Profile, **New post**, a Moderation link placeholder, Settings, user card
+  - `Sidebar`: `<Logo size="md"/>` at the top, then Home, Search, Notifications, Profile, Bookmarks (placeholder until 7B), **New post**, a Moderation link placeholder, Settings, user card. The icon dock shows `<Logo variant="mark"/>`.
   - `TopBar`: search input → `/search?q=`
-  - `MobileNav`, `AuthLayout`, `MarketingNav`, `MarketingFooter`
+  - `MobileNav` (top bar with `<Logo size="sm"/>`), `AuthLayout` (`<Logo size="lg"/>` on every auth card), `MarketingNav`, `MarketingFooter` (logo + "© 2026 Rumor Zero")
+  - No text wordmark, no emblem tiles, no "Fact Social" or other taglines
 - Route groups `(marketing)`, `(auth)`, `(app)` with placeholder pages; a basic `not-found`.
 - OpenNext setup:
   - `wrangler.jsonc`: `name: "rumor-zero"`, `nodejs_compat`, assets binding, `vars.BACKEND_ORIGIN` placeholder
@@ -211,11 +285,13 @@ All three jobs run on test values only; no secrets.
 - [ ] With Django running, `http://localhost:3000/api/health/` returns Django's JSON through the relay
 - [ ] The backend receives the correct `X-RZ-Client-IP` and secret; spoofed client headers from the browser are dropped
 - [ ] Multiple `Set-Cookie` headers survive the relay; with the backend stopped, the relay returns `503 {"code":"backend_waking"}`
+- [ ] Cache headers and a `304 Not Modified` pass through the relay unchanged
 - [ ] The shell matches Stitch b1 at 1280 px and is usable at 1024 px (icon dock) and 390 px (bottom nav); the current page has `aria-current="page"`
+- [ ] Every brand mark in the shell, auth and marketing layouts is `<Logo/>` (the 0D guard test still passes)
 - [ ] The Playwright smoke test passes locally
 - [ ] After you push, all CI jobs are green on GitHub, including the OpenNext build on Linux
 
-**Required tests:** relay unit tests with mocked `fetch` (header allow-list, secret and IP injection, cookie passthrough, timeout → 503, method and body passthrough); API client error normalisation; shell render tests (nav items, active state, responsive variants); E2E smoke.
+**Required tests:** relay unit tests with mocked `fetch` (request and response header allow-lists, secret and IP injection, cookie passthrough, 304 passthrough, timeout → 503, method and body passthrough); API client error normalisation; shell render tests (nav items, active state, responsive variants, logo placement); E2E smoke.
 
 **Recommended models**
 - **Plan:** Opus 5.5 · high. The relay, cookies and client-IP trust are subtle and security-relevant.
@@ -288,7 +364,7 @@ All three jobs run on test values only; no secrets.
 
 **Backend scope**
 - `HEADLESS_FRONTEND_URLS` pointing at `FRONTEND_ORIGIN`.
-- Branded plain-text + HTML templates: "Rumor Zero", no fabricated org names.
+- Branded plain-text + HTML templates: "Rumor Zero", no fabricated org names. The HTML version shows the logo from `FRONTEND_ORIGIN/brand/email-logo.png` (0D; alt "Rumor Zero", width 160). The plain-text version has no image.
 - `email_confirmed` signal → `is_email_verified=True`.
 - Resend throttled.
 - Password reset with login-on-reset, revoking other sessions.
@@ -309,7 +385,7 @@ All three jobs run on test values only; no secrets.
 - [ ] A link older than 24 h, or one already used, shows the expired state with a working resend
 - [ ] Forgot-password responses are identical for existing and non-existing emails (status and body)
 - [ ] Reset logs you in, and previously issued refresh tokens stop working
-- [ ] Emails come from `DEFAULT_FROM_EMAIL` and link to `FRONTEND_ORIGIN` only
+- [ ] Emails come from `DEFAULT_FROM_EMAIL` and link to `FRONTEND_ORIGIN` only (including the logo image URL)
 
 **Required tests:** verify flow; expiry with time control; resend throttle; reset flow, token revocation and enumeration-safe responses; email subject, from and link host; frontend state components; E2E: sign up → read the email file → open the link → verified → post button enabled.
 
@@ -352,27 +428,33 @@ All three jobs run on test values only; no secrets.
 
 ## Part 4: Posts (composer + Recent feed)
 **Status:** [ ] Not started
-**Goal:** create opinion/fact posts with the selector and see them in a reverse-chronological public feed (guide roadmap step 3). Fact posts stay `pending`; the pipeline comes in Part 9.
+**Goal:** create opinion/fact posts with the selector, with an optional source/DOI on fact posts (ARCHITECTURE §4c), and see them in a reverse-chronological public feed (guide roadmap step 3). Fact posts stay `pending`; the pipeline comes in Part 9.
 **Depends on:** 1.
 **Stitch files to convert:**
-- `b2_post_composer_modal`: minus emergency mode and the source field.
-- `b1_home_feed`: the page layout, PostCard, and the **Recent** tab. The inline composer is replaced by a trigger that opens the modal.
+- `b2_post_composer_modal`, including the optional "Primary source URL or DOI" field (shown for Fact only). The emergency toggle stays hidden until 11C.
+- `b1_home_feed`: the page layout, PostCard (with a one-line source under fact claims, styled like the evidence drawer), and the **Recent** tab. The inline composer is replaced by a trigger that opens the modal.
 
 **Backend scope**
-- `posts.Post` with **every** column from ARCHITECTURE §2 except `search_vector` (Part 12). Check constraints and indexes as listed.
-- `posts.services.create_post`: opinion → `published`, fact → `pending`; `fact_posts_per_day` quota from PlatformSettings; throttle `post_create`.
-- Post serializer (ARCHITECTURE §9 shape).
-- `GET/POST /api/v1/posts/`: global Recent feed, cursor pagination, excluding removed and deleted posts.
+- `posts.Post` with **every** column from ARCHITECTURE §2 except `search_vector` (Part 12), including the source, emergency and `pre_removal_status` columns (emergency logic arrives in 11C, removal appeals in 11). Check constraints and indexes as listed.
+- `posts.validators`: source normalisation and validation exactly per ARCHITECTURE §4c (URL or DOI). **Never fetched.**
+- `posts.services.create_post`:
+  - opinion → `published`, fact → `pending`
+  - `fact_posts_per_day` quota from PlatformSettings; throttle `post_create`
+  - accepts `source` (fact only)
+  - refuses `is_emergency=true` with 400 `emergency_unavailable` until 11C
+- Post serializer (ARCHITECTURE §9 shape, all fields present; counts and flags that later parts fill are `0` / `false` / `null` for now).
+- `GET/POST /api/v1/posts/`: global Recent feed in the ARCHITECTURE §9 feed shape (`{pinned: [], results: [{kind:"post", …}], next_cursor}`), cursor pagination, excluding removed and deleted posts.
 - `GET /api/v1/me/fact-quota/`.
 - Basic admin registration.
 
 **Frontend scope**
 - `/home` with Tabs: Recent now; Following arrives in Part 6.
 - `FeedList`: cursor LoadMore, skeletons, empty and error states.
-- `PostCard`: every status variant via StatusBadge/VerdictStripe; fact vs opinion typography.
+- `PostCard`: every status variant via StatusBadge/VerdictStripe; fact vs opinion typography; `SourceLink` line (host or `doi.org/…`, `rel="nofollow ugc noopener noreferrer"`).
 - `ComposerModal`:
   - text with a 500-char counter
   - required Opinion/Fact segmented control
+  - optional "Source (URL or DOI)" field for Fact only, with inline validation and a "DOI preferred" hint
   - quota line "n/10 fact posts left today"
   - disabled with a verify prompt for unverified users
   - submitting and error states
@@ -387,9 +469,13 @@ All three jobs run on test values only; no secrets.
 - [ ] Posting without a type, empty, or over 500 chars is blocked on both client and server
 - [ ] The 11th fact post of the day is refused with a clear message; the quota line updates
 - [ ] Load more never duplicates or skips posts when new ones arrive meanwhile
-- [ ] DB constraints reject an opinion with `verified_*` or a fact with `published`
+- [ ] DB constraints reject an opinion with `verified_*`, a fact with `published`, an opinion with a source, and an emergency opinion
+- [ ] Source validation, on both client and server:
+  - rejected: `javascript:`/`data:` URLs, credentials in URLs, IP or `localhost` hosts, malformed DOIs
+  - `doi:10.1000/xyz` and `https://doi.org/10.1000/xyz` are both stored as `10.1000/xyz`
+- [ ] The server makes no network request for a source (a test with outbound network blocked)
 
-**Required tests:** model constraints; `create_post` (status by type, quota, throttle); feed ordering, exclusion and cursor stability; query count constant for 20 posts; frontend Composer validation and states, PostCard variants, FeedList pagination; E2E: log in → post a fact → CHECKING FACTS… in the feed.
+**Required tests:** model constraints; source validator table (URLs, DOIs, IDN/punycode, every rejection); `create_post` (status by type, quota, throttle, source, emergency refused); feed shape, ordering, exclusion and cursor stability; query count constant for 20 posts; frontend Composer validation and states (including the source field), PostCard variants and SourceLink, FeedList pagination; E2E: log in → post a fact with a DOI → CHECKING FACTS… and the DOI line in the feed.
 
 **Recommended models**
 - **Plan:** Opus 5.5 · high. The central schema (status constraints, indexes, future fields) is decided here.
@@ -401,7 +487,7 @@ All three jobs run on test values only; no secrets.
 **Status:** [ ] Not started
 **Goal:** a shareable, indexable post page (guide §1.1), author soft-delete (D6), and live badge updates by polling (guide §5.1 step 5).
 **Depends on:** 4.
-**Stitch files to convert:** `b3_post_detail_forensic_proof`. Only the claim header, author row, verdict block and action bar; the comments area is Part 7. Drop the chart, ledger, sources and hashes.
+**Stitch files to convert:** `b3_post_detail_forensic_proof`. Only the claim header, author row, verdict block, source link and action bar. The comments area is Part 7; repost/bookmark are 7B; the gauge, tiles and chart are 11D. Drop the ledger, the multi-source registry and hashes.
 
 **Backend scope**
 - `GET /api/v1/posts/{id}/`:
@@ -412,7 +498,7 @@ All three jobs run on test values only; no secrets.
 
 **Frontend scope**
 - `/p/[id]` with **light SSR**: `generateMetadata` (title = excerpt + " · Rumor Zero", description = status label, OG tags) plus the claim text.
-- `PostDetail`: big claim; verdict explanation per status ("Checked automatically · 94% confidence" / "Reviewed by a moderator" + `verdict_note`).
+- `PostDetail`: big claim; verdict explanation per status ("Checked automatically · 94% confidence" / "Reviewed by a moderator" + `verdict_note`); the full source (host shown in punycode for internationalised domains; DOIs link to `https://doi.org/…`).
 - "Copy link"; Delete (own post, confirmation modal).
 - `useStatusPolling`: visible tab only, 10 s backing off to 60 s, stops after 10 min. Used by the feed and the detail page.
 - PostCards link to the detail page.
@@ -439,20 +525,20 @@ All three jobs run on test values only; no secrets.
 **Goal:** public profiles, follow/unfollow, follower and following lists, and the fan-out-on-read Following feed with a short cache (guide §9.2).
 **Depends on:** 4.
 **Stitch files to convert:**
-- `c1_user_profile`: header, counts, post list. Drop the side widgets and trust metrics.
-- `c3_following_list`: tabs and user rows. Drop the chips and metrics.
+- `c1_user_profile`: header, counts, post list. Drop the side widgets and trust metrics (the credibility score comes in 11B, the Credibility widget in 11D).
+- `c3_following_list`: tabs and user rows. Drop the chips and metrics (the score comes in 11B).
 - `b1_home_feed`: the Following tab.
 
 **Backend scope**
 - `social.Follow`: unique pair, no self-follow check.
 - `POST/DELETE /api/v1/users/{u}/follow/`: idempotent.
-- `GET /api/v1/users/{u}/`: display name, bio, joined date, counts (followers / following / posts / verified / false), `is_following`, `is_me`.
-- `…/posts/`: cursor; excludes removed and deleted.
+- `GET /api/v1/users/{u}/`: display name, bio, joined date, counts (followers / following / posts / verified / FALSE), `is_following`, `is_me`.
+- `…/posts/`: cursor, in the ARCHITECTURE §9 feed shape (that user's reposts join in 7B); excludes removed and deleted.
 - `…/followers/`, `…/following/`.
-- `GET /api/v1/feed/`: followed + own posts; first page cached per user for `FEED_CACHE_SECONDS`; cache busted when you post or change a follow.
+- `GET /api/v1/feed/`: followed + own posts in the §9 feed shape (`pinned` stays empty until 11C); first page cached per user for `FEED_CACHE_SECONDS`; cache busted when you post or change a follow.
 
 **Frontend scope**
-- `/u/[username]` (light SSR header): ProfileHeader with Follow button or "Edit profile" (→ `/settings`, Part 14); post list with filter chips All / Facts / Opinions.
+- `/u/[username]` (light SSR header): ProfileHeader with Follow button or "Edit profile" (→ `/settings`, Part 14), counters labelled "Verified" and "FALSE"; post list with filter chips All / Facts / Opinions.
 - `/u/[username]/followers` and `/following` with Tabs; `UserRow` + `FollowButton` (optimistic, with rollback).
 - The Following tab on `/home`, with the empty state "Follow people to see their posts here" → Recent.
 
@@ -476,10 +562,10 @@ All three jobs run on test values only; no secrets.
 **Status:** [ ] Not started
 **Goal:** likes with DB-enforced uniqueness and flat comments (guide §3.3, §9).
 **Depends on:** 5.
-**Stitch files to convert:** `b3_post_detail_forensic_proof` (discussion section: composer + list; no Reply, no comment IDs or likes); action bars in `b1_home_feed` and `a1_logged_out_home`.
+**Stitch files to convert:** `b3_post_detail_forensic_proof` (discussion section: composer + list; no Reply, no comment IDs or likes); action bars in `b1_home_feed` and `a1_logged_out_home` (like and comment here; repost and bookmark in 7B).
 
 **Backend scope**
-- `social.Like` + `POST/DELETE /api/v1/posts/{id}/like/`.
+- `social.Like` (index `(post, created_at)`, also used by the stats in 11D) + `POST/DELETE /api/v1/posts/{id}/like/`.
 - `social.Comment`:
   - `GET` (oldest first, cursor) and `POST` (verified only, ≤500 chars, throttle `comment`) on `/api/v1/posts/{id}/comments/`
   - `DELETE /api/v1/comments/{id}/` for your own comments
@@ -505,6 +591,60 @@ All three jobs run on test values only; no secrets.
 
 ---
 
+## Part 7B: Bookmarks & reposts
+**Status:** [ ] Not started
+**Goal:** private bookmarks and plain reposts (D5; ARCHITECTURE §4d). A repost carries the original's live label and never triggers a new check.
+**Depends on:** 6 (Following feed, profiles), 7 (action bar).
+**Stitch files to convert:**
+- `b1_home_feed`, `a1_logged_out_home`, `b3_post_detail_forensic_proof`: the repost counter (`cached`; Stitch's "Citations" becomes "Reposts") and the bookmark button (`bookmark_border`, filled `bookmark` when saved) in the action bars. Logged-out visitors get a "Log in to …" prompt.
+- `c1_user_profile`: reposts inside the post list.
+- The `/bookmarks` page has no Stitch screen: compose it from the `b1_home_feed` layout.
+
+**Backend scope**
+- `social.Bookmark` and `social.Repost` exactly per ARCHITECTURE §2 (with `Repost.status_at_repost`).
+- `social.services`:
+  - **Reposts** (§4d):
+    - refused: your own post (409 `cannot_repost_own`), a FALSE-labelled post (409 `cannot_repost_false`), a removed or deleted post (404)
+    - reposting a repost reposts the original
+    - idempotent, email-verified only; `status_at_repost` is recorded
+  - **Bookmarks:** idempotent, any logged-in user (no email verification: bookmarks are private).
+- Endpoints: `POST/DELETE /api/v1/posts/{id}/repost/`, `POST/DELETE /api/v1/posts/{id}/bookmark/`, `GET /api/v1/me/bookmarks/` (cursor on bookmark time; deleted and removed posts dropped). Throttles `repost`, `bookmark`.
+- Serializer: `repost_count`, `reposted_by_me`, `bookmarked_by_me` annotated, with no N+1. Bookmark counts are never exposed.
+- **Following feed** (ARCHITECTURE §9):
+  - posts **and** reposts by followed accounts + you, ordered by activity time
+  - a stable cursor over `(activity_at, item id)`
+  - the same post at most once per page (the most recent activity wins)
+- Profile lists include that user's reposts. The Recent feed stays originals only.
+- Repost items whose original was deleted or removed come back as `kind:"repost"` with `post: {"id", "unavailable": true}`.
+- The feed cache is busted on repost and unrepost.
+- Admin registration (read-only).
+- Score effects of reposts come in 11B; the `repost` notification in 13.
+
+**Frontend scope**
+- `RepostButton`: optimistic with rollback; disabled with the reason for your own, FALSE or removed posts.
+- `BookmarkButton`: optimistic.
+- `RepostHeader` ("Reposted by @x"), `UnavailablePostCard` ("This post is no longer available").
+- `/bookmarks`: sidebar item; empty state "Posts you bookmark appear here. Only you can see them."; cursor LoadMore.
+
+**API endpoints:** the repost and bookmark endpoints above.
+
+**Acceptance criteria**
+- [ ] Repost and bookmark toggles are idempotent, and counts stay right under concurrent requests
+- [ ] Reposting your own post, a FALSE-labelled post or a removed post is refused with the right code, and the button explains why
+- [ ] A repost always shows the original's current label (change the status in the Django shell → the repost's badge updates)
+- [ ] When the original is deleted or removed, the repost shows "This post is no longer available"
+- [ ] Another user can never see your bookmarks: the API returns only your own, and there are no counts anywhere
+- [ ] The mixed Following feed never skips or duplicates items across pages while new posts and reposts arrive
+- [ ] Feed, profile and bookmark lists use a constant number of queries
+
+**Required tests:** constraints; service rules; API permissions and codes; feed union ordering, per-page dedupe and cursor stability; query counts; components (optimistic + rollback, disabled reasons, unavailable card); E2E: A reposts B's post → C (who follows A) sees "Reposted by A"; bookmark a post → it appears on /bookmarks.
+
+**Recommended models**
+- **Plan:** Opus 5.5 · high. A stable cursor over mixed posts and reposts is easy to get subtly wrong.
+- **Implement:** Sonnet 5.5 · high. Well specified once the feed query is designed.
+
+---
+
 ## Part 8: Reporting & threshold
 **Status:** [ ] Not started
 **Goal:** one report per user per post; a windowed, brigading-resistant threshold that sends posts to review while keeping them visible (guide §6; ARCHITECTURE §5).
@@ -514,7 +654,7 @@ All three jobs run on test values only; no secrets.
 **Backend scope**
 - `reports.Report` exactly per ARCHITECTURE §2.
 - `POST /api/v1/posts/{id}/report/` implementing ARCHITECTURE §5: `select_for_update`, `report_count`, `counts_toward_threshold`, window count.
-- Create `apps/pipeline/routing.py` with `merge_flag`, `enter_review` and `apply_report_threshold` (the pipeline part is added in Part 9).
+- Create `apps/pipeline/routing.py` with `merge_flag`, `enter_review` and `apply_report_threshold(post, n, cfg, now)` (the pipeline part is added in Part 9; the emergency threshold branch in 11C).
 - `posts.services` owns the status write.
 - `reported_by_me` in the serializer.
 - Read-only ReportAdmin.
@@ -549,10 +689,10 @@ The Report action sits in the PostCard overflow menu and on the detail page.
 **Stitch files to convert:** none new. Verify the verified, false and under-review badge and card states from `b1_home_feed` and `b3_post_detail_forensic_proof` against real data.
 
 **Backend scope**
-- `apps/pipeline/contract.py`: validated dataclasses.
-- `clients.py`: `StubPipelineClient` (rules in ARCHITECTURE §6) and `HttpPipelineClient` (tested with a mocked HTTP layer).
-- `routing.apply_pipeline_result`.
-- `processor.process_pending` with `FOR UPDATE SKIP LOCKED`, retries, backoff and max attempts.
+- `apps/pipeline/contract.py`: validated dataclasses (`PipelineRequest` carries the optional `source`, ARCHITECTURE §6).
+- `clients.py`: `StubPipelineClient` (rules in ARCHITECTURE §6; ignores `source`) and `HttpPipelineClient` (sends `{post_id, content, source}`; tested with a mocked HTTP layer).
+- `routing.apply_pipeline_result(post, result, cfg, now)` (the emergency branch is added in 11C).
+- `processor.process_pending` with `FOR UPDATE SKIP LOCKED`, retries, backoff and max attempts; emergencies first (`is_emergency DESC`), then oldest.
 - Inline kick on commit (daemon thread, closes its DB connection).
 - `manage.py process_pending [--loop --interval N]`.
 - `POST /api/internal/tick/` (secret; small batch; returns `{"processed": n}`).
@@ -564,6 +704,7 @@ The Report action sits in the PostCard overflow menu and on the detail page.
 
 **Acceptance criteria**
 - [ ] Locally, a fact containing `#true` becomes VERIFIED 95% within seconds; `#false` becomes FALSE 92%; `#unsure` becomes UNDER REVIEW (pipeline)
+- [ ] The pipeline request includes the post's `source` (or `None`)
 - [ ] With the inline kick off, `process_pending` or the tick clears the backlog
 - [ ] **Every pipeline-related row of the ARCHITECTURE §4 table has a passing test**, including a late result on a reported post, moderator-decided posts ignored, removed posts ignored, and inconclusive-with-high-confidence → review
 - [ ] Client errors are retried with backoff; after 5 attempts the post goes to review
@@ -585,12 +726,12 @@ The Report action sits in the PostCard overflow menu and on the detail page.
 **Stitch files to convert:** none. `d2_moderator_peer_review_queue` is **reference only** for filters, sorting and actions.
 
 **Backend scope**
-- `moderation.ModerationAction` (append-only, from/to status, post snapshot).
-- `moderation.services`: `mark_verified`, `mark_false`, `dismiss_reports`, `remove`, `escalate`. Each is transactional, applies ARCHITECTURE §4, and logs.
-- `PostAdmin` review queue per ARCHITECTURE §8: list columns, filters, search, inlines, bulk actions with a confirmation form for `verdict_note`/notes; verdict actions for facts only.
-- Also: ReportAdmin; ModerationActionAdmin (read-only, full access seniors only); CommentAdmin hide; UserAdmin (role editable by seniors only); PlatformSettings admin (seniors only).
+- `moderation.ModerationAction`: append-only, from/to status, post snapshot, `subject_user`. The **full action list** from ARCHITECTURE §2 is created now, so later parts don't alter the constraint.
+- `moderation.services`: `mark_verified`, `mark_false`, `dismiss_reports`, `remove` (stores `pre_removal_status`), `escalate`. Each is transactional, applies ARCHITECTURE §4, and logs.
+- `PostAdmin` review queue per ARCHITECTURE §8: list columns, filters, search, inlines, bulk actions with a confirmation form for `verdict_note`/notes; verdict actions for facts only, labelled "Mark verified" and **"Mark FALSE"** (D4). The emergency ordering and filter work from 11C (the columns already exist).
+- Also: ReportAdmin; ModerationActionAdmin (read-only, full access seniors only); CommentAdmin hide; UserAdmin (role editable by seniors only); PlatformSettings admin (seniors only, including the emergency limits).
 - A Groups and permissions data migration.
-- Site header "Rumor Zero moderation".
+- Site header: the logo (`templates/admin/base_site.html` using the static `core/brand/logo-admin.png` from 0D) and "Rumor Zero moderation".
 
 **Frontend scope:** a "Moderation" sidebar link for staff (from `/me.admin_url`, opens in a new tab); hidden for everyone else.
 
@@ -601,6 +742,8 @@ The Report action sits in the PostCard overflow menu and on the detail page.
 - [ ] Every bulk action produces the ARCHITECTURE §4 result and exactly one `moderation_actions` row per post, with correct from/to status
 - [ ] Verified/false actions aren't offered for opinion posts
 - [ ] Dismiss reports restores `pre_review_status` (or leaves `pipeline` when the flag was `both`), and those reports stop counting
+- [ ] Remove stores `pre_removal_status` (the status before review, if the post was under review)
+- [ ] The admin header shows the logo and "Rumor Zero moderation"
 - [ ] The queue page with 100 flagged posts uses a bounded number of queries
 
 **Required tests:** each service × each starting state; the permission matrix per role through the admin test client; audit rows; query counts; sidebar link visibility.
@@ -613,49 +756,222 @@ The Report action sits in the PostCard overflow menu and on the detail page.
 
 ## Part 11: Appeals & removed-post tombstones
 **Status:** [ ] Not started
-**Goal:** the "Request another look" path for authors of false-labelled posts (guide §8.4, c-7) and proper tombstones for removed posts.
+**Goal:** the "Request another look" path for authors of FALSE-labelled **and removed** posts (guide §8.4, §16; c-7; ANALYSIS f-2: removals now lower a public score) and proper tombstones for removed posts.
 **Depends on:** 10.
-**Stitch files to convert:** the "Request another look / appeal" button in `b3_post_detail_forensic_proof`; the removed tombstone card in `c1_user_profile` (with no appeal on removals in the MVP).
+**Stitch files to convert:** the "Request another look / appeal" button in `b3_post_detail_forensic_proof`; the removed tombstone card in `c1_user_profile`, whose "Request Appeal" button is now used for removal appeals.
 
 **Backend scope**
-- `moderation.Appeal`.
-- `POST /api/v1/posts/{id}/appeal/`: author only, `verified_false` only, one per post, throttle `appeal` → `enter_review(APPEAL)`.
-- Admin appeal inline and filter; resolution through the Part 10 actions sets the appeal status and links the `ModerationAction`.
-- The different-moderator rule (seniors exempt).
+- `moderation.Appeal` with `kind` (`label` | `removal`), per ARCHITECTURE §2.
+- `POST /api/v1/posts/{id}/appeal/`: author only, one per post, throttle `appeal`:
+  - `verified_false` → kind `label` → `enter_review(APPEAL)`
+  - `removed` → kind `removal`; the post stays removed and hidden
+- Admin appeal inline and filter (by kind). Label appeals are resolved through the Part 10 verdict actions. Removal appeals use two new actions: **Restore post** (→ `pre_removal_status`, appeal `overturned`, logged `restored`) and **Keep removed** (appeal `upheld`). Both link the `ModerationAction`.
+- The different-moderator rule (seniors exempt), for both kinds.
 - `can_appeal` / `appeal_status` for the author only.
+- Reversing score events on an overturned appeal is added in 11B.
 
-**Frontend scope:** `AppealModal` (optional reason ≤500 chars, states); an APPEAL PENDING chip for the author; the outcome shown on the detail page; `RemovedPostCard` (public and author variants) on the profile and detail pages.
+**Frontend scope:** `AppealModal` (optional reason ≤500 chars, states) for FALSE-labelled and removed posts; an APPEAL PENDING chip for the author; the outcome shown on the detail page; `RemovedPostCard` (public and author variants, the author variant with "Request another look") on the profile and detail pages.
 
 **API endpoints:** `POST /api/v1/posts/{id}/appeal/`.
 
 **Acceptance criteria**
-- [ ] Only the author of a `verified_false` post can appeal, once (others 403, a second appeal 409)
-- [ ] The appealed post appears in the admin queue as `appeal`; the moderator who made the original call can't resolve it unless senior
-- [ ] Overturning gives VERIFIED, upholding keeps FALSE; the author sees the outcome
+- [ ] Only the author of a FALSE-labelled or removed post can appeal, once (others 403, a second appeal 409)
+- [ ] The appealed post appears in the admin queue under `appeal` (with its kind); the moderator who made the original call can't resolve it unless senior
+- [ ] Label appeals: overturning gives VERIFIED, upholding keeps FALSE
+- [ ] Removal appeals: Restore returns the post to its previous status and it reappears in feeds; Keep removed leaves it hidden
+- [ ] The author sees the outcome
 
-**Required tests:** API rules, service transitions, the moderator rule, serializer fields per viewer, AppealModal and chip; E2E: the author files an appeal (resolved through a service fixture).
+**Required tests:** API rules for both kinds, service transitions (including restore targets), the moderator rule, serializer fields per viewer, AppealModal and chip; E2E: the author files an appeal (resolved through a service fixture).
 
 **Recommended models**
-- **Plan:** Sonnet 5.5 · high. Builds directly on the Part 10 services.
-- **Implement:** Sonnet 5.5 · medium. Small, well-bounded feature.
+- **Plan:** Opus 5.5 · high. Removal appeals add a restore path to the state machine.
+- **Implement:** Sonnet 5.5 · high. Builds directly on the Part 10 services.
+
+---
+
+## Part 11B: Credibility score
+**Status:** [ ] Not started
+**Goal:** a public per-account credibility score (0–100, starting at 50) driven by fact-check outcomes (D5; ARCHITECTURE §4a; guide §16).
+- Stored as an append-only ledger plus a denormalised score.
+- Fully reversible, with a visible appeal path.
+
+**Depends on:** 7B (repost events), 10 (moderator actions), 11 (appeals and restores).
+**Stitch files to convert:**
+- `c1_user_profile`: the header meta row ("99.1% Audit Trust Score" → "Credibility 72", or "New").
+- `c3_following_list`: the trust metric in user rows ("96.4% Audit Trust • 84 Verified Claims" → "Credibility 72 · 84 verified").
+- The ring, trend and history visuals come in 11D.
+
+**Backend scope**
+- New app `apps/reputation`:
+  - `scoring.py`, pure functions with no I/O: `score(p, n)`, the weight table, which reposts and reports count (ARCHITECTURE §4a).
+  - `models.ReputationEvent` exactly per ARCHITECTURE §2 (append-only; admin read-only).
+  - `services.py`, the **only** writer of the ledger and of `users.reputation_score` / `reputation_sample`:
+    - `record_post_outcome(post, now)`, `record_removal(post, now)`, `record_report_upheld(report, now)`, `reverse_post_events(post, now)`
+    - all run in the caller's transaction, with `select_for_update()` on the user row
+- Hooks, called explicitly (no signals) from `posts.services` (pipeline verdicts) and `moderation.services` (Mark verified, Mark FALSE, Remove, Restore, appeal outcomes):
+  - A re-label reverses the old event and adds the new one.
+  - An overturned appeal or a restore reverses the events of the author **and every reposter**.
+  - Dismissed reports and failed appeals change nothing.
+- `reputation_sample` counts un-reversed own-post events. The public score is `null` below 3.
+- Emergency weight: an `is_emergency` post that ends FALSE records `emergency_false` (N + 3) instead of `fact_false`, even before the emergency UI exists (the column is there since Part 4).
+- `python manage.py recompute_reputation [--user <username>] [--check]`: rebuilds the denormalised fields from the ledger; `--check` fails on any difference.
+- Endpoints:
+  - `GET /api/v1/users/{u}/reputation/`: score or null, sample, verified / FALSE / removed counts, the last 10 public events with post links.
+  - `GET /api/v1/me/reputation/events/`: your full ledger, cursor.
+  - The `reputation` block also appears in `GET /api/v1/users/{u}/` and in user rows.
+- Admin: a read-only ReputationEvent list (filter by kind, search by username); UserAdmin shows the score with a link.
+
+**Frontend scope**
+- `CredibilityBadge` (the score, or "New" below 3 events) in ProfileHeader and UserRow, with a "How this is calculated" link to `/how-it-works#credibility` (content in Part 15).
+- The score is **never** shown on post cards.
+
+**API endpoints:** the two reputation endpoints above.
+
+**Acceptance criteria**
+- [ ] Every row of the ARCHITECTURE §4a weight table has a passing test, including the emergency weight, the repost timing rule and the reporter cap
+- [ ] An overturned appeal or a restore returns the author and every reposter to exactly their previous score
+- [ ] Re-running the same verdict never double-counts; deleting a post keeps its events
+- [ ] Scores are hidden publicly (API `null`, UI "New") until 3 counted events
+- [ ] `recompute_reputation --check` passes after a randomised sequence of verdicts, removals, restores and appeals
+- [ ] Profile and user-row endpoints keep a constant query count
+
+**Required tests:** scoring pure-function table; one service test per event kind; reversal paths (appeal overturned, restore, re-label); concurrency (two verdicts for the same author at once); recompute; API and privacy (no private ledger data in the public endpoint); CredibilityBadge.
+
+**Recommended models**
+- **Plan:** Opus 5.5 · xhigh. A public score with legal weight must be exactly reversible and auditable.
+- **Implement:** Opus 5.5 · high. Ledger and transaction correctness justify the stronger model.
+
+---
+
+## Part 11C: Emergency posts
+**Status:** [ ] Not started
+**Goal:** authors can flag a fact post as an emergency (D5; ARCHITECTURE §4b):
+- pinned at the top of feeds for 24 hours
+- still fact-checked, first
+- shown in violet
+- protected by abuse safeguards
+
+**Depends on:** 9 (routing), 10 (moderator actions), 11B (score gate and emergency weight).
+**Stitch files to convert:**
+- `b2_post_composer_modal`: the emergency toggle and warning box, with the copy rewritten (D8). No "bypass", no "permanent marker".
+- `b1_home_feed`: the "Emergency dispatch active" banner (→ the pinned-section header) and the emergency card (violet stripe, EMERGENCY chip, `bolt`).
+- `c1_user_profile`: the emergency card in the post list.
+- `d2_moderator_peer_review_queue`: reference only ("Retract Emergency Status" → the admin action **Demote emergency**).
+
+**Backend scope**
+- `posts.services.create_post` accepts `is_emergency` for fact posts only.
+  - Eligibility, all values from PlatformSettings (ARCHITECTURE §4b): email verified, account age, score, block, 1 per 24 h, fact quota (emergency posts count toward it).
+  - It sets `emergency_expires_at`.
+- `GET /api/v1/me/fact-quota/` adds `emergency: {allowed, reason, next_allowed_at}`.
+- `is_active_emergency(post, now)` and the routing changes in ARCHITECTURE §4:
+  - a FALSE result on an active emergency is never final
+  - the emergency report threshold applies while active
+  - **No scheduler**: expiry is checked at read time.
+- The processor and the admin queue take active emergencies first.
+- Feeds (ARCHITECTURE §9):
+  - the `pinned` list: Recent pins all active emergencies; Following pins those from followed accounts + you
+  - newest first, max 3, plus `pinned_total`
+  - pinned posts are left out of `results`
+  - `GET /api/v1/posts/emergencies/` returns all active ones; the serializer gains `emergency_active`
+- Moderation (ARCHITECTURE §8), all logged:
+  - Mark FALSE on an emergency also demotes it and blocks the author for `emergency_false_cooldown_days`
+  - the **Demote emergency** action
+  - **Block emergency posting** on UserAdmin
+  - the "Emergency (active)" filter
+- The `emergency_demoted` notification is wired in Part 13.
+
+**Frontend scope**
+- Composer:
+  - The emergency Toggle appears only for Fact. When not allowed, it's disabled with the reason in plain words.
+  - When on, it shows a warning box and a required confirmation checkbox: "I understand emergency posts are checked first, and misuse lowers my credibility score and blocks emergency posting for 30 days."
+  - The button reads "Post emergency — will be checked".
+- `EmergencyChip` + violet stripe while active. The card takes its status colour after expiry or demotion.
+- `PinnedEmergencies` at the top of both feed tabs: b1 banner style, dismissible for the session, "Show all" expands in place.
+- Detail-page note after expiry or demotion: "Posted as an emergency on <date>. Priority ended." or "… removed by a moderator."
+
+**API endpoints:** `GET /api/v1/posts/emergencies/`; the extended `GET /api/v1/me/fact-quota/`.
+
+**Acceptance criteria**
+- [ ] An emergency opinion is refused by the API and by the DB constraint
+- [ ] Each ineligibility reason is returned and shown: unverified, too new, score below 40, blocked, daily limit, fact quota
+- [ ] Expiry depends only on time: pinned at 23 h 59 min, not pinned at 24 h 01 min (time-controlled test, no job running)
+- [ ] A pipeline FALSE on an active emergency gives UNDER REVIEW (top of the admin queue), never FALSE; after expiry a FALSE result is applied normally
+- [ ] A moderator's Mark FALSE unpins the post at once, blocks the author's emergency posting for 30 days and applies the −3 score event
+- [ ] 2 counting reports send an active emergency to review; the same post after expiry needs 5
+- [ ] At most 3 pinned posts show, none repeated in the list below
+- [ ] The processor handles emergencies before older pending posts
+- [ ] Every new row of the ARCHITECTURE §4 table has a passing test
+
+**Required tests:** routing rows (pure functions with `now`); eligibility matrix; feed pinning, exclusion and expiry with time control; processor ordering; admin actions and audit rows; composer states; PinnedEmergencies. E2E: an eligible user posts an emergency → it's pinned in Recent → a moderator marks it FALSE (service fixture) → it's no longer pinned and shows FALSE.
+
+**Recommended models**
+- **Plan:** Opus 5.5 · xhigh. It changes the core state machine and is the highest-harm feature.
+- **Implement:** Opus 5.5 · high. Time-dependent routing and abuse rules need precise implementation.
+
+---
+
+## Part 11D: Charts & stats
+**Status:** [ ] Not started
+**Goal:** the Stitch charts, re-purposed for data we really have (D5; ANALYSIS f-6): how a fact post was checked and how it spread, and an account's credibility over time.
+**Depends on:** 7B (repost data), 11B (credibility data).
+**Stitch files to convert:**
+- `b3_post_detail_forensic_proof`:
+  - "Consensus Gauge" → a confidence meter with the threshold marked
+  - the three tiles → Confidence · Threshold and margin · Time to verdict
+  - the "Exhibit A" bar chart → reposts and likes per day
+- `c1_user_profile`: the "Epistemic Standing" ring widget → the Credibility widget.
+- `b4_search_results`: the sparkline → the 30-day credibility trend inside that widget.
+- `c2_account_settings`: the "Credibility Index" bar → CredibilityPanel (placed on the settings page in Part 14).
+
+**Backend scope**
+- `GET /api/v1/posts/{id}/stats/` (ARCHITECTURE §9):
+  - same visibility as the detail endpoint
+  - confidence and threshold only for `verdict_source=pipeline`
+  - `seconds_to_verdict`, `verdict_at`, and `daily` buckets (UTC days, the first 14 days after posting) of reposts, likes and comments
+  - a constant number of queries; uncached
+- `GET /api/v1/users/{u}/reputation/` gains `trend`: 30 daily points from the ledger's `score_after` (null while the score is hidden).
+
+**Frontend scope**
+- `src/components/ui/charts/`:
+  - `MeterBar` (with a threshold marker), `StatTile`, `BarChart` (token-built HTML bars, as Stitch b3 does), `RingGauge` and `Sparkline` (inline SVG using `currentColor` + token classes)
+  - each has `role="img"`, an `aria-label` summary and a visually hidden data table, and no animation with reduced motion
+  - **no chart library**
+- `PostStats` on `/p/[id]` ("How this was checked"). Moderator verdicts show "Reviewed by a moderator" and the time to decision, with no %.
+- `CredibilityWidget` on profiles: ring (score or "New"), "20 verified · 3 FALSE", the 30-day sparkline, "How this is calculated".
+- `CredibilityPanel`: score bar and your full history, with reversed items marked and an "Ask for another look" link on each negative item. Shown on your own profile now, and in settings from Part 14.
+
+**API endpoints:** `GET /api/v1/posts/{id}/stats/`; `trend` on the reputation endpoint.
+
+**Acceptance criteria**
+- [ ] Moderator-decided posts never show a confidence %; pending posts show no meter
+- [ ] Every chart has a text alternative (screen-reader table) and uses token colours only (`lint:tokens` passes)
+- [ ] `package.json` has no chart library
+- [ ] The stats and trend endpoints use a constant number of queries; a post with no activity shows empty bars, not an error
+- [ ] Day buckets are correct across UTC midnight (time-controlled test)
+
+**Required tests:** stats endpoint (shape, visibility per status and viewer, bucket boundaries, query counts); trend endpoint; each chart primitive (render, aria, empty data); PostStats and CredibilityWidget states. E2E: open a `#true` fact → the meter shows 95 % with the threshold at 85 %.
+
+**Recommended models**
+- **Plan:** Sonnet 5.5 · high. The data mapping and accessibility need care.
+- **Implement:** Sonnet 5.5 · medium. Presentational components plus two read endpoints.
 
 ---
 
 ## Part 12: Search
 **Status:** [ ] Not started
 **Goal:** Postgres full-text search over posts, plus people search (guide §10), with no new service.
-**Depends on:** 6.
-**Stitch files to convert:** `b4_search_results`: query box, Posts/People tabs, filter chips, result cards, load more. Drop Primary Sources, certainty sort and the contributor spotlight.
+**Depends on:** 6, 11B (the credibility score in people results).
+**Stitch files to convert:** `b4_search_results`: query box, Posts/People tabs, filter chips, result cards, load more. Drop Primary Sources, certainty sort, the claim-data telemetry box and the contributor spotlight (ANALYSIS b-3).
 
 **Backend scope**
 - `search_vector` `GeneratedField` + GIN index migration.
 - `GET /api/v1/search/`:
   - `type=posts`: `websearch` query, `SearchRank`, filters `post_type` and `status`, excludes removed and deleted
-  - `type=users`: prefix match on username and display name
+  - `type=users`: prefix match on username and display name, returned with the `reputation` block (never sorted by it)
   - Pagination: bounded offset (max 5 pages), because rank order can't use a cursor. Documented deviation.
   - Throttled per IP.
 
-**Frontend scope:** `/search` (from the top bar): tabs; chips All / Facts / Opinions / Verified / False / Under review; results with query terms highlighted using a safe text-splitting util (no HTML); UserRows; empty and no-results states; load more.
+**Frontend scope:** `/search` (from the top bar): tabs; chips All / Facts / Opinions / Verified / FALSE / Under review; results with query terms highlighted using a safe text-splitting util (no HTML); UserRows with CredibilityBadge; empty and no-results states; load more.
 
 **API endpoints:** `GET /api/v1/search/`.
 
@@ -675,21 +991,21 @@ The Report action sits in the PostCard overflow menu and on the detail page.
 ## Part 13: Notifications
 **Status:** [ ] Not started
 **Goal:** the DB-backed notifications from guide §11, polled every 30 s while the tab is visible.
-**Depends on:** 7, 10, 11 (all the event sources).
-**Stitch files to convert:** `c4_notifications`. The item types are rebuilt for the MVP and there are no filter tabs.
+**Depends on:** 7, 7B, 10, 11, 11C (all the event sources).
+**Stitch files to convert:** `c4_notifications`. The item types are rebuilt for the MVP and there are no filter tabs. The emergency item's `tertiary` styling is used for `emergency_demoted`.
 
 **Backend scope**
-- `notifications.Notification`.
-- `notifications.services.notify()`, called explicitly (no signals) from: follow, like, comment, pipeline verdict and under-review, moderator remove and verdict, appeal resolved.
-- Dedupe follow and like; no self-notifications.
+- `notifications.Notification` with every type in ARCHITECTURE §2.
+- `notifications.services.notify()`, called explicitly (no signals) from: follow, like, comment, repost, pipeline verdict and under-review, moderator remove and verdict, emergency priority removed (11C), appeal resolved (label and removal appeals).
+- Dedupe follow, like and repost; no self-notifications.
 - `GET /api/v1/notifications/` (cursor), `GET …/unread-count/` (indexed, ≤2 queries, uncached), `POST …/mark-read/` (`ids` or `all`).
 
-**Frontend scope:** `/notifications`: items with a glyph, actor initials, post excerpt, relative time and unread dot; mark all as read; mark read on click. A sidebar unread badge via `useUnreadCount` (30 s, visible-only). Empty state.
+**Frontend scope:** `/notifications`: items with a glyph, actor avatar, post excerpt, relative time and unread dot; mark all as read; mark read on click. A sidebar unread badge via `useUnreadCount` (30 s, visible-only). Empty state.
 
 **API endpoints:** the three notification endpoints above.
 
 **Acceptance criteria**
-- [ ] Each event creates exactly one notification for the right recipient; none for your own actions; repeated like/unlike doesn't spam
+- [ ] Each event creates exactly one notification for the right recipient; none for your own actions; repeated like/unlike or repost/unrepost doesn't spam
 - [ ] The unread count uses ≤2 queries and polling stops on a hidden tab
 
 **Required tests:** one creation test per event type, dedupe, API, NotificationItem variants, hook timers; E2E: B likes A's post → A sees the badge and the item.
@@ -703,22 +1019,23 @@ The Report action sits in the PostCard overflow menu and on the detail page.
 ## Part 14: Account settings, data export, account deletion
 **Status:** [ ] Not started
 **Goal:** users can edit their profile, manage their password, download their data, and delete their account (guide §16 GDPR/CCPA note).
-**Depends on:** 6, 7.
-**Stitch files to convert:** `c2_account_settings`, subset only (ANALYSIS b-1).
+**Depends on:** 6, 7, 7B, 11B, 11D.
+**Stitch files to convert:** `c2_account_settings`, subset only (ANALYSIS b-1). The avatar card comes in 14B; the "Credibility Index" bar is the CredibilityPanel from 11D.
 
 **Backend scope**
 - `PATCH /api/v1/me/`: display_name, username (validated, unique), bio ≤280.
 - `POST /api/v1/me/password/`: only if the password is usable.
-- `GET /api/v1/me/export/`: JSON of your own profile, posts, comments, likes, follows, reports and appeals.
+- `GET /api/v1/me/export/`: JSON of your own profile, posts, comments, likes, follows, bookmarks, reposts, reports, appeals and your credibility history (ledger rows).
 - `DELETE /api/v1/me/`:
   - confirmed by password, or by typing your username for Google-only accounts
-  - cascades your content
+  - cascades your content, bookmarks, reposts and ledger rows
   - moderation logs keep their snapshots
   - logs you out
 
 **Frontend scope:** `/settings` with sections:
-- Profile (display name, username, bio with counter)
+- Profile (display name, username, bio with counter; the photo is added in 14B)
 - Account (email read-only with a verified chip; change password, or "Signed in with Google")
+- Credibility (the CredibilityPanel from 11D: score, history, "Ask for another look" links)
 - Your data (Download JSON)
 - Danger zone (delete modal with typed confirmation)
 
@@ -728,7 +1045,7 @@ Plus toasts and field errors.
 
 **Acceptance criteria**
 - [ ] Profile edits show up everywhere; a taken username gives a field error
-- [ ] The export contains all of your own data and nothing private about anyone else
+- [ ] The export contains all of your own data (including bookmarks, reposts and credibility history) and nothing private about anyone else
 - [ ] Deletion removes the user and their content, logs them out, and the audit trail keeps its post snapshots
 
 **Required tests:** API validation, export contents and privacy, deletion cascade and audit retention, forms; E2E: edit profile → export → delete account.
@@ -739,25 +1056,87 @@ Plus toasts and field errors.
 
 ---
 
+## Part 14B: Photo avatars
+**Status:** [ ] Not started
+**Goal:** optional profile photos (D5), with initials as the fallback everywhere (ANALYSIS f-7; ARCHITECTURE §4e):
+- processed so that nothing from the uploaded file survives except resized pixels
+- stored in Postgres, with no new service
+
+**Depends on:** 14 (settings page). Uses the relay's cache-header passthrough from 0C.
+**Stitch files to convert:**
+- `c2_account_settings`: the avatar card ("Verified Institutional Avatar" → "Profile photo": preview, Upload, Remove).
+- Every avatar spot, through the 0B `Avatar` primitive now given `avatar_url`: sidebar user card, top bar, post cards, detail author, comments, user rows, notifications, profile header.
+
+**Backend scope**
+- Add `Pillow` 12.3.x to `requirements.txt` (SETUP B1). Why: decoding, validation and re-encoding need a real image library. Pillow is the standard one, with prebuilt wheels for Windows and Render.
+- `accounts.Avatar` per ARCHITECTURE §2, and `apps/accounts/avatars.py` implementing ARCHITECTURE §4e exactly:
+  - format checked by decoding
+  - pixel and size limits before the full decode
+  - EXIF orientation applied, then all metadata dropped
+  - centre crop, WebP at 256 and 96 px
+  - the original discarded
+- Endpoints:
+  - `PUT /api/v1/me/avatar/`: multipart `file`; email-verified; not `avatar_uploads_blocked`; throttle `avatar_upload`
+  - `DELETE /api/v1/me/avatar/`
+  - `GET /api/v1/avatars/{user_id}/{version}-{size}.webp`: public; headers per ARCHITECTURE §4e; a wrong version or size → 404
+- `avatar_url` in every author/user payload, built from `avatar_version` (no extra query).
+- Admin: AvatarAdmin (thumbnail, newest first) with **Remove photo** and **Block photo uploads**, logged as `avatar_removed` / `avatar_blocked` with `subject_user`.
+- The export includes your photo (256 px, base64); account deletion removes it.
+
+**Frontend scope**
+- `AvatarUploader` in /settings → Profile:
+  - file input with `accept="image/jpeg,image/png,image/webp"`
+  - square preview; the browser downscales to ≤1024 px before upload
+  - progress
+  - errors: too large, wrong type, too small, blocked, unverified
+  - Remove photo
+- `Avatar` shows the photo (`alt=""` beside the name, or the name as alt when alone) and falls back to initials on error.
+
+**API endpoints:** the three avatar endpoints above.
+
+**Acceptance criteria**
+- [ ] A JPEG with GPS EXIF comes back as WebP with no EXIF, GPS, ICC or XMP data
+- [ ] Each of these is refused with a clear error and without large memory use: SVG, GIF, HEIC, a PNG renamed to `.jpg`, a file over 5 MB, an image over 25 MP (decompression bomb), one under 128×128
+- [ ] Only WebP is ever served; the original upload is never stored
+- [ ] Changing the photo changes its URL; old URLs return 404
+- [ ] Image responses carry the immutable cache header, `nosniff` and the sandbox CSP; a repeat request through the relay gets 304
+- [ ] A moderator's Remove photo switches the user to initials everywhere at once; Block photo uploads makes uploads fail with 403
+- [ ] Unverified users get 403 `email_unverified`
+
+**Required tests:** processing unit tests with fixtures generated in the test (EXIF/GPS, rotation, each rejected type, bomb, tiny image); API permissions, throttle and headers; admin actions and audit rows; export and deletion; AvatarUploader states; Avatar fallback. E2E: upload a photo → it shows in the sidebar and on your post cards.
+
+**Recommended models**
+- **Plan:** Opus 5.5 · high. Handling untrusted files is security-sensitive.
+- **Implement:** Sonnet 5.5 · high. The plan pins down every limit and header.
+
+---
+
 ## Part 15: Landing & static pages
 **Status:** [ ] Not started
 **Goal:** the public face: a landing page, "How verification works", Privacy and Terms (required by Google OAuth and guide §16), error pages, and proper titles everywhere.
-**Depends on:** 4 (the landing preview uses the Recent feed).
-**Stitch files to convert:** `a1_logged_out_home`; `design/stitch/code.html` (layout for the taxonomy table and FAQ only, with copy rewritten); marketing footer.
+**Depends on:** 4 (the landing preview uses the Recent feed), 11B and 11C (the page explains them).
+**Stitch files to convert:** `a1_logged_out_home`; `design/stitch/code.html` (layout for the taxonomy table, the confidence-ramp illustration and the FAQ only, with copy rewritten); marketing footer.
 
 **Backend scope:** none.
 
 **Frontend scope**
-- `/`: prerendered. Hero, 3 feature cards in plain language, a live preview of 4 recent posts fetched client-side, "© 2026 Rumor Zero", no fabricated organisations or people. Logged-in visitors see "Go to your feed".
-- `/how-it-works`: the status table rendered with the real StatusBadges, the lifecycle, and an FAQ with real answers (why opinions aren't checked, reports, appeals, the pipeline).
-- `/privacy`, `/terms`: placeholder text clearly marked **"needs legal review"**.
-- `not-found` and `error` pages.
-- `<title>` = "<Page> · Rumor Zero" on every route; favicon (text-based until D9 is decided).
+- `/`: prerendered, with `<Logo/>`.
+  - Hero, 3 feature cards in plain language, a live preview of 4 recent posts fetched client-side.
+  - "© 2026 Rumor Zero"; no fabricated organisations or people; no taglines from Stitch.
+  - Logged-in visitors see "Go to your feed".
+- `/how-it-works`:
+  - the status table rendered with the real StatusBadges (including EMERGENCY), and the lifecycle
+  - an FAQ with real answers: why opinions aren't checked, reports, appeals (FALSE labels and removals), the pipeline, emergency posts, and why reposts keep the original's label
+  - a `#credibility` section: how the score is calculated in plain words, what raises and lowers it, when it's shown, and how to appeal. Marked **"needs legal review"** (guide §16).
+- `/privacy`, `/terms`: placeholder text clearly marked **"needs legal review"**. The Terms placeholder has explicit sections on verification labels and the credibility score.
+- `not-found` and `error` pages (with `<Logo/>`).
+- `<title>` = "<Page> · Rumor Zero" on every route. The favicon, icons and share image already exist from 0D.
 
 **API endpoints:** none new.
 
 **Acceptance criteria**
-- [ ] The landing page matches the a1 layout, and none of the Stitch sample names or organisations appear anywhere
+- [ ] The landing page matches the a1 layout, and none of the Stitch sample names, organisations or taglines appear anywhere
+- [ ] `/how-it-works#credibility` explains every event in the ARCHITECTURE §4a table and the appeal path
 - [ ] `next build` output marks these pages as static
 - [ ] Every route has a proper title; Lighthouse accessibility ≥ 95 on `/`
 
@@ -772,11 +1151,15 @@ Plus toasts and field errors.
 ## Part 16: Security pass, load test, E2E hardening
 **Status:** [ ] Not started
 **Goal:** guide roadmap step 9. Verify the security checklist, find slow endpoints before users do, and make the full E2E suite a gate.
-**Depends on:** 1–15. Needs k6 (SETUP A6).
+**Depends on:** every part above (0A–15, including 0D, 7B, 11B–11D and 14B). Needs k6 (SETUP A6).
 **Stitch files to convert:** none.
 
 **Backend scope**
-- Go through ARCHITECTURE §12 point by point.
+- Go through ARCHITECTURE §12 point by point, including the new rows:
+  - profile-photo abuse (disguised files, decompression bombs, SVG, oversized)
+  - source-link handling and the "never fetched" test
+  - the emergency safeguards
+  - the credibility score's appeal and audit path
 - `check --deploy` clean.
 - Security headers and cookie flags verified by tests; admin path confirmed.
 - Throttle review; secret-leak scan of the repo (patterns); logging review (no tokens or PII).
@@ -784,9 +1167,14 @@ Plus toasts and field errors.
 - `.github/dependabot.yml` (pip, npm, github-actions, weekly).
 - `pip-audit`/`npm audit`, triaged.
 
-**Frontend scope:** a Content-Security-Policy in `next.config.ts` headers that allows only self, Turnstile and Google Identity Services; verify there are no violations and no `dangerouslySetInnerHTML`; the full E2E journey suite.
+**Frontend scope:** a Content-Security-Policy in `next.config.ts` headers that allows only self, Turnstile and Google Identity Services (`img-src 'self' data:` plus Google's button images, which covers the logo and `/api/v1/avatars/`); verify there are no violations and no `dangerouslySetInnerHTML`; the full E2E journey suite.
 
-**Load test:** `loadtest/*.js` k6 scripts (feed read 50 VUs, post create, report burst) against the local stack with seeded data; `EXPLAIN` on the hot queries.
+**Load test:** `loadtest/*.js` k6 scripts against the local stack with seeded data (`seed_demo` also creates reposts, bookmarks and a few active emergencies):
+- feed read at 50 VUs, including reposts and pinned emergencies
+- post create
+- report burst
+- avatar image fetch
+- `EXPLAIN` on the hot queries
 
 **Acceptance criteria**
 - [ ] Every ARCHITECTURE §12 row has evidence (a test or a documented check)
@@ -810,8 +1198,8 @@ Plus toasts and field errors.
 **Stitch files to convert:** none.
 
 **Backend scope**
-- `render.yaml` Blueprint: rootDir `backend`, build and start commands from ENV_GUIDE §2.6, health check path, auto-deploy after checks; env var **keys** only, with secrets marked `sync: false`.
-- A production settings review.
+- `render.yaml` Blueprint: rootDir `backend`, build and start commands from ENV_GUIDE §2.6, health check path, auto-deploy after checks; env var **keys** only (including the optional `EMERGENCY_*` keys), with secrets marked `sync: false`.
+- A production settings review. Pillow installs from its prebuilt Linux wheel, so no system packages are needed; photo processing stays within 512 MB thanks to the limits in ARCHITECTURE §4e.
 - Anymail Brevo backend; Sentry.
 - A staff-only "send test error" management command.
 - Deploy runbook notes in `docs/`.
@@ -842,7 +1230,10 @@ Plus toasts and field errors.
 
 **Frontend scope**
 - `wrangler.jsonc` final (`vars.BACKEND_ORIGIN = <BACKEND>`); the Workers Builds settings documented.
-- A Playwright production smoke test (`PLAYWRIGHT_BASE_URL=<FRONTEND>`): landing loads, the signup page shows the Turnstile widget, `/api/health/` through the relay works.
+- A Playwright production smoke test (`PLAYWRIGHT_BASE_URL=<FRONTEND>`):
+  - the landing page loads with the favicon and an `og:image` that returns 200
+  - the signup page shows the Turnstile widget
+  - `/api/health/` through the relay works
 - Check Workers observability for CPU-limit (1102) errors on `/p/[id]`.
 
 **Backend and ops scope**
@@ -855,6 +1246,8 @@ Plus toasts and field errors.
 - [ ] Browser devtools show `rz_refresh` as a host-only HttpOnly Secure cookie on the `<FRONTEND>` host, and it survives a reload
 - [ ] UptimeRobot is green for 24 h with no Render cold start in that window; cron-job.org returns 200 hourly; the keepalive workflow is green
 - [ ] No Worker 1102 CPU-limit errors over 24 h of normal use
+- [ ] A shared post link shows the Rumor Zero preview image; a profile photo upload works end to end in production
+- [ ] Emails arrive with the logo image loading from `<FRONTEND>/brand/email-logo.png`
 - [ ] The FRONTEND URL is filled in ARCHITECTURE §0; the ENV_GUIDE master table matches reality
 
 **Required tests:** the production smoke suite, the keepalive workflow run, the k6 smoke run.
