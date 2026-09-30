@@ -805,31 +805,37 @@ Other settings:
 
 **Master:** `design/logo.svg` (read-only; you replace it, Claude never edits `design/`). `design/logo.png` is an earlier raster version, kept but **not used**.
 
-**What the SVG is (inspected 2026-09-29):**
-- `viewBox="0 0 1000 1000"`, no width/height, transparent background, 2.6 KB.
-- The wordmark "Rum0r": R, u, m, r in teal `#19aa96` (class `cls-1`); the "0" and a full-width underline in amber `#f4a361` (class `cls-2`).
+**What the SVG is (current version, recoloured by you and inspected 2026-09-30):**
+- `viewBox="0 0 1000 1000"`, no width/height, transparent background, 2.2 KB.
+- The wordmark "Rum0r":
+  - R, u, m, r in neutral grey `#898a8d` (class `cls-2`)
+  - the "0" and a full-width underline in cyan `#23b5d8` (class `cls-1`)
 - All text is outlined paths: no fonts, scripts, links or bitmaps.
-- The artwork spans x 121.4–878.6, y 413.0–625.7 of the 1000 box (≈ 3.6 : 1); the rest of the square is empty. The "0" is the only `path.cls-2` (x 664.5–779.2, y 413.0–584.9).
+- The artwork spans x 121.4–878.6, y 413.0–625.7 of the 1000 box (≈ 3.6 : 1); the rest of the square is empty.
+- The "0" is the only `<path>` in the cyan class, currently `path.cls-1` (x ≈ 664.4–779.2, y ≈ 413.0–584.9). The underline is a `<rect>` in the same class.
+- Class names can change whenever the file is re-exported, so the mark selector lives in `brand.config.json`, and the build fails if it doesn't match exactly one path.
 - Accessible name everywhere: **"Rumor Zero"** (the logo reads "Rum0r").
+- The first version (2026-09-29, teal `#19aa96` + amber `#f4a361`) was practically identical to the Verified and Under-review colours (ΔE 1.5 and 0.6). This version replaced it.
 
-**Colour check against the Stitch tokens (flagged):**
+**Colour check against the Stitch tokens** (CIE76 ΔE; above ≈ 10 is clearly a different colour):
 
-| Logo colour | Nearest Stitch token | Consequence |
+| Logo colour | Nearest Stitch tokens | Verdict |
 |---|---|---|
-| teal `#19aa96` | `primary-container` `#00a896` (Verified family) | practically the Verified colour |
-| amber `#f4a361` | `verdict-review` `#F4A261` (Under review) | practically the Under-review colour |
+| grey `#898a8d` | `outline` `#6c7a76` (ΔE 10) | a neutral, like Stitch's text/outline greys. No clash. |
+| cyan `#23b5d8` | `secondary-fixed-dim` `#93ccff` (ΔE 22), `secondary-container` `#5bb8fe` (ΔE 23), `primary-container` `#00a896` (ΔE 32) | clearly distinct from every verdict colour. It sits between the blue **action** family and the Verified teal. **No verdict clash.** |
 
-- DESIGN.md reserves colour for verdicts, so these two colours live **only inside the logo image**. They never become tokens, buttons, links or badges. UI keeps using the verdict tokens for verdicts only.
-- If the match with the verdict colours isn't intended, recolouring is a one-command change (below).
+- DESIGN.md keeps colour for verdicts and actions, so the logo colours still live **only inside the logo image**. They never become tokens, buttons, links or badges; a cyan button would read as an action or as "verified".
 
-| Contrast (WCAG ratio) | teal letters | amber "0" / underline |
+| Contrast (WCAG ratio) | grey letters | cyan "0" / underline |
 |---|---|---|
-| on `surface-container-lowest` `#ffffff` (sidebar, cards) | 2.9 : 1 | 2.0 : 1 |
-| on `surface` `#faf8ff` (page) | 2.8 : 1 | 1.9 : 1 |
-| on `inverse-surface` `#283044` | 4.5 : 1 | 6.4 : 1 |
-| on `on-surface` `#131b2e` | 5.9 : 1 | 8.4 : 1 |
+| on `surface-container-lowest` `#ffffff` (sidebar, cards) | 3.45 : 1 | 2.42 : 1 |
+| on `surface` `#faf8ff` (page) | 3.28 : 1 | 2.30 : 1 |
+| on `inverse-surface` `#283044` | 3.81 : 1 | 5.43 : 1 |
+| on `on-surface` `#131b2e` | 4.97 : 1 | 7.09 : 1 |
 
-- Logotypes are exempt from WCAG 1.4.3 / 1.4.11, so this is recorded, not blocking. The logo reads best on dark surfaces.
+- The grey letters pass 3 : 1 on every surface.
+- The cyan "0" is below 3 : 1 on light surfaces. Logotypes are exempt from WCAG 1.4.3 / 1.4.11, so this is recorded, not blocking. The "0" is still clearly visible, but a slightly darker cyan would make it crisper on white.
+- Both colours are ≥ 3.8 : 1 on the dark plate.
 - In the (light) app it sits directly on the light surfaces as designed. Every generated **plate** (favicon, app icons, share image, email, Google, admin) puts it on `inverse-surface` `#283044`, a Stitch token.
 - Rumor Zero has no dark theme (Stitch is light-only). "Works on dark" covers dark browser tabs, dark-mode email clients, link previews and dark UI spots such as toasts.
 
@@ -856,7 +862,7 @@ It reads `src/lib/brand-assets.json`.
 | Admin logo | `backend/apps/core/static/core/brand/logo-admin.png` | 64 px tall | Django admin header (Part 10) |
 | Asset list | `frontend/src/lib/brand-assets.json` | — | generated; read by `Logo`, `manifest.ts` and the root metadata |
 
-- Icons and the mark use the amber "0" on the `inverse-surface` plate. The share image, email, Google and admin logos use the full wordmark on the same plate.
+- Icons and the mark use the cyan "0" on the `inverse-surface` plate (5.4 : 1). The share image, email, Google and admin logos use the full wordmark on the same plate.
 - The build **only reads** `design/`. It fails if the master contains `<script>`, `<foreignObject>`, `on*` attributes, external `href`/`xlink:href`, embedded bitmaps or `<text>`, or has no `viewBox`. It prints the contrast table above.
 
 **Placements:**
@@ -875,6 +881,7 @@ The old marks replaced are listed in ANALYSIS e.2; DESIGN.md's sidebar wordmark 
 
 **Changing the logo later:**
 1. Replace `design/logo.svg` yourself.
-2. Run `npm run brand:build` in `frontend/`.
-3. Compare the printed contrast table with this section and update it.
-4. Commit the regenerated files.
+2. Check that the mark selector in `frontend/scripts/brand/brand.config.json` still picks the "0" (re-exports can rename classes).
+3. Run `npm run brand:build` in `frontend/`.
+4. Compare the printed contrast table with this section and update it.
+5. Commit the regenerated files.

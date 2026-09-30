@@ -202,7 +202,7 @@ Adjustments for real dependencies:
   - master `design/logo.svg`. The script **only reads** `design/`; it never writes, moves or deletes anything there. `design/logo.png` is not used.
   - **safety check first:** no `<script>`, `<foreignObject>`, `on*` attributes, external `href`/`xlink:href`, embedded bitmaps or `<text>`, and a `viewBox` must exist. Otherwise the build fails with a clear message.
   - wordmark: the SVG with its `viewBox` cropped to the artwork plus padding → `public/brand/logo.svg`
-  - mark: the "0" (`path.cls-2`, set in the config) in its own square `viewBox` → `public/brand/mark.svg`
+  - mark: the "0" in its own square `viewBox` → `public/brand/mark.svg`. The selector lives in the config (currently `path.cls-1`, the only path in the cyan class), and the build fails unless it matches exactly one `<path>`.
   - every asset in the ARCHITECTURE §14 table: `favicon.ico` (16/32/48, written by a small tested PNG-in-ICO helper), `icon.svg`, `apple-icon.png`, the three manifest icons, `opengraph-image.png` + `twitter-image.png` (+ `.alt.txt`), `email-logo.png`, `google-oauth-logo.png`, and `backend/apps/core/static/core/brand/logo-admin.png` (creating the folder if needed)
   - plates use `inverse-surface` `#283044`
   - `src/lib/brand-assets.json`: the generated list of assets, sizes and plate colour

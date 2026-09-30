@@ -522,12 +522,20 @@ Searched every `.html` and `.md` file (text, `<title>`, logos, `alt`/`data-alt`,
 
 | File | What it is | Used? |
 |---|---|---|
-| `design/logo.svg` | **Master.** `viewBox="0 0 1000 1000"`, no width/height, transparent background, 2.6 KB. The wordmark "Rum0r": R, u, m, r in teal `#19aa96`; the "0" and a full-width underline in amber `#f4a361`. All text is outlined paths: no fonts, scripts, links or bitmaps. The artwork spans x 121.4–878.6, y 413.0–625.7 (≈ 3.6 : 1); the rest of the square is empty. The "0" is the only `path.cls-2` (x 664.5–779.2, y 413.0–584.9). | Yes, by Part 0D |
+| `design/logo.svg` | **Master** (current version recoloured by you, inspected 2026-09-30). `viewBox="0 0 1000 1000"`, no width/height, transparent background, 2.2 KB. The wordmark "Rum0r": R, u, m, r in neutral grey `#898a8d`; the "0" and a full-width underline in cyan `#23b5d8`. All text is outlined paths: no fonts, scripts, links or bitmaps. The artwork spans x 121.4–878.6, y 413.0–625.7 (≈ 3.6 : 1); the rest of the square is empty. The "0" is the only `<path>` in the cyan class (currently `path.cls-1`). | Yes, by Part 0D |
 | `design/logo.png` | Earlier raster version: 2048×2047 px, RGB with no transparency, white letters with a cyan `#19B6DA` "0" and underline on a navy `#182431` plate, plus a 1-px light-grey border at the edge. | No. Kept untouched. |
 
 - The logo reads "Rum0r"; its accessible name everywhere is **"Rumor Zero"**.
-- **Colour clash (flagged):** the SVG's teal and amber are almost exactly Stitch's Verified teal `primary-container` `#00a896` and the Under-review amber `verdict-review` `#F4A261`. DESIGN.md reserves colour for verdicts, so these colours must stay **inside the logo image only** (ARCHITECTURE §14).
-- **Contrast on light surfaces is low:** teal letters 2.8–2.9 : 1 and the amber "0" 1.9–2.0 : 1 on `surface` / white. On dark surfaces they reach 4.5–8.4 : 1. Logotypes are exempt from WCAG contrast rules, so this is recorded, not blocking. Every plate we generate (favicon, app icons, share image, email, admin) uses the dark `inverse-surface` behind the logo.
+- **Colour clash: resolved.**
+  - The first SVG (2026-09-29, teal `#19aa96` + amber `#f4a361`) was practically Stitch's Verified and Under-review colours (ΔE 1.5 and 0.6), so it was flagged. You recoloured it.
+  - The current grey is a neutral close to `outline` (ΔE 10).
+  - The cyan is clearly distinct from every verdict colour (nearest: the blue action family at ΔE 22–23, Verified teal at ΔE 32).
+  - Both colours still stay **inside the logo image only** and never become UI colours (ARCHITECTURE §14).
+- **Contrast:**
+  - grey letters 3.3–3.5 : 1 on the light surfaces (passes 3 : 1);
+  - cyan "0" 2.3–2.4 : 1 on light surfaces (below 3 : 1, but logotypes are exempt, so this is recorded, not blocking);
+  - on the dark `inverse-surface`, 3.8 : 1 and 5.4 : 1.
+  - Every plate we generate (favicon, app icons, share image, email, admin) uses `inverse-surface` behind the logo.
 
 ### e.2 Brand marks to replace (applied in Parts 0C, 2, 10 and 0D)
 
@@ -727,10 +735,10 @@ Storage options checked on 2026-09-29, with no card allowed:
 
 - **Master files:** `design/logo.svg` is the master. `design/logo.png` is untouched and unused.
 - **Header:** the logo alone, with the accessible name "Rumor Zero". No text beside it and no tagline, because the logo already is the wordmark. The same applies to auth cards, marketing nav and footer (the footer adds "© 2026 Rumor Zero").
-- **Favicon and app icons:** the amber "0" on the dark `inverse-surface` plate, because the full wordmark is unreadable below about 48 px. Everything else uses the full wordmark.
+- **Favicon and app icons:** the cyan "0" on the dark `inverse-surface` plate (5.4 : 1), because the full wordmark is unreadable below about 48 px. Everything else uses the full wordmark.
 - **Share image, email logo, Google logo, admin logo:** the full logo on the same dark plate.
 - **Google consent screen:** don't upload a logo for now. Google shows it only after brand verification, and verification checks domain ownership, which a free `workers.dev` address very likely can't pass. The optional steps are in ENV_GUIDE §2.9.
-- **Colour clash:** flagged in e.1 and ARCHITECTURE §14.
+- **Colour clash:** the first SVG's teal/amber matched the verdict colours. It was resolved by your recolour on 2026-09-30 to grey + cyan (e.1, ARCHITECTURE §14).
 - **Part 0E not needed:** the planned "swap in the SVG" part was dropped because the SVG arrived before Part 0D.
 
 **Sources (f-7, f-8):**
