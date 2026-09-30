@@ -6,11 +6,11 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none active. **Part 0A (Backend foundation) is done** (2026-09-30).
-- **Owner:** none (idle until the user starts the next part)
-- **Phase:** 0A implemented and validated; awaiting the user's review and git commit
-- **Last approved plan:** `docs/agents/plans/part-0A-backend-foundation.md` (status: implemented)
-- **Last updated:** 2026-09-30 by Claude (Sonnet 5.5), Part 0A implementation
+- **Part:** 0B (Frontend foundation & design system). Part 0A is done (2026-09-30).
+- **Owner:** Claude (Sonnet 5.5)
+- **Phase:** plan approved by the user 2026-10-01; implementation starting
+- **Approved plan:** `docs/agents/plans/part-0B-frontend-foundation.md`
+- **Last updated:** 2026-10-01 by Claude (Sonnet 5.5), Part 0B start
 
 ## Completed checkpoints
 
