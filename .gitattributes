@@ -1,0 +1,14 @@
+# Store text with LF endings and check it out with LF, even on Windows (so Linux CI matches).
+* text=auto eol=lf
+
+# Binary files: never convert line endings. Git's text/binary guess can't be trusted here
+# (a ReportLab PDF looks like text). Add any new binary type below.
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary

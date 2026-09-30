@@ -260,7 +260,7 @@ Also pick `ADMIN_URL_PATH`: run `py -3.13 -c "import secrets; print('mod-' + sec
    - `SENTRY_ENVIRONMENT=production`
    - `SENTRY_TRACES_SAMPLE_RATE=0.0` (raise to `0.1` if you want performance traces)
 
-**Gotchas:** 5K errors/month, 1 user. Code never sends passwords or tokens (`send_default_pii=False`).
+**Gotchas:** 5K errors/month, 1 user. `send_default_pii=False` alone is not enough: it would still send the `X-RZ-*` secret and client-IP headers, request bodies and stack-frame variables. The settings scrub or disable all of these (ARCHITECTURE §12), so no password, token, key or secret reaches Sentry.
 
 ### 2.6 Render → the backend service and all backend variables
 

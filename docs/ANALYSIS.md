@@ -331,7 +331,7 @@ The original default was "drop all". Since 2026-09-29 the seven features you nam
 9. **`moderation_actions.action = 'escalated'` has no defined flow.**
    → Admin action "Escalate to senior": sets `posts.escalated_at` and logs the action. Seniors get an "Escalated" list filter.
 10. **`users.role` enum vs "implemented as two Django Groups" (§8.2)** is two sources of truth.
-    → `role` is the source of truth. On save it syncs Group membership and `is_staff` (true for moderator/senior). Only seniors (and the superuser) can edit `role`.
+    → `role` is the source of truth. On save it syncs Group membership and `is_staff` (true for moderator/senior, and always for a superuser, whose role stays `user` after `createsuperuser`). Only seniors (and the superuser) can edit `role`.
 11. **`users.password_hash` "null if OAuth-only"** vs Django, which stores `password` and marks OAuth-only accounts with an *unusable* password (never NULL).
     → Use Django's `password` field and `set_unusable_password()`.
 12. **`users.oauth_provider` / `oauth_subject_id`** duplicate django-allauth's `SocialAccount (provider, uid)` table.

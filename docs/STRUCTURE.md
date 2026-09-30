@@ -21,7 +21,8 @@ rumor-zero/
 │   │   │                               OpenNext build on Linux) + e2e (Playwright). Render deploys only "After CI Checks Pass".
 │   │   └── keepalive.yml        🔨 18  daily deep-health ping (DB + Redis); UptimeRobot handles the 5-min ping
 │   └── dependabot.yml           🔨 16  weekly pip + npm + github-actions update PRs (guide §12)
-├── .gitattributes               🔨 0A  `* text=auto eol=lf` so Windows checkouts don't break Linux CI
+├── .gitattributes               ✅ `* text=auto eol=lf` so Windows checkouts don't break Linux CI, plus `binary` for PDF,
+│                                    image and font types (git's text guess corrupted the PDF in docs/)
 ├── .gitignore                   ✅ real env files ignored, *.example kept
 ├── AGENTS.md                    ✅ canonical shared rules for Claude Code and Codex
 ├── CLAUDE.md                    ✅ Claude Code entry point; loads the shared AGENTS.md rules
@@ -38,7 +39,8 @@ rumor-zero/
 │   │   ├── settings.py          🔨 0A  single settings module driven by env (django-environ); no settings/ split
 │   │   ├── urls.py              🔨 0A  /api/health/, /api/v1/…, /api/auth/… (allauth headless), /<ADMIN_URL_PATH>
 │   │   ├── wsgi.py / asgi.py    🅐
-│   ├── apps/                    🔨 each created with `python manage.py startapp <name> apps/<name>`
+│   ├── apps/                    🔨 package (`__init__.py`); each app: create `apps/<name>/` first, then
+│   │                                `python manage.py startapp <name> apps/<name>`, then `name = "apps.<name>"` in apps.py
 │   │   ├── core/                0A  health + deep health, ClientIPMiddleware (relay secret), PlatformSettings singleton
 │   │   │                            (incl. emergency limits; seniors-only admin in 10), cursor pagination, throttles,
 │   │   │                            exception handler; 9 internal tick endpoint;

@@ -25,3 +25,28 @@ in `task.md`; transient continuation state belongs in `HANDOFF.md`.
   takeover is not automatic.
 - **Evidence:** user request and the repository-level dual-agent setup added on this date.
 
+### 2026-09-30 — Git for Windows line endings corrupt text-looking binaries
+
+- **Applies to:** all parts that add binary files (0D brand assets, fonts, PDFs).
+- **Fact:** Git for Windows' system config (`C:\Program Files\Git\etc\gitconfig`) sets
+  `core.autocrlf = true`. The ReportLab PDF in `docs/` (ASCII85 + Flate, no NUL bytes) passes git's
+  text heuristic, so checkout inserted 1,911 CRs (554,315 → 556,226 bytes) and broke its xref
+  offsets. The committed blob was intact.
+- **Consequence:** the root `.gitattributes` marks binary types explicitly. Add every new binary
+  extension there; never rely on git's text guess. `text=auto` uses the same heuristic.
+- **Evidence:** `git ls-files --eol` showed `i/lf w/crlf attr/`; the blob's `startxref` pointed at
+  `xref`, but the working copy's didn't. The repaired file hashes to the HEAD blob.
+
+### 2026-09-30 — sentry-sdk 2.71.0 default scrubbing is narrow
+
+- **Applies to:** 0A (Sentry init), 17 (deploy), any sentry-sdk upgrade.
+- **Fact:** with `send_default_pii=False`, only Authorization, Proxy-Authorization, Cookie,
+  Set-Cookie, X-Forwarded-For, X-Real-IP and X-Api-Key are stripped (`SENSITIVE_ENV_KEYS`). The
+  default `EventScrubber` matches **exact** lowercase keys. Request bodies ≤ 10 KB
+  (`max_request_body_size="medium"`) and frame locals (`include_local_variables=True`) are sent by
+  default. The newer `data_collection` option (substring matching) is opt-in only.
+- **Consequence:** the ARCHITECTURE §12 Sentry settings are required. Re-check these defaults
+  whenever the sentry-sdk version changes.
+- **Evidence:** sentry-python tag 2.71.0: `sentry_sdk/integrations/_wsgi_common.py`,
+  `sentry_sdk/scrubber.py`, `sentry_sdk/consts.py`, `sentry_sdk/utils.py`.
+

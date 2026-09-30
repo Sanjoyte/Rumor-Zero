@@ -71,7 +71,7 @@ Conventions:
 | password | Django hasher field | **Argon2id** first in `PASSWORD_HASHERS` (PBKDF2 fallback). Google-only accounts get `set_unusable_password()`, never NULL (c-11). |
 | display_name | varchar(50) | blank → UI falls back to `@username` |
 | bio | varchar(280) | |
-| role | `user` \| `moderator` \| `senior_moderator` | default `user`. **Source of truth**: on save, syncs Django Groups "Moderators" / "Senior moderators" and `is_staff = role != user` (c-10). |
+| role | `user` \| `moderator` \| `senior_moderator` | default `user`. **Source of truth**: on save, syncs Django Groups "Moderators" / "Senior moderators" and `is_staff = is_superuser or role != user` (c-10). `createsuperuser` leaves `role = user`, so the superuser keeps Django Admin access through `is_superuser`. |
 | is_email_verified | bool, default false | mirror of allauth `EmailAddress.verified` for the primary email (signal `email_confirmed`); true for Google sign-ups |
 | is_active, is_staff, is_superuser, last_login | Django | |
 | avatar_version | varchar(16) null | null = no photo (initials). Set by the avatar service (14B); the photo URL is built from it (§9). Replaces the old unused `avatar_url`. |
@@ -766,6 +766,7 @@ Other settings:
   - API permissions and throttles
   - query counts
   - `/api/health/` = 0 queries
+  - **hermetic:** tests never depend on the developer's real `backend/.env`. They set what they need through the `settings` fixture or `monkeypatch`; CI builds its env file from `backend/.env.example`.
 - **Frontend:** Vitest + React Testing Library for components and hooks.
 - **E2E:** Playwright for one user flow per part where it applies (e.g. sign up → post a fact → see CHECKING FACTS… → verdict badge).
 - **CI (`.github/workflows/ci.yml`):** ruff + pytest (Postgres service), eslint + tsc + vitest + `next build` + `opennextjs-cloudflare build` (Linux), Playwright. Render deploys **only after CI passes**.
@@ -783,6 +784,7 @@ Other settings:
 | Secrets | env vars only; `.env*` git-ignored; either agent needs explicit user authorization before reading or editing local env files; production env files denied; Dependabot |
 | Transport | HTTPS everywhere (Render/Cloudflare TLS); `SECURE_PROXY_SSL_HEADER`, HSTS, secure cookies in prod |
 | Admin exposure | unguessable `ADMIN_URL_PATH`, staff-only, path never public |
+| Error reports (Sentry) | `send_default_pii=False` alone strips only a fixed list of standard headers such as Authorization, Cookie and X-Forwarded-For (sentry-sdk 2.71.0), so settings also add `x-rz-proxy-secret`, `x-rz-cron-secret` and `x-rz-client-ip` to the `EventScrubber` denylist, and set `max_request_body_size="never"` and `include_local_variables=False`. Request bodies (passwords, allauth keys, emails), relay/cron secrets, client IPs and frame locals never reach Sentry. |
 | Uploaded images (profile photos) | decode-and-re-encode with Pillow (JPEG/PNG/WebP in, WebP out); size, pixel and dimension limits before decoding; EXIF/GPS/ICC/XMP dropped; original never stored; served from our origin with `nosniff` + `default-src 'none'; sandbox`; no SVG uploads (§4e) |
 | User-supplied links (source/DOI) | http/https only; no credentials, IP or localhost hosts; punycode shown; `rel="nofollow ugc noopener noreferrer"`; **never fetched server-side** (no SSRF) (§4c) |
 | Emergency abuse | eligibility gates, 1 per 24 h, lower report threshold, human confirmation of FALSE, 30-day block, moderator demote/block (§4b) |

@@ -135,21 +135,23 @@ Adjustments for real dependencies:
 **Backend scope**
 - Setup commands:
   - in `backend/`: `py -3.13 -m venv .venv`, then `django-admin startproject rumor_zero .`
-  - apps `core`, `accounts` via `python manage.py startapp <name> apps/<name>`
+  - apps `core`, `accounts`: create `apps/__init__.py` and the empty target folder first (`New-Item -ItemType Directory apps\<name>`; `startapp` refuses a missing destination), run `python manage.py startapp <name> apps/<name>`, then change `name` in its `apps.py` from `"<name>"` to `"apps.<name>"`
+  - straight after scaffolding, and after every `makemigrations`: `ruff check --fix . ; ruff format .`. Django writes single-quoted, unformatted code and only auto-runs black, which isn't installed. Migrations stay in ruff's scope.
 - Files:
   - `requirements.txt` / `requirements-dev.txt` pinned per SETUP B1/B2 (re-check the latest patch versions)
   - `pyproject.toml` (ruff, pytest)
   - `conftest.py`, `.python-version` (3.13)
   - root `compose.yaml`: `postgres:18` (volume at `/var/lib/postgresql`) + `redis:8-alpine`, both with healthchecks
-  - root `.gitattributes` (`* text=auto eol=lf`)
+  - root `.gitattributes`: **already exists** (added 2026-09-30: `* text=auto eol=lf` plus `binary` for PDF, image and font types). Keep it, and add any new binary type to it.
 - `settings.py`:
   - reads env with django-environ (process env wins over `.env`)
+  - `backend/.env` is optional: it's loaded only if present, and a missing required variable fails by **name** (never its value). Tests never depend on the developer's real `.env`; they set what they need through the `settings` fixture or `monkeypatch`, and CI builds its env file from `.env.example` (Part 0C).
   - `DATABASE_URL` with `CONN_MAX_AGE=60`, `CONN_HEALTH_CHECKS=True`
   - Redis cache when `REDIS_URL` is set (`protocol: 2`), else LocMem
   - Argon2 first in `PASSWORD_HASHERS`
   - WhiteNoise; admin at `ADMIN_URL_PATH`
   - production security settings when not DEBUG: `SECURE_PROXY_SSL_HEADER`, HSTS, secure cookies
-  - Sentry initialised only if `SENTRY_DSN` is set (`send_default_pii=False`)
+  - Sentry initialised only if `SENTRY_DSN` is set, with `send_default_pii=False`, `max_request_body_size="never"`, `include_local_variables=False` and `event_scrubber=EventScrubber(denylist=DEFAULT_DENYLIST + ["x-rz-proxy-secret", "x-rz-cron-secret", "x-rz-client-ip"])` (both from `sentry_sdk.scrubber`). `send_default_pii=False` alone would still send the three `X-RZ-*` headers, request bodies and frame locals (ARCHITECTURE §12).
   - logging that never prints secrets
 - `accounts.User`, exactly as in ARCHITECTURE §2:
   - UUID, lowercase username validation plus reserved names, lowercase email, role → Groups/`is_staff` sync, `is_email_verified`, `display_name`, `bio`
@@ -167,8 +169,8 @@ Adjustments for real dependencies:
 
 **Acceptance criteria**
 - [ ] `docker compose up -d` shows both services healthy; `python manage.py migrate` works on an empty DB
-- [ ] `AUTH_USER_MODEL = "accounts.User"` from the very first migration; `createsuperuser` works
-- [ ] Changing `role` updates Group membership and `is_staff`
+- [ ] `AUTH_USER_MODEL = "accounts.User"` from the very first migration; `createsuperuser` works and that account can log into Django Admin
+- [ ] Changing `role` updates Group membership and `is_staff`; a superuser keeps `is_staff` whatever its role (`is_staff = is_superuser or role != user`)
 - [ ] A `reputation_score` outside 0–100 is rejected by the database; new users start at 50
 - [ ] `/api/health/` returns `{"status":"ok"}` with **0 queries**; `/api/health/deep/` returns 403 without the secret and 200 with it
 - [ ] `X-RZ-Client-IP` is honoured only with the correct `X-RZ-Proxy-Secret`
@@ -176,7 +178,7 @@ Adjustments for real dependencies:
 - [ ] `ruff check .`, `ruff format --check .`, `pytest` and `makemigrations --check --dry-run` are all clean
 - [ ] No secret appears in the repo; any new env var is added to `backend/.env.example` and ENV_GUIDE
 
-**Required tests:** user model (email/username normalisation, reserved names, role sync, `reputation_score` range check), health endpoints (query count 0, secret check), ClientIPMiddleware (secret ok / wrong / missing), PlatformSettings accessor (seed including emergency defaults, caching), pagination output shape, exception handler `code`.
+**Required tests:** user model (email/username normalisation, reserved names, role sync, a superuser keeping `is_staff` with `role = user` and after role changes, `reputation_score` range check), health endpoints (query count 0, secret check), ClientIPMiddleware (secret ok / wrong / missing), PlatformSettings accessor (seed including emergency defaults, caching), pagination output shape, exception handler `code`, Sentry scrubbing (a Sentry-shaped event with `X-Rz-Proxy-Secret`, `X-Rz-Cron-Secret` and `X-Rz-Client-Ip` headers comes out scrubbed, and the init options above are set; no DSN or network needed).
 
 **Recommended models**
 - **Plan:** Opus 5.5 · high. The custom user model and settings layout are painful to change after the first migration.
@@ -334,7 +336,7 @@ Adjustments for real dependencies:
 **Backend scope:** none beyond what E2E needs (e.g. a CI env file built from `.env.example`).
 
 **CI** `.github/workflows/ci.yml`, on push and PR:
-- **backend:** ubuntu, Python 3.13, `postgres:18` + `redis` services; ruff, pytest, makemigrations check
+- **backend:** ubuntu, Python 3.13, `postgres:18` + `redis` services; builds `backend/.env` from `backend/.env.example` (test values only; there is no real `.env` in CI), with the Postgres service using the example's user, password and database so `DATABASE_URL` needs no override; ruff, pytest, makemigrations check
 - **frontend:** Node 24, `npm ci`, lint, typecheck, lint:tokens, vitest, `next build`, `npx @opennextjs/cloudflare build`
 - **e2e:** Playwright chromium against both servers
 

@@ -117,6 +117,7 @@ python manage.py process_pending --loop     # optional: local pipeline sweeper
 pytest                                      # backend tests (needs Postgres up)
 pytest --cov=apps
 ruff check . ; ruff format --check .        # lint + format check (fix: ruff format .)
+ruff check --fix . ; ruff format .          # right after startproject/startapp/makemigrations
 python manage.py makemigrations --check --dry-run
 # frontend (cd frontend)
 npm install
@@ -155,6 +156,12 @@ npm run brand:build                         # after Part 0D: regenerate assets f
   also goes into `backend/.env.example` + `docs/ENV_GUIDE.md`.
 - ruff line length is 100. Tests live in `apps/<name>/tests/test_*.py` with factory-boy. Assert
   query counts on list endpoints.
+- Generated code (`startproject`/`startapp` output and every new migration) is normalised with
+  `ruff check --fix . ; ruff format .` straight after generation, then kept formatted. Django only
+  auto-runs black, which we don't install, so its raw output is single-quoted and fails
+  `ruff format --check`. Don't exclude migrations from ruff.
+- A new app: create `apps/<name>/` first (`startapp` refuses a missing folder), run
+  `python manage.py startapp <name> apps/<name>`, then set `name = "apps.<name>"` in its `apps.py`.
 
 ### Frontend
 
