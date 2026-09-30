@@ -6,91 +6,100 @@ read-only git output.
 
 ## Active work
 
-- **Part:** 0A (Backend foundation). **Planned and approved; implementation not started.**
-- **Owner:** none (idle until the user starts the implementing agent)
-- **Phase:** ready to implement 0A
-- **Last approved plan:** `docs/agents/plans/part-0A-backend-foundation.md` (approved 2026-09-30 by
-  the user). The earlier `part-pre0A-verified-fixes.md` is done.
-- **Last updated:** 2026-09-30 by Claude (Opus 5.5), Part 0A planning
+- **Part:** none active. **Part 0A (Backend foundation) is done** (2026-09-30).
+- **Owner:** none (idle until the user starts the next part)
+- **Phase:** 0A implemented and validated; awaiting the user's review and git commit
+- **Last approved plan:** `docs/agents/plans/part-0A-backend-foundation.md` (status: implemented)
+- **Last updated:** 2026-09-30 by Claude (Sonnet 5.5), Part 0A implementation
 
 ## Completed checkpoints
 
-- Dual-agent setup (shared `AGENTS.md`, Claude/Codex adapters, memory, handoff, plans, Codex model
-  matrix): committed by the user as `dbe02e6`.
-- 2026-09-30 (Claude), pre-0A correction pass, committed by the user as `c25d479`. It verified five
-  reported issues and fixed them:
-  1. The docs PDF's working copy was corrupted by `core.autocrlf=true` (the committed blob was
-     intact). Added root `.gitattributes` (`* text=auto eol=lf` + `binary` types) and restored the
-     working-copy bytes. They now hash to the HEAD blob `1008f7036a406f1ad098f9391cff59a85eb7d0a2`.
-  2. `is_staff = is_superuser or role != user` (ARCHITECTURE §2, ANALYSIS c-10, task.md 0A).
-  3. The Sentry init spec adds an `EventScrubber` denylist for the three `X-RZ-*` headers,
-     `max_request_body_size="never"` and `include_local_variables=False` (task.md 0A,
-     ARCHITECTURE §12, ENV_GUIDE §2.5).
-  4. Generated code is normalised with `ruff check --fix . ; ruff format .` (AGENTS.md, task.md 0A).
-  5. The `startapp` folder and `apps.<name>` steps (AGENTS.md, task.md 0A, STRUCTURE); hermetic
-     tests and the CI env file from `.env.example` (task.md 0A/0C, ARCHITECTURE §11).
-
-- 2026-09-30 (Claude), Part 0A planning. Read-only checks:
-  - The 0A prerequisites (SETUP Part A, ENV_GUIDE §1.1–1.4) are met: Python 3.13.15, Docker engine
-    29.7.2 running, Compose v5.4.0, `RemoteSigned`, `backend/.env` present (not read), ports
-    5432/6379/8000 free.
-  - Every SETUP B1/B2 pin is still the latest on PyPI.
-  - User decisions: admin login by **email** (`USERNAME_FIELD="email"`) and an **exact-match**
-    reserved-username list (full list in the plan).
+- Dual-agent setup (`dbe02e6`) and the pre-0A correction pass (`c25d479`), both committed by the user.
+- 2026-09-30 (Claude, Opus 5.5): Part 0A planning; the plan was committed by the user.
+- 2026-09-30 (Claude, Sonnet 5.5): **Part 0A implemented.**
+  - Local services: root `compose.yaml` (Postgres 18 + Redis 8, healthchecks, loopback ports).
+  - `backend/`: venv, pinned `requirements*.txt`, `pyproject.toml`, `conftest.py`, the `rumor_zero`
+    project (env-driven `settings.py`, `env_helpers.py`, `sentry.py`, `urls.py`) and two apps:
+    - `accounts`: custom `User` (email login, UUID, role → groups/`is_staff` sync, DB checks),
+      `validators.py`, admin, `0001_initial`.
+    - `core`: `PlatformSettings` singleton + cached accessor, `ClientIPMiddleware`, cursor
+      pagination, exception handler with `code`, health + deep health, admin, `0001_initial`,
+      `0002_seed_platform_settings`.
+  - Docs updated: ARCHITECTURE §1/§2, STRUCTURE, `task.md` (both status locations + deviations),
+    MEMORY (the `localhost`/IPv6 stall).
+  - No new env variables were needed, so `backend/.env.example` and ENV_GUIDE are unchanged.
 
 ## Current workspace state
 
-- Tree was clean at `c25d479` when planning started. Uncommitted now: only the files listed below.
-- 25 tracked text files are still CRLF in the working tree from earlier checkouts; their index
-  copies are LF. Git may warn "CRLF will be replaced by LF". This is harmless; do not normalize them
-  as a separate change.
-- No product implementation part has started. No dependencies were installed, no containers were
-  started and no real env file was read.
+- The tree was clean at the start (the user had committed the plan). Everything below is new and
+  uncommitted; nothing pre-existing was modified except the docs listed.
+- `backend/.env` was **not read or edited**. Its `DATABASE_URL` host, port and name were checked as
+  booleans only (local, 5432, `rumor_zero`); no value was printed.
+- The local DB was migrated for the first time (empty DB → `accounts.0001` first). The Docker volume
+  `rumor-zero_pgdata` now holds that schema; the containers are running.
+- 25 tracked text files may still be CRLF in the working tree (see the earlier note); harmless.
 
-## Validation
+## Validation (all in `backend/`, `.venv\Scripts\…` executables, 2026-09-30)
 
-Part 0A planning: application tests don't apply yet (nothing is scaffolded). `git diff --check`
-exits 0.
-
-Earlier, from the pre-0A correction pass:
-
-- Passed: `git hash-object --no-filters <pdf>` equals `git rev-parse HEAD:<pdf>`
-  (`1008f70…`); the size is 554,315 and `startxref` lands on `xref`.
-- Passed: `git check-attr -a <pdf>` → `binary: set`, `text: unset`.
-- Passed: `git diff --quiet -- <pdf>` → exit 0 (no content change).
-- Passed: `git diff --check` → exit 0.
-- Passed: `.gitattributes` has LF endings and no trailing whitespace.
-- Passed: grep finds no `role != user` without the superuser clause, and no remaining "never sends
-  passwords or tokens (`send_default_pii=False`)" claim (outside the plan, which quotes the old text).
-- Not run: Django `startproject`/`startapp`/`makemigrations` + ruff. Issue 4 was verified against the
-  Django 5.2 template sources, because nothing is scaffolded yet. Part 0A's `ruff format --check .`
-  criterion exercises it.
-- Application tests: not applicable (not scaffolded).
+- Passed: `docker compose up -d` → `docker compose ps`: postgres and redis both `(healthy)`.
+- Passed: `python manage.py migrate` on the empty DB (21 migrations, `accounts.0001` before `admin`/`core`);
+  a second `migrate` reports "No migrations to apply".
+- Passed: `python manage.py makemigrations --check --dry-run` → "No changes detected" (exit 0).
+- Passed: `ruff check .` → "All checks passed!"; `ruff format --check .` → "43 files already formatted".
+- Passed: `python manage.py check` → no issues.
+- Passed: `python -m pytest` → **200 passed** (~5 s, real Postgres, hermetic cache/hasher/static).
+- Passed: `python -m pytest --cov=apps --cov=rumor_zero` → 200 passed, total coverage 93%.
+- Passed (inside pytest, subprocess with an explicit production-like env): `manage.py check --deploy
+  --fail-level WARNING` exits 0; the probe shows the proxy SSL header, SSL redirect with
+  `^api/health/$` exempt, HSTS ≥ 1 year with subdomains, and secure session/CSRF cookies.
+- Passed (in-process against the real `.env` config, statuses only): `/api/health/` → 200; deep health
+  without the secret → 403; with it → 200 `{"status":"ok","database":"ok","cache":"ok"}`, which
+  exercised real Postgres and the real Redis (`RedisCache`, protocol 2); the seeded PlatformSettings
+  row is present; the admin login page → 200.
+- Passed: `git grep "django-insecure"` (outside docs) → no match; `git check-ignore backend/.env` →
+  prints the path.
+- Not run: a manual interactive `createsuperuser` + browser login (covered by
+  `test_createsuperuser_account_can_log_into_the_admin`), and gunicorn (not runnable on Windows).
 
 ## Next exact action
 
-1. The user reviews and (optionally) commits the plan and this file.
-2. The user starts a fresh session with **Sonnet 5.5 · medium** (Claude) or **GPT-6.1 Sol · medium**
-   (Codex) and prompts:
-   `Implement only the approved Part 0A plan, validate it, update task.md and HANDOFF.md, then stop.`
-3. The implementing agent reads `docs/agents/plans/part-0A-backend-foundation.md` and starts at its
-   step 0. The pre-0A follow-ups (test `__init__.py`, migrations E501 ignore, secret variable
-   naming) are already folded into that plan.
+1. The user reviews the diff and commits (all git operations are theirs). Optional manual check:
+   `cd backend ; .\.venv\Scripts\Activate.ps1 ; python manage.py createsuperuser`, then
+   `python manage.py runserver` and log in at http://localhost:8000/admin/ with the **email**.
+2. Start a fresh session for the next part in `task.md`'s order. Per the table, Part 0B (frontend)
+   depends only on SETUP Part A and has no backend dependency; 0C needs 0A, 0B and 0D.
+3. Prompt for planning: `Plan Part 0B from task.md. Do not implement yet.`
 
 ## Blockers or user decisions
 
-- None open. The two 0A decisions are recorded in the plan.
+- None open.
+
+## Follow-ups noted during 0A (not done, per the part's scope)
+
+- Part 10: log old → new values for every PlatformSettings change; seniors-only editing; the senior
+  group's extra permissions (the role → groups mapping is cumulative).
+- Part 1/2: a CLI superuser has `is_email_verified=False` and no allauth `EmailAddress`; decide
+  whether it needs app writes. `DEFAULT_AUTHENTICATION_CLASSES` is `[]` until Part 1, so an
+  unauthenticated request currently returns 403 rather than 401.
+- Part 17: fail deploys when `PROXY_SHARED_SECRET`/`INTERNAL_CRON_SECRET` is short or a
+  `local-dev-only` placeholder; verify Render's health-check Host header against `ALLOWED_HOSTS`;
+  `collectstatic` must run in the build (the manifest storage needs it when DEBUG is False).
+- Part 0C: CI builds its env file from `backend/.env.example`; the tests read it only through
+  process env/`.env`, and `test_settings.py` passes every variable explicitly to its subprocesses.
 
 ## Files changed for the current work (uncommitted)
 
-- `docs/agents/plans/part-0A-backend-foundation.md` (new, approved plan)
-- `docs/agents/HANDOFF.md`
+- New: `compose.yaml`; `backend/{.python-version,manage.py,conftest.py,pyproject.toml,requirements.txt,requirements-dev.txt}`;
+  `backend/rumor_zero/*` (7 files); `backend/apps/**` (`accounts`, `core`, with migrations and tests).
+- Edited docs: `docs/ARCHITECTURE.md`, `docs/STRUCTURE.md`, `docs/agents/HANDOFF.md`,
+  `docs/agents/MEMORY.md`, `docs/agents/plans/part-0A-backend-foundation.md`, `task.md`.
+- Untracked and ignored (not for commit): `backend/.venv/`, caches, `backend/.coverage`.
 
 ## Handoff checklist (outgoing agent)
 
-- [ ] Stop editing before the incoming agent starts.
-- [ ] Record current owner, phase and approved plan.
-- [ ] Record files changed and any unrelated pre-existing modifications.
-- [ ] Record every validation command and its exact pass/fail result.
-- [ ] Record blockers, user decisions and the next exact action.
-- [ ] Promote only durable, non-duplicated knowledge to `MEMORY.md`.
+- [x] Stop editing before the incoming agent starts.
+- [x] Record current owner, phase and approved plan.
+- [x] Record files changed and any unrelated pre-existing modifications.
+- [x] Record every validation command and its exact pass/fail result.
+- [x] Record blockers, user decisions and the next exact action.
+- [x] Promote only durable, non-duplicated knowledge to `MEMORY.md`.

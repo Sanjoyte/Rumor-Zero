@@ -81,7 +81,7 @@ not let the review expand the part's scope without user approval.
 
 | Part | Title | Depends on | Status |
 |---|---|---|---|
-| 0A | Backend foundation | SETUP Part A | [ ] |
+| 0A | Backend foundation | SETUP Part A | [x] Done (2026-09-30) |
 | 0B | Frontend foundation & design system | SETUP Part A | [ ] |
 | 0D | Brand assets & Logo component | 0B | [ ] |
 | 0C | App shell, API relay, API client, CI | 0A, 0B, 0D | [ ] |
@@ -127,7 +127,7 @@ Adjustments for real dependencies:
 ---
 
 ## Part 0A: Backend foundation
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-09-30)
 **Goal:** a running Django project with env-driven settings, the final custom User model (before the first migration), health endpoints, shared API plumbing, local Postgres/Redis, and a green test and lint setup.
 **Depends on:** SETUP.md Part A (Python 3.13, Docker); ENV_GUIDE §1.1–1.4 done (`backend/.env` exists).
 **Stitch files to convert:** none.
@@ -168,15 +168,23 @@ Adjustments for real dependencies:
 **API endpoints:** `GET /api/health/`, `GET /api/health/deep/`.
 
 **Acceptance criteria**
-- [ ] `docker compose up -d` shows both services healthy; `python manage.py migrate` works on an empty DB
-- [ ] `AUTH_USER_MODEL = "accounts.User"` from the very first migration; `createsuperuser` works and that account can log into Django Admin
-- [ ] Changing `role` updates Group membership and `is_staff`; a superuser keeps `is_staff` whatever its role (`is_staff = is_superuser or role != user`)
-- [ ] A `reputation_score` outside 0–100 is rejected by the database; new users start at 50
-- [ ] `/api/health/` returns `{"status":"ok"}` with **0 queries**; `/api/health/deep/` returns 403 without the secret and 200 with it
-- [ ] `X-RZ-Client-IP` is honoured only with the correct `X-RZ-Proxy-Secret`
-- [ ] `python manage.py check --deploy` passes with production-like env values (DEBUG=False, secure cookies, HSTS)
-- [ ] `ruff check .`, `ruff format --check .`, `pytest` and `makemigrations --check --dry-run` are all clean
-- [ ] No secret appears in the repo; any new env var is added to `backend/.env.example` and ENV_GUIDE
+- [x] `docker compose up -d` shows both services healthy; `python manage.py migrate` works on an empty DB
+- [x] `AUTH_USER_MODEL = "accounts.User"` from the very first migration; `createsuperuser` works and that account can log into Django Admin
+- [x] Changing `role` updates Group membership and `is_staff`; a superuser keeps `is_staff` whatever its role (`is_staff = is_superuser or role != user`)
+- [x] A `reputation_score` outside 0–100 is rejected by the database; new users start at 50
+- [x] `/api/health/` returns `{"status":"ok"}` with **0 queries**; `/api/health/deep/` returns 403 without the secret and 200 with it
+- [x] `X-RZ-Client-IP` is honoured only with the correct `X-RZ-Proxy-Secret`
+- [x] `python manage.py check --deploy` passes with production-like env values (DEBUG=False, secure cookies, HSTS)
+- [x] `ruff check .`, `ruff format --check .`, `pytest` and `makemigrations --check --dry-run` are all clean
+- [x] No secret appears in the repo; any new env var is added to `backend/.env.example` and ENV_GUIDE (no new variable was needed)
+
+**Deviations and decisions (2026-09-30):**
+- Admin login is by **email** (`USERNAME_FIELD="email"`), reserved usernames are an **exact-match** list, and groups are cumulative: both were user decisions, now in ARCHITECTURE §2.
+- `compose.yaml` binds Postgres and Redis on `[::1]` as well as `127.0.0.1`. `localhost` resolves to `::1` first on Windows, and with nothing listening there libpq stalled for 8 s or more, so `makemigrations` appeared to hang. Ports stay loopback-only.
+- `ClientIPMiddleware` trusts only the right-most `X-Forwarded-For` entry. An unparseable one leaves `REMOTE_ADDR` alone, because anything to its left is client-supplied (ARCHITECTURE §1).
+- The role sync manages only the "Moderators" and "Senior moderators" groups and leaves other groups alone, instead of a blanket `groups.set()`.
+- `PlatformSettings` fields carry an upper bound of 32767 (their column type), so the seed and the admin reject absurd values.
+- `pytest` ignores WhiteNoise's "No directory at staticfiles" warning (`collectstatic` doesn't run in tests).
 
 **Required tests:** user model (email/username normalisation, reserved names, role sync, a superuser keeping `is_staff` with `role = user` and after role changes, `reputation_score` range check), health endpoints (query count 0, secret check), ClientIPMiddleware (secret ok / wrong / missing), PlatformSettings accessor (seed including emergency defaults, caching), pagination output shape, exception handler `code`, Sentry scrubbing (a Sentry-shaped event with `X-Rz-Proxy-Secret`, `X-Rz-Cron-Secret` and `X-Rz-Client-Ip` headers comes out scrubbed, and the init options above are set; no DSN or network needed).
 

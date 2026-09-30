@@ -37,6 +37,18 @@ in `task.md`; transient continuation state belongs in `HANDOFF.md`.
 - **Evidence:** `git ls-files --eol` showed `i/lf w/crlf attr/`; the blob's `startxref` pointed at
   `xref`, but the working copy's didn't. The repaired file hashes to the HEAD blob.
 
+### 2026-09-30 — `localhost` stalls on Windows unless the container also listens on `::1`
+
+- **Applies to:** every part that connects to local Postgres/Redis (all backend parts, Playwright in
+  0C); anyone changing `compose.yaml` port bindings or `DATABASE_URL`/`REDIS_URL`.
+- **Fact:** on this Windows setup `localhost` resolves to `['::1', '127.0.0.1']`. With the ports bound
+  only to `127.0.0.1`, psycopg/libpq stalled on the `::1` attempt (8 s with `connect_timeout=8`, no
+  visible end without one), so `manage.py makemigrations`/`migrate` looked hung. A raw socket to
+  `::1` was refused after ~2 s, and `127.0.0.1` connected instantly.
+- **Consequence:** `compose.yaml` binds both `127.0.0.1` and `[::1]` (still loopback-only). Keep both.
+  If a Django command hangs on the DB, test with a socket/`connect_timeout` before suspecting the code.
+- **Evidence:** socket and psycopg probes; after adding `[::1]` the `localhost` connect took 0.04 s.
+
 ### 2026-09-30 — sentry-sdk 2.71.0 default scrubbing is narrow
 
 - **Applies to:** 0A (Sentry init), 17 (deploy), any sentry-sdk upgrade.

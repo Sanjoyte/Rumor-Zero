@@ -1,0 +1,25 @@
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "DJ", "C4", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "rumor_zero"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["E501"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "rumor_zero.settings"
+testpaths = ["apps"]
+addopts = "-ra --strict-markers"
+filterwarnings = [
+    # WhiteNoise notes that `collectstatic` has not run; tests use plain static storage.
+    "ignore:No directory at:UserWarning",
+]
+
+[tool.coverage.run]
+source = ["apps", "rumor_zero"]
+omit = ["*/migrations/*", "*/tests/*", "*/tests.py"]

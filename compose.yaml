@@ -1,0 +1,35 @@
+name: rumor-zero
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: rumor_zero
+      POSTGRES_PASSWORD: rumor_zero
+      POSTGRES_DB: rumor_zero
+    ports:
+      # Loopback only. Both families, because "localhost" resolves to ::1 first on Windows and
+      # a client would stall on the IPv6 attempt if nothing listened there.
+      - "127.0.0.1:5432:5432"
+      - "[::1]:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rumor_zero -d rumor_zero"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+      - "[::1]:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

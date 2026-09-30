@@ -1,6 +1,7 @@
 # Plan: Part 0A, Backend foundation
 
-- **Status:** APPROVED, **not started**. No step below has been executed yet.
+- **Status:** IMPLEMENTED 2026-09-30 by Claude (Sonnet 5.5). Deviations are listed under Part 0A in
+  `task.md`. The steps below are kept as the record of what was approved.
 - **Drafted:** 2026-09-30 by Claude (Opus 5.5). **Approved:** 2026-09-30 by the user (Sanjoyte).
   **Implement with:** Sonnet 5.5 · medium (task.md).
 - **Part:** 0A (task.md). **Depends on:** SETUP.md Part A + ENV_GUIDE §1.1–1.4. These aren't task.md

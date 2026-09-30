@@ -40,7 +40,7 @@ GitHub Actions → GET /api/health/deep/ (daily, DB+Redis) · CI on every push/P
 - `frontend/src/app/api/[...path]/route.ts` (the **API relay**) forwards `/api/*` to `BACKEND_ORIGIN`.
   - It allow-lists request headers, keeps every `Set-Cookie`, uses `redirect:'manual'`, and has a ~70 s timeout that returns `503 {"code":"backend_waking"}`.
   - It adds `X-RZ-Proxy-Secret` and `X-RZ-Client-IP` (from `cf-connecting-ip`).
-- Django's `ClientIPMiddleware` sets `REMOTE_ADDR` from `X-RZ-Client-IP` **only** if the secret matches; otherwise it uses the right-most `X-Forwarded-For` entry. allauth (`ALLAUTH_TRUSTED_PROXY_COUNT=0`) and DRF (`NUM_PROXIES=0`) then read `REMOTE_ADDR`.
+- Django's `ClientIPMiddleware` sets `REMOTE_ADDR` from `X-RZ-Client-IP` **only** if the secret matches (constant-time compare, and the IP must parse); otherwise it uses the right-most `X-Forwarded-For` entry (only that one: everything to its left is client-supplied, so an unparseable right-most entry leaves `REMOTE_ADDR` alone). It is the first middleware and **removes both `X-RZ-*` headers from `request.META`**, so no later code, log line or error report can see them. allauth (`ALLAUTH_TRUSTED_PROXY_COUNT=0`) and DRF (`NUM_PROXIES=0`) then read `REMOTE_ADDR`.
 - No CORS anywhere. `django-cors-headers` is not installed.
 - Next's `proxy.ts`/middleware is **not used**.
 
@@ -58,20 +58,21 @@ Conventions:
 - `timestamptz` everywhere, stored and returned in UTC.
 - Text fields are `''` rather than NULL unless noted.
 - Every status and enum is a Django `TextChoices` backed by a DB `CheckConstraint`.
+- Headings below are logical names. Physical tables keep Django's defaults (`accounts_user`, `core_platformsettings`, …).
 
 ### users: `accounts.User` (`AUTH_USER_MODEL`, must exist before the first migration)
 
-`AbstractBaseUser` + `PermissionsMixin`.
+`AbstractBaseUser` + `PermissionsMixin`. **`USERNAME_FIELD = "email"`** (Django Admin logs in with the email, case-insensitively), `REQUIRED_FIELDS = ["username"]`, so `createsuperuser` asks for email, username, password.
 
 | Field | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
-| username | varchar(30) unique | lowercase `^[a-z0-9_]{3,30}$`, stored lowercase; reserved words blocked (`admin`, `api`, `settings`…) |
-| email | varchar(254) unique | stored lowercase; never shown publicly |
+| username | varchar(30) unique | lowercase `^[a-z0-9_]{3,30}$`, stored lowercase. Input is NFKC-normalised, stripped and lowercased before validation (so "Ada" is stored as `ada`). Reserved words are blocked by **exact match**, case-insensitively (`admin` is reserved, `ada_admin` is not); the list is `RESERVED_USERNAMES` in `apps/accounts/validators.py`. A DB check enforces the format. |
+| email | varchar(254) unique | stripped and lowercased on save (a DB check enforces lowercase); never shown publicly |
 | password | Django hasher field | **Argon2id** first in `PASSWORD_HASHERS` (PBKDF2 fallback). Google-only accounts get `set_unusable_password()`, never NULL (c-11). |
 | display_name | varchar(50) | blank → UI falls back to `@username` |
 | bio | varchar(280) | |
-| role | `user` \| `moderator` \| `senior_moderator` | default `user`. **Source of truth**: on save, syncs Django Groups "Moderators" / "Senior moderators" and `is_staff = is_superuser or role != user` (c-10). `createsuperuser` leaves `role = user`, so the superuser keeps Django Admin access through `is_superuser`. |
+| role | `user` \| `moderator` \| `senior_moderator` | default `user`. **Source of truth**: on save, syncs Django Groups "Moderators" / "Senior moderators" and `is_staff = is_superuser or role != user` (c-10). Groups are **cumulative**: `moderator` → "Moderators"; `senior_moderator` → both "Moderators" and "Senior moderators" (Part 10 gives the senior group only the extra permissions). Only those two groups are managed; other groups are left alone. The sync runs on create and when `role` changes, so a `last_login`-only save stays one query. In Django Admin `is_staff` and `groups` are read-only (editing them would fight the sync). `createsuperuser` leaves `role = user`, so the superuser keeps Django Admin access through `is_superuser`. |
 | is_email_verified | bool, default false | mirror of allauth `EmailAddress.verified` for the primary email (signal `email_confirmed`); true for Google sign-ups |
 | is_active, is_staff, is_superuser, last_login | Django | |
 | avatar_version | varchar(16) null | null = no photo (initials). Set by the avatar service (14B); the photo URL is built from it (§9). Replaces the old unused `avatar_url`. |
@@ -233,9 +234,10 @@ A separate table keeps image bytes out of every `users` query.
 ### platform_settings (singleton, id=1) (c-13)
 
 - Fields: `report_threshold`, `report_window_hours`, `report_min_account_age_hours`, `confidence_threshold`, `fact_posts_per_day`, the six emergency limits (`emergency_duration_hours`, `emergency_posts_per_day`, `emergency_min_account_age_days`, `emergency_min_reputation`, `emergency_report_threshold`, `emergency_false_cooldown_days`; §3), `updated_by`, `updated_at`. All are created in Part 0A.
-- Seeded from env defaults by a data migration.
-- Editable **only by senior moderators** in Django Admin.
-- Read through a 60 s cache; every change is logged.
+- Seeded from env defaults by a data migration (a missing or empty variable falls back to its default; an invalid or out-of-range one stops startup, naming the variable).
+- Every field is a `PositiveSmallIntegerField` with a DB `CheckConstraint`: ≥ 1 for `report_threshold`, `report_window_hours`, `emergency_duration_hours` and `emergency_report_threshold`; 0–100 for `confidence_threshold` and `emergency_min_reputation`; ≥ 0 for the rest (a per-day value of 0 works as a kill switch). `id` is fixed at 1 by a check.
+- Editable **only by senior moderators** in Django Admin (Part 10; until then any staff user with the model permission).
+- Read through a 60 s cache (`apps.core.services.get_platform_settings()`; a save clears it now and again on commit); every change is logged (Part 10).
 
 ## 3. Configuration values
 
