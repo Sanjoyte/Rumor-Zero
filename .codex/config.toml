@@ -1,0 +1,5 @@
+# Shared project defaults. Codex loads this file only after the project is trusted.
+# Per-part selections in task.md override these defaults through /model and /reasoning.
+model = "gpt-6.1-sol"
+model_reasoning_effort = "high"
+

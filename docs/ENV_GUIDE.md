@@ -7,7 +7,10 @@ Order:
 Every variable in `backend/.env.example` and `frontend/.env.example` appears below. UI paths were checked on 2026-09-29; dashboards change, so if a button has moved, search the page for the setting's name.
 
 > **Ground rules**
-> - **Never paste a secret into a chat with Claude** (or anyone else). Paste secrets only into your local `.env` files or a provider's dashboard. Claude Code asks your permission before reading or editing `backend/.env` or `frontend/.env.local`, never repeats their values, and can't read `.dev.vars` or `.env.production*` at all.
+> - **Never paste a secret into a chat with Claude Code, Codex or anyone else.** Paste secrets only
+>   into your local `.env` files or a provider dashboard. Either agent may read or edit
+>   `backend/.env` or `frontend/.env.local` only when you explicitly ask and authorize it, and it
+>   must never repeat the values. `.dev.vars` and `.env.production*` stay denied.
 > - Local and production secrets are **always different values**. Never reuse a local secret in production.
 > - Wherever a dashboard asks for an app, project or sender **name**, type **`Rumor Zero`**. Where it asks for a URL-bearing **slug**, use `rumor-zero` (or the fallbacks in §2.0).
 
@@ -123,7 +126,7 @@ Free. No billing account is needed; if Google offers to set one up, choose skip 
 6. The dialog shows a **Client ID** (`…apps.googleusercontent.com`) and a **Client secret**. Copy **only the Client ID**:
    - `backend/.env` → `GOOGLE_OAUTH_CLIENT_ID=<client id>`
    - `frontend/.env.local` → `NEXT_PUBLIC_GOOGLE_CLIENT_ID=<same client id>`
-   
+
    The **secret is not needed** by this flow. Don't save it anywhere. Client IDs are public by design, so the `NEXT_PUBLIC_` one is safe.
 7. **Testing mode.** The app starts in "Testing". With only the basic scopes, sign-in works for any Google account, but if Google blocks an account, add it under **Audience → Test users** (up to 100).
    - Gotcha: new or changed origins can take from a few minutes to a few hours to start working.
@@ -368,7 +371,7 @@ Also pick `ADMIN_URL_PATH`: run `py -3.13 -c "import secrets; print('mod-' + sec
    - **App home page:** `<FRONTEND>/`
    - **Privacy policy:** `<FRONTEND>/privacy`
    - **Terms of service:** `<FRONTEND>/terms`
-   
+
    These pages exist from Part 15 and **are required** before publishing. Under **Authorized domains**, add the registrable domain `<subdomain>.workers.dev` (e.g. `rumor-zero.workers.dev`) → **Save**.
 3. **Audience** → **Publish app** → confirm → status **In production**. With only the basic scopes, no Google verification is needed. The consent screen then shows the app name "Rumor Zero" without a logo, which is fine.
 4. No new variable: `GOOGLE_OAUTH_CLIENT_ID` / `NEXT_PUBLIC_GOOGLE_CLIENT_ID` stay the same client ID.

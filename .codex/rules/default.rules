@@ -1,0 +1,99 @@
+# The user performs every state-changing git/GitHub operation. Read-only git commands such as
+# status, diff, log and show remain available. Project-local rules load only for a trusted repo.
+prefix_rule(
+    pattern = [
+        "git",
+        [
+            "add",
+            "am",
+            "apply",
+            "bisect",
+            "branch",
+            "checkout",
+            "cherry-pick",
+            "clean",
+            "clone",
+            "commit",
+            "config",
+            "fetch",
+            "filter-branch",
+            "gc",
+            "init",
+            "merge",
+            "mv",
+            "notes",
+            "prune",
+            "pull",
+            "push",
+            "rebase",
+            "reflog",
+            "remote",
+            "replace",
+            "reset",
+            "restore",
+            "revert",
+            "rm",
+            "sparse-checkout",
+            "stash",
+            "submodule",
+            "switch",
+            "tag",
+            "update-index",
+            "update-ref",
+            "worktree",
+        ],
+    ],
+    decision = "forbidden",
+    justification = "The user performs git mutations. Use git status/diff/log/show for inspection and ask the user to perform the state-changing command.",
+    match = [
+        "git add .",
+        "git commit -m checkpoint",
+        "git push origin main",
+        "git checkout -- task.md",
+    ],
+    not_match = [
+        "git status --short",
+        "git diff -- task.md",
+        "git log --oneline",
+        "git show HEAD",
+    ],
+)
+
+prefix_rule(
+    pattern = ["gh", "pr", ["create", "merge", "close", "edit", "comment", "review"]],
+    decision = "forbidden",
+    justification = "The user performs GitHub mutations. Read-only inspection is allowed.",
+    match = ["gh pr create", "gh pr merge 12", "gh pr comment 12 --body review"],
+    not_match = ["gh pr view 12", "gh pr list"],
+)
+
+prefix_rule(
+    pattern = ["gh", "repo", ["create", "delete", "edit", "fork", "rename", "sync"]],
+    decision = "forbidden",
+    justification = "The user performs repository mutations. Read-only inspection is allowed.",
+    match = ["gh repo create rumor-zero", "gh repo delete owner/rumor-zero"],
+    not_match = ["gh repo view owner/rumor-zero"],
+)
+
+prefix_rule(
+    pattern = ["gh", ["release", "secret", "variable"]],
+    decision = "forbidden",
+    justification = "Release, secret and variable changes are reserved for the user.",
+    match = ["gh release create v1", "gh secret set TOKEN", "gh variable set MODE"],
+)
+
+prefix_rule(
+    pattern = ["gh", "workflow", "run"],
+    decision = "forbidden",
+    justification = "The user starts GitHub workflows.",
+    match = ["gh workflow run ci.yml"],
+    not_match = ["gh workflow view ci.yml", "gh workflow list"],
+)
+
+prefix_rule(
+    pattern = ["gh", "api"],
+    decision = "forbidden",
+    justification = "gh api can mutate arbitrary GitHub resources; ask the user to run it.",
+    match = ["gh api repos/owner/rumor-zero"],
+)
+

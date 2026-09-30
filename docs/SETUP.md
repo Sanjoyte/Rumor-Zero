@@ -28,7 +28,9 @@ Verify:
 git --version        # expect: git version 2.56.x or newer
 ```
 
-You run every git command yourself. Claude is blocked from state-changing git commands by `.claude/settings.json`.
+You run every git command yourself. Claude Code is blocked from state-changing git commands by
+`.claude/settings.json`; Codex is blocked by `.codex/rules/default.rules`. The shared prohibition in
+`AGENTS.md` still applies if a tool surface cannot enforce those files.
 
 ### A2. Python 3.13
 
@@ -199,7 +201,8 @@ These are required third-party widgets, loaded only on the auth pages.
 
 ## Part C: Free accounts to create
 
-**None of these should ask for a credit card.** If one does, stop and don't enter it. Tell Claude, and it will suggest an alternative.
+**None of these should ask for a credit card.** If one does, stop and do not enter it. Tell the
+active agent, and it will suggest an alternative.
 
 | # | Service | What it's for | When needed | Plan / free limits (2026-09-29) |
 |---|---|---|---|---|

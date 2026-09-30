@@ -12,6 +12,9 @@ rumor-zero/
 ├── .claude/
 │   └── settings.json            ✅ Claude Code permissions: denies state-changing git/gh commands, `.dev.vars` and `.env.production*`; asks before reading or editing the real env files
 │                                    (recommended addition, done by you: "Edit(/design/**)" so design/ can't be edited)
+├── .codex/
+│   ├── config.toml              ✅ Codex project model/reasoning defaults
+│   └── rules/default.rules      ✅ Codex command rules: state-changing git/gh commands are forbidden
 ├── .github/
 │   ├── workflows/
 │   │   ├── ci.yml               🔨 0C  backend (ruff, pytest on Postgres 18 service) + frontend (lint, typecheck, vitest, build,
@@ -20,14 +23,15 @@ rumor-zero/
 │   └── dependabot.yml           🔨 16  weekly pip + npm + github-actions update PRs (guide §12)
 ├── .gitattributes               🔨 0A  `* text=auto eol=lf` so Windows checkouts don't break Linux CI
 ├── .gitignore                   ✅ real env files ignored, *.example kept
-├── CLAUDE.md                    ✅ rules and commands for Claude Code sessions
+├── AGENTS.md                    ✅ canonical shared rules for Claude Code and Codex
+├── CLAUDE.md                    ✅ Claude Code entry point; loads the shared AGENTS.md rules
 ├── task.md                      ✅ ordered build parts + status checkboxes
 ├── compose.yaml                 🔨 0A  local postgres:18 + redis:8-alpine (dev only)
 ├── render.yaml                  🔨 17  Render Blueprint for the backend service (rootDir: backend)
 │
 ├── backend/                     Django project root (cd here to run manage.py)
 │   ├── .env.example             ✅ every backend variable, documented
-│   ├── .env                     you create it (git-ignored; Claude asks before reading or editing it)
+│   ├── .env                     you create it (git-ignored; either agent needs explicit permission to read/edit it)
 │   ├── .python-version          🔨 0A  "3.13"
 │   ├── manage.py                🅐  `django-admin startproject rumor_zero .`
 │   ├── rumor_zero/              🅐  project package (Python needs the underscore)
@@ -66,7 +70,7 @@ rumor-zero/
 ├── frontend/                    Next.js app root (cd here to run npm)
 │   ├── .env.example             ✅ every frontend variable, documented
 │   │                                ⚠ create-next-app refuses a folder containing it: Part 0B moves it aside, scaffolds, moves it back
-│   ├── .env.local               you create it (git-ignored; Claude asks before reading or editing it)
+│   ├── .env.local               you create it (git-ignored; either agent needs explicit permission to read/edit it)
 │   ├── .gitignore               🅑  ⚠ contains `.env*`; Part 0B must append `!.env.example`
 │   ├── .nvmrc                   🔨 0B  "24" (also read by Cloudflare Workers Builds)
 │   ├── package.json             🅑  scripts: dev, build, start, lint (eslint), lint:tokens, typecheck, test (vitest run), test:e2e
@@ -149,10 +153,14 @@ rumor-zero/
 │   ├── fact-based-social-platform-architecture-guide.pdf   ✅ original guide (read ARCHITECTURE.md instead)
 │   ├── ANALYSIS.md              ✅ inventory, gaps, inconsistencies, decisions, topology, name audit
 │   ├── ARCHITECTURE.md          ✅ condensed source of truth for all parts
+│   ├── agents/                  ✅ cross-agent continuity
+│   │   ├── HANDOFF.md           live owner, phase, validation and exact next action
+│   │   ├── MEMORY.md            durable verified discoveries not stored in another source of truth
+│   │   └── plans/               user-approved per-part implementation plans
 │   ├── SETUP.md                 ✅ tools, packages, accounts
 │   ├── STRUCTURE.md             ✅ this file
 │   └── ENV_GUIDE.md             ✅ how to obtain every env value
-└── design/                      ✅ READ-ONLY (you change these files, never Claude)
+└── design/                      ✅ READ-ONLY (you change these files, never Claude or Codex)
     ├── logo.svg                 ✅ master logo (D9); every derived asset comes from it via `npm run brand:build`
     ├── logo.png                 ✅ earlier raster version, kept but unused
     └── stitch/                  ✅ visual source of truth (code.html + DESIGN.md authoritative; screen.png reference)
@@ -163,7 +171,7 @@ rumor-zero/
 - **Placeholders created now: only `backend/.env.example` and `frontend/.env.example`.**
   - `django-admin startproject rumor_zero .` only needs `manage.py` and `rumor_zero/` to be absent, so it won't collide.
   - `create-next-app` *does* refuse a non-empty folder. Its allow-list includes `.gitignore`, `.claude`, `docs` and `LICENSE`, but not `.env.example`. That's why Part 0B moves the file aside for the scaffold step.
-  - Scaffold with `--no-agents-md`. Otherwise create-next-app writes `frontend/AGENTS.md` and `frontend/CLAUDE.md`, which would compete with the root CLAUDE.md.
+  - Scaffold with `--no-agents-md`. Otherwise create-next-app writes `frontend/AGENTS.md` and `frontend/CLAUDE.md`, which would compete with the root shared instructions.
 - **`backend/apps/<name>`** keeps the project package (`rumor_zero/`) small, with domain code grouped by feature. The app label stays short (`posts`), and the Python path is `apps.posts`.
 - **One `settings.py`, driven by env vars**, not `settings/dev.py` + `settings/prod.py`. It's simpler, and Render and local differ only in `.env` values.
 - **Where converted Stitch code goes:**

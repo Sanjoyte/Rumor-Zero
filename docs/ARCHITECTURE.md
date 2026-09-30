@@ -780,7 +780,7 @@ Other settings:
 | Brute force | allauth rate limits + DRF throttles on the real client IP (relay header + secret) |
 | Bots / brigading | Turnstile on signup, email verification before writes, new-account report weighting, report throttle |
 | Stolen DB | Argon2id; allauth stores only signed/hashed keys |
-| Secrets | env vars only; `.env*` git-ignored; Claude asks before reading or editing local env files; production env files denied; Dependabot |
+| Secrets | env vars only; `.env*` git-ignored; either agent needs explicit user authorization before reading or editing local env files; production env files denied; Dependabot |
 | Transport | HTTPS everywhere (Render/Cloudflare TLS); `SECURE_PROXY_SSL_HEADER`, HSTS, secure cookies in prod |
 | Admin exposure | unguessable `ADMIN_URL_PATH`, staff-only, path never public |
 | Uploaded images (profile photos) | decode-and-re-encode with Pillow (JPEG/PNG/WebP in, WebP out); size, pixel and dimension limits before decoding; EXIF/GPS/ICC/XMP dropped; original never stored; served from our origin with `nosniff` + `default-src 'none'; sandbox`; no SVG uploads (§4e) |
@@ -803,7 +803,7 @@ Other settings:
 
 ## 14. Branding and logo (D9, changed 2026-09-29; ANALYSIS e, f-8; Part 0D)
 
-**Master:** `design/logo.svg` (read-only; you replace it, Claude never edits `design/`). `design/logo.png` is an earlier raster version, kept but **not used**.
+**Master:** `design/logo.svg` (read-only; you replace it, Claude and Codex never edit `design/`). `design/logo.png` is an earlier raster version, kept but **not used**.
 
 **What the SVG is (current version, recoloured by you and inspected 2026-09-30):**
 - `viewBox="0 0 1000 1000"`, no width/height, transparent background, 2.2 KB.

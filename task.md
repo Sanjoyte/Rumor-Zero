@@ -2,19 +2,80 @@
 
 ## How to use this file
 
-1. Start Claude Code in the repo root (`claude`).
-2. **Enter plan mode:** press **Shift+Tab** until the footer shows *plan mode*, or start your message with `/plan`.
-3. **Set the part's PLAN model and effort.** For example `/model opus`, then `/effort xhigh`.
-4. Type: **`Plan Part 4 from @task.md`**. The `@` attaches this file, and Claude reads `CLAUDE.md` and `docs/ARCHITECTURE.md` itself.
-5. **Review the plan.** Ask for changes until you're happy, then approve it.
-6. **Switch to the IMPLEMENT model**, if it's different. Press **Esc** as soon as implementation starts, run `/model …` and `/effort …`, then type *"Implement the approved plan."*
-   - Shortcut: `/model opusplan` uses Opus while planning and switches to Sonnet for implementation automatically.
-7. **Claude implements only that part.** It runs the part's tests, ticks its acceptance criteria below, sets its **Status**, and **stops**.
-8. **You review** the diff and run the tests yourself, then do all git operations (commit/push) yourself. Start a fresh session (`/clear`) for the next part.
+1. Choose **one** active agent. Never run Claude Code and Codex concurrently in the same checkout.
+2. Start it in the repo root. It must read `AGENTS.md`, `docs/agents/HANDOFF.md`,
+   `docs/agents/MEMORY.md`, this part and the relevant architecture sections before planning.
+3. Set the part's **PLAN** model and reasoning effort from the tables below, then enter plan mode:
+   - Claude Code: `/model …`, `/effort …`, then `/plan` (or Shift+Tab).
+   - Codex: `/model`, `/reasoning`, then `/plan`.
+4. Prompt: **`Plan Part <ID> from task.md. Do not implement yet.`** Review and revise the plan.
+   After you approve it, the agent saves it under `docs/agents/plans/` and links it from
+   `docs/agents/HANDOFF.md`.
+5. Switch to the **IMPLEMENT** model/effort if the table differs, then prompt:
+   **`Implement only the approved Part <ID> plan, validate it, update task.md and HANDOFF.md, then stop.`**
+6. If the active agent is near a usage/context limit, tell it:
+   **`Checkpoint now for a handoff. Update HANDOFF.md and stop without starting another step.`**
+7. Start the other agent and prompt:
+   **`Continue Part <ID> from docs/agents/HANDOFF.md and the linked approved plan. Verify the current diff and test state first; continue only from the recorded next action.`**
+8. When the part is done, the agent runs its required tests, ticks its acceptance criteria, updates
+   both status locations in this file, records final validation in `HANDOFF.md`, and stops.
+9. You review the diff and tests, then perform all git operations yourself. Start a fresh session
+   for the next part (`/clear` in Claude; a new Codex chat/session in Codex).
 
 **Models and effort** (checked against the Claude Code docs on 2026-09-29):
 - `/model` aliases: `opus` → Opus 5.5, `sonnet` → Sonnet 5.5, `haiku` → Haiku 4.5, `opusplan`.
 - `/effort` levels: `low`, `medium`, `high`, `xhigh`, `max` on Opus 5.5 and Sonnet 5.5 (both default to `medium`). `max` is **session-only**. Haiku 4.5 has no effort setting.
+
+### Codex model choices for ChatGPT Plus
+
+Checked against official OpenAI documentation on 2026-09-30. The project default in
+`.codex/config.toml` is `gpt-6.1-sol` with `high` reasoning. Use `/model` and `/reasoning` to apply
+the per-part choices below. The picker is authoritative for your account. If Astra is unavailable
+or your Plus allowance is low, replace it with `gpt-6.1-sol` at the same effort (or one level
+higher). If GPT-6.1 Sol has not reached your client, use `gpt-6-sol` at the same effort.
+
+- **GPT-6.1 Sol (`gpt-6.1-sol`):** default for planning and implementation; best balance for long, coordinated
+  engineering work.
+- **GPT-6 Astra (`gpt-6-astra`):** reserve for the five highest-risk plans/audits. It uses the Plus allowance much
+  faster, so do not use it for routine implementation.
+- **GPT-6 Luna (`gpt-6-luna`):** use for bounded, mechanical implementation only after a stronger model has fixed
+  the plan. Escalate to Sol if tests fail for a non-obvious reason.
+- Avoid `ultra` on Plus for these parts. It delegates to subagents and spends allowance quickly;
+  the explicit Claude↔Codex handoff already provides continuity.
+
+| Part | Codex plan | Codex implement | Why |
+|---|---|---|---|
+| 0A | GPT-6.1 Sol · high | GPT-6.1 Sol · medium | Foundational schema/settings; implementation is standard once fixed |
+| 0B | GPT-6.1 Sol · medium | GPT-6.1 Sol · high | Large coordinated design-system conversion |
+| 0D | GPT-6.1 Sol · medium | GPT-6.1 Sol · medium | Bounded asset pipeline, but exactness matters |
+| 0C | GPT-6.1 Sol · high | GPT-6.1 Sol · high | Relay, cookies, proxy trust and CI interact |
+| 1 | GPT-6 Astra · high | GPT-6.1 Sol · xhigh | Security-critical auth design; long implementation |
+| 2 | GPT-6.1 Sol · high | GPT-6.1 Sol · high | Enumeration safety and token/session edge cases |
+| 3 | GPT-6.1 Sol · high | GPT-6.1 Sol · medium | Account-linking risks, small implementation surface |
+| 4 | GPT-6.1 Sol · high | GPT-6.1 Sol · high | Central post schema plus substantial API/UI work |
+| 5 | GPT-6.1 Sol · medium | GPT-6.1 Sol · medium | Standard detail/share/delete/polling flow |
+| 6 | GPT-6.1 Sol · high | GPT-6.1 Sol · medium | Feed query and cache invalidation need care |
+| 7 | GPT-6.1 Sol · medium | GPT-6 Luna · high | Well-bounded CRUD after the interfaces are fixed |
+| 7B | GPT-6.1 Sol · high | GPT-6.1 Sol · high | Mixed-feed cursor stability is subtle |
+| 8 | GPT-6.1 Sol · xhigh | GPT-6.1 Sol · high | Concurrency, windows and anti-brigading |
+| 9 | GPT-6 Astra · xhigh | GPT-6.1 Sol · xhigh | Core state machine and concurrent transitions |
+| 10 | GPT-6.1 Sol · high | GPT-6.1 Sol · high | Permissions and audit correctness |
+| 11 | GPT-6.1 Sol · high | GPT-6.1 Sol · high | Restore path added to moderation state machine |
+| 11B | GPT-6 Astra · xhigh | GPT-6.1 Sol · xhigh | Public, reversible and auditable reputation ledger |
+| 11C | GPT-6 Astra · xhigh | GPT-6.1 Sol · xhigh | Highest-harm feature; time and abuse rules |
+| 11D | GPT-6.1 Sol · medium | GPT-6 Luna · high | Mostly presentational work plus two read endpoints |
+| 12 | GPT-6.1 Sol · high | GPT-6.1 Sol · medium | PostgreSQL FTS and index behavior |
+| 13 | GPT-6.1 Sol · medium | GPT-6 Luna · high | Straightforward service hooks and UI |
+| 14 | GPT-6.1 Sol · high | GPT-6.1 Sol · medium | Privacy and deletion cascades |
+| 14B | GPT-6.1 Sol · high | GPT-6.1 Sol · high | Untrusted image processing and resource limits |
+| 15 | GPT-6 Luna · medium | GPT-6 Luna · high | Static content built from established components |
+| 16 | GPT-6 Astra · max | GPT-6.1 Sol · xhigh | Dedicated security/load/E2E audit and fixes |
+| 17 | GPT-6.1 Sol · high | GPT-6.1 Sol · medium | Free-tier deployment constraints and configuration |
+| 18 | GPT-6.1 Sol · high | GPT-6.1 Sol · medium | Cross-service origins, cookies, variables and monitoring |
+
+If allowance permits, use **GPT-6 Astra · high** for a final read-only review of Parts 1, 9, 11B,
+11C and 16 after their required tests pass. Put findings in the current approved plan/handoff; do
+not let the review expand the part's scope without user approval.
 
 **Status legend:** `[ ] Not started` · `[~] In progress` · `[x] Done (date)` · `[!] Blocked (reason)`
 
@@ -144,7 +205,7 @@ Adjustments for real dependencies:
 - **Scaffold:**
   - Move `frontend/.env.example` out of `frontend/`.
   - From the repo root: `npx create-next-app@16.3 frontend --ts --tailwind --eslint --app --src-dir --import-alias "@/*" --use-npm --turbopack --no-agents-md --disable-git --yes`. Use the latest 16.3.x, **≥ 16.3.7**.
-  - Put `.env.example` back, append `!.env.example` to `frontend/.gitignore`, and confirm no `frontend/CLAUDE.md` or `AGENTS.md` exists.
+  - Put `.env.example` back, append `!.env.example` to `frontend/.gitignore`, and confirm no nested `frontend/CLAUDE.md` or `AGENTS.md` exists.
   - package name `rumor-zero-frontend`; `.nvmrc` = `24`; `@types/node` ^24
   - scripts: `lint` (eslint), `typecheck`, `test` (vitest run), `lint:tokens` (fails on default-palette classes or raw hex in `src/`)
 - **Theme:** `src/app/globals.css` `@theme` holds every DESIGN.md token.
@@ -176,7 +237,7 @@ Adjustments for real dependencies:
 - [ ] PostCard shows the violet stripe and EMERGENCY chip for an active emergency, and the status colour otherwise
 - [ ] Avatar falls back to initials with no `src` and with a broken `src`
 - [ ] `npm run lint`, `npm run typecheck`, `npm test` and `npm run build` pass
-- [ ] `git check-ignore frontend/.env.example` prints nothing (the file is tracked); no frontend CLAUDE.md or AGENTS.md
+- [ ] `git check-ignore frontend/.env.example` prints nothing (the file is tracked); no nested frontend CLAUDE.md or AGENTS.md
 
 **Required tests:** a render and variant test per primitive; Modal a11y (role, focus return, Esc); Tabs and SegmentedControl keyboard navigation; PasswordField show/hide; StatusBadge table-driven test (including the emergency row); Avatar fallback; `cn`/`format` unit tests.
 
@@ -1194,7 +1255,7 @@ Plus toasts and field errors.
 ## Part 17: Deploy backend (Render, Neon, Upstash, Brevo, Sentry)
 **Status:** [ ] Not started
 **Goal:** the Django API live on free tiers, deployed only after CI passes.
-**Depends on:** 16. You do the account and dashboard steps in ENV_GUIDE §2.0–2.6; Claude prepares the config and checklists and **never handles secret values**.
+**Depends on:** 16. You do the account and dashboard steps in ENV_GUIDE §2.0–2.6; the active agent prepares the config and checklists and **never handles secret values**.
 **Stitch files to convert:** none.
 
 **Backend scope**
