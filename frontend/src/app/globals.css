@@ -1,1 +1,198 @@
 @import "tailwindcss";
+/* Self-hosted Material Symbols Outlined. Imported into the components layer so that the size
+   utilities (text-[1rem]) still win over the package's own 24px default. */
+@import "material-symbols/outlined.css" layer(components);
+@plugin "@tailwindcss/forms" {
+  strategy: class;
+}
+
+/*
+ * Rumor Zero design tokens: the single source for styles.
+ * Generated from design/stitch/DESIGN.md (the Stitch "Epistemic Ledger" tailwind config) in Part 0B.
+ * Components use these token classes only: no raw hex, no Tailwind default palette.
+ */
+@theme {
+  /* Reset the defaults so that only Stitch tokens exist. */
+  --color-*: initial;
+  --font-*: initial;
+  --text-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+
+  --default-font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --default-mono-font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  /* Colors (verdict families carry the only chroma). */
+  --color-surface: #faf8ff;
+  --color-surface-dim: #d2d9f4;
+  --color-surface-bright: #faf8ff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f2f3ff;
+  --color-surface-container: #eaedff;
+  --color-surface-container-high: #e2e7ff;
+  --color-surface-container-highest: #dae2fd;
+  --color-on-surface: #131b2e;
+  --color-on-surface-variant: #3c4946;
+  --color-inverse-surface: #283044;
+  --color-inverse-on-surface: #eef0ff;
+  --color-outline: #6c7a76;
+  --color-outline-variant: #bbcac5;
+  --color-surface-tint: #006b5f;
+  --color-primary: #006b5f;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #00a896;
+  --color-on-primary-container: #00352e;
+  --color-inverse-primary: #59dbc7;
+  --color-secondary: #006398;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #5bb8fe;
+  --color-on-secondary-container: #00476e;
+  --color-tertiary: #732ee4;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #a87dff;
+  --color-on-tertiary-container: #3c0088;
+  --color-error: #ba1a1a;
+  --color-on-error: #ffffff;
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #93000a;
+  --color-primary-fixed: #79f7e3;
+  --color-primary-fixed-dim: #59dbc7;
+  --color-on-primary-fixed: #00201c;
+  --color-on-primary-fixed-variant: #005047;
+  --color-secondary-fixed: #cce5ff;
+  --color-secondary-fixed-dim: #93ccff;
+  --color-on-secondary-fixed: #001d31;
+  --color-on-secondary-fixed-variant: #004b73;
+  --color-tertiary-fixed: #eaddff;
+  --color-tertiary-fixed-dim: #d2bbff;
+  --color-on-tertiary-fixed: #25005a;
+  --color-on-tertiary-fixed-variant: #5a00c6;
+  --color-background: #faf8ff;
+  --color-on-background: #131b2e;
+  --color-surface-variant: #dae2fd;
+  --color-verdict-review: #f4a261;
+  --color-on-verdict-review: #9a4a12;
+
+  /* Radii: only rounded-lg (4px) and rounded-full (a static 9999px utility). */
+  --radius-lg: 0.25rem;
+
+  /* The one shadow. Stitch ran Tailwind v3, whose shadow-sm is lighter than v4's. */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+
+  /* Named spacing. */
+  --spacing-gutter: 1.25rem;
+  --spacing-gutter-mobile: 0.75rem;
+  --spacing-margin: 2rem;
+  --spacing-margin-mobile: 1rem;
+  --spacing-space-xs: 0.25rem;
+  --spacing-space-sm: 0.5rem;
+  --spacing-space-md: 0.875rem;
+  --spacing-space-lg: 1.25rem;
+  --spacing-space-xl: 2rem;
+
+  /* Named content widths (max-w-reading, max-w-wide, max-w-form, max-w-modal). */
+  --container-reading: 760px;
+  --container-wide: 1240px;
+  --container-form: 480px;
+  --container-modal: 620px;
+
+  /* Typography: size + line height + tracking + weight per token (text-<token>). */
+  --text-display-hero: 3.5rem;
+  --text-display-hero--line-height: 4rem;
+  --text-display-hero--letter-spacing: -0.03em;
+  --text-display-hero--font-weight: 600;
+  --text-display-hero-mobile: 2.25rem;
+  --text-display-hero-mobile--line-height: 2.75rem;
+  --text-display-hero-mobile--letter-spacing: -0.02em;
+  --text-display-hero-mobile--font-weight: 600;
+  --text-headline-lg: 2.25rem;
+  --text-headline-lg--line-height: 2.75rem;
+  --text-headline-lg--letter-spacing: -0.02em;
+  --text-headline-lg--font-weight: 500;
+  --text-headline-md: 1.75rem;
+  --text-headline-md--line-height: 2.25rem;
+  --text-headline-md--letter-spacing: -0.01em;
+  --text-headline-md--font-weight: 500;
+  --text-headline-sm: 1.25rem;
+  --text-headline-sm--line-height: 1.75rem;
+  --text-headline-sm--letter-spacing: -0.01em;
+  --text-headline-sm--font-weight: 600;
+  --text-claim-headline: 1.375rem;
+  --text-claim-headline--line-height: 1.875rem;
+  --text-claim-headline--letter-spacing: -0.01em;
+  --text-claim-headline--font-weight: 500;
+  --text-claim-opinion: 1.375rem;
+  --text-claim-opinion--line-height: 1.875rem;
+  --text-claim-opinion--letter-spacing: -0.005em;
+  --text-claim-opinion--font-weight: 400;
+  --text-body-lg: 1.125rem;
+  --text-body-lg--line-height: 1.75rem;
+  --text-body-lg--font-weight: 400;
+  --text-body-md: 0.9375rem;
+  --text-body-md--line-height: 1.5rem;
+  --text-body-md--font-weight: 400;
+  --text-body-sm: 0.8125rem;
+  --text-body-sm--line-height: 1.25rem;
+  --text-body-sm--font-weight: 400;
+  --text-label-code: 0.75rem;
+  --text-label-code--line-height: 1rem;
+  --text-label-code--letter-spacing: 0.06em;
+  --text-label-code--font-weight: 600;
+  --text-label-metric: 0.875rem;
+  --text-label-metric--line-height: 1.25rem;
+  --text-label-metric--font-weight: 700;
+  --text-label-badge: 0.6875rem;
+  --text-label-badge--line-height: 0.875rem;
+  --text-label-badge--letter-spacing: 0.03em;
+  --text-label-badge--font-weight: 600;
+
+  /* Font families, named like the type tokens (font-<token>). */
+  --font-display-hero: var(--font-newsreader), Georgia, "Times New Roman", serif;
+  --font-display-hero-mobile: var(--font-newsreader), Georgia, "Times New Roman", serif;
+  --font-headline-lg: var(--font-newsreader), Georgia, "Times New Roman", serif;
+  --font-headline-md: var(--font-newsreader), Georgia, "Times New Roman", serif;
+  --font-headline-sm: var(--font-newsreader), Georgia, "Times New Roman", serif;
+  --font-claim-headline: var(--font-newsreader), Georgia, "Times New Roman", serif;
+  --font-claim-opinion: var(--font-newsreader), Georgia, "Times New Roman", serif;
+  --font-body-lg: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-body-md: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-body-sm: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-label-code: var(--font-jetbrains-mono), ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --font-label-metric:
+    var(--font-jetbrains-mono), ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --font-label-badge: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-surface font-body-md text-body-md text-on-surface antialiased;
+  }
+
+  /* Tailwind v4 dropped the pointer cursor on buttons; Stitch (v3) had it. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* Visible keyboard focus everywhere, in Protocol Blue. Inputs add their own ring on top. */
+  :focus-visible {
+    outline: 2px solid var(--color-secondary);
+    outline-offset: 2px;
+  }
+}
+
+/* Spinners and transitions stand still for people who ask for reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

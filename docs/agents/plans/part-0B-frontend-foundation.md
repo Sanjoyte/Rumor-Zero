@@ -1,6 +1,6 @@
 # Plan: Part 0B, Frontend foundation & design system
 
-- **Status:** APPROVED 2026-10-01 by the user (Sanjoyte); implementation in progress (Claude, Sonnet 5.5).
+- **Status:** IMPLEMENTED 2026-10-01 by Claude (Sonnet 5.5). Deviations are listed under Part 0B in `task.md`. The steps below are kept as the record of what was approved.
 - **Drafted:** 2026-09-30 by Claude (Opus 5.5). **Implement with:** Sonnet 5.5 · high (task.md).
 - **On approval:** save this file as `docs/agents/plans/part-0B-frontend-foundation.md` and link it
   from `docs/agents/HANDOFF.md` before running any command.

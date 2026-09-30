@@ -77,16 +77,18 @@ rumor-zero/
 │
 ├── frontend/                    Next.js app root (cd here to run npm)
 │   ├── .env.example             ✅ every frontend variable, documented
-│   │                                ⚠ create-next-app refuses a folder containing it: Part 0B moves it aside, scaffolds, moves it back
+│   │                                ⚠ create-next-app refuses a folder containing it (or .env.local): Part 0B scaffolded in a scratch folder and copied the result in, so neither env file was touched
 │   ├── .env.local               you create it (git-ignored; either agent needs explicit permission to read/edit it)
-│   ├── .gitignore               🅑  ⚠ contains `.env*`; Part 0B must append `!.env.example`
-│   ├── .nvmrc                   🔨 0B  "24" (also read by Cloudflare Workers Builds)
-│   ├── package.json             🅑  scripts: dev, build, start, lint (eslint), lint:tokens, typecheck, test (vitest run), test:e2e
-│   ├── next.config.ts           🅑  + initOpenNextCloudflareForDev() in 0C
+│   ├── .gitignore               🅑  contains `.env*`, plus `!.env.example` appended in 0B
+│   ├── .nvmrc                   ✅ 0B  "24" (also read by Cloudflare Workers Builds)
+│   ├── .prettierrc.json, .prettierignore  ✅ 0B  prettier + the Tailwind class sorter (reads src/app/globals.css)
+│   ├── package.json             🅑  scripts: dev, build, start, lint (eslint), lint:tokens, typecheck, test (vitest run), test:watch, format, format:check; test:e2e arrives in 0C
+│   ├── next.config.ts           🅑  `agentRules: false` (0B) + initOpenNextCloudflareForDev() in 0C
 │   ├── tsconfig.json            🅑  strict, alias @/* → src/*
 │   ├── eslint.config.mjs        🅑
 │   ├── postcss.config.mjs       🅑
-│   ├── vitest.config.mts        🔨 0B
+│   ├── vitest.config.mts        ✅ 0B  jsdom, `@` alias, setup file
+│   ├── scripts/lint-tokens.mjs  ✅ 0B  `npm run lint:tokens`: fails on default-palette classes, raw hex, stray radius/shadow/text sizes, dangerouslySetInnerHTML (+ lint-tokens.test.ts)
 │   ├── playwright.config.ts     🔨 0C  webServer starts backend + frontend for e2e
 │   ├── wrangler.jsonc           🔨 0C  name "rumor-zero", main .open-next/worker.js, nodejs_compat, assets binding
 │   ├── open-next.config.ts      🔨 0C  defineCloudflareConfig() with the default cache (no R2)
@@ -126,18 +128,19 @@ rumor-zero/
 │       │   │   └── settings/                ← c2 (14, photo 14B)
 │       │   └── api/[...path]/route.ts       🔨 0C  **API relay** to BACKEND_ORIGIN (not Next's proxy.ts)
 │       ├── components/
-│       │   ├── ui/              🔨 0B  primitives converted from Stitch: Button, Icon, TextField, PasswordField,
+│       │   ├── ui/              ✅ 0B  primitives converted from Stitch: Button, Icon, TextField, PasswordField,
 │       │   │                            Textarea, Checkbox, RadioCard, Select, Toggle, Tabs, SegmentedControl, FilterChips,
 │       │   │                            Card, VerdictStripe, StatusBadge (incl. EMERGENCY), CategoryChip,
 │       │   │                            Avatar (photo `src` + initials fallback), Modal (<dialog>),
-│       │   │                            Alert, Toast, Skeleton, EmptyState, LoadMore, ProgressBar, PasswordStrengthMeter;
+│       │   │                            Alert, Toast, Skeleton, EmptyState, LoadMore, ProgressBar, PasswordStrengthMeter,
+│       │   │                            Divider, DangerZone (+ field-styles.ts shared by the text-like controls);
 │       │   │                            0D Logo (the only brand mark);
 │       │   │                            11D charts/ MeterBar, StatTile, BarChart, RingGauge, Sparkline
 │       │   └── shell/           🔨 0C  AppShell, Sidebar, TopBar, MobileNav, AuthLayout, MarketingNav, MarketingFooter
 │       │                                (all using <Logo/>), UnverifiedBanner (1)
 │       ├── features/            🔨 screen-specific pieces, one folder per domain:
 │       │   ├── auth/            1–3  SignupForm, LoginForm, GoogleButton, Turnstile, VerifyEmailStatus, ResetForms
-│       │   ├── posts/           4–5, 9  PostCard, SourceLink, Composer(Modal), FeedList, PostDetail, useStatusPolling;
+│       │   ├── posts/           ✅ 0B PostCard (props only); 4–5, 9  SourceLink, Composer(Modal), FeedList, PostDetail, useStatusPolling;
 │       │   │                        11C EmergencyChip, PinnedEmergencies; 11D PostStats
 │       │   ├── social/          6–7  FollowButton, UserRow, ProfileHeader, LikeButton, CommentList, CommentComposer;
 │       │   │                        7B RepostButton, BookmarkButton, RepostHeader, UnavailablePostCard
@@ -147,14 +150,16 @@ rumor-zero/
 │       │   ├── reputation/      11B  CredibilityBadge; 11D CredibilityWidget, CredibilityPanel
 │       │   ├── search/          12   SearchBar, SearchResults
 │       │   ├── notifications/   13   NotificationList, useUnreadCount
-│       │   └── settings/        14   ProfileForm, PasswordForm, DangerZone; 14B AvatarUploader
+│       │   ├── settings/        14   ProfileForm, PasswordForm (uses ui/DangerZone); 14B AvatarUploader
+│       │   └── dev/             ✅ 0B  UiGallery and its sections, served at /dev/ui (404 in production builds)
 │       ├── lib/
 │       │   ├── api/             🔨 0C  client.ts (fetch wrapper: base "/api", bearer token, one refresh-retry on 401,
 │       │   │                            error normalisation), types.ts (API shapes from ARCHITECTURE §9)
 │       │   ├── auth/            🔨 0C/1  AuthProvider (access token in memory only), refresh lock (Web Locks API)
 │       │   ├── brand-assets.json 🔨 0D  generated list of logo assets (read by Logo, manifest.ts, metadata)
-│       │   └── cn.ts, format.ts 🔨 0B  className joiner, relative time / number formatting
-│       └── test/setup.ts        🔨 0B  RTL + jest-dom setup for Vitest
+│       │   └── cn.ts, format.ts, password-strength.ts, post-display.ts  ✅ 0B  className joiner, relative time / number formatting,
+│       │                                advisory password score, pure stripe + badge rules (ARCHITECTURE §4 table)
+│       └── test/setup.ts        ✅ 0B  RTL + jest-dom setup for Vitest, plus a jsdom shim for <dialog>
 │
 ├── loadtest/                    🔨 16  k6 scripts (feed read, post create, report burst)
 ├── docs/
@@ -178,8 +183,8 @@ rumor-zero/
 
 - **Placeholders created now: only `backend/.env.example` and `frontend/.env.example`.**
   - `django-admin startproject rumor_zero .` only needs `manage.py` and `rumor_zero/` to be absent, so it won't collide.
-  - `create-next-app` *does* refuse a non-empty folder. Its allow-list includes `.gitignore`, `.claude`, `docs` and `LICENSE`, but not `.env.example`. That's why Part 0B moves the file aside for the scaffold step.
-  - Scaffold with `--no-agents-md`. Otherwise create-next-app writes `frontend/AGENTS.md` and `frontend/CLAUDE.md`, which would compete with the root shared instructions.
+  - `create-next-app` *does* refuse a non-empty folder. Its allow-list includes `.gitignore`, `.claude`, `docs` and `LICENSE`, but not `.env.example`. So Part 0B scaffolded in a scratch folder and copied the files in (the real `.env.local` was in the way too).
+  - Scaffold with `--no-agents-md`, **and** keep `agentRules: false` in `next.config.ts`. Otherwise create-next-app (and later every `next dev`) writes `frontend/AGENTS.md` and `frontend/CLAUDE.md`, which would compete with the root shared instructions.
 - **`backend/apps/<name>`** keeps the project package (`rumor_zero/`) small, with domain code grouped by feature. The app label stays short (`posts`), and the Python path is `apps.posts`.
 - **One `settings.py`, driven by env vars**, not `settings/dev.py` + `settings/prod.py`. It's simpler, and Render and local differ only in `.env` values.
 - **Where converted Stitch code goes:**

@@ -62,3 +62,17 @@ in `task.md`; transient continuation state belongs in `HANDOFF.md`.
 - **Evidence:** sentry-python tag 2.71.0: `sentry_sdk/integrations/_wsgi_common.py`,
   `sentry_sdk/scrubber.py`, `sentry_sdk/consts.py`, `sentry_sdk/utils.py`.
 
+
+### 2026-10-01 — Claude Code's Bash tool mangles long and backslash-heavy heredocs
+
+- **Applies to:** every part when Claude writes files through Bash (regexes, Windows paths, large components).
+- **Fact:** in a heredoc, a doubled backslash arrives as a single one even when the delimiter is quoted (`<<'EOF'`), and a command body of roughly 8 KB or more can fail to parse with `unexpected EOF while looking for matching` a quote. A regex written with an escaped backslash in a character class then fails at runtime, or worse, a pattern built in a template string silently loses its escapes.
+- **Consequence:** write regex-heavy or large files with the Write tool, or in several small Bash calls. In JavaScript prefer `String.raw` and `\x5c` for a literal backslash. Single-backslash escapes (`\n`, `\d`, `“`) survive fine in a heredoc.
+- **Evidence:** `od -c` on a heredoc-written file during Part 0B (`lint-tokens.mjs` first failed with "Unterminated group").
+
+### 2026-10-01 — Visual checks of the UI work headlessly with Edge on this machine
+
+- **Applies to:** 0C and every UI part (the acceptance criteria ask for Stitch side-by-side checks).
+- **Fact:** `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe --headless=new --disable-gpu --hide-scrollbars --force-device-scale-factor=1 --window-size=1280,<height> --virtual-time-budget=15000 --screenshot=<abs path>.png <url>` renders the dev server or a Stitch `code.html` (`file:///` works; the Tailwind CDN needs network). Tall windows (11500 px) work; crop with `System.Drawing` in PowerShell. To click, focus or press keys, start Edge with `--remote-debugging-port=<n>` and drive it from a Node 24 script using the global `WebSocket` and the DevTools protocol (`Runtime.evaluate`, `Input.dispatchKeyEvent`, `Page.captureScreenshot`). Keep such scripts and images in the scratchpad, not the repo.
+- **Consequence:** this caught two bugs unit tests could not: an avatar image that failed before hydration, and modal initial focus.
+- **Evidence:** Part 0B verification; Stitch b2, d1 and a2 were screenshotted the same way for comparison.

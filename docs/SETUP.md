@@ -158,24 +158,29 @@ Versions are the latest stable releases as of 2026-09-29. Part 0 re-checks patch
 
 | Package | Version | Purpose |
 |---|---|---|
-| `next` | **16.3.x, ≥ 16.3.7** (16.3.7 ships 2026-09-30 with security fixes; 16.3.6 until then) | React framework, App Router, SSR |
+| `next` | **16.3.8** installed in 0B (keep 16.3.x, ≥ 16.3.7, which carries the 2026-09-30 security fixes) | React framework, App Router, SSR. `next.config.ts` sets `agentRules: false` (see below) |
 | `react`, `react-dom` | 19.2.8 | UI library |
 | `typescript` | ^5 (**not** 7.x) | Types |
-| `@types/node` | ^24 | Node types. Must be ^24 for Vitest 5; the template ships ^20. |
+| `@types/node` | 24.19.0 | Node types. Must be 24.x for Vitest 5; the template ships ^20. |
 | `@types/react`, `@types/react-dom` | from template | React types |
 | `tailwindcss`, `@tailwindcss/postcss` | 4.3.3 | Styling. Stitch tokens become a v4 `@theme`. |
-| `@tailwindcss/forms` | 0.5.11 (optional, decided in 0B) | Form-control reset, used as `strategy: "class"` |
+| `@tailwindcss/forms` | 0.5.11 (**used**, decided in 0B) | Form-control reset with `strategy: "class"`: the primitives add `form-input`, `form-checkbox`, `form-radio`, `form-select` and `form-textarea` themselves. Stitch used the global reset. |
 | `material-symbols` | 0.47.5 | Self-hosted Material Symbols Outlined icon font (Stitch icon set) |
 | `eslint`, `eslint-config-next` | ^9, same as `next` | Linting. `next lint` is removed in Next 16, so the script runs `eslint`. |
-| `prettier` (+ `prettier-plugin-tailwindcss`) | latest at Part 0B | Formatting, and sorts Tailwind classes |
+| `prettier` (+ `prettier-plugin-tailwindcss`) | 3.9.9 (+ 0.8.1) | Formatting, and sorts Tailwind classes |
 | `@opennextjs/cloudflare` | 1.20.7 | Adapter that builds Next.js for Cloudflare Workers |
 | `wrangler` (dev) | 4.143.0 | Cloudflare CLI used by the adapter (needs Node ≥22) |
-| `vitest` | 5.0.2 | Unit/component test runner |
+| `vitest` | 5.0.3 | Unit/component test runner |
 | `@vitejs/plugin-react` | 6.1.1 | React support for Vitest |
-| `jsdom`, `vite-tsconfig-paths` | latest at Part 0B | Browser-like test DOM, `@/` imports in tests |
-| `@testing-library/react`, `@testing-library/dom`, `@testing-library/user-event`, `@testing-library/jest-dom` | RTL 16.3.3 + latest | Component testing |
+| `jsdom` | 30.1.1 | Browser-like test DOM. `vite-tsconfig-paths` is **not** used: `vitest.config.mts` aliases `@` to `src` directly. |
+| `@testing-library/react`, `@testing-library/dom`, `@testing-library/user-event`, `@testing-library/jest-dom` | RTL 16.3.3, dom 10.4.2, user-event 14.6.7, jest-dom 7.0.1 | Component testing |
 | `@playwright/test` | 1.63.0 | End-to-end tests. Browsers are installed by `npx playwright install chromium`. |
 | `sharp` (dev) | 0.35.x (0.35.4 today) | **Added in Part 0D.** Renders `design/logo.svg` into the favicon, app icons, share image and email/admin logos (`npm run brand:build`). Prebuilt Windows x64 binaries. Used only by `frontend/scripts/brand/`, never by app code or the Worker bundle. |
+
+**Scaffolding notes (verified in Part 0B, 2026-10-01):**
+- `create-next-app` 16.3.8 has no `--turbopack` option any more (Turbopack is the default). Part 0B ran it with `--ts --tailwind --eslint --app --src-dir --import-alias "@/*" --use-npm --empty --no-react-compiler --no-agents-md --disable-git --skip-install --yes` in a scratch folder and copied the result into `frontend/`, because it refuses a folder that holds `.env.example` or `.env.local`.
+- `--no-agents-md` is not enough: Next 16.3.x also writes `frontend/AGENTS.md` and `CLAUDE.md` on every `next dev`. `agentRules: false` in `next.config.ts` turns that off.
+- Behind this machine's network a first `npm install` can fail with `ERR_SSL_CIPHER_OPERATION_FAILED`. `npm cache verify` and a retry fixed it; do not disable TLS checks.
 
 **Not used in the frontend (on purpose):**
 - chart libraries (Chart.js, Recharts, d3): the charts are token-built HTML/SVG (Part 11D)

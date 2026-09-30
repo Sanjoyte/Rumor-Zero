@@ -747,7 +747,17 @@ Other settings:
   - Use Stitch class names (`bg-surface-container-low`, `font-claim-headline text-claim-headline`, `max-w-reading`, `px-space-md`).
   - **No** Tailwind default palette, no arbitrary hex, only `rounded-lg`/`rounded-full`, `shadow-sm` only.
   - Fact text: `font-claim-headline text-claim-headline`. Opinion text: `font-claim-opinion text-claim-opinion italic`.
-- User text is rendered as plain text (`whitespace-pre-wrap break-words`). Never `dangerouslySetInnerHTML`.
+- User text is rendered as plain text (`whitespace-pre-wrap break-words`). Never `dangerouslySetInnerHTML` (ESLint `react/no-danger` and `npm run lint:tokens` both enforce it).
+- **Design-system build (Part 0B):**
+  - `globals.css` resets the Tailwind defaults (`--color-*`, `--font-*`, `--text-*`, `--radius-*`, `--shadow-*`), then holds the 49 DESIGN.md colour tokens, 13 type tokens, `--radius-lg`, the named spacing and `--container-*` widths. `npm run lint:tokens` fails on anything outside them.
+  - `shadow-sm` is overridden to Tailwind v3's lighter value (`0 1px 2px 0 rgb(0 0 0 / 0.05)`), because Stitch was built on v3.
+  - `@tailwindcss/forms` runs with `strategy: "class"`; each form primitive adds its own `form-*` class.
+  - Utilities for the same CSS property never sit on one element together (CSS order, not class order, would decide). Variants are chosen with `cond ? a : b`, and components take their font through a prop (`mono`) rather than an override.
+  - The icon font CSS is imported into `@layer components`, so the `text-[1rem]` size utilities still beat its 24px default.
+  - Password strength is advisory: Weak / Fair / Good / Strong from `scorePassword()`; the Django validators decide.
+  - `StatusBadge` is driven by the pure `statusBadgeSpec()` and `stripeTone()` in `src/lib/post-display.ts`, a one-to-one copy of the §4 badge table; a published opinion shows only its OPINION chip.
+  - `<dialog>` modals: Esc and the close button call `onClose`; focus goes to the `data-autofocus` element (else the first control) and returns to the opener; a scrim click does not dismiss unless `dismissOnBackdrop` is set.
+  - A server-rendered avatar `<img>` can fail before hydration, so `Avatar` also checks for an already-finished, zero-width image.
 - Avatars use `<Avatar>`: the user's photo when `avatar_url` is set (14B), otherwise initials, and initials on load error. Icons use `<Icon name="…"/>` (Material Symbols, self-hosted).
 - The brand is shown **only** through `<Logo/>` (§14). Never re-create the old text wordmark or the emblem tiles.
 - Images (logo, avatars) are plain `<img>` with explicit width/height. `next/image` optimisation is not used: on Workers it needs Cloudflare Images, and our images are already pre-sized. SVG is never inlined from a file.

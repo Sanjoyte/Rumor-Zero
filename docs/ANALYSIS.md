@@ -96,7 +96,7 @@ Each decision has a default. The rest of the docs (ARCHITECTURE, task.md) alread
 | `MarketingNav` / `MarketingFooter` | a1 | Footer links cut to About, How verification works, Privacy, Terms |
 | `Button` (primary / secondary / ghost / destructive / icon) | everywhere | Primary = `bg-secondary`. There's one radius (`rounded-lg` = 4px) and one shadow (`shadow-sm`). |
 | `TextField`, `PasswordField` (visibility toggle), `Textarea` (+ counter), `Checkbox`, `RadioCard` list, `Select` | a2, a3, a5, a6, b2, b3, c2, d1, d2 | Bind labels to inputs (`htmlFor`). c2 lacks this. |
-| `PasswordStrengthMeter` (4 segments) | a2, a6 | Stitch is inconsistent: 3/4 means "Strong" in a2 but "Fair" in a6. Use one scale. |
+| `PasswordStrengthMeter` (4 segments) | a2, a6 | Stitch is inconsistent: 3/4 means "Strong" in a2 but "Fair" in a6. Decided in Part 0B: one scale, Weak / Fair / Good / Strong (advisory). |
 | `GoogleButton` + "or" `Divider` | a2, a3 | Keep the inline Google "G" SVG (`data-rz-keep`) |
 | `Alert` / `Callout` (info, success, warning, error) | a3, a4, a5, a6, c1, c2, d1 | Tints from verdict families: `secondary/10` info, `error/10` error, `verdict-review/10` warning |
 | `PostCard` with 4px `VerdictStripe` | root, a1, b1, b3, b4, c1, d2 | Core component. Variants: opinion, pending, verified, false, under review, removed (tombstone) |
@@ -124,7 +124,7 @@ Each decision has a default. The rest of the docs (ARCHITECTURE, task.md) alread
 
 ### a.4 Design tokens (from DESIGN.md frontmatter = the coded `tailwind.config`)
 
-**Colors (48 tokens).** Only the verdict families carry chroma. Everything else is neutral.
+**Colors (49 tokens).** Only the verdict families carry chroma. Everything else is neutral.
 
 | Role | Token → hex |
 |---|---|
@@ -176,7 +176,7 @@ Target stack: Next.js (App Router, TypeScript, `src/`), Tailwind CSS v4, React c
    Then **class names from the Stitch HTML keep working as written** (`bg-surface-container-low`, `font-claim-headline text-claim-headline`, `px-space-md`, `max-w-reading`). This is the single biggest conversion saving. Reset the default palette (`--color-*: initial`) so it can't creep back in.
 2. **Plugins:**
    - `container-queries` is built into v4.
-   - `forms`: add the `@tailwindcss/forms` plugin via `@plugin`, or restyle inputs by hand. Decide in Part 0B.
+   - `forms`: decided in Part 0B: the `@tailwindcss/forms` plugin via `@plugin` with `strategy: "class"`, applied inside the primitives (Stitch used its global reset).
    - The CDN script and inline config are deleted.
 3. **Fonts:** load Inter, JetBrains Mono and Newsreader with `next/font/google`. It self-hosts them at build time, so there are no runtime Google requests, no layout shift, and it's free. Material Symbols get self-hosted too (method in SETUP.md Part B), with a small `<Icon name="…"/>` component.
 4. **HTML → JSX:**

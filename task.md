@@ -82,7 +82,7 @@ not let the review expand the part's scope without user approval.
 | Part | Title | Depends on | Status |
 |---|---|---|---|
 | 0A | Backend foundation | SETUP Part A | [x] Done (2026-09-30) |
-| 0B | Frontend foundation & design system | SETUP Part A | [ ] |
+| 0B | Frontend foundation & design system | SETUP Part A | [x] Done (2026-10-01) |
 | 0D | Brand assets & Logo component | 0B | [ ] |
 | 0C | App shell, API relay, API client, CI | 0A, 0B, 0D | [ ] |
 | 1 | Auth core: sign up, log in, tokens, log out | 0C | [ ] |
@@ -195,7 +195,7 @@ Adjustments for real dependencies:
 ---
 
 ## Part 0B: Frontend foundation & design system
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-01)
 **Goal:** a Next.js app whose Tailwind v4 theme **is** the Stitch design system, plus the tested UI primitive kit every later screen is built from.
 **Depends on:** SETUP.md Part A (Node 24). Can run in parallel with 0A.
 
@@ -241,13 +241,26 @@ Adjustments for real dependencies:
 **Backend scope:** none. **API endpoints:** none.
 
 **Acceptance criteria**
-- [ ] `/dev/ui` shows every primitive in every state. PostCard, the sign-up form fields, the d1 radio list and the b2 modal visually match Stitch side by side at 1280 px.
-- [ ] Every Stitch class name used in the components resolves: no missing tokens, no default palette (`npm run lint:tokens` passes)
-- [ ] StatusBadge renders glyph + label (+ % where applicable) for all 9 rows of the ARCHITECTURE §4 badge table, using the word FALSE (never "debunked")
-- [ ] PostCard shows the violet stripe and EMERGENCY chip for an active emergency, and the status colour otherwise
-- [ ] Avatar falls back to initials with no `src` and with a broken `src`
-- [ ] `npm run lint`, `npm run typecheck`, `npm test` and `npm run build` pass
-- [ ] `git check-ignore frontend/.env.example` prints nothing (the file is tracked); no nested frontend CLAUDE.md or AGENTS.md
+- [x] `/dev/ui` shows every primitive in every state. PostCard, the sign-up form fields, the d1 radio list and the b2 modal visually match Stitch side by side at 1280 px.
+- [x] Every Stitch class name used in the components resolves: no missing tokens, no default palette (`npm run lint:tokens` passes)
+- [x] StatusBadge renders glyph + label (+ % where applicable) for all 9 rows of the ARCHITECTURE §4 badge table, using the word FALSE (never "debunked")
+- [x] PostCard shows the violet stripe and EMERGENCY chip for an active emergency, and the status colour otherwise
+- [x] Avatar falls back to initials with no `src` and with a broken `src`
+- [x] `npm run lint`, `npm run typecheck`, `npm test` and `npm run build` pass
+- [x] `git check-ignore frontend/.env.example` prints nothing (the file is tracked); no nested frontend CLAUDE.md or AGENTS.md
+
+**Deviations and decisions (2026-10-01):**
+- **Scaffold in a temp folder.** `create-next-app` refuses a folder that holds `.env.example` *or* the real `.env.local`, so it ran with `--skip-install` in a scratch directory and the files were copied into `frontend/`. Neither env file was moved, read or edited. The flags differ from the plan text: `--turbopack` no longer exists (Turbopack is the default), and `--empty --no-react-compiler` were added.
+- **Next 16.3.8 writes `frontend/AGENTS.md` and `CLAUDE.md` on every dev start**, even with `--no-agents-md`. `next.config.ts` sets `agentRules: false`; the generated files were deleted (hard rule 9).
+- **Versions:** `next`/`eslint-config-next` 16.3.8, `vitest` 5.0.3 (SETUP said 5.0.2), `@testing-library/jest-dom` 7.0.1, `prettier` 3.9.9, `prettier-plugin-tailwindcss` 0.8.1, `jsdom` 30.1.1. Vite 8's own `@/` alias handling was not needed: `vitest.config.mts` aliases `@` directly, so `vite-tsconfig-paths` was **not** added.
+- **`@tailwindcss/forms` 0.5.11, `strategy: "class"`** (decided by the user). Primitives add `form-input`, `form-checkbox`, `form-radio`, `form-select` and `form-textarea` themselves.
+- **Password meter scale** (decided by the user): Weak / Fair / Good / Strong from a dependency-free `scorePassword()`; it is advisory and the Django validators stay authoritative.
+- **PostCard** lives in `src/features/posts/PostCard.tsx` and is props-only (decided by the user). It has no action bar and no source line yet (Parts 4, 7, 7B). `DangerZone` and `Divider` are `ui/` primitives.
+- **Tokens:** DESIGN.md has **49** colour tokens (ANALYSIS said 48). `--color-*`, `--font-*`, `--text-*`, `--radius-*` and `--shadow-*` are reset first. `shadow-sm` is overridden to Tailwind v3's lighter value because Stitch was built on v3.
+- **Icon font:** `material-symbols/outlined.css` is imported into `@layer components` from `globals.css`. Its own rule is unlayered and would otherwise beat every `text-[1rem]` size utility.
+- **Fixed while verifying in a real browser (headless Edge):** an `<img>` avatar that 404s before hydration never fired `onError` and showed a broken-image icon; the modal focused its Close button instead of the `data-autofocus` element (document order beat selector order).
+- **Stitch vs docs:** where Stitch disagreed with itself the a2/d1 variant was used; FALSE claims are not struck through; labels say FALSE. Stitch's composer and report copy was rewritten per ANALYSIS b-5.
+- **Not done (left for later parts):** the Material Symbols font is 4 MB (subset it in Part 16); toasts sit below an open `<dialog>` because the dialog uses the top layer (move the toast region to a popover if a toast must show over a modal); background scroll is not locked while a modal is open.
 
 **Required tests:** a render and variant test per primitive; Modal a11y (role, focus return, Esc); Tabs and SegmentedControl keyboard navigation; PasswordField show/hide; StatusBadge table-driven test (including the emergency row); Avatar fallback; `cn`/`format` unit tests.
 

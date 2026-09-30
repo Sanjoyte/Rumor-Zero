@@ -100,5 +100,161 @@ python manage.py check                              # System check identified no
 
 ---
 
+## Part 0B: Frontend foundation & design system
+
+Everything here runs in `frontend\`. No backend, Docker container or secret is needed: these pages
+make no API calls. (Next loads your `frontend\.env.local` by itself; you never open or print it.)
+
+### 1. Terminal: install and check the tools
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+node -v                               # v24.x.x (the project pins Node 24)
+npm install                           # "up to date, audited 449 packages" and "found 0 vulnerabilities"
+```
+
+- npm also prints `npm warn allow-scripts ... unrs-resolver`. It is harmless.
+- On a fresh clone the first install can stop with `ERR_SSL_CIPHER_OPERATION_FAILED` on this
+  network. Run `npm cache verify`, then `npm install` again. Don't turn TLS checks off.
+
+### 2. Terminal: automated checks
+
+Same folder. Nothing else needs to be running.
+
+```powershell
+npm run lint                          # only the npm header, no findings
+npm run lint:tokens                   # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
+npm run typecheck                     # only the npm header, no type errors
+npm run format:check                  # All matched files use Prettier code style!
+npm test                              # Test Files  32 passed (32) / Tests  251 passed (251)
+```
+
+### 3. Terminal: try to break the design-token guard
+
+`lint:tokens` rejects anything outside the Stitch design system. Add a file that breaks two rules:
+
+```powershell
+Set-Content src\tmp-token-check.tsx 'export const x = "bg-blue-500 rounded-md";'
+npm run lint:tokens
+Remove-Item src\tmp-token-check.tsx
+npm run lint:tokens
+```
+
+- First run exits with code 1 and prints
+  `src/tmp-token-check.tsx:1  Tailwind default palette colour: bg-blue-500`,
+  `src/tmp-token-check.tsx:1  radius other than rounded-lg / rounded-full: rounded-md` and
+  `lint:tokens found 2 problem(s).`
+- Second run (file removed) is back to `lint:tokens OK ...`. Nothing is left behind.
+
+### 4. Terminal: start the dev server
+
+```powershell
+npm run dev                           # leave this window running
+```
+
+- Prints `▲ Next.js 16.3.8 (Turbopack)`, `- Local:         http://localhost:3000`,
+  `- Environments: .env.local` and `✓ Ready in` a few hundred milliseconds.
+- It must not create `frontend\AGENTS.md` or `frontend\CLAUDE.md` (see step 8).
+
+### 5. Browser: while `npm run dev` is running
+
+| URL | Expect |
+|---|---|
+| http://localhost:3000/ | Heading "Frontend foundation" and one sentence ("The design system is in place. ..."). Tab title "Rumor Zero". |
+| http://localhost:3000/dev/ui | The gallery. Tab title and heading "UI gallery", a row of section links, and 13 sections from Icon down to "Stitch b2 and d1: modals". |
+| http://localhost:3000/nope | Next's standard 404 page |
+
+On `/dev/ui` (a 1280 px wide window shows it as designed), check the look first:
+
+- Page background is a pale lavender; headings are a serif (Newsreader), body text is Inter, small
+  caps labels are monospace.
+- Icons are glyphs. If you read words like `check_circle` instead, the icon font didn't load.
+
+Then try each control:
+
+| Do this | Expect |
+|---|---|
+| Tabs: click **Recent**, or focus a tab and press the right arrow | Recent is selected, the blue underline moves under it, the text below reads "Panel for recent" |
+| Post type control: click **Fact** | Nothing is chosen at first; after the click Fact is the raised white pill and Opinion is not |
+| Password field (in the "TextField, PasswordField, Textarea" section): click the eye icon | The dots turn into the text `hunter2hunter2`; the button now says "Hide password" |
+| "Try a password" box: type `abc`, then `abcdefg1`, then `abcdefg1X`, then `correct horse battery 9` | The label under the bar reads **Weak** (red), **Fair** (amber), **Good** (teal), **Strong** (teal), filling 1, 2, 3 and 4 segments |
+| Toggle row: click the first (off) toggle | It switches on. The third toggle is violet (emergency), the last is greyed out and does nothing |
+| Radio list ("Why are you reporting this post?"): click **Spam or fake accounts** | Its card gets the blue border and the first card loses it |
+| Avatar section, "a photo that fails to load" | Two dark circles with the initials **GH** and **RU**. No broken-image icon. |
+| Red alert "Could not log in": click the **×** | The alert disappears |
+| **Show a live toast** | A dark toast "Saved just now" appears bottom-centre and is gone after about 4 seconds |
+
+The post cards under "Stitch b1: PostCard" (eight of them, in this order):
+
+- Verified 94%: teal stripe, `VERIFIED 94%`.
+- FALSE 88%: red stripe, `FALSE 88%`. The claim is not struck through.
+- Emergency: the only card with a **violet** stripe, with `CHECKING FACTS…` and `EMERGENCY` chips.
+- Under review: amber stripe, `UNDER REVIEW` and `APPEAL PENDING`.
+- Opinion: grey stripe, italic serif text, an `OPINION` chip and no status badge.
+- Moderator-verified: `VERIFIED · REVIEWED`, no percentage.
+- Moderator-FALSE, emergency over: red again, `FALSE · REVIEWED`, no `EMERGENCY` chip.
+- Removed: a small box "Removed by a moderator", with no text, stripe or chips.
+
+The word "debunked" appears nowhere. For a side-by-side look, open
+`design\stitch\stitch_website_sitemap_grid_builder\b1_home_feed\code.html` next to the gallery.
+Stitch also shows an affiliation line, an evidence drawer and an action bar (later parts) and
+strikes FALSE claims through (deliberately not copied).
+
+### 6. Browser: the two modals
+
+Still on `/dev/ui`, scroll to "Stitch b2 and d1: modals".
+
+| Do this | Expect |
+|---|---|
+| Click **Open the composer (b2)** | A 620 px dialog, centred, over a dimmed and slightly blurred page. Header "New post". The cursor is already in the large serif text box, with `0 / 500 characters` under it. Fact is selected, the violet Emergency toggle is on with a violet "Misuse has consequences." callout, and there is a Source field. Footer: "7 of 10 fact posts left today", Cancel, **Post fact, will be checked**. |
+| Type `Solar capacity grew 30% last year.` | The counter reads `34 / 500 characters` |
+| Click **Opinion** | The button becomes **Post opinion** and the Emergency toggle and Source field disappear |
+| Press Tab over and over | Focus cycles through the dialog's own controls and never reaches the page behind it. After the last button it leaves the page for the browser's own controls, then comes back to Close. |
+| Press Esc | The dialog closes and focus is back on **Open the composer (b2)** |
+| Click **Open the report modal (d1)** | Header "Report this post" with a small "REPORT" line above it, a quoted claim with a dark left edge, five radio cards (the first selected, blue border), a blue "What happens next" note, and a white footer with Cancel and **Submit report**. Focus starts on the × button. |
+| Press Esc | The dialog closes and focus returns to **Open the report modal (d1)** |
+
+### 7. Terminal: the production build hides the gallery
+
+Stop the dev server first (`Ctrl+C` in its window), then in `frontend\`:
+
+```powershell
+npm run build
+npm start                             # leave this window running
+```
+
+- Build: `✓ Compiled successfully in` a few seconds, `Generating static pages ... (4/4)`, and a
+  route list with `/`, `/_not-found` and `/dev/ui`, all marked `○ (Static)`. The route is listed
+  but answers 404 at runtime, as the next commands show.
+- Start: `▲ Next.js 16.3.8`, `- Local:         http://localhost:3000`, `✓ Ready in` about 100 ms.
+
+In a second window:
+
+```powershell
+curl.exe -s -o NUL -w "/        %{http_code}`n" http://localhost:3000/
+curl.exe -s -o NUL -w "/dev/ui  %{http_code}`n" http://localhost:3000/dev/ui
+```
+
+- Expect `/        200` and `/dev/ui  404`.
+- Browser: http://localhost:3000/dev/ui shows "This page could not be found", while
+  http://localhost:3000/ still shows "Frontend foundation".
+
+### 8. Terminal: repository checks
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+git check-ignore frontend\.env.example             # prints nothing: the example env file is tracked
+Test-Path frontend\AGENTS.md, frontend\CLAUDE.md   # False, then False
+```
+
+### 9. Stop and clean up
+
+- Stop the server: `Ctrl+C` in its window.
+- Nothing else is running for this part: no containers, no backend.
+- Optional: `Remove-Item -Recurse -Force frontend\.next` deletes the build output. It is recreated
+  by the next `npm run dev` or `npm run build`.
+
+---
+
 <!-- Add the next part below in the same shape: "## Part <ID>: <title>", then numbered steps,
      each saying Terminal or Browser, each with the exact command and the expected result. -->
