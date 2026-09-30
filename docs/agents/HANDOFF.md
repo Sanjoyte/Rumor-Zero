@@ -6,17 +6,19 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none. The pre-0A correction pass is **done**; no `task.md` build part has started.
-- **Owner:** none (idle)
-- **Phase:** ready to plan Part 0A or 0B
-- **Last approved plan:** `docs/agents/plans/part-pre0A-verified-fixes.md` (done 2026-09-30)
-- **Last updated:** 2026-09-30 by Claude (pre-0A correction pass finished)
+- **Part:** 0A (Backend foundation). **Planned and approved; implementation not started.**
+- **Owner:** none (idle until the user starts the implementing agent)
+- **Phase:** ready to implement 0A
+- **Last approved plan:** `docs/agents/plans/part-0A-backend-foundation.md` (approved 2026-09-30 by
+  the user). The earlier `part-pre0A-verified-fixes.md` is done.
+- **Last updated:** 2026-09-30 by Claude (Opus 5.5), Part 0A planning
 
 ## Completed checkpoints
 
 - Dual-agent setup (shared `AGENTS.md`, Claude/Codex adapters, memory, handoff, plans, Codex model
   matrix): committed by the user as `dbe02e6`.
-- 2026-09-30 (Claude), pre-0A correction pass. It verified five reported issues and fixed them:
+- 2026-09-30 (Claude), pre-0A correction pass, committed by the user as `c25d479`. It verified five
+  reported issues and fixed them:
   1. The docs PDF's working copy was corrupted by `core.autocrlf=true` (the committed blob was
      intact). Added root `.gitattributes` (`* text=auto eol=lf` + `binary` types) and restored the
      working-copy bytes. They now hash to the HEAD blob `1008f7036a406f1ad098f9391cff59a85eb7d0a2`.
@@ -28,21 +30,29 @@ read-only git output.
   5. The `startapp` folder and `apps.<name>` steps (AGENTS.md, task.md 0A, STRUCTURE); hermetic
      tests and the CI env file from `.env.example` (task.md 0A/0C, ARCHITECTURE §11).
 
+- 2026-09-30 (Claude), Part 0A planning. Read-only checks:
+  - The 0A prerequisites (SETUP Part A, ENV_GUIDE §1.1–1.4) are met: Python 3.13.15, Docker engine
+    29.7.2 running, Compose v5.4.0, `RemoteSigned`, `backend/.env` present (not read), ports
+    5432/6379/8000 free.
+  - Every SETUP B1/B2 pin is still the latest on PyPI.
+  - User decisions: admin login by **email** (`USERNAME_FIELD="email"`) and an **exact-match**
+    reserved-username list (full list in the plan).
+
 ## Current workspace state
 
-- Uncommitted: the files listed below.
-- `git status` still shows the PDF as ` M`, although `git diff --quiet -- <pdf>` exits 0 and the
-  bytes hash to the HEAD blob. The index still caches the old working-copy size (556,226), and git
-  treats a size mismatch as a change without comparing content. **The user** runs
-  `git add docs/fact-based-social-platform-architecture-guide.pdf`, which stages no new content
-  (same blob), and the entry becomes clean.
+- Tree was clean at `c25d479` when planning started. Uncommitted now: only the files listed below.
 - 25 tracked text files are still CRLF in the working tree from earlier checkouts; their index
   copies are LF. Git may warn "CRLF will be replaced by LF". This is harmless; do not normalize them
   as a separate change.
-- No product implementation part has started. No dependencies were installed and no real env file
-  was read.
+- No product implementation part has started. No dependencies were installed, no containers were
+  started and no real env file was read.
 
 ## Validation
+
+Part 0A planning: application tests don't apply yet (nothing is scaffolded). `git diff --check`
+exits 0.
+
+Earlier, from the pre-0A correction pass:
 
 - Passed: `git hash-object --no-filters <pdf>` equals `git rev-parse HEAD:<pdf>`
   (`1008f70…`); the size is 554,315 and `startxref` lands on `xref`.
@@ -59,26 +69,22 @@ read-only git output.
 
 ## Next exact action
 
-1. The user reviews the diff, runs `git add` on the PDF (see above) and commits.
-2. The user chooses Part 0A or Part 0B and one agent.
-3. The chosen agent reads `AGENTS.md`, this file, `MEMORY.md`, the selected `task.md` part and its
-   relevant architecture/setup sections.
-4. It creates a plan under `docs/agents/plans/`, asks the user to approve it, records itself as
-   owner here, then implements only the approved part. The Part 0A planner should also take the
-   follow-ups at the end of `part-pre0A-verified-fixes.md`.
+1. The user reviews and (optionally) commits the plan and this file.
+2. The user starts a fresh session with **Sonnet 5.5 · medium** (Claude) or **GPT-6.1 Sol · medium**
+   (Codex) and prompts:
+   `Implement only the approved Part 0A plan, validate it, update task.md and HANDOFF.md, then stop.`
+3. The implementing agent reads `docs/agents/plans/part-0A-backend-foundation.md` and starts at its
+   step 0. The pre-0A follow-ups (test `__init__.py`, migrations E501 ignore, secret variable
+   naming) are already folded into that plan.
 
 ## Blockers or user decisions
 
-- None.
+- None open. The two 0A decisions are recorded in the plan.
 
 ## Files changed for the current work (uncommitted)
 
-- `.gitattributes` (new)
-- `docs/fact-based-social-platform-architecture-guide.pdf` (working copy only; same blob as HEAD)
-- `AGENTS.md`, `task.md`
-- `docs/ARCHITECTURE.md`, `docs/ANALYSIS.md`, `docs/ENV_GUIDE.md`, `docs/STRUCTURE.md`
-- `docs/agents/MEMORY.md`, `docs/agents/HANDOFF.md`
-- `docs/agents/plans/part-pre0A-verified-fixes.md` (new)
+- `docs/agents/plans/part-0A-backend-foundation.md` (new, approved plan)
+- `docs/agents/HANDOFF.md`
 
 ## Handoff checklist (outgoing agent)
 
