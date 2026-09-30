@@ -262,7 +262,8 @@
       "Read(**/.env.test.local)",
       "Read(**/.env.production)",
       "Read(**/.env.production.local)",
-      "Read(**/.dev.vars)"
+      "Read(**/.dev.vars)",
+      "Edit(/design/**)"
     ],
     "ask": [
       "Read(**/.env)",
