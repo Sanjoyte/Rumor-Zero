@@ -78,6 +78,15 @@ in `task.md`; transient continuation state belongs in `HANDOFF.md`.
 - **Evidence:** Part 0B verification; Stitch b2, d1 and a2 were screenshotted the same way for comparison.
 - **Limit (2026-10-01, Part 0C):** headless Edge does not shrink the layout viewport below roughly 500 px, so a `--window-size=390,…` shot shows a clipped desktop-ish page, not the phone layout. For phone widths use Playwright (installed since 0C) with `browser.newPage({ viewport: { width: 390, height: 844 } })` from a scratchpad script that `require`s `frontend/node_modules/@playwright/test`. Measured that way, the 0C shell has no horizontal overflow at 390 px.
 
+### 2026-10-01 — Check Linux-only CI steps in Docker before asking the user to push
+
+- **Applies to:** 0C, 17, 18, and any change to the frontend lockfile, OpenNext/wrangler/vite versions or Linux-only CI steps.
+- **Fact:** `npx opennextjs-cloudflare build` can't be run on Windows (and must never run on a tree with a real `.env.local`: it copies `.env*` into the bundle). The Windows-side checks therefore missed that `@opennextjs/cloudflare` 1.20.7 imports an undeclared `esbuild`, and the first CI run failed (fix and removal condition: SETUP B3, `esbuild` row). Docker's Linux engine on this machine reproduces the CI frontend job exactly:
+  1. Pack only what CI checks out: `git ls-files -co --exclude-standard` (tracked + new, never ignored files such as `.env.local`), keep the paths that exist, and `tar --force-local -cf <scratchpad>/ci-src.tar -T <list>`. GNU tar reads `C:` as a remote host without `--force-local`.
+  2. Run `docker run --rm -e CI=true -v "<scratchpad>:/in:ro" node:24-bookworm-slim bash /in/ci-frontend.sh` from PowerShell. The script extracts into the container's own filesystem, then runs the job's steps (`npm ci`, lint, typecheck, lint:tokens, format:check, test, `npx opennextjs-cloudflare build`).
+- **Consequence:** never bind-mount `frontend/` itself into the container. A run takes about 10 minutes (`npm ci` ≈ 6 min over the container network). The image matched CI's Node 24.21.0 / npm 11.19.0.
+- **Evidence:** the Part 0C fix run passed every step ("OpenNext build complete", `.open-next/worker.js` written, exit 0).
+
 ### 2026-10-01 — Stopping a background `next dev` can orphan Next and workerd
 
 - **Applies to:** every part where Claude runs `npm run dev` / `npx next dev` as a background task on Windows.

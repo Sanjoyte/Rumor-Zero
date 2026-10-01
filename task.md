@@ -396,6 +396,10 @@ All three jobs run on test values only; no secrets.
 - **`skipTrailingSlashRedirect: true`** in `next.config.ts`: Next's default redirect turned `/api/health/` into `/api/health`, which loops with Django's `APPEND_SLASH`. A `redirects()` rule keeps page URLs slash-less (`/home/` → `/home`, covered by E2E).
 - **CI runs one OpenNext build step** (`npx opennextjs-cloudflare build` runs `next build` itself), covering both build items. Action majors: checkout, setup-python, setup-node and upload-artifact all `@v7`.
 - **Versions:** `@opennextjs/cloudflare` 1.20.7, `wrangler` 4.145.0 (SETUP said 4.143.0), `@playwright/test` 1.63.0, all exact devDependencies. No new env variable.
+- **First CI run (2026-10-01):** backend and e2e were green. The frontend job failed in its last step, the OpenNext build: `ERR_MODULE_NOT_FOUND: Cannot find package 'esbuild'`.
+  - Cause: `@opennextjs/cloudflare` imports esbuild without declaring it (upstream #1339). `vite` 8's optional esbuild peer stops npm from hoisting the copy it relied on.
+  - Fix: `esbuild` 0.28.1 as an exact devDependency (wrangler's version, one shared copy, `npm audit` clean). See SETUP B3 for when to remove it.
+  - The OpenNext build was then run on Linux in a `node:24` container, from exactly the files CI checks out (no env files).
 - **Basic `not-found`, `error` and `global-error`** now (ARCHITECTURE §14 places their logo in 0C); Part 15 polishes them. Fonts moved to `src/app/fonts.ts` so `global-error` can reuse them. The root title template is `"%s · Rumor Zero"`.
 - **The top-bar search box keeps b1's compact classes** instead of the 44 px `TextField`, so the bar matches Stitch.
 - **`/dev/shell`** (dev-only, 404 in production) shows the shell with a sample user for the Stitch comparison, because there is no sign-in until Part 1. `?user=none` shows the logged-out shell.

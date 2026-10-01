@@ -8,19 +8,38 @@ read-only git output.
 
 - **Part:** 0C (App shell, API relay, API client, CI). Parts 0A (2026-09-30), 0B and 0D (2026-10-01)
   are done and committed.
-- **Owner:** none (implementation finished; idle until the user reviews, commits and pushes)
-- **Phase:** implemented and validated locally. task.md shows `[~] In progress (awaiting first CI
-  run)` in both places, with 7 of 8 criteria ticked. The open one is "all CI jobs green on GitHub",
-  which needs the user's push.
+- **Owner:** none (fix finished; idle until the user commits and pushes it)
+- **Phase:** the first CI run (on `6e83866`) failed only in the frontend job's OpenNext build, with
+  `Cannot find package 'esbuild'`. The fix is in the working tree, uncommitted, and the whole
+  frontend job passes on Linux in Docker. task.md still shows `[~] In progress (awaiting first CI
+  run)` in both places, with 7 of 8 criteria ticked. The open one is "all CI jobs green on GitHub".
 - **Last approved plan:** [`docs/agents/plans/part-0C-app-shell-relay-ci.md`](plans/part-0C-app-shell-relay-ci.md)
   (status: implemented 2026-10-01; awaiting CI)
-- **Last updated:** 2026-10-01 by Claude (Opus 5.5), end of Part 0C implementation
+- **Last updated:** 2026-10-01 by Claude (Opus 5.5), fix for the first CI run
 
 ## Completed checkpoints
 
 - Dual-agent setup, the pre-0A correction pass, Parts 0A, 0B and 0D (0D = `b695f09`), the
   multi-source spec change (`bd05636`) and the 0C plan (`90857ec`), all committed by the user.
-- 2026-10-01 (Claude, Opus 5.5): **Part 0C implemented** (uncommitted, see the file list below).
+- 2026-10-01 (Claude, Opus 5.5): **fix for the first CI run** (uncommitted).
+  - CI on `6e83866`: backend and e2e were green; the frontend job failed at "OpenNext build" with
+    `ERR_MODULE_NOT_FOUND: Cannot find package 'esbuild' imported from
+    …/@opennextjs/cloudflare/dist/cli/build/bundle-server.js`.
+  - Cause: `@opennextjs/cloudflare` 1.20.7 imports `esbuild` without declaring it (upstream
+    opennextjs-cloudflare#1339; fix PR #1353 unreleased). It relied on npm hoisting `@opennextjs/aws`'s
+    nested 0.25.4, and `vite` 8.3.1's optional peer `esbuild ^0.27.0 || ^0.28.0` blocks that hoist, so
+    no top-level `esbuild` existed. Windows has the same tree; it went unnoticed because the OpenNext
+    build is Linux-only.
+  - Fix: `esbuild` **0.28.1** as an exact devDependency.
+    - It matches wrangler's own pin (one shared copy) and sits inside vite's peer range.
+    - It's patched for GHSA-g7r4-m6w7-qqqr; 0.27.7, upstream's suggested line, was flagged by
+      `npm audit`.
+    - Lockfile: wrangler's nested `esbuild` + 26 `@esbuild/*` entries moved to the top level; nothing
+      else changed. Git's default diff shows ~8.5k lines because of the move; `--diff-algorithm=histogram`
+      shows ~485.
+    - Docs: SETUP B3 `esbuild` row (why, and remove once OpenNext declares it), task.md deviation,
+      MEMORY (Docker recipe for Linux-only CI steps).
+- 2026-10-01 (Claude, Opus 5.5): **Part 0C implemented**, committed by the user as `6e83866`.
   - **Relay:** `src/lib/api/relay.ts` + `src/app/api/[...path]/route.ts`, per ARCHITECTURE §1.
     Bodies are buffered (≤ 6 MB). A backend `/api/` `Location` is rewritten as relative. Timeout: 70 s,
     for the headers only. `backend_waking` 503s.
@@ -49,21 +68,10 @@ read-only git output.
 
 ## Current workspace state
 
-- **Modified:**
-  - `task.md`, `docs/{ARCHITECTURE,ANALYSIS,STRUCTURE,SETUP,test-command}.md`
-  - `docs/agents/{HANDOFF,MEMORY}.md`, `docs/agents/plans/part-0C-app-shell-relay-ci.md`
-  - in `frontend/`: `package.json`, `package-lock.json`, `next.config.ts`, `tsconfig.json`,
-    `eslint.config.mjs`, `.prettierignore`
-  - in `frontend/src/`: `app/layout.tsx`, `app/providers.tsx`, `components/ui/Toast.tsx`,
-    `features/dev/UiGallery.tsx`
-- **Deleted:** `frontend/src/app/page.tsx`. It moved to `(marketing)/page.tsx`; two pages for `/` would
-  fail the build.
-- **New:**
-  - `.github/workflows/ci.yml`
-  - in `frontend/`: `wrangler.jsonc`, `open-next.config.ts`, `playwright.config.ts`, `e2e/`
-  - in `frontend/src/app/`: `(app)/`, `(auth)/`, `(marketing)/`, `api/`, `dev/shell/`, `fonts.ts`,
-    `not-found.tsx`, `error.tsx`, `global-error.tsx`, `error-pages.test.tsx`
-  - in `frontend/src/`: `components/shell/`, `lib/api/`, `lib/auth/`, `features/dev/ShellPreview.tsx`
+- HEAD is `6e83866` (the 0C implementation, committed and pushed by the user).
+- **Uncommitted, the CI fix only:**
+  - `frontend/package.json` (+ `"esbuild": "0.28.1"` in devDependencies) and `frontend/package-lock.json`
+  - `docs/SETUP.md`, `task.md`, `docs/agents/HANDOFF.md`, `docs/agents/MEMORY.md`
 - `git status --short design` prints nothing.
 - No nested `frontend/AGENTS.md`/`CLAUDE.md`.
 - `frontend/playwright-report` and `frontend/test-results` exist locally; they are git-ignored.
@@ -71,7 +79,27 @@ read-only git output.
   (`echo-check-secret`) on a separate `next dev -p 3100`.
 - **Nothing left running.** The Docker containers the agent started were stopped with
   `docker compose down`, which keeps the data. No dev server, `runserver` or workerd is running, and
-  ports 3000/3100/8000/8765 are free.
+  ports 3000/3100/8000/8765 are free. The Linux check container ran with `--rm` and is gone; the
+  `node:24-bookworm-slim` image stays in Docker's local cache.
+
+## Validation of the CI fix (2026-10-01)
+
+- Passed (`frontend/`, Windows, each exit 0):
+  - `npm ls esbuild` shows a top-level `esbuild@0.28.1`, also used by wrangler and vite
+    (`deduped`); `@opennextjs/aws` keeps its nested 0.25.4.
+  - `npm audit` → "found 0 vulnerabilities".
+  - Loading `@opennextjs/cloudflare/dist/cli/build/bundle-server.js` (the module that failed in CI)
+    works, and it resolves `esbuild` 0.28.1.
+  - `npm run lint`, `lint:tokens`, `typecheck`, `format:check`; `npm test` → **51 files, 412 tests
+    passed**.
+- Passed (Linux): the whole CI frontend job in `node:24-bookworm-slim` (Node 24.21.0 / npm 11.19.0,
+  the same as CI), with `CI=true`.
+  - The source was the 288 files `git ls-files -co --exclude-standard` lists, so the only env files
+    were the two `.env.example`s.
+  - Steps: `npm ci` (736 packages), lint, typecheck, lint:tokens, format:check, test (**51 / 412
+    passed**, including the 0D brand tests), then `npx opennextjs-cloudflare build` → "OpenNext build
+    complete", `.open-next/worker.js` written. Exit 0.
+- Not re-run: backend and e2e, which were green in CI and are untouched by this change.
 
 ## Validation of Part 0C (2026-10-01)
 
@@ -119,26 +147,24 @@ read-only git output.
   `initOpenNextCloudflareForDev()` (workerd).
 - Passed: `ci.yml` parses (the `yaml` package): 3 jobs, all actions `@v7`; triggers are push to
   `main`, PR and dispatch.
-- Not run (Linux/GitHub only):
-  - `npx opennextjs-cloudflare build`
-  - the CI workflow itself
-  - `wrangler preview`/`deploy`
+- Not run at the time (Linux/GitHub only): `npx opennextjs-cloudflare build` (it has since run, in
+  the CI fix above), the CI workflow itself, `wrangler preview`/`deploy`.
 
 ## Next exact action
 
-1. The user reviews the diff, commits and pushes (all git operations are theirs). `docs/test-command.md`
-   Part 0C has the hands-on checks.
-2. Check the first CI run, either in GitHub's Actions tab or with `gh run list --workflow ci.yml --limit 1`
+1. The user reviews the CI fix (`frontend/package.json`, `frontend/package-lock.json` and the four
+   docs), commits and pushes (all git operations are theirs).
+2. Check that CI run, either in GitHub's Actions tab or with `gh run list --workflow ci.yml --limit 1`
    and `gh run view <id> --log-failed` (read-only; `gh api` is denied).
    - **If all three jobs are green:** tick the last 0C criterion in task.md, set
      `**Status:** [x] Done (YYYY-MM-DD)` and the summary row to `[x] Done (YYYY-MM-DD)`, then update
      this file. The next part is **Part 1** (Auth core). Prompt: `Plan Part 1 from task.md. Do not
      implement yet.`
-   - **If a job fails:** investigate and report before changing anything. Known risks:
-     - 0D's `build.test.ts` may report stale brand SVGs on Linux (librsvg measurement). Fix the
-       measurement; never loosen the test.
-     - An import-case mismatch could fail the Linux build.
-     - A Linux-only OpenNext build problem.
+   - **If a job fails:** investigate and report before changing anything. Before asking the user to
+     push again, reproduce the job in Docker (MEMORY.md, "Check Linux-only CI steps in Docker").
+     - Already cleared on Linux, in CI run 1 and in Docker: 0D's brand tests (no librsvg drift), the
+       lint and type checks, and Playwright.
+     - Fixed: the OpenNext build's missing `esbuild`.
 
 ## Blockers or user decisions
 
@@ -170,6 +196,15 @@ read-only git output.
     that `request.signal` doesn't abort early.
   - Never build the Worker from a checkout with a real `.env.local` (SETUP B3 note).
   - Replace `vars.BACKEND_ORIGIN` in `wrangler.jsonc`.
+- **Dependency upkeep (Part 16 Dependabot, or any OpenNext upgrade):**
+  - Remove the `esbuild` devDependency once an `@opennextjs/cloudflare` release declares `esbuild`
+    itself (upstream #1339 / PR #1353). Then re-run the OpenNext build: in Docker first, then CI.
+  - When bumping `wrangler`, keep `esbuild` on wrangler's own pin, so one copy is shared and it stays
+    inside vite's peer range.
+  - `npm ci` on Linux warns that `eslint@9.39.5` is deprecated ("no longer supported"). Our
+    `"eslint": "^9"` range (from create-next-app) holds it there; `eslint-config-next` 16.3.8 accepts
+    `>=9.0.0`. Moving to a supported ESLint major is a separate, deliberate upgrade: check the flat
+    config and `npm run lint`.
 - **Minor:**
   - `<Logo/>` renders 47.86 px instead of 48 px tall at `lg`, because preflight sets
     `img { height: auto }`, so the rounded width decides the height. Invisible in practice; the E2E
