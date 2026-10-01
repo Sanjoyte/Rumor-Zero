@@ -6,12 +6,12 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none active. **Part 0B (Frontend foundation & design system) is done** (2026-10-01).
-  Part 0A is done (2026-09-30).
-- **Owner:** none (idle until the user starts the next part)
-- **Phase:** 0B implemented and validated; awaiting the user's review and git commit
-- **Last approved plan:** `docs/agents/plans/part-0B-frontend-foundation.md` (status: implemented)
-- **Last updated:** 2026-10-01 by Claude (Sonnet 5.5), Part 0B implementation
+- **Part:** **0D (Brand assets & Logo component): plan approved, not started.** Parts 0A (2026-09-30)
+  and 0B (2026-10-01) are done; 0D's only dependency is 0B.
+- **Owner:** none (idle until the user starts the implementation)
+- **Phase:** 0D planned; no code, dependency or `task.md` change made yet
+- **Approved plan:** `docs/agents/plans/part-0D-brand-assets.md` (status: approved, not implemented)
+- **Last updated:** 2026-10-01 by Claude (Sonnet 5.5), Part 0D planning
 
 ## Completed checkpoints
 
@@ -73,13 +73,17 @@ read-only git output.
 
 ## Next exact action
 
-1. The user reviews the diff and commits (all git operations are theirs).
-2. Start a fresh session for the next part in `task.md`'s order. Per the table that is **Part 0D**
-   (Brand assets & Logo component; depends on 0B, now done). Then 0C (needs 0A, 0B, 0D).
-3. Prompt for planning: `Plan Part 0D from task.md. Do not implement yet.`
-   - 0D will add `sharp` and the `brand:build` script. Add each new binary type to `.gitattributes`.
-   - `lint:tokens` has an empty `ALLOWLIST` in `scripts/lint-tokens.mjs`; 0D's generated
-     `src/lib/brand-assets.json` and `src/app/manifest.ts` (brand hex) must be added to it.
+**Implement Part 0D from the approved plan** (`docs/agents/plans/part-0D-brand-assets.md`). Start with
+its step 0 (set `task.md` 0D to In progress in both places), then follow the ordered steps.
+
+- Prompt: `Implement only the approved Part 0D plan, validate it, update task.md and HANDOFF.md, then stop.`
+- Verify first: `git status` is clean (0B is committed), and `design/logo.svg` is unchanged.
+- Plan notes that differ from the older hints here: `.gitattributes` needs no change (`*.png` and
+  `*.ico` are already binary; SVG/JSON/`.alt.txt` are text). `lint:tokens` gets `src/lib/brand-assets.json`
+  on its `ALLOWLIST` and starts scanning `.json`; `manifest.ts` reads its colours from that JSON, so it
+  needs no allowlist entry (a recorded deviation).
+- User decision for the plan: rounded-square plate for favicon.ico, icon.svg, icon-192 and icon-512.
+- After 0D comes 0C (needs 0A, 0B, 0D).
 
 ## Blockers or user decisions
 
