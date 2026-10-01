@@ -6,16 +6,24 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none active. Parts 0A (2026-09-30), 0B and 0D (2026-10-01) are done and committed.
-- **Owner:** none (idle until the user starts the next part)
-- **Phase:** docs-only spec change (multi-source posts) applied; awaiting the user's review and git commit
-- **Last approved plan:** `docs/agents/plans/spec-multi-source-posts.md` (status: implemented)
-- **Last updated:** 2026-10-01 by Claude (Opus 5.5), multi-source spec change
+- **Part:** 0C (App shell, API relay, API client, CI). Parts 0A (2026-09-30), 0B and 0D (2026-10-01)
+  are done and committed.
+- **Owner:** none (idle until the user starts implementation)
+- **Phase:** plan approved; implementation not started (no code, setup command or `task.md` change yet)
+- **Last approved plan:** [`docs/agents/plans/part-0C-app-shell-relay-ci.md`](plans/part-0C-app-shell-relay-ci.md)
+  (status: approved 2026-10-01, not implemented)
+- **Last updated:** 2026-10-01 by Claude (Opus 5.5), Part 0C planning
 
 ## Completed checkpoints
 
-- Dual-agent setup, the pre-0A correction pass, Parts 0A, 0B and 0D (0D = `b695f09`), all
-  committed by the user.
+- Dual-agent setup, the pre-0A correction pass, Parts 0A, 0B and 0D (0D = `b695f09`), and the
+  multi-source spec change (`bd05636`), all committed by the user.
+- 2026-10-01 (Claude, Opus 5.5): **Part 0C planned and approved.**
+  - It checked that every dependency (0A, 0B, 0D) is Done.
+  - It saved the plan in `docs/agents/plans/part-0C-app-shell-relay-ci.md`.
+  - The approved deviations from task.md / ANALYSIS d are listed in the plan, for example buffered
+    request bodies, `skipTrailingSlashRedirect`, the Location rewrite, and one OpenNext build step in
+    CI. They are recorded in ARCHITECTURE/ANALYSIS during implementation, not yet.
 - 2026-10-01 (Claude, Opus 5.5): **spec change, up to 5 sources per fact post** (user decision; was
   one). Docs only, uncommitted: `AGENTS.md`, `docs/{ARCHITECTURE,ANALYSIS,STRUCTURE}.md`, `task.md`,
   new `docs/agents/plans/spec-multi-source-posts.md`. `Post.source` + `source_kind` became one
@@ -44,12 +52,15 @@ read-only git output.
 
 ## Current workspace state
 
-- Uncommitted (spec change only): modified `AGENTS.md`, `docs/ANALYSIS.md`, `docs/ARCHITECTURE.md`,
-  `docs/STRUCTURE.md`, `task.md`, `docs/agents/HANDOFF.md`; new `docs/agents/plans/spec-multi-source-posts.md`.
-  No code, test, dependency or env file changed. `git status --short design` prints nothing.
-- Spec-change checks: a grep of the docs for `source_kind`, `"source"`, `source: str`, "one per post" and
-  "multi-source registr" finds only the new `source_kind(value)` helper and the plan's history notes. No tests
-  run (docs only).
+- The tree was clean at `bd05636` before planning.
+- Uncommitted now (planning only):
+  - new `docs/agents/plans/part-0C-app-shell-relay-ci.md`
+  - modified `docs/agents/HANDOFF.md`
+- No code, test, dependency, env file or `task.md` changed, and no tests were run (docs only).
+- Read-only checks made while planning (2026-10-01):
+  - `npm view`: `@opennextjs/cloudflare` 1.20.7, `wrangler` 4.145.0, `@playwright/test` 1.63.0.
+  - Next 16.3.8 source: the `/:path+/` 308 redirect, `x-forwarded-for ??=`, `request.url` built with
+    `new URL()`, and the patched fetch keeping `duplex`.
 
 ## Validation of Part 0D (all in `frontend/`, 2026-10-01)
 
@@ -79,20 +90,23 @@ read-only git output.
 
 ## Next exact action
 
-1. The user reviews the multi-source spec diff and commits (all git operations are theirs).
-2. Start a fresh session for the next part in `task.md`'s order: **Part 0C** (App shell, API relay, API
-   client, CI; needs 0A, 0B, 0D, all done). The spec change does not affect 0C.
-3. Prompt for planning: `Plan Part 0C from task.md. Do not implement yet.`
-   - 0C places `<Logo/>` everywhere listed in ARCHITECTURE §14 (sidebar `md`, tablet dock `mark`, mobile top
-     bar `sm`, auth card `lg`, marketing nav/footer, 404/500) and extends the guard test's expectations if it
-     adds files that legitimately know about the brand (it should not: use `<Logo/>`).
-   - CI: run `lint:tokens`, `format:check` and `npm test` (the brand tests need `sharp`, which `npm ci` installs
-     with prebuilt binaries on Linux). Do **not** add a "regenerate and diff" check for PNGs: bytes can differ
-     across OS/libvips builds (`build.test.ts` already fails on stale SVG/JSON/txt outputs).
+**Implement Part 0C from the approved plan**
+([`docs/agents/plans/part-0C-app-shell-relay-ci.md`](plans/part-0C-app-shell-relay-ci.md)).
+
+- Model: Sonnet 5.5 · high (task.md).
+- Prompt: `Implement only the approved Part 0C plan, validate it, update task.md and HANDOFF.md, then stop.`
+- Start at the plan's step 0: set task.md 0C to `[~] In progress` in both places and update this file.
+- The last acceptance criterion (CI green on GitHub) needs the user to push. The agent then reads the
+  result with `gh run list/view` (read-only; `gh api` is denied).
 
 ## Blockers or user decisions
 
 - None open.
+- User decisions for 0C (2026-10-01), detailed in the plan:
+  - logged-out shell = reduced nav (Home, Search, Log in / Sign up)
+  - phones = top bar plus a 5-tab bottom bar (Home, Search, New post, Notifications, Profile), with the
+    avatar opening an account sheet (Bookmarks, Settings, Moderation)
+  - marketing links only to existing pages (About, Community Guidelines, Press and Contact dropped)
 
 ## Follow-ups noted during 0D (not done, per the part's scope)
 
