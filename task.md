@@ -84,7 +84,7 @@ not let the review expand the part's scope without user approval.
 | 0A | Backend foundation | SETUP Part A | [x] Done (2026-09-30) |
 | 0B | Frontend foundation & design system | SETUP Part A | [x] Done (2026-10-01) |
 | 0D | Brand assets & Logo component | 0B | [x] Done (2026-10-01) |
-| 0C | App shell, API relay, API client, CI | 0A, 0B, 0D | [ ] |
+| 0C | App shell, API relay, API client, CI | 0A, 0B, 0D | [~] In progress (awaiting first CI run) |
 | 1 | Auth core: sign up, log in, tokens, log out | 0C | [ ] |
 | 2 | Email verification & password reset | 1 | [ ] |
 | 3 | Continue with Google | 1 | [ ] |
@@ -340,7 +340,7 @@ Adjustments for real dependencies:
 ---
 
 ## Part 0C: App shell, API relay, API client, CI
-**Status:** [ ] Not started
+**Status:** [~] In progress (implemented and validated locally 2026-10-01; waiting for the first CI run on GitHub after your push)
 **Goal:** the three page layouts; the single-origin API relay (the core of the free topology); the base API client; and a CI pipeline that also proves the Cloudflare build works on Linux.
 **Depends on:** 0A, 0B, 0D.
 **Stitch files to convert:** app shell (sidebar + top bar) from `b1_home_feed`; `MarketingNav`/`MarketingFooter` from `a1_logged_out_home`; auth card layout from `a2_sign_up`. Every brand mark in them (text wordmark, emblem tiles, "Fact Social") becomes `<Logo/>` (ANALYSIS e.2).
@@ -380,14 +380,27 @@ All three jobs run on test values only; no secrets.
 **API endpoints:** none new (the relay forwards `/api/health/`).
 
 **Acceptance criteria**
-- [ ] With Django running, `http://localhost:3000/api/health/` returns Django's JSON through the relay
-- [ ] The backend receives the correct `X-RZ-Client-IP` and secret; spoofed client headers from the browser are dropped
-- [ ] Multiple `Set-Cookie` headers survive the relay; with the backend stopped, the relay returns `503 {"code":"backend_waking"}`
-- [ ] Cache headers and a `304 Not Modified` pass through the relay unchanged
-- [ ] The shell matches Stitch b1 at 1280 px and is usable at 1024 px (icon dock) and 390 px (bottom nav); the current page has `aria-current="page"`
-- [ ] Every brand mark in the shell, auth and marketing layouts is `<Logo/>` (the 0D guard test still passes)
-- [ ] The Playwright smoke test passes locally
+- [x] With Django running, `http://localhost:3000/api/health/` returns Django's JSON through the relay
+- [x] The backend receives the correct `X-RZ-Client-IP` and secret; spoofed client headers from the browser are dropped
+- [x] Multiple `Set-Cookie` headers survive the relay; with the backend stopped, the relay returns `503 {"code":"backend_waking"}`
+- [x] Cache headers and a `304 Not Modified` pass through the relay unchanged
+- [x] The shell matches Stitch b1 at 1280 px and is usable at 1024 px (icon dock) and 390 px (bottom nav); the current page has `aria-current="page"`
+- [x] Every brand mark in the shell, auth and marketing layouts is `<Logo/>` (the 0D guard test still passes)
+- [x] The Playwright smoke test passes locally
 - [ ] After you push, all CI jobs are green on GitHub, including the OpenNext build on Linux
+
+**Deviations and decisions (2026-10-01):**
+- **User decisions:** the logged-out shell shows only Home and Search (plus Log in / Sign up); phones get a top bar and five bottom tabs (Home, Search, New post, Notifications, Profile) with an account sheet for Bookmarks, Settings and Moderation; marketing links go only to pages that exist (About, Community Guidelines, Press and Contact dropped). ARCHITECTURE §10 and ANALYSIS a.3 record them.
+- **Request bodies are buffered (≤ 6 MB), not streamed** (the scope said `duplex:'half'` streaming). Django can't read chunked bodies and OpenNext buffers them on Workers anyway; the real-HTTP test proves bodies arrive with `Content-Length`. Over 6 MB → 413 `payload_too_large`.
+- **Relay additions** (ARCHITECTURE §1, ANALYSIS d): `User-Agent` is forwarded; a `Location` pointing at the backend's own `/api/` is returned as a relative URL, any other is dropped; `Content-Length` is copied only without `Content-Encoding`; the 70 s timer covers the wait for headers only; an upstream non-JSON 502/503/504 also becomes `backend_waking`; `BACKEND_ORIGIN` must be https (http only for loopback).
+- **`skipTrailingSlashRedirect: true`** in `next.config.ts`: Next's default redirect turned `/api/health/` into `/api/health`, which loops with Django's `APPEND_SLASH`. A `redirects()` rule keeps page URLs slash-less (`/home/` → `/home`, covered by E2E).
+- **CI runs one OpenNext build step** (`npx opennextjs-cloudflare build` runs `next build` itself), covering both build items. Action majors: checkout, setup-python, setup-node and upload-artifact all `@v7`.
+- **Versions:** `@opennextjs/cloudflare` 1.20.7, `wrangler` 4.145.0 (SETUP said 4.143.0), `@playwright/test` 1.63.0, all exact devDependencies. No new env variable.
+- **Basic `not-found`, `error` and `global-error`** now (ARCHITECTURE §14 places their logo in 0C); Part 15 polishes them. Fonts moved to `src/app/fonts.ts` so `global-error` can reuse them. The root title template is `"%s · Rumor Zero"`.
+- **The top-bar search box keeps b1's compact classes** instead of the 44 px `TextField`, so the bar matches Stitch.
+- **`/dev/shell`** (dev-only, 404 in production) shows the shell with a sample user for the Stitch comparison, because there is no sign-in until Part 1. `?user=none` shows the logged-out shell.
+- The toast region moved to `bottom-20 md:bottom-space-lg` so the phone bottom bar doesn't cover it.
+- **Verified locally:** headless Edge at 1280 next to Stitch b1 (same rail, header and item geometry; differences are the planned logo, Bookmarks, "New post" and no Ledger pill); Playwright at 1024 and 390 (no horizontal overflow); a scratchpad echo backend for the header, cookie and 304 checks. ANALYSIS c-35's "CPU check" belongs to Part 18 and was reworded.
 
 **Required tests:** relay unit tests with mocked `fetch` (request and response header allow-lists, secret and IP injection, cookie passthrough, 304 passthrough, timeout → 503, method and body passthrough); API client error normalisation; shell render tests (nav items, active state, responsive variants, logo placement); E2E smoke.
 

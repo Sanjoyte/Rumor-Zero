@@ -1,0 +1,149 @@
+# CI for every push to main and every pull request (ARCHITECTURE §11).
+# Test values only: env files are copied from the committed .env.example files, so CI needs no
+# secrets (ENV_GUIDE §2.10). Render deploys only "After CI Checks Pass".
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (ruff, migrations, pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      # The same user, password and database as backend/.env.example, so DATABASE_URL works as is.
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: rumor_zero
+          POSTGRES_PASSWORD: rumor_zero
+          POSTGRES_DB: rumor_zero
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rumor_zero -d rumor_zero"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: backend/.python-version
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Env file from the example (test values only)
+        run: cp .env.example .env
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: python manage.py makemigrations --check --dry-run
+      - run: python -m pytest
+
+  frontend:
+    name: Frontend (lint, types, tests, OpenNext build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run lint:tokens
+      - run: npm run format:check
+      - run: npm test
+      # Runs `next build` itself, then bundles the Worker. Linux only (OpenNext doesn't support
+      # Windows). No env file here: the OpenNext build copies .env* files into the bundle.
+      - name: OpenNext build (next build + Cloudflare Worker bundle)
+        run: npx opennextjs-cloudflare build
+
+  e2e:
+    name: E2E (Playwright, Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: rumor_zero
+          POSTGRES_PASSWORD: rumor_zero
+          POSTGRES_DB: rumor_zero
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rumor_zero -d rumor_zero"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: backend/.python-version
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      # playwright.config.ts starts Django with backend/.venv's Python.
+      - name: Backend virtualenv and env file (test values only)
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -r requirements.txt
+          cp .env.example .env
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      # Its PROXY_SHARED_SECRET equals the backend example's, so the relay's headers are trusted.
+      - name: Env file from the example (test values only)
+        run: cp .env.example .env.local
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+      - run: npm run test:e2e
+        working-directory: frontend
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7

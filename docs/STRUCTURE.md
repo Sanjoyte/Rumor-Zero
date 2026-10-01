@@ -17,7 +17,7 @@ rumor-zero/
 │   └── rules/default.rules      ✅ Codex command rules: state-changing git/gh commands are forbidden
 ├── .github/
 │   ├── workflows/
-│   │   ├── ci.yml               🔨 0C  backend (ruff, pytest on Postgres 18 service) + frontend (lint, typecheck, vitest, build,
+│   │   ├── ci.yml               ✅ 0C  backend (ruff, pytest on Postgres 18 service) + frontend (lint, typecheck, vitest, build,
 │   │   │                               OpenNext build on Linux) + e2e (Playwright). Render deploys only "After CI Checks Pass".
 │   │   └── keepalive.yml        🔨 18  daily deep-health ping (DB + Redis); UptimeRobot handles the 5-min ping
 │   └── dependabot.yml           🔨 16  weekly pip + npm + github-actions update PRs (guide §12)
@@ -82,23 +82,24 @@ rumor-zero/
 │   ├── .gitignore               🅑  contains `.env*`, plus `!.env.example` appended in 0B
 │   ├── .nvmrc                   ✅ 0B  "24" (also read by Cloudflare Workers Builds)
 │   ├── .prettierrc.json, .prettierignore  ✅ 0B  prettier + the Tailwind class sorter (reads src/app/globals.css)
-│   ├── package.json             🅑  scripts: dev, build, start, lint (eslint), lint:tokens, typecheck, test (vitest run), test:watch, format, format:check; test:e2e arrives in 0C
-│   ├── next.config.ts           🅑  `agentRules: false` (0B) + initOpenNextCloudflareForDev() in 0C
+│   ├── package.json             🅑  scripts: dev, build, start, lint (eslint), lint:tokens, typecheck, test (vitest run), test:watch, format, format:check; 0C adds test:e2e and the Linux-only preview, deploy, upload, cf-typegen
+│   ├── next.config.ts           🅑  `agentRules: false` (0B); ✅ 0C: `poweredByHeader: false`, `skipTrailingSlashRedirect` + page-slash redirect,
+│   │                                initOpenNextCloudflareForDev() in the dev-server phase only
 │   ├── tsconfig.json            🅑  strict, alias @/* → src/*
 │   ├── eslint.config.mjs        🅑
 │   ├── postcss.config.mjs       🅑
 │   ├── vitest.config.mts        ✅ 0B  jsdom, `@` alias, setup file
 │   ├── scripts/lint-tokens.mjs  ✅ 0B  `npm run lint:tokens`: fails on default-palette classes, raw hex, stray radius/shadow/text sizes, dangerouslySetInnerHTML (+ lint-tokens.test.ts)
-│   ├── playwright.config.ts     🔨 0C  webServer starts backend + frontend for e2e
-│   ├── wrangler.jsonc           🔨 0C  name "rumor-zero", main .open-next/worker.js, nodejs_compat, assets binding
-│   ├── open-next.config.ts      🔨 0C  defineCloudflareConfig() with the default cache (no R2)
+│   ├── playwright.config.ts     ✅ 0C  webServer starts Django (backend/.venv) + Next (`next dev`, or `next start` in CI)
+│   ├── wrangler.jsonc           ✅ 0C  name "rumor-zero", main .open-next/worker.js, nodejs_compat, assets binding
+│   ├── open-next.config.ts      ✅ 0C  defineCloudflareConfig() with the default cache (no R2)
 │   ├── scripts/brand/           ✅ 0D  build-brand-assets.mjs + brand.config.json (`npm run brand:build`): reads
 │   │                                design/logo.svg (never writes design/), writes every derived logo asset (ARCHITECTURE §14);
 │   │                                svg.mjs (safety check, bounds, crops), ico.mjs, png.mjs, contrast.mjs + their tests
 │   ├── public/
 │   │   └── brand/               ✅ 0D  generated: logo.svg, mark.svg, icon-192/512/maskable-512.png, email-logo.png,
 │   │                                google-oauth-logo.png (never hand-edited)
-│   ├── e2e/                     🔨 0C+ Playwright specs (smoke in 0C; one flow per later part)
+│   ├── e2e/                     ✅ 0C  Playwright specs: smoke.spec.ts (0C); one flow per later part
 │   └── src/
 │       ├── app/                 🅑 App Router (routes below)
 │       │   ├── layout.tsx       🔨 0B  fonts (next/font), <html lang="en">, providers
@@ -106,19 +107,20 @@ rumor-zero/
 │       │   ├── favicon.ico, icon.svg, apple-icon.png, opengraph-image.png (+ .alt.txt),
 │       │   │   twitter-image.png   ✅ 0D  generated brand files (Next.js metadata file conventions);
 │       │   │   manifest.ts (hand-written, reads brand-assets.json) ✅ 0D
-│       │   ├── not-found.tsx, error.tsx          🔨 15
-│       │   ├── (marketing)/     no app shell, prerendered
+│       │   ├── not-found.tsx, error.tsx, global-error.tsx   ✅ 0C basic AuthLayout cards with the logo; polished in 15
+│       │   ├── fonts.ts         ✅ 0C  next/font setup shared by layout.tsx and global-error.tsx
+│       │   ├── (marketing)/     ✅ 0C layout (MarketingNav + MarketingFooter) + placeholder pages; no app shell, prerendered
 │       │   │   ├── page.tsx                 "/"              ← a1 (15)
 │       │   │   ├── how-it-works/page.tsx    "/how-it-works"  ← root code.html layout, rewritten (15)
 │       │   │   ├── privacy/, terms/         "/privacy", "/terms" (15)
-│       │   ├── (auth)/          AuthLayout (max-w-form card)
+│       │   ├── (auth)/          ✅ 0C AuthLayout (max-w-form card) + login/signup placeholders
 │       │   │   ├── signup/                  ← a2 (1)
 │       │   │   ├── login/                   ← a3 (1)
 │       │   │   ├── verify-email/            ← a4 "check inbox" (2)
 │       │   │   ├── verify-email/[key]/      ← a4 link landing states (2)
 │       │   │   ├── forgot-password/         ← a5 (2)
 │       │   │   └── reset-password/[key]/    ← a6 (2)
-│       │   ├── (app)/           AppShell (sidebar/top bar/mobile nav)
+│       │   ├── (app)/           ✅ 0C AppShell (sidebar/top bar/mobile nav) + placeholders for every nav destination
 │       │   │   ├── layout.tsx
 │       │   │   ├── home/                    "/home" ← b1 (4, following tab 6, reposts 7B, pinned emergencies 11C)
 │       │   │   ├── p/[id]/                  "/p/:id" ← b3 (5, comments 7, repost/bookmark 7B, appeal 11, stats 11D)
@@ -128,7 +130,8 @@ rumor-zero/
 │       │   │   ├── u/[username]/followers/, following/   ← c3 (6)
 │       │   │   ├── notifications/           ← c4 (13)
 │       │   │   └── settings/                ← c2 (14, photo 14B)
-│       │   └── api/[...path]/route.ts       🔨 0C  **API relay** to BACKEND_ORIGIN (not Next's proxy.ts)
+│       │   ├── dev/shell/       ✅ 0C  dev-only shell preview with a sample user (404 in production)
+│       │   └── api/[...path]/route.ts       ✅ 0C  **API relay** to BACKEND_ORIGIN (not Next's proxy.ts); logic in lib/api/relay.ts
 │       ├── components/
 │       │   ├── ui/              ✅ 0B  primitives converted from Stitch: Button, Icon, TextField, PasswordField,
 │       │   │                            Textarea, Checkbox, RadioCard, Select, Toggle, Tabs, SegmentedControl, FilterChips,
@@ -138,8 +141,8 @@ rumor-zero/
 │       │   │                            Divider, DangerZone (+ field-styles.ts shared by the text-like controls);
 │       │   │                            ✅ 0D Logo (the only brand mark);
 │       │   │                            11D charts/ MeterBar, StatTile, BarChart, RingGauge, Sparkline
-│       │   └── shell/           🔨 0C  AppShell, Sidebar, TopBar, MobileNav, AuthLayout, MarketingNav, MarketingFooter
-│       │                                (all using <Logo/>), UnverifiedBanner (1)
+│       │   └── shell/           ✅ 0C  AppShell, Sidebar, TopBar, MobileNav, AccountMenu, ShellLink, nav-items.ts, AuthLayout,
+│       │                                MarketingNav, MarketingFooter, Placeholder (all using <Logo/>); UnverifiedBanner (1)
 │       ├── features/            🔨 screen-specific pieces, one folder per domain:
 │       │   ├── auth/            1–3  SignupForm, LoginForm, GoogleButton, Turnstile, VerifyEmailStatus, ResetForms
 │       │   ├── posts/           ✅ 0B PostCard (props only); 4–5, 9  SourceLink, Composer(Modal), FeedList, PostDetail, useStatusPolling;
@@ -153,11 +156,11 @@ rumor-zero/
 │       │   ├── search/          12   SearchBar, SearchResults
 │       │   ├── notifications/   13   NotificationList, useUnreadCount
 │       │   ├── settings/        14   ProfileForm, PasswordForm (uses ui/DangerZone); 14B AvatarUploader
-│       │   └── dev/             ✅ 0B  UiGallery and its sections, served at /dev/ui (404 in production builds)
+│       │   └── dev/             ✅ 0B  UiGallery and its sections, served at /dev/ui (404 in production builds); 0C ShellPreview (/dev/shell)
 │       ├── lib/
-│       │   ├── api/             🔨 0C  client.ts (fetch wrapper: base "/api", bearer token, one refresh-retry on 401,
-│       │   │                            error normalisation), types.ts (API shapes from ARCHITECTURE §9)
-│       │   ├── auth/            🔨 0C/1  AuthProvider (access token in memory only), refresh lock (Web Locks API)
+│       │   ├── api/             ✅ 0C  client.ts (fetch wrapper: base "/api", bearer token, single-flight 401 hook with one retry,
+│       │   │                            error normalisation), types.ts (API shapes from ARCHITECTURE §9), relay.ts (server-only relay logic)
+│       │   ├── auth/            ✅ 0C skeleton: token-store.ts (memory only), refresh-lock.ts (Web Locks API), AuthProvider.tsx; completed in 1
 │       │   ├── brand-assets.json ✅ 0D  generated list of logo assets (read by Logo and manifest.ts); brand-guard.test.ts guards the rule
 │       │   └── cn.ts, format.ts, password-strength.ts, post-display.ts  ✅ 0B  className joiner, relative time / number formatting,
 │       │                                advisory password score, pure stripe + badge rules (ARCHITECTURE §4 table)

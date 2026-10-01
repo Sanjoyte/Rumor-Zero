@@ -93,7 +93,7 @@ Each decision has a default. The rest of the docs (ARCHITECTURE, task.md) alread
 | `AppShell` = `Sidebar` + `TopBar` (+ `UserCard`, `SearchInput`) | root, b1–d2 | Add tablet icon-dock and mobile bottom-nav variants (DESIGN.md "intended behavior"). Remove the "Verification Ledger" pill. Show "Moderation" only to moderators, linking to Django Admin. |
 | `AuthCard` (`max-w-form`) + `Logo` | a2–a6 | The per-file emblem tiles (check, layers, diamond, lock) are all replaced by `<Logo/>` (D9, e.2). |
 | `Logo` (wordmark / mark) | every brand-mark spot | The only brand mark in the UI (Part 0D; ARCHITECTURE §14) |
-| `MarketingNav` / `MarketingFooter` | a1 | Footer links cut to About, How verification works, Privacy, Terms |
+| `MarketingNav` / `MarketingFooter` | a1 | Links only to pages that exist (0C, user decision 2026-10-01): nav How it works, Log in, Sign up; footer How verification works, Privacy, Terms. About, Community Guidelines, Press and Contact are dropped (no part builds them) |
 | `Button` (primary / secondary / ghost / destructive / icon) | everywhere | Primary = `bg-secondary`. There's one radius (`rounded-lg` = 4px) and one shadow (`shadow-sm`). |
 | `TextField`, `PasswordField` (visibility toggle), `Textarea` (+ counter), `Checkbox`, `RadioCard` list, `Select` | a2, a3, a5, a6, b2, b3, c2, d1, d2 | Bind labels to inputs (`htmlFor`). c2 lacks this. |
 | `PasswordStrengthMeter` (4 segments) | a2, a6 | Stitch is inconsistent: 3/4 means "Strong" in a2 but "Fair" in a6. Decided in Part 0B: one scale, Weak / Fair / Good / Strong (advisory). |
@@ -420,7 +420,7 @@ The original default was "drop all". Since 2026-09-29 the seven features you nam
     - Static pages (landing shell, how-it-works, privacy, terms) are **prerendered** at build time.
     - Post detail and profile pages do a **light SSR**: `generateMetadata` for OG tags + the claim text only; the rest hydrates on the client.
     - All personalised pages are client-rendered through `/api`.
-    - Part 0C adds a CPU check to the deploy smoke test.
+    - Part 18 checks Workers observability for CPU-limit (1102) errors on `/p/[id]` (0C has no deploy).
 36. **Next.js 16 renamed `middleware.ts` to `proxy.ts`.** Our "proxy" is **not** that file: it is a normal Route Handler we call the **API relay** (`src/app/api/[...path]/route.ts`). `proxy.ts`/middleware stays unused (only experimental on OpenNext).
 
 ---
@@ -456,8 +456,9 @@ Moderators ──► https://rumor-zero-api.onrender.com/<ADMIN_URL_PATH>   (Dja
 ```
 
 - **API relay:** a catch-all Route Handler, `frontend/src/app/api/[...path]/route.ts`. It is not Next 16's `proxy.ts`; see c-36.
-  - It forwards the method, body and an **allow-list** of headers (`Authorization`, `Cookie`, `Content-Type`, `Accept`, `Origin`, `X-Requested-With`) to `BACKEND_ORIGIN`.
-  - It uses `redirect: 'manual'` and `duplex: 'half'` for streamed bodies under `next dev`.
+  - It forwards the method, body and an **allow-list** of headers (`Authorization`, `Cookie`, `Content-Type`, `Accept`, `Origin`, `X-Requested-With`, plus `If-None-Match`, `If-Modified-Since` and `User-Agent`) to `BACKEND_ORIGIN`.
+  - It uses `redirect: 'manual'`. Request bodies are **buffered** (≤ 6 MB), not streamed: Django can't read chunked bodies, and OpenNext buffers them on Workers anyway (changed in 0C; was `duplex: 'half'` streaming).
+  - A redirect to the backend's own `/api/` comes back as a relative `Location`; any other `Location` is dropped. `next.config.ts` turns off Next's trailing-slash redirect for `/api/` (it would loop with Django's `APPEND_SLASH`). Full rules: ARCHITECTURE §1.
   - It copies back the status, body and **every** `Set-Cookie` via `headers.getSetCookie()`.
   - It adds `X-RZ-Proxy-Secret: <PROXY_SHARED_SECRET>` and `X-RZ-Client-IP` (from `cf-connecting-ip`, or `x-forwarded-for` locally).
   - It sets a ~70 s timeout for Render cold starts (~1 min) and returns a friendly `503 {"code":"backend_waking"}` on timeout.

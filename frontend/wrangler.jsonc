@@ -1,0 +1,26 @@
+{
+  // Cloudflare Worker for the frontend, built by `npx opennextjs-cloudflare build` (OpenNext).
+  // Build, preview and deploy run on Linux only (CI, Workers Builds); never on Windows.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "rumor-zero",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-30",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS",
+  },
+  "services": [
+    {
+      // Self-reference service binding; the service name must match the worker name.
+      // See https://opennext.js.org/cloudflare/caching
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "rumor-zero",
+    },
+  ],
+  "vars": {
+    // Not a secret. Placeholder until Part 18 fills in the real Render URL (ARCHITECTURE §0).
+    // PROXY_SHARED_SECRET is a Worker secret set in the dashboard, never in this file.
+    "BACKEND_ORIGIN": "https://rumor-zero-api.onrender.com",
+  },
+}

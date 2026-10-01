@@ -1,0 +1,166 @@
+import Link from "next/link";
+import { Avatar } from "@/components/ui/Avatar";
+import { buttonClasses } from "@/components/ui/Button";
+import { Icon } from "@/components/ui/Icon";
+import { Logo } from "@/components/ui/Logo";
+import { cn } from "@/lib/cn";
+import { AccountMenu } from "./AccountMenu";
+import {
+  footerItems,
+  isActive,
+  LOG_IN,
+  NEW_POST,
+  nameOf,
+  primaryItems,
+  userMenuItems,
+  type NavItem,
+  type ShellUser,
+} from "./nav-items";
+import { ShellLink } from "./ShellLink";
+
+export const USER_MENU_ID = "rz-user-menu";
+
+export interface SidebarProps {
+  user: ShellUser | null;
+  pathname: string;
+  /** Opens the composer (Part 4). Until then the button does nothing. */
+  onNewPost?: () => void;
+}
+
+/** Stitch b1 L20/L21 (main list) and L32/L33 (footer list): same shape, footer is smaller. */
+function itemClasses(active: boolean, size: "main" | "footer"): string {
+  return cn(
+    "flex items-center justify-center gap-space-sm rounded-lg px-space-md transition-colors xl:justify-start",
+    size === "main"
+      ? "py-space-sm font-body-md text-body-md"
+      : "py-space-xs font-body-sm text-body-sm",
+    active
+      ? "bg-secondary font-semibold text-on-secondary"
+      : "text-on-surface-variant hover:bg-surface-container-low hover:text-on-surface",
+  );
+}
+
+function SidebarLink({
+  item,
+  pathname,
+  size,
+}: {
+  item: NavItem;
+  pathname: string;
+  size: "main" | "footer";
+}) {
+  const active = !item.external && isActive(pathname, item.href);
+  return (
+    <ShellLink item={item} active={active} title={item.label} className={itemClasses(active, size)}>
+      <Icon name={item.icon} size="xl" />
+      {/* Hidden in the icon dock, but still the link's name. */}
+      <span className="sr-only xl:not-sr-only">{item.label}</span>
+    </ShellLink>
+  );
+}
+
+/**
+ * The left rail (Stitch b1 L13–44): the full `w-64` rail at ≥1280px, a `w-16` icon dock at
+ * 768–1279px, hidden on phones (MobileNav takes over).
+ */
+export function Sidebar({ user, pathname, onNewPost }: SidebarProps) {
+  const footer = footerItems(user);
+
+  return (
+    <aside className="fixed top-0 left-0 z-50 hidden h-full w-16 flex-col justify-between border-r border-outline-variant/30 bg-surface-container-lowest md:flex xl:w-64">
+      <div className="flex flex-col">
+        <div className="flex h-16 items-center justify-center gap-space-sm border-b border-outline-variant/30 xl:justify-start xl:px-space-lg">
+          <Link href="/home" className="rounded-lg">
+            <span className="hidden xl:block">
+              <Logo size="md" />
+            </span>
+            <span className="block xl:hidden">
+              <Logo variant="mark" size="md" />
+            </span>
+          </Link>
+        </div>
+        <div className="flex flex-col gap-space-sm p-space-sm">
+          <nav aria-label="Main" className="flex flex-col gap-space-xs">
+            {primaryItems(user).map((item) => (
+              <SidebarLink key={item.href} item={item} pathname={pathname} size="main" />
+            ))}
+          </nav>
+          {user && (
+            <div className="pt-space-sm">
+              <button
+                type="button"
+                title={NEW_POST.label}
+                onClick={onNewPost}
+                className="flex w-full items-center justify-center gap-space-xs rounded-lg bg-secondary px-space-md py-space-sm font-body-md text-body-md font-semibold text-on-secondary shadow-sm transition-colors hover:bg-on-secondary-container focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/30"
+              >
+                <Icon name={NEW_POST.icon} size="lg" />
+                <span className="sr-only xl:not-sr-only">{NEW_POST.label}</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-col border-t border-outline-variant/30">
+        {footer.length > 0 && (
+          <div className="flex flex-col gap-space-xs px-space-sm py-space-xs">
+            {footer.map((item) => (
+              <SidebarLink key={item.href} item={item} pathname={pathname} size="footer" />
+            ))}
+          </div>
+        )}
+        {user ? (
+          <div className="flex items-center justify-center gap-space-sm border-t border-outline-variant/30 bg-surface-container-lowest p-space-sm xl:justify-between xl:p-space-md">
+            <div className="hidden min-w-0 flex-1 items-center gap-space-sm xl:flex">
+              <Avatar name={nameOf(user)} src={user.avatar_url} size={8} decorative />
+              <div className="flex min-w-0 flex-col">
+                <span className="truncate font-body-sm text-body-sm font-semibold text-on-surface">
+                  {nameOf(user)}
+                </span>
+                <span className="truncate font-label-code text-label-code text-on-surface-variant">
+                  @{user.username}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              popoverTarget={USER_MENU_ID}
+              aria-label="User menu"
+              title="User menu"
+              className="flex-shrink-0 rounded-lg p-space-xs text-outline transition-colors hover:bg-surface-container-low hover:text-on-surface"
+            >
+              <span className="block xl:hidden">
+                <Avatar name={nameOf(user)} src={user.avatar_url} size={8} decorative />
+              </span>
+              <span className="hidden xl:block">
+                <Icon name="more_horiz" size="xl" />
+              </span>
+            </button>
+            <AccountMenu
+              id={USER_MENU_ID}
+              label="Account"
+              items={userMenuItems(user)}
+              placement="rail"
+              pathname={pathname}
+            />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-space-sm border-t border-outline-variant/30 p-space-sm xl:p-space-md">
+            <Link
+              href={LOG_IN.href}
+              title={LOG_IN.label}
+              className={buttonClasses({ variant: "secondary", className: "w-full" })}
+            >
+              <Icon name={LOG_IN.icon} size="lg" className="xl:hidden" />
+              <span className="sr-only xl:not-sr-only">{LOG_IN.label}</span>
+            </Link>
+            <Link href="/signup" title="Sign up" className={buttonClasses({ className: "w-full" })}>
+              <Icon name="person_add" size="lg" className="xl:hidden" />
+              <span className="sr-only xl:not-sr-only">Sign up</span>
+            </Link>
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}

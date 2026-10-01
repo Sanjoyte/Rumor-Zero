@@ -93,7 +93,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       <div
         role="status"
         aria-live="polite"
-        className="pointer-events-none fixed right-0 bottom-space-lg left-0 z-50 flex flex-col items-center gap-space-sm px-space-lg"
+        className="pointer-events-none fixed right-0 bottom-20 left-0 z-50 flex flex-col items-center gap-space-sm px-space-lg md:bottom-space-lg"
       >
         {items.map((item) => (
           <ToastEntry key={item.id} item={item} onDismiss={dismiss} />

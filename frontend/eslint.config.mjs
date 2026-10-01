@@ -16,6 +16,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // OpenNext / wrangler output and Playwright reports (generated):
+    ".open-next/**",
+    ".wrangler/**",
+    "playwright-report/**",
+    "test-results/**",
   ]),
 ]);
 

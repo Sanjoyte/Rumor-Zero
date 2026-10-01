@@ -523,5 +523,325 @@ Test-Path frontend\AGENTS.md, frontend\CLAUDE.md   # False, then False
 
 ---
 
+## Part 0C: App shell, API relay, API client, CI
+
+Needs Part 0A's containers and virtualenv, and your own `backend\.env` and `frontend\.env.local`.
+The relay reads `BACKEND_ORIGIN` and `PROXY_SHARED_SECRET` from `frontend\.env.local`. The secret
+must be the same as the one in `backend\.env` (ENV_GUIDE §1.2). Nobody can log in yet (Part 1), so
+the app pages show the logged-out shell; `/dev/shell` shows the logged-in one with a sample user.
+
+### 1. Terminal: install the new tools
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm install                       # up to date, audited 735 packages ... found 0 vulnerabilities
+npx playwright install chromium   # first time: downloads Chromium for the E2E test; later: prints nothing
+npx wrangler --version            # 4.145.0
+npx playwright --version          # Version 1.63.0
+```
+
+- `npm install` also prints an `allow-scripts` warning: it did not run the install scripts of
+  `workerd`, `esbuild` and `unrs-resolver`. That is expected. Their programs come from separate
+  platform packages and work without those scripts.
+- Don't run `npm run preview`, `deploy` or `upload` on Windows. They are for Linux (CI and
+  Cloudflare), and they would copy your real `.env.local` into the Worker bundle.
+
+### 2. Terminal: automated checks
+
+```powershell
+npm run lint             # no output after the command line
+npm run lint:tokens      # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
+npm run typecheck        # no output after the command line
+npm run format:check     # All matched files use Prettier code style!
+npm test                 # Test Files  51 passed (51) / Tests  412 passed (412)
+npm run build
+```
+
+The build ends with a route list. These lines matter:
+
+```text
+┌ ○ /
+├ ƒ /api/[...path]
+├ ○ /home
+├ ○ /login
+├ ○ /signup
+└ ƒ /u/[username]
+```
+
+- `○` means prerendered at build time; `ƒ` means it runs per request. The relay (`/api/[...path]`)
+  must be `ƒ`; the landing and auth pages must be `○`.
+
+### 3. Terminal: start Django and the frontend
+
+Window 1:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py runserver        # leave this window running
+```
+
+Window 2:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run dev                       # ✓ Ready in about 0.5 s, then "✓ Running next.config.ts took" 1 to 5 s
+```
+
+- The extra seconds start `workerd`, Cloudflare's local runtime, for the OpenNext dev setup. If
+  Windows Firewall asks about it, local access is all it needs.
+
+### 4. Terminal (third window): the relay
+
+```powershell
+curl.exe -i http://localhost:3000/api/health/
+curl.exe -s -i http://localhost:3000/api/health | Select-String '^HTTP|^location'
+curl.exe -s -o NUL -w "%{http_code}`n" "http://localhost:3000/api/a%2Fb/"
+curl.exe -s -o NUL -w "%{http_code}`n" http://localhost:3000/api/nope/
+curl.exe -s -o NUL -w "%{http_code} %{redirect_url}`n" http://localhost:3000/home/
+```
+
+- First: `HTTP/1.1 200 OK` and the body `{"status":"ok"}`. That is Django's answer, fetched through
+  the relay on port 3000, with no redirect.
+- Second: `HTTP/1.1 301 Moved Permanently` and `location: /api/health/`. That is Django adding the
+  missing slash; the relay keeps the target relative, so it stays on port 3000.
+- Third: `400` (an encoded `/` is refused). Fourth: `404` (Django has no such path).
+- Fifth: `308 http://localhost:3000/home`. Page URLs drop a trailing slash; API URLs keep it.
+
+Now stop Django (`Ctrl+C` in window 1) and ask again:
+
+```powershell
+curl.exe -s -i http://localhost:3000/api/health/ | Select-String '^HTTP|^retry-after|^cache-control|code'
+```
+
+```text
+HTTP/1.1 503 Service Unavailable
+cache-control: no-store
+retry-after: 30
+{"detail":"The server is waking up. Try again in a minute.","code":"backend_waking"}
+```
+
+It answers at once, because nothing is listening on port 8000. Start `python manage.py runserver`
+again in window 1.
+
+### 5. Terminal: what the backend receives (stand-in backend)
+
+Django removes the `X-RZ-*` headers before any code can see them, so this check uses a small
+stand-in backend. It reports what arrived as true/false and names only. It uses the made-up value
+`echo-check-secret`, never your real secret.
+
+First stop `npm run dev` (`Ctrl+C` in window 2): Next runs only one dev server per folder. Then
+stop `runserver` in window 1 too; it isn't needed here.
+
+Window 1, the stand-in backend:
+
+```powershell
+@'
+// Stand-in backend for the Part 0C relay check. It prints header NAMES and true/false only.
+const http = require("node:http");
+http.createServer((req, res) => {
+  const chunks = [];
+  req.on("data", (chunk) => chunks.push(chunk));
+  req.on("end", () => {
+    const path = new URL(req.url, "http://x").pathname;
+    if (path === "/api/cookies/") {
+      res.setHeader("set-cookie", ["first=1; Path=/; HttpOnly", "second=2; Path=/api/auth/; SameSite=Lax"]);
+      return res.end("{}");
+    }
+    if (path === "/api/etag/") {
+      res.setHeader("etag", '"v1"');
+      res.setHeader("cache-control", "public, max-age=31536000, immutable");
+      if (req.headers["if-none-match"] === '"v1"') { res.statusCode = 304; return res.end(); }
+      return res.end("cached body");
+    }
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({
+      method: req.method,
+      secretMatches: req.headers["x-rz-proxy-secret"] === "echo-check-secret",
+      clientIp: req.headers["x-rz-client-ip"] ?? null,
+      forwardedHost: req.headers["x-forwarded-host"] ?? null,
+      contentLength: req.headers["content-length"] ?? null,
+      chunked: req.headers["transfer-encoding"] === "chunked",
+      bodyBytes: Buffer.concat(chunks).length,
+    }));
+  });
+}).listen(8765, "127.0.0.1", () => console.log("stand-in backend on http://127.0.0.1:8765"));
+'@ | Set-Content -Encoding utf8 $env:TEMP\rz-echo.cjs
+node $env:TEMP\rz-echo.cjs        # stand-in backend on http://127.0.0.1:8765
+```
+
+Window 2, a dev server pointed at it. The `$env:` values last only for this window;
+`.env.local` is not changed:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+$env:BACKEND_ORIGIN = "http://127.0.0.1:8765"; $env:PROXY_SHARED_SECRET = "echo-check-secret"
+npx next dev -p 3100
+```
+
+Window 3:
+
+```powershell
+curl.exe -s -H "X-RZ-Proxy-Secret: spoofed" -H "X-RZ-Client-IP: 6.6.6.6" -H "X-Forwarded-Host: evil.example" http://localhost:3100/api/echo/
+curl.exe -s -H "Content-Type: text/plain" --data "hello relay" http://localhost:3100/api/echo/
+curl.exe -s -i http://localhost:3100/api/cookies/ | Select-String '^set-cookie'
+curl.exe -s -i http://localhost:3100/api/etag/ | Select-String '^HTTP|^etag|^cache-control'
+curl.exe -s -i -H 'If-None-Match: \"v1\"' http://localhost:3100/api/etag/ | Select-String '^HTTP|^etag|^cache-control'
+```
+
+```text
+{"method":"GET","secretMatches":true,"clientIp":"::1","forwardedHost":null,"contentLength":null,"chunked":false,"bodyBytes":0}
+{"method":"POST","secretMatches":true,"clientIp":"::1","forwardedHost":null,"contentLength":"11","chunked":false,"bodyBytes":11}
+set-cookie: first=1; Path=/; HttpOnly
+set-cookie: second=2; Path=/api/auth/; SameSite=Lax
+HTTP/1.1 200 OK
+cache-control: public, max-age=31536000, immutable
+etag: "v1"
+HTTP/1.1 304 Not Modified
+cache-control: public, max-age=31536000, immutable
+etag: "v1"
+```
+
+- **Spoofing:** the faked `X-RZ-Proxy-Secret`, `X-RZ-Client-IP` and `X-Forwarded-Host` never
+  arrive. The backend gets the relay's own secret (`secretMatches: true`) and your real address
+  (`::1` is this machine).
+- **Body:** it arrives with its length (`contentLength: "11"`), never chunked, which Django needs.
+- **Cookies and caching:** both cookies and the `304 Not Modified` come back with `etag` and
+  `cache-control` unchanged.
+- In PowerShell, the quotes inside `If-None-Match` need the `\"` form shown above.
+
+Stop both servers (`Ctrl+C` in windows 1 and 2), then close window 2 so its `$env:` values are
+gone. Delete the script: `Remove-Item $env:TEMP\rz-echo.cjs`.
+
+### 6. Browser: the layouts
+
+Start the normal servers again: `python manage.py runserver` in window 1, and in a **new** window 2
+`npm run dev` (in `frontend\`).
+
+| URL | Expect |
+|---|---|
+| http://localhost:3000/ | Placeholder landing page. Top: the logo, "How it works", "Log in" and a blue "Sign up" button. Footer: the small logo, How verification works · Privacy · Terms, and "© 2026 Rumor Zero". Tab title "Rumor Zero". |
+| http://localhost:3000/home | The logged-out app shell. Left rail: the logo, Home (blue) and Search; Log in and Sign up at the bottom. Top bar: "Search posts and people" and a Log in link. Tab title "Home · Rumor Zero". |
+| http://localhost:3000/home/ | Redirects to `/home` |
+| http://localhost:3000/dev/shell | The logged-in shell with the sample user Ada Lovelace: Home, Search, Notifications, Profile, Bookmarks, a blue "New post" button; Moderation and Settings at the bottom; the user card with "AL" and `@ada` |
+| http://localhost:3000/dev/shell?user=none | The same page with the logged-out shell |
+| http://localhost:3000/login and /signup | A centred white card with the large logo, "Welcome back" or "Create your account" |
+| http://localhost:3000/no-such-page | "Page not found" card with the logo and "Go to the home page" |
+| http://localhost:3000/dev/ui | The intro text now links to /dev/shell |
+
+On http://localhost:3000/dev/shell:
+- Type in the search box and press Enter: the address becomes `/search?q=…` and the page title is
+  Search.
+- Click `•••` in the user card: a small menu with Profile and Settings opens above it. `Esc` closes
+  it.
+- Reload, then press `Tab` once: a blue "Skip to content" link appears at the top left.
+- The round "N" button at the bottom left is Next's dev indicator; it doesn't exist in production.
+
+Narrower screens: open DevTools (`F12`), switch on the device toolbar (`Ctrl+Shift+M`) and set the
+width. The layout switches at 1280 and 768 px.
+
+| Width | Expect on /dev/shell |
+|---|---|
+| 1280 | The full 256 px rail with labels |
+| 1024 | An icon dock: the cyan "0" mark at the top, icons only (hovering shows each name), the "AL" avatar at the bottom |
+| 390 | A top bar with the small logo and the "AL" avatar; a bottom bar with Home · Search · New post · Notifications · Profile. Tapping the avatar opens a sheet from the bottom with Bookmarks, Settings and Moderation; `Esc` or a tap outside closes it. No sideways scrolling. |
+
+Compare with Stitch: open
+`C:\Users\Nafis\Downloads\Rumor-Zero\design\stitch\stitch_website_sitemap_grid_builder\b1_home_feed\code.html`
+in the browser (it needs internet for its Tailwind script), next to /dev/shell, both at 1280.
+- The rail width, item positions, blue Home item, top bar height and search box line up.
+- Expected differences: the logo image instead of the "Rumor Zero" text; Bookmarks added; "New
+  post" instead of "Submit Claim"; Moderation instead of "Audit Queue"; no "Verification Ledger"
+  pill; and sample cards instead of Stitch's feed.
+
+### 7. Terminal: the E2E smoke test
+
+Needs the containers from step 3. Django and the dev server may be running or not: Playwright
+starts what is missing and reuses what is already running. A reused dev server keeps its own
+`BACKEND_ORIGIN`.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run test:e2e
+```
+
+```text
+Running 8 tests using 6 workers
+
+  ok 1 [chromium] › e2e\smoke.spec.ts:8:5 › the relay forwards /api/health/ to Django (120ms)
+  ok 5 [chromium] › e2e\smoke.spec.ts:14:5 › the landing page shows the logo and the footer (1.4s)
+  ok 7 [chromium] › e2e\smoke.spec.ts:73:5 › the auth card shows the large logo (1.7s)
+  ok 2 [chromium] › e2e\smoke.spec.ts:25:5 › page URLs drop a trailing slash (2.2s)
+  ok 3 [chromium] › e2e\smoke.spec.ts:31:5 › the app shell has the full rail at 1280px (2.2s)
+  ok 6 [chromium] › e2e\smoke.spec.ts:60:5 › the app shell has a top bar and bottom bar at 390px (2.0s)
+  ok 8 [chromium] › e2e\smoke.spec.ts:82:5 › an unknown URL shows the 404 page with the logo (745ms)
+  ok 4 [chromium] › e2e\smoke.spec.ts:44:5 › the app shell has the icon dock at 1024px (2.3s)
+
+  8 passed (9.3s)
+```
+
+- The order and timings vary (six tests run in parallel). `[WebServer]` lines are Django's request
+  log.
+
+### 8. Terminal: the same test the way CI runs it
+
+CI tests the production build and starts its own servers. First stop `npm run dev` and `runserver`
+(`Ctrl+C`); in this mode Playwright won't reuse them.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run build
+$env:CI = "1"
+npm run test:e2e         # 8 passed, this time against `next start`
+Remove-Item Env:CI
+```
+
+### 9. Terminal: the backend is unchanged and still passes
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\backend
+.\.venv\Scripts\Activate.ps1
+python -m pytest                                    # 200 passed
+ruff check . ; ruff format --check .                # All checks passed! / 43 files already formatted
+python manage.py makemigrations --check --dry-run   # No changes detected
+```
+
+### 10. Terminal: repository checks
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+git status --short design                          # prints nothing: design\ is untouched
+Test-Path frontend\AGENTS.md, frontend\CLAUDE.md   # False, then False
+git check-ignore frontend/playwright-report frontend/test-results   # prints both: test reports are never committed
+git check-ignore .github/workflows/ci.yml frontend/wrangler.jsonc frontend/playwright.config.ts   # prints nothing: all three are committed
+```
+
+### 11. Browser: CI on GitHub (after you push)
+
+This is the one check the agent could not run, because only you push.
+
+| URL | Expect |
+|---|---|
+| Your repository's **Actions** tab on github.com | A "CI" run for your push with three green jobs: "Backend (ruff, migrations, pytest)", "Frontend (lint, types, tests, OpenNext build)" and "E2E (Playwright, Chromium)" |
+
+- The frontend job's last step, "OpenNext build", proves the Cloudflare build works on Linux.
+- If the E2E job fails, its run page has a "playwright-report" artifact (kept 7 days) that shows
+  why.
+- Optional, in a terminal: `gh run list --workflow ci.yml --limit 1` shows `completed` and
+  `success`.
+
+### 12. Stop and clean up
+
+- Stop the servers: `Ctrl+C` in each window.
+- If `npm run dev` later says "Another next dev server is already running" with a PID, the old
+  server is still alive. End it with `taskkill /PID <that PID> /T /F`.
+- Stop the containers and keep the data: `docker compose down` (repo root).
+- `frontend\playwright-report` and `frontend\test-results` are git-ignored; delete them whenever
+  you like.
+
+---
+
 <!-- Add the next part below in the same shape: "## Part <ID>: <title>", then numbered steps,
      each saying Terminal or Browser, each with the exact command and the expected result. -->

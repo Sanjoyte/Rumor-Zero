@@ -168,19 +168,25 @@ Versions are the latest stable releases as of 2026-09-29. Part 0 re-checks patch
 | `material-symbols` | 0.47.5 | Self-hosted Material Symbols Outlined icon font (Stitch icon set) |
 | `eslint`, `eslint-config-next` | ^9, same as `next` | Linting. `next lint` is removed in Next 16, so the script runs `eslint`. |
 | `prettier` (+ `prettier-plugin-tailwindcss`) | 3.9.9 (+ 0.8.1) | Formatting, and sorts Tailwind classes |
-| `@opennextjs/cloudflare` | 1.20.7 | Adapter that builds Next.js for Cloudflare Workers |
-| `wrangler` (dev) | 4.143.0 | Cloudflare CLI used by the adapter (needs Node ≥22) |
+| `@opennextjs/cloudflare` (dev) | 1.20.7 (exact pin, **installed in 0C**) | Adapter that builds Next.js for Cloudflare Workers. Peers: `next >=16.3.6`, `wrangler ^4.125`; the optional `rclone.js` peer is not installed. CLI: `npx opennextjs-cloudflare build` (Linux only: CI and Workers Builds). |
+| `wrangler` (dev) | **4.145.0** (exact pin, installed in 0C; this table said 4.143.0) | Cloudflare CLI used by the adapter (needs Node ≥22). It brings `workerd` (1.20260930.x), so `wrangler.jsonc` uses `compatibility_date` 2026-09-30. |
 | `vitest` | 5.0.3 | Unit/component test runner |
 | `@vitejs/plugin-react` | 6.1.1 | React support for Vitest |
 | `jsdom` | 30.1.1 | Browser-like test DOM. `vite-tsconfig-paths` is **not** used: `vitest.config.mts` aliases `@` to `src` directly. |
 | `@testing-library/react`, `@testing-library/dom`, `@testing-library/user-event`, `@testing-library/jest-dom` | RTL 16.3.3, dom 10.4.2, user-event 14.6.7, jest-dom 7.0.1 | Component testing |
-| `@playwright/test` | 1.63.0 | End-to-end tests. Browsers are installed by `npx playwright install chromium`. |
+| `@playwright/test` | 1.63.0 (exact pin, installed in 0C) | End-to-end tests. Browsers are installed once by `npx playwright install chromium` (to `%LOCALAPPDATA%ms-playwright`); CI uses `--with-deps`. |
 | `sharp` (dev) | 0.35.5 (exact pin) | **Added in Part 0D** (2026-10-01). Renders `design/logo.svg` into the favicon, app icons, share image and email/admin logos (`npm run brand:build`). Prebuilt Windows x64 binaries. Used only by `frontend/scripts/brand/`, never by app code or the Worker bundle. |
 
 **Scaffolding notes (verified in Part 0B, 2026-10-01):**
 - `create-next-app` 16.3.8 has no `--turbopack` option any more (Turbopack is the default). Part 0B ran it with `--ts --tailwind --eslint --app --src-dir --import-alias "@/*" --use-npm --empty --no-react-compiler --no-agents-md --disable-git --skip-install --yes` in a scratch folder and copied the result into `frontend/`, because it refuses a folder that holds `.env.example` or `.env.local`.
 - `--no-agents-md` is not enough: Next 16.3.x also writes `frontend/AGENTS.md` and `CLAUDE.md` on every `next dev`. `agentRules: false` in `next.config.ts` turns that off.
 - Behind this machine's network a first `npm install` can fail with `ERR_SSL_CIPHER_OPERATION_FAILED`. `npm cache verify` and a retry fixed it; do not disable TLS checks.
+
+**OpenNext and Playwright notes (verified in Part 0C, 2026-10-01):**
+- npm 11.17 prints an `allow-scripts` warning that it did not run the install scripts of `esbuild`, `workerd` and `unrs-resolver`. They work anyway: their binaries come from platform packages (`@esbuild/win32-x64`, `@cloudflare/workerd-windows-64`); the lockfile also holds the Linux ones CI needs.
+- `next dev` on Windows starts `workerd` through `initOpenNextCloudflareForDev()` (about 4 s extra the first time). `next build` never does: the call runs only in the dev-server phase.
+- **Never run `npm run preview`, `deploy` or `upload` from a checkout that has a real `.env.local`:** the OpenNext build copies `.env`, `.env.local` and the other `.env*` files into `.open-next/cloudflare/next-env.mjs`, so their values would end up in the Worker bundle. Workers Builds uses a clean checkout. CI's frontend job creates no env file for the same reason.
+- GitHub Actions used by `ci.yml` (current majors, checked on their release pages 2026-10-01): `actions/checkout@v7`, `actions/setup-python@v7`, `actions/setup-node@v7`, `actions/upload-artifact@v7`. Dependabot (Part 16) keeps them current.
 
 **Not used in the frontend (on purpose):**
 - chart libraries (Chart.js, Recharts, d3): the charts are token-built HTML/SVG (Part 11D)

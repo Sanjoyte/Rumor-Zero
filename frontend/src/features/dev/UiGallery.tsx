@@ -30,7 +30,11 @@ export function UiGallery() {
         <h1 className="font-headline-lg text-headline-lg text-on-surface">UI gallery</h1>
         <p className="max-w-2xl font-body-md text-body-md text-on-surface-variant">
           Every primitive in every state. This page exists only in development and returns 404 in a
-          production build.
+          production build. The app shell has its own preview at{" "}
+          <a href="/dev/shell" className="font-medium text-secondary hover:underline">
+            /dev/shell
+          </a>
+          .
         </p>
         <nav aria-label="Gallery sections" className="flex flex-wrap gap-x-space-lg gap-y-space-xs">
           {LINKS.map(([id, label]) => (

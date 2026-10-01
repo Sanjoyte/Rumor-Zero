@@ -37,9 +37,15 @@ GitHub Actions → GET /api/health/deep/ (daily, DB+Redis) · CI on every push/P
 
 **Topology rule (ANALYSIS d):** the browser only ever talks to `<FRONTEND>`.
 
-- `frontend/src/app/api/[...path]/route.ts` (the **API relay**) forwards `/api/*` to `BACKEND_ORIGIN`.
-  - It allow-lists request headers, keeps every `Set-Cookie`, uses `redirect:'manual'`, and has a ~70 s timeout that returns `503 {"code":"backend_waking"}`.
-  - It adds `X-RZ-Proxy-Secret` and `X-RZ-Client-IP` (from `cf-connecting-ip`).
+- `frontend/src/app/api/[...path]/route.ts` (the **API relay**) forwards `/api/*` to `BACKEND_ORIGIN`. The logic is in `src/lib/api/relay.ts` (route files may only export handlers). Rules (Part 0C):
+  - **Config:** `BACKEND_ORIGIN` must be `https:` (plain `http:` only for loopback hosts, so the secret never travels in clear) and a bare origin; `PROXY_SHARED_SECRET` must be set. Otherwise `500 {"code":"relay_misconfigured"}`, logging the variable name only.
+  - **Path:** the target is `BACKEND_ORIGIN + pathname + search` of `request.url` (Next has already resolved `..`, `%2e%2e` and `\`). Encoded `%2F`, `%5C` or `%00` → 400; a target outside `/api/` or off the backend origin → 404.
+  - **Trailing slashes:** `next.config.ts` sets `skipTrailingSlashRedirect: true`, because Next's built-in `/:path+/ → /:path+` redirect would loop with Django's `APPEND_SLASH`. One `redirects()` rule still strips the slash from page URLs (`/home/` → `/home`). OpenNext already exempts `/api/` and honours the flag.
+  - **Request headers allow-list:** `Accept`, `Authorization`, `Content-Type`, `Cookie`, `Origin`, `X-Requested-With`, `If-None-Match`, `If-Modified-Since`, `User-Agent`. Then it adds `X-RZ-Proxy-Secret` and `X-RZ-Client-IP`. `Host`, hop-by-hop headers, `X-Forwarded-*`, `Content-Length` and any client `X-RZ-*` are never forwarded.
+  - **Client IP:** `cf-connecting-ip` (set by Cloudflare's edge), else the right-most `X-Forwarded-For` entry, after a charset/length check (Django re-parses it). Locally `next dev` keeps a client-sent `X-Forwarded-For` (`??=` in Next's server), so only local dev can be spoofed.
+  - **Bodies are buffered, not streamed:** Django (runserver and WSGI) reads `CONTENT_LENGTH`, so a chunked body would arrive empty, and OpenNext buffers request bodies on Workers anyway. Over 6 MB (declared or counted) → `413 {"code":"payload_too_large"}`; the runtime sets `Content-Length`.
+  - **Fetch:** `redirect:'manual'`, `cache:'no-store'`, signal = the client's abort + a 70 s timer that is **cleared when headers arrive**, so a long download isn't cut off. Any failure before headers (timeout, refused, DNS), or an upstream non-JSON 502/503/504 (Render's own error page), → `503 {"detail": "…", "code":"backend_waking"}` with `Retry-After: 30` and `Cache-Control: no-store`. A status outside 200–599 → 502 `bad_gateway`.
+  - **Response headers allow-list:** `Content-Type`, `Cache-Control`, `ETag`, `Last-Modified`, `Content-Disposition`, `X-Content-Type-Options`, `Content-Security-Policy`, `Retry-After`; every `Set-Cookie` (via `getSetCookie()`); `Content-Length` only when the upstream has no `Content-Encoding` (fetch decodes gzip/br); `Location` only when it points at the backend's own `/api/`, rewritten as a relative URL. 204/205/304 and HEAD responses have no body.
 - Django's `ClientIPMiddleware` sets `REMOTE_ADDR` from `X-RZ-Client-IP` **only** if the secret matches (constant-time compare, and the IP must parse); otherwise it uses the right-most `X-Forwarded-For` entry (only that one: everything to its left is client-supplied, so an unparseable right-most entry leaves `REMOTE_ADDR` alone). It is the first middleware and **removes both `X-RZ-*` headers from `request.META`**, so no later code, log line or error report can see them. allauth (`ALLAUTH_TRUSTED_PROXY_COUNT=0`) and DRF (`NUM_PROXIES=0`) then read `REMOTE_ADDR`.
 - No CORS anywhere. `django-cors-headers` is not installed.
 - Next's `proxy.ts`/middleware is **not used**.
@@ -768,6 +774,14 @@ Other settings:
   - A server-rendered avatar `<img>` can fail before hydration, so `Avatar` also checks for an already-finished, zero-width image.
 - Avatars use `<Avatar>`: the user's photo when `avatar_url` is set (14B), otherwise initials, and initials on load error. Icons use `<Icon name="…"/>` (Material Symbols, self-hosted).
 - The brand is shown **only** through `<Logo/>` (§14). Never re-create the old text wordmark or the emblem tiles.
+- **Layouts (Part 0C):** route groups `(marketing)` (MarketingNav + MarketingFooter), `(auth)` (AuthLayout: the a2 card with `<Logo size="lg"/>`) and `(app)` (AppShell); components in `src/components/shell/`.
+  - AppShell (Stitch b1 classes): the `w-64` rail at ≥1280 px, a `w-16` icon dock at 768–1279 px (labels `sr-only xl:not-sr-only`, so links keep their names), and below 768 px a top bar (`<Logo size="sm"/>` + account avatar) plus a bottom bar. The fixed top bar (search → `GET /search?q=`, avatar) shows from 768 px. Pages choose their own container width.
+  - Rail items: Home `/home`, Search, Notifications, Profile `/u/<username>`, Bookmarks, **New post** (opens the composer from Part 4), then Moderation (only with `admin_url`; Django Admin in a new tab), Settings and the user card with a menu (Profile, Settings; Part 1 adds Log out).
+  - Phones (user decision 2026-10-01): bottom tabs Home, Search, New post, Notifications, Profile; the top-bar avatar opens a bottom sheet with Bookmarks, Settings, Moderation.
+  - **Logged out** (user decision 2026-10-01): only Home and Search, with Log in / Sign up in place of the user card and avatar; the bottom bar is Home, Search, Log in.
+  - Menus and the sheet are native `popover` elements with explicit positioning (a popover is centred by default). `aria-current="page"` comes from `usePathname()` on the item and everything below it (`/u/ada/followers` keeps Profile active).
+  - Marketing links go only to pages that exist (user decision 2026-10-01): nav How it works, Log in, Sign up; footer How verification works, Privacy, Terms, "© 2026 Rumor Zero".
+  - Titles: the root metadata template is `"%s · Rumor Zero"`. `not-found`, `error` and `global-error` are basic AuthLayout cards with the logo (Part 15 polishes them). `/dev/shell` previews the shell with a sample user in development only.
 - Images (logo, avatars) are plain `<img>` with explicit width/height. `next/image` optimisation is not used: on Workers it needs Cloudflare Images, and our images are already pre-sized. SVG is never inlined from a file.
 - Charts are token-built HTML/SVG (`src/components/ui/charts/`, 11D), each with `role="img"`, an `aria-label` summary and a visually hidden data table. No chart library.
 - Source links (every source of a post): `rel="nofollow ugc noopener noreferrer"`, `target="_blank"`, plain-text label (§4c).
@@ -789,7 +803,11 @@ Other settings:
   - **hermetic:** tests never depend on the developer's real `backend/.env`. They set what they need through the `settings` fixture or `monkeypatch`; CI builds its env file from `backend/.env.example`.
 - **Frontend:** Vitest + React Testing Library for components and hooks.
 - **E2E:** Playwright for one user flow per part where it applies (e.g. sign up → post a fact → see CHECKING FACTS… → verdict badge).
-- **CI (`.github/workflows/ci.yml`):** ruff + pytest (Postgres service), eslint + tsc + vitest + `next build` + `opennextjs-cloudflare build` (Linux), Playwright. Render deploys **only after CI passes**.
+- **CI (`.github/workflows/ci.yml`, Part 0C):** on push to `main`, pull requests and manual dispatch; read-only permissions; superseded runs cancelled; 15 min per job; no secrets (env files are copied from the `.env.example` files).
+  - **backend:** Python from `.python-version`, `postgres:18` (the example's `rumor_zero` user/password/database) + `redis:8-alpine` services; ruff check, ruff format --check, `makemigrations --check --dry-run`, pytest.
+  - **frontend:** Node from `.nvmrc`; `npm ci`; lint, typecheck, lint:tokens, format:check, vitest; then `npx opennextjs-cloudflare build`, which runs `next build` itself (Linux only). No env file in this job: the OpenNext build copies `.env*` files into the Worker bundle.
+  - **e2e:** the same services, a `backend/.venv`, `npx playwright install --with-deps chromium`, `next build`, then Playwright (`playwright.config.ts` starts Django and `next start`); the report is uploaded on failure (7 days).
+  - Render deploys **only after CI passes**. There is no PNG regenerate-and-diff check (§14).
 
 ## 12. Security checklist (guide §12)
 
