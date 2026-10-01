@@ -526,19 +526,19 @@ All three jobs run on test values only; no secrets.
 
 ## Part 4: Posts (composer + Recent feed)
 **Status:** [ ] Not started
-**Goal:** create opinion/fact posts with the selector, with an optional source/DOI on fact posts (ARCHITECTURE §4c), and see them in a reverse-chronological public feed (guide roadmap step 3). Fact posts stay `pending`; the pipeline comes in Part 9.
+**Goal:** create opinion/fact posts with the selector, with up to 5 optional sources (URL or DOI) on fact posts (ARCHITECTURE §4c), and see them in a reverse-chronological public feed (guide roadmap step 3). Fact posts stay `pending`; the pipeline comes in Part 9.
 **Depends on:** 1.
 **Stitch files to convert:**
-- `b2_post_composer_modal`, including the optional "Primary source URL or DOI" field (shown for Fact only). The emergency toggle stays hidden until 11C.
-- `b1_home_feed`: the page layout, PostCard (with a one-line source under fact claims, styled like the evidence drawer), and the **Recent** tab. The inline composer is replaced by a trigger that opens the modal.
+- `b2_post_composer_modal`, including the optional "Primary source URL or DOI" field (shown for Fact only), turned into a list of up to 5 fields. The emergency toggle stays hidden until 11C.
+- `b1_home_feed`: the page layout, PostCard (with a one-line source under fact claims, styled like the evidence drawer: the first source, then "+N more"), and the **Recent** tab. The inline composer is replaced by a trigger that opens the modal.
 
 **Backend scope**
-- `posts.Post` with **every** column from ARCHITECTURE §2 except `search_vector` (Part 12), including the source, emergency and `pre_removal_status` columns (emergency logic arrives in 11C, removal appeals in 11). Check constraints and indexes as listed.
-- `posts.validators`: source normalisation and validation exactly per ARCHITECTURE §4c (URL or DOI). **Never fetched.**
+- `posts.Post` with **every** column from ARCHITECTURE §2 except `search_vector` (Part 12), including the `sources` array, emergency and `pre_removal_status` columns (emergency logic arrives in 11C, removal appeals in 11). Check constraints and indexes as listed. Add `django.contrib.postgres` to `INSTALLED_APPS` for `ArrayField` (part of Django; no new dependency).
+- `posts.validators`: source normalisation and validation exactly per ARCHITECTURE §4c (URL or DOI, per element); the list rules (at most 5, no duplicates after normalisation); `source_kind(value)` derives `url`/`doi`. **Never fetched.**
 - `posts.services.create_post`:
   - opinion → `published`, fact → `pending`
   - `fact_posts_per_day` quota from PlatformSettings; throttle `post_create`
-  - accepts `source` (fact only)
+  - accepts `sources` (fact only, 0–5)
   - refuses `is_emergency=true` with 400 `emergency_unavailable` until 11C
 - Post serializer (ARCHITECTURE §9 shape, all fields present; counts and flags that later parts fill are `0` / `false` / `null` for now).
 - `GET/POST /api/v1/posts/`: global Recent feed in the ARCHITECTURE §9 feed shape (`{pinned: [], results: [{kind:"post", …}], next_cursor}`), cursor pagination, excluding removed and deleted posts.
@@ -548,11 +548,11 @@ All three jobs run on test values only; no secrets.
 **Frontend scope**
 - `/home` with Tabs: Recent now; Following arrives in Part 6.
 - `FeedList`: cursor LoadMore, skeletons, empty and error states.
-- `PostCard`: every status variant via StatusBadge/VerdictStripe; fact vs opinion typography; `SourceLink` line (host or `doi.org/…`, `rel="nofollow ugc noopener noreferrer"`).
+- `PostCard`: every status variant via StatusBadge/VerdictStripe; fact vs opinion typography; `SourceLink` line (first source's host or `doi.org/…`, then "+N more" when there are more; `rel="nofollow ugc noopener noreferrer"`). "+N more" becomes a link to the detail page in Part 5.
 - `ComposerModal`:
   - text with a 500-char counter
   - required Opinion/Fact segmented control
-  - optional "Source (URL or DOI)" field for Fact only, with inline validation and a "DOI preferred" hint
+  - optional "Source (URL or DOI)" list for Fact only: one field to start, "Add another source" up to 5, a remove button on extra rows, inline validation per row (including duplicates), empty rows dropped before submit, and a "DOI preferred" hint
   - quota line "n/10 fact posts left today"
   - disabled with a verify prompt for unverified users
   - submitting and error states
@@ -567,13 +567,15 @@ All three jobs run on test values only; no secrets.
 - [ ] Posting without a type, empty, or over 500 chars is blocked on both client and server
 - [ ] The 11th fact post of the day is refused with a clear message; the quota line updates
 - [ ] Load more never duplicates or skips posts when new ones arrive meanwhile
-- [ ] DB constraints reject an opinion with `verified_*`, a fact with `published`, an opinion with a source, and an emergency opinion
+- [ ] DB constraints reject an opinion with `verified_*`, a fact with `published`, an opinion with sources, more than 5 sources, an empty source element, and an emergency opinion
 - [ ] Source validation, on both client and server:
   - rejected: `javascript:`/`data:` URLs, credentials in URLs, IP or `localhost` hosts, malformed DOIs
   - `doi:10.1000/xyz` and `https://doi.org/10.1000/xyz` are both stored as `10.1000/xyz`
-- [ ] The server makes no network request for a source (a test with outbound network blocked)
+  - a 6th source and duplicates after normalisation are refused; one bad element refuses the whole post with a per-index error
+  - sources keep the order entered
+- [ ] The server makes no network request for any source (a test with outbound network blocked)
 
-**Required tests:** model constraints; source validator table (URLs, DOIs, IDN/punycode, every rejection); `create_post` (status by type, quota, throttle, source, emergency refused); feed shape, ordering, exclusion and cursor stability; query count constant for 20 posts; frontend Composer validation and states (including the source field), PostCard variants and SourceLink, FeedList pagination; E2E: log in → post a fact with a DOI → CHECKING FACTS… and the DOI line in the feed.
+**Required tests:** model constraints; source validator table (URLs, DOIs, IDN/punycode, every rejection) plus list rules (0, 5 and 6 sources, duplicates, per-index errors, order kept) and `source_kind`; `create_post` (status by type, quota, throttle, sources, emergency refused); feed shape (`sources: [{value, kind}]`), ordering, exclusion and cursor stability; query count constant for 20 posts with sources; frontend Composer validation and states (add/remove source rows, limit 5, duplicates), PostCard variants and SourceLink ("+N more"), FeedList pagination; E2E: log in → post a fact with a DOI and a URL → CHECKING FACTS… and the line "doi.org/… +1 more" in the feed.
 
 **Recommended models**
 - **Plan:** Opus 5.5 · high. The central schema (status constraints, indexes, future fields) is decided here.
@@ -585,7 +587,7 @@ All three jobs run on test values only; no secrets.
 **Status:** [ ] Not started
 **Goal:** a shareable, indexable post page (guide §1.1), author soft-delete (D6), and live badge updates by polling (guide §5.1 step 5).
 **Depends on:** 4.
-**Stitch files to convert:** `b3_post_detail_forensic_proof`. Only the claim header, author row, verdict block, source link and action bar. The comments area is Part 7; repost/bookmark are 7B; the gauge, tiles and chart are 11D. Drop the ledger, the multi-source registry and hashes.
+**Stitch files to convert:** `b3_post_detail_forensic_proof`. Only the claim header, author row, verdict block, the primary-sources registry (as `SourceList`) and action bar. The comments area is Part 7; repost/bookmark are 7B; the gauge, tiles and chart are 11D. Drop the ledger and hashes, and the registry's sample titles, org-type chips, "% match" and archive lines.
 
 **Backend scope**
 - `GET /api/v1/posts/{id}/`:
@@ -596,7 +598,7 @@ All three jobs run on test values only; no secrets.
 
 **Frontend scope**
 - `/p/[id]` with **light SSR**: `generateMetadata` (title = excerpt + " · Rumor Zero", description = status label, OG tags) plus the claim text.
-- `PostDetail`: big claim; verdict explanation per status ("Checked automatically · 94% confidence" / "Reviewed by a moderator" + `verdict_note`); the full source (host shown in punycode for internationalised domains; DOIs link to `https://doi.org/…`).
+- `PostDetail`: big claim; verdict explanation per status ("Checked automatically · 94% confidence" / "Reviewed by a moderator" + `verdict_note`); `SourceList` under "Sources (N)": every source numbered 01, 02 … in the order entered, each with its full value (host shown in punycode for internationalised domains; DOIs link to `https://doi.org/…`) and an open-in-new link. The PostCard's "+N more" now links here.
 - "Copy link"; Delete (own post, confirmation modal).
 - `useStatusPolling`: visible tab only, 10 s backing off to 60 s, stops after 10 min. Used by the feed and the detail page.
 - PostCards link to the detail page.
@@ -787,8 +789,8 @@ The Report action sits in the PostCard overflow menu and on the detail page.
 **Stitch files to convert:** none new. Verify the verified, false and under-review badge and card states from `b1_home_feed` and `b3_post_detail_forensic_proof` against real data.
 
 **Backend scope**
-- `apps/pipeline/contract.py`: validated dataclasses (`PipelineRequest` carries the optional `source`, ARCHITECTURE §6).
-- `clients.py`: `StubPipelineClient` (rules in ARCHITECTURE §6; ignores `source`) and `HttpPipelineClient` (sends `{post_id, content, source}`; tested with a mocked HTTP layer).
+- `apps/pipeline/contract.py`: validated dataclasses (`PipelineRequest` carries `sources`, a tuple of 0–5 strings, ARCHITECTURE §6).
+- `clients.py`: `StubPipelineClient` (rules in ARCHITECTURE §6; ignores `sources`) and `HttpPipelineClient` (sends `{post_id, content, sources}`; tested with a mocked HTTP layer).
 - `routing.apply_pipeline_result(post, result, cfg, now)` (the emergency branch is added in 11C).
 - `processor.process_pending` with `FOR UPDATE SKIP LOCKED`, retries, backoff and max attempts; emergencies first (`is_emergency DESC`), then oldest.
 - Inline kick on commit (daemon thread, closes its DB connection).
@@ -802,7 +804,7 @@ The Report action sits in the PostCard overflow menu and on the detail page.
 
 **Acceptance criteria**
 - [ ] Locally, a fact containing `#true` becomes VERIFIED 95% within seconds; `#false` becomes FALSE 92%; `#unsure` becomes UNDER REVIEW (pipeline)
-- [ ] The pipeline request includes the post's `source` (or `None`)
+- [ ] The pipeline request includes the post's `sources` in order (empty when there are none)
 - [ ] With the inline kick off, `process_pending` or the tick clears the backlog
 - [ ] **Every pipeline-related row of the ARCHITECTURE §4 table has a passing test**, including a late result on a reported post, moderator-decided posts ignored, removed posts ignored, and inconclusive-with-high-confidence → review
 - [ ] Client errors are retried with backoff; after 5 attempts the post goes to review
@@ -1255,7 +1257,7 @@ Plus toasts and field errors.
 **Backend scope**
 - Go through ARCHITECTURE §12 point by point, including the new rows:
   - profile-photo abuse (disguised files, decompression bombs, SVG, oversized)
-  - source-link handling and the "never fetched" test
+  - source-list handling (all sources of a post) and the "never fetched" test
   - the emergency safeguards
   - the credibility score's appeal and audit path
 - `check --deploy` clean.

@@ -93,8 +93,7 @@ Conventions:
 | author | FK users, CASCADE, indexed | |
 | content | text, 1–500 chars (CheckConstraint) | plain text only |
 | post_type | `opinion` \| `fact` | chosen explicitly by the author, immutable |
-| source | varchar(500), default '' | optional, fact posts only: a validated http(s) URL or a bare DOI (§4c). **Never fetched.** Immutable. |
-| source_kind | `''` \| `url` \| `doi` | checks: set iff `source` is set; `source` only when `post_type='fact'` |
+| sources | `varchar(500)[]` (`ArrayField`), default `[]`, not null | optional, fact posts only: 0–5 validated http(s) URLs or bare DOIs, in the order entered (§4c). **Never fetched.** Immutable. Checks: at most 5 elements; empty unless `post_type='fact'`; no empty element. The kind (`url`/`doi`) is derived, not stored |
 | is_emergency | bool, default false | chosen at creation, immutable; check: only when `post_type='fact'` (§4b) |
 | emergency_expires_at | timestamptz null | `created_at + emergency_duration_hours`, stored at creation; check: set iff `is_emergency` |
 | emergency_demoted_at | timestamptz null | priority ended early (moderator demotion or FALSE verdict) |
@@ -126,7 +125,7 @@ Indexes:
 - partial `(created_at) WHERE status='under_review'` (review queue)
 - partial `(emergency_expires_at) WHERE is_emergency AND emergency_demoted_at IS NULL AND deleted_at IS NULL` (pinned emergencies)
 
-The source, emergency and `pre_removal_status` columns are created in Part 4 with the rest of the table. Their logic arrives in Parts 4/5 (source), 11 (removal appeals) and 11C (emergency), so no later schema change is needed.
+The sources, emergency and `pre_removal_status` columns are created in Part 4 with the rest of the table. Their logic arrives in Parts 4/5 (sources), 11 (removal appeals) and 11C (emergency), so no later schema change is needed.
 
 ### Social graph
 
@@ -257,7 +256,8 @@ A separate table keeps image bytes out of every `users` query.
 | Pinned emergencies shown per feed | 3 (+ "Show all") | code | — |
 | Credibility: start / prior weight / public after | 50 / 10 imaginary events / 3 counted events | code (`apps/reputation/scoring.py`) | — |
 | Credibility: reporter credit cap | 4 upheld reports per 30 days | code | — |
-| Source field max length | 500 chars | code | — |
+| Sources per fact post | 5 | code (+ DB check) | — |
+| Source max length | 500 chars each | code (+ column type) | — |
 | Profile photo limits | ≤ 5 MB, ≤ 25 MP, ≥ 128×128 px; stored as WebP 256 + 96 px | code (§4e) | — |
 | Feed cache TTL (s) | 30 | `FEED_CACHE_SECONDS` | — |
 | Access / refresh token lifetime | 15 min / 14 days | `JWT_ACCESS_TOKEN_MINUTES` / `JWT_REFRESH_TOKEN_DAYS` | — |
@@ -465,18 +465,24 @@ Nothing else changes the score:
 
 **Notifications:** the author gets `emergency_demoted` when priority is removed early. Out of scope: follower alerts, email or push, and moderator email alerts.
 
-## 4c. Source / DOI (D5, ANALYSIS f-3; Parts 4–5)
+## 4c. Sources / DOI (D5, ANALYSIS f-3; Parts 4–5)
 
-- **Scope:** optional, fact posts only, one per post, immutable, at most 500 chars. It's stored in `source` + `source_kind`.
-- **DOI input:** `10.<4–9 digits>/<suffix>` (Crossref's recommended pattern `^10\.\d{4,9}/[-._;()/:A-Za-z0-9]+$`). A leading `doi:` or `https://doi.org/` / `http://dx.doi.org/` is accepted and stripped. Stored bare, e.g. `10.1038/s41558-024-02102`, with `source_kind=doi`.
+- **Scope:** optional, fact posts only, **0–5 sources per post**, kept in the order entered, immutable, each at most 500 chars. Stored in the `sources` array column (§2). Changed from one source to up to five by the user on 2026-10-01.
+- **Each source** is an http(s) URL or a DOI, validated and normalised by the rules below. Every element must be valid, or the whole post is refused.
+- **Duplicates:** two sources that are equal after normalisation are refused (`doi:10.1000/xyz` and `https://doi.org/10.1000/xyz` are the same source).
+- **DOI input:** `10.<4–9 digits>/<suffix>` (Crossref's recommended pattern `^10\.\d{4,9}/[-._;()/:A-Za-z0-9]+$`). A leading `doi:` or `https://doi.org/` / `http://dx.doi.org/` is accepted and stripped. Stored bare, e.g. `10.1038/s41558-024-02102`.
 - **URL input:**
   - `http` or `https` only;
   - a host with a dot, no user/password, no IP-address or `localhost` hosts, no whitespace or control characters;
-  - internationalised hosts are converted to punycode for storage and display;
-  - `source_kind=url`.
-- **Never fetched.** The server makes no request to the URL: no previews, no HEAD checks (no SSRF). A test enforces this.
-- **Display:** fact cards show one line with the host (or `doi.org/…` for a DOI); the detail page shows the full value. DOIs link to `https://doi.org/<doi>`. Links use `rel="nofollow ugc noopener noreferrer"` and `target="_blank"`, and the text is plain.
-- **Pipeline:** passed as the optional `source` in `PipelineRequest` (§6) for the future real pipeline. The stub ignores it.
+  - internationalised hosts are converted to punycode for storage and display.
+- **Kind is derived, not stored:** a stored DOI is bare and starts with `10.`; a stored URL always starts with `http://` or `https://`. One helper, `posts.validators.source_kind(value)`, returns `doi` or `url`, and the serializer uses it.
+- **API input:** `POST /api/v1/posts/` takes an optional `sources: ["…", …]` (at most 5 strings; the client drops empty rows). Errors are reported per index (`{"sources": {"1": ["…"]}}`), with the codes `too_many_sources` and `duplicate_source` for the list rules. Sources on an opinion are refused.
+- **Never fetched.** The server makes no request to any source: no previews, no HEAD checks (no SSRF). A test enforces this.
+- **Display:**
+  - Fact cards keep one line: the first source's host (or `doi.org/…` for a DOI), then "+N more" when there are more. From Part 5, "+N more" links to the detail page.
+  - The detail page shows every source as a numbered list (01, 02 …) with the full value and an open-in-new link, under "Sources (N)". This is the Stitch b3 "primary sources" registry without its sample titles, org-type chips, "% match" and archive/hash lines.
+  - DOIs link to `https://doi.org/<doi>`. Links use `rel="nofollow ugc noopener noreferrer"` and `target="_blank"`, and the text is plain.
+- **Pipeline:** passed as `sources` in `PipelineRequest` (§6) for the future real pipeline. The stub ignores it.
 
 ## 4d. Bookmarks and reposts (D5, ANALYSIS f-4; Part 7B)
 
@@ -538,7 +544,7 @@ Nothing else changes the score:
 
 ```python
 # apps/pipeline/contract.py — frozen dataclasses, validated on construction
-PipelineRequest(post_id: UUID, content: str, source: str | None)   # source = the validated URL or DOI (§4c), never fetched by us
+PipelineRequest(post_id: UUID, content: str, sources: tuple[str, ...])   # 0–5 validated URLs/DOIs (§4c), never fetched by us
 PipelineResult(verdict: Literal["true","false","inconclusive"],
                confidence_score: Decimal,   # 0–100, quantized to 0.01
                raw_result: dict)            # stored verbatim in posts.pipeline_result
@@ -553,7 +559,7 @@ class PipelineClient(Protocol):
   - `#unsure` → (inconclusive, 40)
   - otherwise a hash of the content gives the confidence (50–99) and verdict
   - `raw_result={"stub": true, "rule": …}`
-- **`HttpPipelineClient`** (`PIPELINE_BACKEND=http`, future): `POST PIPELINE_URL` with `{post_id, content, source}`, `Authorization: Bearer PIPELINE_API_KEY`, 20 s timeout. It expects `{verdict, confidence_score, raw_result}`. Swapping it in changes nothing else.
+- **`HttpPipelineClient`** (`PIPELINE_BACKEND=http`, future): `POST PIPELINE_URL` with `{post_id, content, sources}`, `Authorization: Bearer PIPELINE_API_KEY`, 20 s timeout. It expects `{verdict, confidence_score, raw_result}`. Swapping it in changes nothing else.
 - **Processor** `process_pending(limit=10, now)`:
   - selects fact posts with `status='pending'`, `deleted_at IS NULL`, `pipeline_next_attempt_at` null or ≤ now, **emergencies first** (`is_emergency DESC`), then oldest first, `FOR UPDATE SKIP LOCKED`;
   - calls the client and routes the result with `apply_pipeline_result(post, result, cfg, now)`;
@@ -686,7 +692,8 @@ Other settings:
 { "id": "uuid",
   "author": {"id": "uuid", "username": "ada", "display_name": "Ada", "avatar_url": null},
   "content": "…", "post_type": "fact", "status": "verified_true",
-  "source": "10.1038/s41558-024-02102", "source_kind": "doi",
+  "sources": [{"value": "10.1038/s41558-024-02102", "kind": "doi"},
+              {"value": "https://www.iea.org/reports/renewables-2023", "kind": "url"}],
   "is_emergency": false, "emergency_active": false, "emergency_expires_at": null,
   "confidence_score": "94.00", "verdict_source": "pipeline", "verdict_note": "",
   "like_count": 3, "comment_count": 1, "repost_count": 2,
@@ -694,6 +701,7 @@ Other settings:
   "is_mine": false, "can_appeal": false, "appeal_status": null, "created_at": "…" }
 ```
 
+- `sources` is `[]` for opinions and for facts without sources; `kind` is derived from the stored value (§4c).
 - `confidence_score` is non-null only for `verified_*` with `verdict_source=pipeline`.
 - `emergency_active` is computed at serialization with `now` (§4b).
 - `avatar_url` is `/api/v1/avatars/{user_id}/{avatar_version}-96.webp`, or null (initials). The 256 px size is used on profiles.
@@ -762,7 +770,7 @@ Other settings:
 - The brand is shown **only** through `<Logo/>` (§14). Never re-create the old text wordmark or the emblem tiles.
 - Images (logo, avatars) are plain `<img>` with explicit width/height. `next/image` optimisation is not used: on Workers it needs Cloudflare Images, and our images are already pre-sized. SVG is never inlined from a file.
 - Charts are token-built HTML/SVG (`src/components/ui/charts/`, 11D), each with `role="img"`, an `aria-label` summary and a visually hidden data table. No chart library.
-- Source links: `rel="nofollow ugc noopener noreferrer"`, `target="_blank"`, plain-text label (§4c).
+- Source links (every source of a post): `rel="nofollow ugc noopener noreferrer"`, `target="_blank"`, plain-text label (§4c).
 - Accessibility:
   - Every status is shown by glyph **and** label **and** colour (DESIGN.md).
   - Modals use `<dialog>`, focus-visible rings in `secondary`, labels bound to inputs.
@@ -798,7 +806,7 @@ Other settings:
 | Admin exposure | unguessable `ADMIN_URL_PATH`, staff-only, path never public |
 | Error reports (Sentry) | `send_default_pii=False` alone strips only a fixed list of standard headers such as Authorization, Cookie and X-Forwarded-For (sentry-sdk 2.71.0), so settings also add `x-rz-proxy-secret`, `x-rz-cron-secret` and `x-rz-client-ip` to the `EventScrubber` denylist, and set `max_request_body_size="never"` and `include_local_variables=False`. Request bodies (passwords, allauth keys, emails), relay/cron secrets, client IPs and frame locals never reach Sentry. |
 | Uploaded images (profile photos) | decode-and-re-encode with Pillow (JPEG/PNG/WebP in, WebP out); size, pixel and dimension limits before decoding; EXIF/GPS/ICC/XMP dropped; original never stored; served from our origin with `nosniff` + `default-src 'none'; sandbox`; no SVG uploads (§4e) |
-| User-supplied links (source/DOI) | http/https only; no credentials, IP or localhost hosts; punycode shown; `rel="nofollow ugc noopener noreferrer"`; **never fetched server-side** (no SSRF) (§4c) |
+| User-supplied links (up to 5 sources/DOIs per post) | http/https only; no credentials, IP or localhost hosts; punycode shown; `rel="nofollow ugc noopener noreferrer"`; **never fetched server-side** (no SSRF) (§4c) |
 | Emergency abuse | eligibility gates, 1 per 24 h, lower report threshold, human confirmation of FALSE, 30-day block, moderator demote/block (§4b) |
 | Public credibility score (reputational/legal risk, guide §16) | only automated from labels; audit ledger; exact reversal on appeal; label and removal appeals; never ranked or shown on cards; Terms need legal review (§4a) |
 | Logo SVG | our own file, checked by the brand build (no scripts, links, bitmaps or text) and served as `<img>` (§14) |

@@ -20,8 +20,8 @@ Rumor Zero is a social platform where every post is **text-only** and labelled *
   safeguards.
 - Every account has a public **credibility score** (0–100) driven by fact-check outcomes, with an
   appeal path.
-- Also: follow, like, comment, repost, bookmark, an optional source/DOI on fact posts, charts,
-  search, notifications, profile photos.
+- Also: follow, like, comment, repost, bookmark, up to five optional sources (URL or DOI) on fact
+  posts, charts, search, notifications, profile photos.
 - The only images are profile photos and the logo.
 
 ## Read these first

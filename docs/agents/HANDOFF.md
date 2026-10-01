@@ -6,17 +6,22 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none active. **Part 0D (Brand assets & Logo component) is done** (2026-10-01). Parts 0A
-  (2026-09-30) and 0B (2026-10-01) are done too.
+- **Part:** none active. Parts 0A (2026-09-30), 0B and 0D (2026-10-01) are done and committed.
 - **Owner:** none (idle until the user starts the next part)
-- **Phase:** 0D implemented and validated; awaiting the user's review and git commit
-- **Last approved plan:** `docs/agents/plans/part-0D-brand-assets.md` (status: implemented)
-- **Last updated:** 2026-10-01 by Claude (Sonnet 5.5), Part 0D implementation
+- **Phase:** docs-only spec change (multi-source posts) applied; awaiting the user's review and git commit
+- **Last approved plan:** `docs/agents/plans/spec-multi-source-posts.md` (status: implemented)
+- **Last updated:** 2026-10-01 by Claude (Opus 5.5), multi-source spec change
 
 ## Completed checkpoints
 
-- Dual-agent setup, the pre-0A correction pass, Part 0A, Part 0B and the 0D plan (`920cf0b`), all
-  committed by the user. The 0D implementation below is uncommitted.
+- Dual-agent setup, the pre-0A correction pass, Parts 0A, 0B and 0D (0D = `b695f09`), all
+  committed by the user.
+- 2026-10-01 (Claude, Opus 5.5): **spec change, up to 5 sources per fact post** (user decision; was
+  one). Docs only, uncommitted: `AGENTS.md`, `docs/{ARCHITECTURE,ANALYSIS,STRUCTURE}.md`, `task.md`,
+  new `docs/agents/plans/spec-multi-source-posts.md`. `Post.source` + `source_kind` became one
+  `sources varchar(500)[]` column (kind derived), API output `sources: [{value, kind}]`, pipeline
+  `sources: tuple[str, ...]`, composer source list, card "first source +N more", b3 registry →
+  `SourceList` (Part 5). Part 4 must build this design (ARCHITECTURE §2, §4c, §9).
 - 2026-10-01 (Claude, Sonnet 5.5): **Part 0D implemented.**
   - `frontend/scripts/brand/`: `build-brand-assets.mjs` (`npm run brand:build`), `svg.mjs` (safety
     check, tokenizer, fill inlining, bounds measured from a 4x render, wordmark crop, mark extraction),
@@ -39,21 +44,14 @@ read-only git output.
 
 ## Current workspace state
 
-- Everything below is uncommitted. Modified tracked files: `task.md`, `docs/{ARCHITECTURE,SETUP,STRUCTURE}.md`,
-  `docs/test-command.md`, `docs/agents/HANDOFF.md`, `docs/agents/plans/part-0D-brand-assets.md` (status line),
-  `frontend/{package.json,package-lock.json,.prettierignore}`, `frontend/scripts/lint-tokens.{mjs,test.ts}`,
-  `frontend/src/app/layout.tsx`, `frontend/src/features/dev/UiGallery.tsx`.
-- New: `frontend/scripts/brand/`, `frontend/public/brand/`, the generated files under `frontend/src/app/`
-  and `frontend/src/lib/brand-assets.json`, `frontend/src/app/manifest.{ts,test.ts}`,
-  `frontend/src/components/ui/Logo.{tsx,test.tsx}`, `frontend/src/features/dev/LogoSection.tsx`,
-  `frontend/src/lib/brand-guard.test.ts`, `backend/apps/core/static/`.
-- `git status --short design` prints nothing; `design/logo.svg` was only read.
-- `.gitattributes` needed no change (`*.png`, `*.ico` already binary). `git check-ignore` prints nothing for
-  any generated file. No `frontend/AGENTS.md` or `CLAUDE.md` exists (checked after build and dev start).
-- `frontend/.env.local` and `backend/.env` were **not read or edited**. No dev server is left running.
-- The local Postgres/Redis containers were not needed and were not touched.
+- Uncommitted (spec change only): modified `AGENTS.md`, `docs/ANALYSIS.md`, `docs/ARCHITECTURE.md`,
+  `docs/STRUCTURE.md`, `task.md`, `docs/agents/HANDOFF.md`; new `docs/agents/plans/spec-multi-source-posts.md`.
+  No code, test, dependency or env file changed. `git status --short design` prints nothing.
+- Spec-change checks: a grep of the docs for `source_kind`, `"source"`, `source: str`, "one per post" and
+  "multi-source registr" finds only the new `source_kind(value)` helper and the plan's history notes. No tests
+  run (docs only).
 
-## Validation (all in `frontend/`, 2026-10-01)
+## Validation of Part 0D (all in `frontend/`, 2026-10-01)
 
 - Passed: `npm run lint` → exit 0, no findings.
 - Passed: `npm run lint:tokens` → "lint:tokens OK".
@@ -81,9 +79,9 @@ read-only git output.
 
 ## Next exact action
 
-1. The user reviews the diff and commits (all git operations are theirs).
+1. The user reviews the multi-source spec diff and commits (all git operations are theirs).
 2. Start a fresh session for the next part in `task.md`'s order: **Part 0C** (App shell, API relay, API
-   client, CI; needs 0A, 0B, 0D, all done).
+   client, CI; needs 0A, 0B, 0D, all done). The spec change does not affect 0C.
 3. Prompt for planning: `Plan Part 0C from task.md. Do not implement yet.`
    - 0C places `<Logo/>` everywhere listed in ARCHITECTURE §14 (sidebar `md`, tablet dock `mark`, mobile top
      bar `sm`, auth card `lg`, marketing nav/footer, 404/500) and extends the guard test's expectations if it

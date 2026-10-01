@@ -28,7 +28,7 @@ Each decision has a default. The rest of the docs (ARCHITECTURE, task.md) alread
 | D3 | Where the keep-alive and scheduled jobs run. GitHub Actions every 10 min exceeds a private repo's free minutes and is arguably outside GitHub's Actions terms. | **UptimeRobot** (free) pings `/api/health/` every 5 min, which also gives uptime alerts. **cron-job.org** (free) calls the hourly pipeline sweeper. A **daily** GitHub Actions workflow does the "deep" ping (DB + Redis). Works for public or private repos. | c-20 |
 | D10 | Next.js on Cloudflare adapter. Cloudflare's docs now recommend **vinext** (1.0 released 2026-09-28, a Vite re-implementation). OpenNext is the mature path. | **OpenNext (`@opennextjs/cloudflare`) on Workers.** It runs the real Next.js build. Keep the code vinext-portable (no `'use cache'`, no `proxy.ts`/middleware, no R2) so switching later is cheap. | c-23 |
 | D4 | Wording of the "false" badge | **Changed by you (2026-09-29): FALSE everywhere.** The backend enum values stay `verified_false` / `false` (already FALSE-based). Every human-readable label says FALSE: badges ("FALSE 88%", "FALSE · REVIEWED"), profile counters, the admin action "Mark FALSE", notifications and emails. Stitch's "DEBUNKED" is never used. (The guide says "Unverified / False".) | b-2, f |
-| D5 | Stitch features the guide does not have (emergency mode, sources/DOI field, bookmarks, reposts, reputation scores, charts, photo avatars) | **Changed by you (2026-09-29): build them all, backend included.** Emergency posts (11C), source/DOI field (4–5), bookmarks and reposts (7B), credibility score (11B), charts (11D), photo avatars (14B). What is still dropped is listed in b-3. | b-3, f |
+| D5 | Stitch features the guide does not have (emergency mode, sources/DOI field, bookmarks, reposts, reputation scores, charts, photo avatars) | **Changed by you (2026-09-29): build them all, backend included.** Emergency posts (11C), source/DOI field (4–5), bookmarks and reposts (7B), credibility score (11B), charts (11D), photo avatars (14B). What is still dropped is listed in b-3. **Changed by you (2026-10-01):** up to 5 sources per fact post instead of one (f-3). | b-3, f |
 | D6 | Can authors delete their own posts? | Yes, as a **soft delete**: hidden everywhere, but kept for the moderation audit trail. No editing. | b-2 |
 | D7 | Daily limit on fact posts (shown in Stitch composer "3/10 remaining") | **Adopt it** as a config value: `FACT_POSTS_PER_DAY = 10` | b-3 |
 | D8 | Copy tone. Stitch uses jargon ("cryptographic ledger", "epistemic", "dispatch"). | Rewrite in **plain language**, keeping the layout and visual design | b-5 |
@@ -73,9 +73,9 @@ Each decision has a default. The rest of the docs (ARCHITECTURE, task.md) alread
 | a4 | `a4_verify_email` | "Check your inbox": resend with countdown, browse read-only | no | Convert, plus the link-landing states it lacks |
 | a5 | `a5_forgot_password` | Request reset link (success banner shown together with the form) | no | Convert (separate idle and success states) |
 | a6 | `a6_reset_password` | New password + confirm, strength meter | no | Convert |
-| b1 | `b1_home_feed` | Home feed: tabs Following / Recent, inline composer, 5 post cards (verified, FALSE, emergency, under review, opinion), "You're caught up" | yes | Convert, including the emergency card and "emergency active" banner (11C), the repost and bookmark actions (7B), and a one-line source under fact claims in the evidence-drawer style (4). Drop the drawers' ledger/telemetry content. |
-| b2 | `b2_post_composer_modal` | Composer modal: text + 500-char counter, Opinion/Fact segmented control, emergency toggle, source URL, daily quota | yes (inert) | Convert all of it: the optional source URL/DOI field (4) and the emergency toggle for fact posts (11C, copy rewritten). Keep the counter and quota. |
-| b3 | `b3_post_detail_forensic_proof` | Post detail: claim, author, chart, "Verification Ledger" evidence section, appeal button, comments | yes | Convert the claim, verdict block, appeal button, flat comments, source link (5), repost/bookmark (7B), and the gauge, tiles and bar chart re-purposed as real check stats (11D). Drop the ledger, multi-source registry and hashes. |
+| b1 | `b1_home_feed` | Home feed: tabs Following / Recent, inline composer, 5 post cards (verified, FALSE, emergency, under review, opinion), "You're caught up" | yes | Convert, including the emergency card and "emergency active" banner (11C), the repost and bookmark actions (7B), and a one-line source under fact claims in the evidence-drawer style: the first source, then "+N more" (4). Drop the drawers' ledger/telemetry content. |
+| b2 | `b2_post_composer_modal` | Composer modal: text + 500-char counter, Opinion/Fact segmented control, emergency toggle, source URL, daily quota | yes (inert) | Convert all of it: the optional source URL/DOI field, turned into a list of up to 5 fields with "Add another source" (4), and the emergency toggle for fact posts (11C, copy rewritten). Keep the counter and quota. |
+| b3 | `b3_post_detail_forensic_proof` | Post detail: claim, author, chart, "Verification Ledger" evidence section, appeal button, comments | yes | Convert the claim, verdict block, appeal button, flat comments, the primary-sources registry as a numbered source list (5; only the user's URLs/DOIs, no titles, org chips, "% match" or archive lines), repost/bookmark (7B), and the gauge, tiles and bar chart re-purposed as real check stats (11D). Drop the ledger and hashes. |
 | b4 | `b4_search_results` | Search: tabs (Claims / Contributors / Sources), status filter chips, result cards, contributor spotlight, load more | yes | Convert posts tab, a people tab (with credibility score, 11B), type/status filter chips, and load more. Its sparkline is reused for the credibility trend (11D). Drop the claim-data box and contributor spotlight. |
 | c1 | `c1_user_profile` | Own profile: header + counts, tabs, pending/verified/emergency/removed cards, 4 side widgets | yes | Convert header, counts, post list (with reposts), removed tombstone, emergency card, and the "Epistemic Standing" widget as the Credibility widget (11B/11D). Drop the other three side widgets. |
 | c2 | `c2_account_settings` | Settings: identity/ORCID, security (SSO, 2FA, sessions), GDPR export, delete account | yes | Convert a subset: profile fields, profile photo (14B), email, change password, Google status, credibility history (14/11D), export, delete |
@@ -105,7 +105,8 @@ Each decision has a default. The rest of the docs (ARCHITECTURE, task.md) alread
 | `ActionBar` (like, comment, repost, bookmark, report, copy link) | a1, b1, b3 | Stitch never shows a real like toggle (b1 uses `fact_check` for the first counter). Define the liked state as a filled glyph in `secondary`. Repost = `cached` + count; bookmark = `bookmark_border`, filled `bookmark` when saved (7B). |
 | `RepostButton`, `BookmarkButton`, `RepostHeader`, `UnavailablePostCard` | a1, b1, b3, c1 | Part 7B |
 | `EmergencyChip` + violet stripe, `PinnedEmergencies` (banner) | b1, b2, c1 | Part 11C (`tertiary` family, `bolt` glyph) |
-| `SourceLink` | b1, b2, b3 | Part 4/5: one line with the host or DOI |
+| `SourceLink` | b1, b2, b3 | Part 4: one line with the first source's host or DOI, then "+N more" |
+| `SourceList` | b3 | Part 5: numbered list of every source (01, 02 …), full value, open-in-new link |
 | `CredibilityBadge`, `CredibilityWidget`, `CredibilityPanel` | c1, c2, c3, b4 | Parts 11B/11D |
 | Chart primitives `MeterBar`, `StatTile`, `BarChart`, `RingGauge`, `Sparkline` | b3, c1, b4, c2 | Part 11D; token-built HTML/SVG, no chart library |
 | `AvatarUploader` | c2 | Part 14B |
@@ -247,7 +248,7 @@ The original default was "drop all". Since 2026-09-29 the seven features you nam
 | Feature (Stitch label) | Where | Decision |
 |---|---|---|
 | Emergency mode / "Unverified — Emergency" / violet status / fast-track | root, b1, b2, c1, c4, d2 | **Built (11C)**, redesigned: a flag on fact posts, pinned 24 h, still fact-checked, abuse safeguards (f-1). Stitch's "bypass verification", "trust tokens", "permanent emergency marker" and "request expedited audit" are not adopted. |
-| Source URL / DOI field | b1, b2, b3, b4, c1 | **Built (4–5)**: one optional, validated source per fact post, never fetched (f-3). The CITATION / DATASET / SCOPE buttons, multi-source registries and "N sources" counts are dropped. |
+| Source URL / DOI field | b1, b2, b3, b4, c1 | **Built (4–5)**: up to 5 optional, validated sources per fact post, never fetched (f-3). b3's source registry becomes the plain numbered list. The CITATION / DATASET / SCOPE buttons, registry metadata (titles, org types, "% match", archive hashes) and "N sources" counts on profiles and search are dropped. |
 | Avatar upload | c2 | **Built (14B)** as real profile photos (f-7) |
 | File/PDF attachments, dataset uploads, data archive `.zip` | b1, b3, c1, c2, d2 | Still dropped: posts stay text-only. The data export is JSON. |
 | Charts, sparklines, gauges, consensus metrics | b3, b4, c1, c2 | **Built (11D)**, re-purposed for data we really have (f-6). The claim-data telemetry boxes (b1, b4) are dropped: there is no claim dataset. |
@@ -641,11 +642,15 @@ The full rules are in ARCHITECTURE (sections named below). This section records 
 - A removal now lowers a public score, so the author of a removed post can also ask for another look (guide §16). It is still one appeal per post.
 - If the appeal is overturned, the post returns to its previous status, and the score events are reversed for the author and for every reposter.
 
-### f-3 Source / DOI (ARCHITECTURE §4c; Parts 4–5)
+### f-3 Sources / DOI (ARCHITECTURE §4c; Parts 4–5)
 
-- One optional source on fact posts: an http(s) URL or a DOI.
-- It is validated and stored, but **never fetched** by the server (no SSRF risk).
-- The pipeline contract carries it for the future real pipeline.
+- Up to 5 optional sources on fact posts (changed from one by you on 2026-10-01), each an http(s)
+  URL or a DOI, in the order entered. Duplicates after normalisation are refused.
+- Stored in one `sources` array column on the post: they are immutable and always read with it,
+  so the feed needs no extra query and "opinions have no sources" stays a plain DB check.
+- They are validated and stored, but **never fetched** by the server (no SSRF risk).
+- Cards show the first source and "+N more"; the detail page lists them all.
+- The pipeline contract carries them for the future real pipeline.
 - Follow-up, not in the MVP: a DOI title lookup against Crossref's fixed API host, sending only the DOI.
 
 ### f-4 Bookmarks and reposts (ARCHITECTURE §4d; Part 7B)

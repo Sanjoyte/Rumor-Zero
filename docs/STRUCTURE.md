@@ -54,7 +54,7 @@ rumor-zero/
 │   │   │                            validators.py (username/email rules, RESERVED_USERNAMES), UserManager, admin.py
 │   │   │                        1–3 allauth adapters, refresh-cookie adapter, username check, verified-email permission
 │   │   │                        14B Avatar model, avatars.py (Pillow processing), avatar endpoints
-│   │   ├── posts/               4–5 Post model + status constraints, validators.py (source/DOI), services (the only place
+│   │   ├── posts/               4–5 Post model + status constraints, validators.py (sources/DOI), services (the only place
 │   │   │                            status changes), feeds, status polling; 11C emergency eligibility + pinned feeds;
 │   │   │                            11D stats endpoint; 12 search_vector GeneratedField + search API
 │   │   ├── social/              6–7 Follow, Like, Comment; 7B Bookmark, Repost, mixed Following feed
