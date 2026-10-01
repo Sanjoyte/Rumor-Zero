@@ -6,8 +6,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-/** Files that may break the rules on purpose (the generated brand files arrive in Part 0D). */
-export const ALLOWLIST = [];
+/**
+ * Files that may break the rules on purpose. The generated asset list holds the logo's own colours
+ * for non-CSS contexts (Part 0D); manifest.ts reads them from it, so it needs no entry itself.
+ */
+export const ALLOWLIST = ["src/lib/brand-assets.json"];
 
 const PALETTE = [
   "slate",
@@ -169,7 +172,7 @@ function walk(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) walk(full, out);
-    else if (/\.(?:ts|tsx|js|jsx|mjs|css)$/.test(entry.name)) out.push(full);
+    else if (/\.(?:ts|tsx|js|jsx|mjs|css|json)$/.test(entry.name)) out.push(full);
   }
   return out;
 }

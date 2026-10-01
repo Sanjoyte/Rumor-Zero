@@ -104,9 +104,15 @@ describe("lint-tokens: the real source tree", () => {
     expect(lintDirectory(root)).toEqual([]);
   });
 
+  it("scans JSON, so the generated brand colours are only allowed through the allowlist", () => {
+    const root = path.resolve(import.meta.dirname, "..");
+    const files = lintDirectory(root, []).map((v) => v.file);
+    expect(new Set(files)).toEqual(new Set(["src/lib/brand-assets.json"]));
+  });
+
   it("skips allowlisted files", () => {
     const root = path.resolve(import.meta.dirname, "..");
-    const all = lintDirectory(root, ["src/app/globals.css"]);
+    const all = lintDirectory(root, ["src/lib/brand-assets.json"]);
     expect(all).toEqual([]);
   });
 });

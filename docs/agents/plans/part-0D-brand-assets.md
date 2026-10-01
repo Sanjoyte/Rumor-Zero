@@ -1,6 +1,6 @@
 # Plan: Part 0D, Brand assets & Logo component
 
-- **Status:** APPROVED 2026-10-01, not yet implemented.
+- **Status:** IMPLEMENTED 2026-10-01 by Claude (Sonnet 5.5). Deviations are listed under Part 0D in `task.md`. The steps below are kept as the record of what was approved.
 - **Drafted:** 2026-10-01 by Claude (Sonnet 5.5). **Implement with:** Sonnet 5.5 · medium (task.md).
 - **Part:** 0D (task.md). **Depends on:** 0B only, which is `[x] Done (2026-10-01)`. Git tree was clean
   at planning time (0B committed).

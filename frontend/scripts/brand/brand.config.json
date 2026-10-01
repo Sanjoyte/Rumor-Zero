@@ -1,0 +1,34 @@
+{
+  "_comment": "Settings for npm run brand:build (ARCHITECTURE 14). markSelector is 'tag.class' and must match exactly one shape: the cyan '0'. Re-exporting the master can rename classes, so check it after every logo change. plateColor is the Stitch inverse-surface token (a test keeps it equal to globals.css). Fractions are relative to the plate; the tests, not these numbers, are the contract.",
+  "master": "design/logo.svg",
+  "adminFile": "backend/apps/core/static/core/brand/logo-admin.png",
+  "markSelector": "path.cls-1",
+  "plateColor": "#283044",
+  "altText": "Rumor Zero",
+  "wordmarkPadding": 12,
+  "markPadding": 12,
+  "roundedRadius": 0.22,
+  "faviconSizes": [16, 32, 48],
+  "plates": {
+    "favicon": { "markFraction": 0.8, "rounded": true },
+    "icon": { "markFraction": 0.64, "rounded": true },
+    "apple": { "size": 180, "markFraction": 0.64 },
+    "maskable": { "size": 512, "markFraction": 0.5 },
+    "share": { "width": 1200, "height": 630, "wordmarkWidthFraction": 0.6 },
+    "email": { "width": 320, "height": 96, "wordmarkWidthFraction": 0.84 },
+    "google": { "width": 120, "height": 120, "wordmarkWidthFraction": 0.84 },
+    "admin": { "height": 64, "wordmarkHeightFraction": 0.64 }
+  },
+  "contrastSurfaces": [
+    { "name": "surface-container-lowest", "hex": "#ffffff" },
+    { "name": "surface", "hex": "#faf8ff" },
+    { "name": "inverse-surface", "hex": "#283044" },
+    { "name": "on-surface", "hex": "#131b2e" }
+  ],
+  "expectedContrast": [
+    { "surface": "surface-container-lowest", "grey": "3.45", "cyan": "2.42" },
+    { "surface": "surface", "grey": "3.28", "cyan": "2.30" },
+    { "surface": "inverse-surface", "grey": "3.81", "cyan": "5.43" },
+    { "surface": "on-surface", "grey": "4.97", "cyan": "7.09" }
+  ]
+}

@@ -256,5 +256,272 @@ Test-Path frontend\AGENTS.md, frontend\CLAUDE.md   # False, then False
 
 ---
 
+## Part 0D: Brand assets & Logo component
+
+Everything here runs in `frontend\` unless a step says otherwise. No backend, Docker container or
+secret is needed. (Next loads your `frontend\.env.local` by itself; you never open or print it.)
+The master logo is `design\logo.svg`. It is read-only: nothing below changes it.
+
+### 1. Terminal: the tools
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm install                           # "up to date, audited 449 packages" and "found 0 vulnerabilities"
+npm ls sharp --depth=0                # `-- sharp@0.35.5
+```
+
+- npm also prints `npm warn allow-scripts ... unrs-resolver`. It is harmless.
+- `sharp` is the image library that draws the PNGs. Only the brand script uses it.
+
+### 2. Terminal: build every logo asset
+
+```powershell
+npm run brand:build
+```
+
+- Prints `brand:build read design\logo.svg and wrote 16 files:` and a list: `logo.svg`, `mark.svg`,
+  `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `email-logo.png` and
+  `google-oauth-logo.png` under `frontend/public/brand/`; `icon.svg`, `favicon.ico`, `apple-icon.png`,
+  `opengraph-image.png`, `twitter-image.png` and the two `.alt.txt` files under `frontend/src/app/`;
+  `frontend/src/lib/brand-assets.json`; and `backend/apps/core/static/core/brand/logo-admin.png`.
+- Then the contrast table, which must read exactly like the one in `docs\ARCHITECTURE.md` section 14:
+
+```text
+Contrast on                       grey letters  cyan "0"
+surface-container-lowest #ffffff  3.45 : 1      2.42 : 1
+surface #faf8ff                   3.28 : 1      2.30 : 1
+inverse-surface #283044           3.81 : 1      5.43 : 1
+on-surface #131b2e                4.97 : 1      7.09 : 1
+```
+
+- The last line is `The contrast table matches ARCHITECTURE 14.` If you ever change the logo's colours and see
+  `DIFFERS from ARCHITECTURE 14` instead, update that section.
+
+### 3. Terminal: nothing under `design\` changes, and a second run changes nothing
+
+```powershell
+$paths = @('public\brand\*', 'src\app\favicon.ico', 'src\app\icon.svg', 'src\app\apple-icon.png', 'src\app\opengraph-image.png', 'src\app\twitter-image.png', 'src\lib\brand-assets.json', '..\design\logo.svg', '..\backend\apps\core\static\core\brand\logo-admin.png')
+$h1 = Get-FileHash $paths | Select-Object Path, Hash
+$h1.Count                             # 15
+npm run brand:build | Out-Null
+$h2 = Get-FileHash $paths | Select-Object Path, Hash
+@(Compare-Object $h1 $h2 -Property Path, Hash).Count    # 0
+cd ..
+git status --short design             # prints nothing
+cd frontend
+```
+
+- `15` files hashed, and `0` differences: building again gives the same bytes, including
+  `design\logo.svg`.
+- `git status --short design` prints nothing: the master was only read.
+
+### 4. Terminal: the build refuses an unsafe logo
+
+The script takes `--master <file>` so you can try another SVG. Each bad file below is a copy of the
+real logo with one thing added, kept in your temp folder.
+
+```powershell
+$bad = Join-Path $env:TEMP "rz-bad-logo.svg"
+(Get-Content ..\design\logo.svg -Raw) -replace '<defs>', '<script>alert(1)</script><text>x</text><defs>' | Set-Content $bad
+npm run brand:build -- --master $bad
+$LASTEXITCODE
+```
+
+- Prints `brand:build failed: rz-bad-logo.svg failed the safety check, so nothing was built:` with
+  `- <script> element (line 3)` and `- <text> element (line 3)`. `$LASTEXITCODE` is `1`.
+
+```powershell
+(Get-Content ..\design\logo.svg -Raw) -replace '<defs>', '<use href="https://evil.example/x.svg#a"/><defs>' | Set-Content $bad
+npm run brand:build -- --master $bad
+```
+
+- Fails with `- external href="https://evil.example/x.svg#a" on <use> (line 3)`.
+
+```powershell
+(Get-Content ..\design\logo.svg -Raw) -replace 'viewBox="0 0 1000 1000"', '' | Set-Content $bad
+npm run brand:build -- --master $bad
+Remove-Item $bad
+```
+
+- Fails with `- the <svg> root has no viewBox`.
+- In all three, no asset is written and `design\logo.svg` is untouched. Running plain
+  `npm run brand:build` again afterwards still works.
+
+### 5. Terminal: automated checks
+
+Same folder. Nothing else needs to be running.
+
+```powershell
+npm run lint                          # only the npm header, no findings
+npm run lint:tokens                   # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
+npm run typecheck                     # only the npm header, no type errors
+npm run format:check                  # All matched files use Prettier code style!
+npm test                              # Test Files  40 passed (40) / Tests  329 passed (329)
+```
+
+- The new tests are the SVG safety check, the ICO writer, the contrast table (compared with
+  `docs\ARCHITECTURE.md`), the PNG sizes, a full build into a scratch folder, `Logo`, `manifest.ts` and
+  the brand guard.
+
+### 6. Terminal: try to break the brand guard
+
+Only `Logo.tsx`, `brand-assets.json` and `manifest.ts` may know where the logo files are, and nobody
+may re-create the old text wordmark. Add two files that break the rules:
+
+```powershell
+Set-Content src\tmp-wordmark.tsx 'export const X = () => <span className="font-headline-sm">Rumor Zero</span>;'
+Set-Content src\tmp-logo-ref.ts 'export const src = "/brand/logo.svg";'
+npx vitest run src/lib/brand-guard.test.ts
+Remove-Item src\tmp-wordmark.tsx, src\tmp-logo-ref.ts
+npx vitest run src/lib/brand-guard.test.ts
+```
+
+- First run: `Tests  3 failed | 3 passed (6)`. The failures name `tmp-logo-ref.ts` (twice: it refers to
+  `/brand/` and names a logo image) and `tmp-wordmark.tsx` (it re-creates the text wordmark).
+- Second run (files removed): `Tests  6 passed (6)`. Nothing is left behind.
+
+### 7. Terminal: the production build carries the icon tags
+
+```powershell
+npm run build
+$html = Get-Content .next\server\app\index.html -Raw
+[regex]::Matches($html, '<link rel="(?:icon|apple-touch-icon|manifest)"[^>]*>') | ForEach-Object { $_.Value }
+[regex]::Matches($html, '<meta (?:property|name)="(?:og:image|twitter:image|twitter:card|og:site_name)"[^>]*>') | ForEach-Object { $_.Value }
+```
+
+- Build: `✓ Compiled successfully`, `Generating static pages ... (10/10)`, and a route list that now also
+  has `/apple-icon.png`, `/icon.svg`, `/manifest.webmanifest`, `/opengraph-image.png` and
+  `/twitter-image.png`, all `○ (Static)`.
+- The links:
+
+```text
+<link rel="manifest" href="/manifest.webmanifest"/>
+<link rel="icon" href="/favicon.ico?favicon.<hash>.ico" sizes="48x48" type="image/x-icon"/>
+<link rel="icon" href="/icon.svg?icon.<hash>.svg" sizes="any" type="image/svg+xml"/>
+<link rel="apple-touch-icon" href="/apple-icon.png?apple-icon.<hash>.png" sizes="180x180" type="image/png"/>
+```
+
+- The meta tags: `og:site_name` is `Rumor Zero`, `twitter:card` is `summary_large_image`, and `og:image` and
+  `twitter:image` are full URLs built from `NEXT_PUBLIC_SITE_URL` (`http://localhost:3000/opengraph-image.png?...`
+  with the value from your `.env.local`).
+- `<hash>` differs from run to run.
+
+### 8. Terminal: start the dev server and fetch every asset
+
+```powershell
+npm run dev                           # leave this window running
+```
+
+Second window:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+foreach ($u in '/favicon.ico','/icon.svg','/apple-icon.png','/manifest.webmanifest','/opengraph-image.png','/twitter-image.png','/brand/logo.svg','/brand/mark.svg','/brand/icon-192.png','/brand/icon-512.png','/brand/icon-maskable-512.png','/brand/email-logo.png','/brand/google-oauth-logo.png') {
+  curl.exe -s -o NUL -w "$u  %{http_code}  %{content_type}`n" "http://localhost:3000$u"
+}
+curl.exe -s http://localhost:3000/manifest.webmanifest
+curl.exe -s -o NUL -w "/brand/nope.png  %{http_code}`n" http://localhost:3000/brand/nope.png
+```
+
+- All 13 lines say `200`. Content types: `image/x-icon` for the .ico, `image/svg+xml` for the three SVGs,
+  `application/manifest+json` for the manifest, and `image/png` for the rest.
+- The manifest is one line of JSON: name and short name `Rumor Zero`, `"start_url":"/"`,
+  `"display":"standalone"`, `theme_color` and `background_color` both `#283044`, and three icons:
+  `192x192` (`any`), `512x512` (`any`) and `512x512` (`maskable`).
+- The last line says `404`: only generated files exist.
+
+### 9. Browser: while `npm run dev` is running
+
+| URL | Expect |
+|---|---|
+| http://localhost:3000/ | Heading "Frontend foundation". The tab shows a dark rounded square with a cyan "0" as its icon (a hard refresh, Ctrl+F5, helps if the old icon is cached). |
+| http://localhost:3000/dev/ui#logo | The "Logo" section: three panels, "ON SURFACE" (pale lavender), "ON SURFACE-CONTAINER-LOWEST" (white) and "ON INVERSE-SURFACE" (dark navy). |
+
+In each of the three panels:
+
+- Row one: the wordmark "Rum0r" at **sm, md and lg**, three clearly different sizes (24, 36 and 48 px tall). The letters
+  are grey, the "0" and the underline are cyan.
+- Row two: the cyan "0" mark alone at sm, md and lg.
+- Last line: a small "0" followed by "Rumor Zero (decorative mark: the name is written next to it)".
+- On the dark panel the grey letters look dimmer but readable; the cyan stands out.
+- The labels under the logos are plain text, not part of the images.
+
+Check the sizes and names in the page itself: press F12, open the **Console** and paste
+
+```js
+[...document.querySelectorAll('#logo img')].map(i => [i.alt, i.width, i.height].join(' | ')).slice(0, 7)
+```
+
+- Expect `Rumor Zero | 79 | 24`, `Rumor Zero | 119 | 36`, `Rumor Zero | 158 | 48`, `Rumor Zero | 24 | 24`,
+  `Rumor Zero | 36 | 36`, `Rumor Zero | 48 | 48` and ` | 24 | 24` (the decorative one has an empty alt).
+
+Now open each generated image in the browser and check what you see:
+
+| URL | Expect |
+|---|---|
+| http://localhost:3000/brand/logo.svg | The full wordmark on a transparent background, tightly cropped |
+| http://localhost:3000/brand/mark.svg | The cyan "0" alone on a transparent background |
+| http://localhost:3000/brand/icon-512.png | A dark navy rounded square with a large cyan "0" in the middle; the four corners are transparent |
+| http://localhost:3000/brand/icon-maskable-512.png | A full-bleed navy square, the "0" smaller and well inside the middle, no rounded corners |
+| http://localhost:3000/apple-icon.png | A full-bleed navy square with the "0" (iOS rounds it itself) |
+| http://localhost:3000/opengraph-image.png | A wide navy picture with the whole wordmark centred, grey letters, cyan "0" and underline |
+| http://localhost:3000/brand/email-logo.png | A small navy banner with the wordmark |
+| http://localhost:3000/brand/google-oauth-logo.png | A small navy square with the wordmark across the middle |
+
+Last, the manifest as the browser reads it: F12 → **Application** → **Manifest**. It shows the name
+"Rumor Zero", theme and background colour `#283044`, and the three icons, including one marked
+"maskable".
+
+### 10. Terminal: exact sizes of the generated files
+
+Stop the dev server first (`Ctrl+C`), or use a new window. In `frontend\`:
+
+```powershell
+Add-Type -AssemblyName System.Drawing
+$pngs = 'src\app\apple-icon.png','public\brand\icon-192.png','public\brand\icon-512.png','public\brand\icon-maskable-512.png','src\app\opengraph-image.png','src\app\twitter-image.png','public\brand\google-oauth-logo.png','public\brand\email-logo.png','..\backend\apps\core\static\core\brand\logo-admin.png'
+foreach ($p in $pngs) { $img = [System.Drawing.Image]::FromFile((Resolve-Path $p)); "{0,-62} {1} x {2}  {3} bytes" -f $p, $img.Width, $img.Height, (Get-Item $p).Length; $img.Dispose() }
+$b = [System.IO.File]::ReadAllBytes((Resolve-Path src\app\favicon.ico))
+"ico: images=$([BitConverter]::ToUInt16($b,4)); sizes=" + (($b[6], $b[22], $b[38]) -join ',')
+```
+
+```text
+src\app\apple-icon.png               180 x 180  2333 bytes
+public\brand\icon-192.png            192 x 192  3904 bytes
+public\brand\icon-512.png            512 x 512  12022 bytes
+public\brand\icon-maskable-512.png   512 x 512  6262 bytes
+src\app\opengraph-image.png          1200 x 630  12839 bytes
+src\app\twitter-image.png            1200 x 630  12839 bytes
+public\brand\google-oauth-logo.png   120 x 120  1605 bytes
+public\brand\email-logo.png          320 x 96  3541 bytes
+..\backend\apps\core\static\core\brand\logo-admin.png   158 x 64  1879 bytes
+ico: images=3; sizes=16,32,48
+```
+
+- The sizes are exact; the byte counts can differ a little on another machine.
+- The Google logo is far under 1 MB. The apple icon is also opaque (its PNG has no alpha channel);
+  the automated tests check that.
+
+### 11. Terminal: repository checks
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+git check-ignore frontend\src\app\favicon.ico frontend\public\brand\logo.svg backend\apps\core\static\core\brand\logo-admin.png   # prints nothing: none of them is ignored
+git check-attr binary -- frontend/src/app/favicon.ico frontend/src/app/apple-icon.png     # both: binary: set
+git status --short design             # prints nothing: design\ is untouched
+Test-Path frontend\AGENTS.md, frontend\CLAUDE.md   # False, then False
+```
+
+### 12. Stop and clean up
+
+- Stop the server: `Ctrl+C` in its window.
+- Nothing else is running for this part: no containers, no backend.
+- The generated files are meant to be committed; do not delete them. To change the logo later:
+  replace `design\logo.svg` yourself, check that `markSelector` in
+  `frontend\scripts\brand\brand.config.json` still picks the "0" (the build fails if it does not
+  match exactly one shape), run `npm run brand:build`, and compare the contrast table with
+  `docs\ARCHITECTURE.md` section 14.
+
+---
+
 <!-- Add the next part below in the same shape: "## Part <ID>: <title>", then numbered steps,
      each saying Terminal or Browser, each with the exact command and the expected result. -->

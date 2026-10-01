@@ -1,0 +1,91 @@
+{
+  "master": "design/logo.svg",
+  "plateColor": "#283044",
+  "logoColors": {
+    "grey": "#898a8d",
+    "cyan": "#23b5d8"
+  },
+  "alt": "Rumor Zero",
+  "wordmark": {
+    "file": "public/brand/logo.svg",
+    "src": "/brand/logo.svg",
+    "width": 781.5,
+    "height": 236.75
+  },
+  "mark": {
+    "file": "public/brand/mark.svg",
+    "src": "/brand/mark.svg",
+    "width": 196,
+    "height": 196
+  },
+  "favicon": {
+    "file": "src/app/favicon.ico",
+    "sizes": [
+      16,
+      32,
+      48
+    ]
+  },
+  "icon": {
+    "file": "src/app/icon.svg"
+  },
+  "appleIcon": {
+    "file": "src/app/apple-icon.png",
+    "width": 180,
+    "height": 180
+  },
+  "icons": [
+    {
+      "file": "public/brand/icon-192.png",
+      "src": "/brand/icon-192.png",
+      "width": 192,
+      "height": 192,
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "file": "public/brand/icon-512.png",
+      "src": "/brand/icon-512.png",
+      "width": 512,
+      "height": 512,
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "file": "public/brand/icon-maskable-512.png",
+      "src": "/brand/icon-maskable-512.png",
+      "width": 512,
+      "height": 512,
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "share": {
+    "file": "src/app/opengraph-image.png",
+    "width": 1200,
+    "height": 630
+  },
+  "twitter": {
+    "file": "src/app/twitter-image.png",
+    "width": 1200,
+    "height": 630
+  },
+  "email": {
+    "file": "public/brand/email-logo.png",
+    "src": "/brand/email-logo.png",
+    "width": 320,
+    "height": 96,
+    "displayWidth": 160
+  },
+  "google": {
+    "file": "public/brand/google-oauth-logo.png",
+    "src": "/brand/google-oauth-logo.png",
+    "width": 120,
+    "height": 120
+  },
+  "admin": {
+    "file": "backend/apps/core/static/core/brand/logo-admin.png",
+    "width": 158,
+    "height": 64
+  }
+}

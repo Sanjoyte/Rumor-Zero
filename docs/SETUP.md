@@ -175,7 +175,7 @@ Versions are the latest stable releases as of 2026-09-29. Part 0 re-checks patch
 | `jsdom` | 30.1.1 | Browser-like test DOM. `vite-tsconfig-paths` is **not** used: `vitest.config.mts` aliases `@` to `src` directly. |
 | `@testing-library/react`, `@testing-library/dom`, `@testing-library/user-event`, `@testing-library/jest-dom` | RTL 16.3.3, dom 10.4.2, user-event 14.6.7, jest-dom 7.0.1 | Component testing |
 | `@playwright/test` | 1.63.0 | End-to-end tests. Browsers are installed by `npx playwright install chromium`. |
-| `sharp` (dev) | 0.35.x (0.35.4 today) | **Added in Part 0D.** Renders `design/logo.svg` into the favicon, app icons, share image and email/admin logos (`npm run brand:build`). Prebuilt Windows x64 binaries. Used only by `frontend/scripts/brand/`, never by app code or the Worker bundle. |
+| `sharp` (dev) | 0.35.5 (exact pin) | **Added in Part 0D** (2026-10-01). Renders `design/logo.svg` into the favicon, app icons, share image and email/admin logos (`npm run brand:build`). Prebuilt Windows x64 binaries. Used only by `frontend/scripts/brand/`, never by app code or the Worker bundle. |
 
 **Scaffolding notes (verified in Part 0B, 2026-10-01):**
 - `create-next-app` 16.3.8 has no `--turbopack` option any more (Turbopack is the default). Part 0B ran it with `--ts --tailwind --eslint --app --src-dir --import-alias "@/*" --use-npm --empty --no-react-compiler --no-agents-md --disable-git --skip-install --yes` in a scratch folder and copied the result into `frontend/`, because it refuses a folder that holds `.env.example` or `.env.local`.

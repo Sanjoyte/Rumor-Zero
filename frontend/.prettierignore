@@ -4,3 +4,4 @@ coverage
 package-lock.json
 next-env.d.ts
 public/brand
+src/lib/brand-assets.json

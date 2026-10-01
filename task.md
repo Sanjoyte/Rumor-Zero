@@ -83,7 +83,7 @@ not let the review expand the part's scope without user approval.
 |---|---|---|---|
 | 0A | Backend foundation | SETUP Part A | [x] Done (2026-09-30) |
 | 0B | Frontend foundation & design system | SETUP Part A | [x] Done (2026-10-01) |
-| 0D | Brand assets & Logo component | 0B | [ ] |
+| 0D | Brand assets & Logo component | 0B | [x] Done (2026-10-01) |
 | 0C | App shell, API relay, API client, CI | 0A, 0B, 0D | [ ] |
 | 1 | Auth core: sign up, log in, tokens, log out | 0C | [ ] |
 | 2 | Email verification & password reset | 1 | [ ] |
@@ -271,7 +271,7 @@ Adjustments for real dependencies:
 ---
 
 ## Part 0D: Brand assets & Logo component
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-01)
 **Goal:** one logo everywhere (D9). Every derived asset comes from one command and one master file, and one `<Logo/>` component is the only way the UI shows the brand. A later logo change is then: replace `design/logo.svg`, run one command.
 **Depends on:** 0B. Runs before 0C, because the shell uses `<Logo/>`.
 **Stitch files to convert:** none directly. The brand marks it replaces are applied in 0C and listed in ANALYSIS e.2:
@@ -304,18 +304,32 @@ Adjustments for real dependencies:
 **API endpoints:** none.
 
 **Acceptance criteria**
-- [ ] `npm run brand:build` regenerates every asset in ARCHITECTURE §14 from `design/logo.svg`, and `git status` shows nothing changed under `design/`
-- [ ] A master with a `<script>`, an external link or a `<text>` element makes the build fail with a clear message
-- [ ] Sizes are exact:
+- [x] `npm run brand:build` regenerates every asset in ARCHITECTURE §14 from `design/logo.svg`, and `git status` shows nothing changed under `design/`
+- [x] A master with a `<script>`, an external link or a `<text>` element makes the build fail with a clear message
+- [x] Sizes are exact:
   - favicon.ico holds 16/32/48
   - apple-icon is 180×180 and opaque
   - the manifest icons are 192, 512 and maskable 512, with the mark inside the 80 % safe zone
   - share images are 1200×630
   - the Google logo is 120×120 and under 1 MB
-- [ ] `next build` HTML contains the favicon, icon, apple-touch-icon, manifest and `og:image` tags
-- [ ] `<Logo/>` renders with the accessible name "Rumor Zero" (or `alt=""` when decorative) at every size, with no layout shift
-- [ ] The printed contrast table matches ARCHITECTURE §14
-- [ ] The guard test and `lint:tokens` pass; `npm run lint`, `typecheck`, `test` and `build` pass
+- [x] `next build` HTML contains the favicon, icon, apple-touch-icon, manifest and `og:image` tags
+- [x] `<Logo/>` renders with the accessible name "Rumor Zero" (or `alt=""` when decorative) at every size, with no layout shift
+- [x] The printed contrast table matches ARCHITECTURE §14
+- [x] The guard test and `lint:tokens` pass; `npm run lint`, `typecheck`, `test` and `build` pass
+
+**Deviations and decisions (2026-10-01):**
+- **Icon plate shape** (decided by the user): `favicon.ico`, `icon.svg`, `icon-192.png` and `icon-512.png` use a rounded-square plate (22 % radius, transparent corners). `apple-icon.png`, `icon-maskable-512.png` and the wide plates are full-bleed squares/rectangles. ARCHITECTURE §14 records this.
+- **`sharp` 0.35.5, exact pin.** SETUP said 0.35.4; 0.35.5 was already in `node_modules` as Next's optional dependency, so adding it as a devDependency only changed `package-lock.json` flags (`optional` → `devOptional` for sharp, `@img/colour`, `semver`). No new binary type for `.gitattributes`: `*.png` and `*.ico` were already binary, and SVG/JSON/`.alt.txt` are text.
+- **`lint:tokens` allowlist is `src/lib/brand-assets.json` only.** `manifest.ts` reads its colours and icon paths from that JSON, so it contains no hex and no `/brand/` literal and needs no entry (task text listed both). `lint:tokens` now scans `.json` under `src/` so the allowlist entry is real.
+- **No XML dependency.** `scripts/brand/svg.mjs` has a small tokenizer; the mark selector supports `tag.class` only. Class fills are inlined into the derived SVGs (no `<style>`). Artwork bounds are measured from a 4x render, not parsed from path data.
+- **Extra safety checks** beyond the task list: `<tspan>`/`<textPath>`, `<iframe>`/`<embed>`/`<object>`/`<audio>`/`<video>`, DOCTYPE/ENTITY, `@import`, external `url()`, `data:` and `javascript:` values. Every problem is listed at once, with line numbers, and nothing is written.
+- **Padding:** wordmark viewBox = artwork + 12 units on every side; mark viewBox = square around the "0" with 12 units clear (`brand.config.json`).
+- **`brand-assets.json`** lists each asset with its repo-relative `file`, public `src` where there is one, and sizes read from the written PNG headers. `manifest.ts` uses the plate colour for `theme_color` and `background_color`.
+- **`.alt.txt` files have no trailing newline** (Next copies them verbatim into `og:image:alt`; a newline showed up as "Rumor Zero
+").
+- **`metadataBase`** comes from the existing `NEXT_PUBLIC_SITE_URL` (no new env variable), so `og:image` and `twitter:image` are absolute.
+- **No CI regenerate-and-diff check** (for 0C): PNG bytes can differ across OS/libvips builds. Tests check sizes, structure and the text outputs (`build.test.ts` fails if a committed SVG/JSON/txt asset is stale).
+- **Verified in a real browser** (headless Edge, `/dev/ui#logo`): every Logo renders at exactly 24/36/48 px with its width from the artwork ratio, named "Rumor Zero" (`alt=""` when decorative), on all three surfaces. All 13 generated URLs answer 200 in `next dev` with the right content type.
 
 **Required tests:** SVG safety check (each forbidden construct); mark extraction and viewBox cropping; ICO writer (header and entries); asset dimension tests that read PNG headers (no extra dependency); `brand-assets.json` shape; Logo render, sizes and accessible name; guard test.
 

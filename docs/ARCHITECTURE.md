@@ -877,6 +877,13 @@ It reads `src/lib/brand-assets.json`.
 | Asset list | `frontend/src/lib/brand-assets.json` | — | generated; read by `Logo`, `manifest.ts` and the root metadata |
 
 - Icons and the mark use the cyan "0" on the `inverse-surface` plate (5.4 : 1). The share image, email, Google and admin logos use the full wordmark on the same plate.
+- Plate details (Part 0D, `brand.config.json`):
+  - `favicon.ico`, `icon.svg`, `icon-192.png` and `icon-512.png` sit on a **rounded-square** plate (22 % radius, transparent corners). `apple-icon.png`, `icon-maskable-512.png` and the share, email, Google and admin logos are full-bleed, opaque rectangles.
+  - The wordmark SVG is cropped to the measured artwork plus 12 units on every side; the mark is the "0" centred in a square viewBox with 12 units clear. Bounds are measured from a 4x render, so no path parser is needed.
+  - Derived SVGs have their class fills inlined (no `<style>`), so nesting them in plates cannot clash on class names.
+  - The maskable icon keeps the mark inside the central 80 % circle (checked by a pixel-scan test). `manifest.ts` uses the plate colour for `theme_color` and `background_color`.
+  - The `.alt.txt` files hold exactly `Rumor Zero` with no trailing newline: Next copies them verbatim into `og:image:alt`.
+  - PNG bytes are reproducible on the same machine but not guaranteed across operating systems, so CI does not regenerate-and-diff; tests check sizes, structure and the text outputs instead.
 - The build **only reads** `design/`. It fails if the master contains `<script>`, `<foreignObject>`, `on*` attributes, external `href`/`xlink:href`, embedded bitmaps or `<text>`, or has no `viewBox`. It prints the contrast table above.
 
 **Placements:**

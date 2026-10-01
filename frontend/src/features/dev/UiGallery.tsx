@@ -2,6 +2,7 @@
 
 import { DisplaySections } from "./DisplaySections";
 import { FormSections } from "./FormSections";
+import { LogoSection } from "./LogoSection";
 import { StitchSections } from "./StitchSections";
 
 const LINKS = [
@@ -12,6 +13,7 @@ const LINKS = [
   ["navigation", "Tabs and chips"],
   ["badges", "Badges"],
   ["avatars", "Avatar"],
+  ["logo", "Logo"],
   ["feedback", "Feedback"],
   ["password-meter", "Password meter"],
   ["danger", "DangerZone"],
@@ -44,6 +46,7 @@ export function UiGallery() {
       </header>
       <FormSections />
       <DisplaySections />
+      <LogoSection />
       <StitchSections />
     </main>
   );
