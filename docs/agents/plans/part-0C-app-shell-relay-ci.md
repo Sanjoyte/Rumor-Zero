@@ -1,7 +1,7 @@
 # Plan: Part 0C, App shell, API relay, API client, CI
 
-- **Status:** IMPLEMENTED 2026-10-01 by Claude (Opus 5.5) and validated locally; the last
-  acceptance criterion (CI green on GitHub) waits for the user's push. Approved by the user on
+- **Status:** DONE 2026-10-01. Implemented by Claude (Opus 5.5) and validated locally. CI went green
+  on `60cfffc`, after one fix: an `esbuild` devDependency for OpenNext (task.md 0C). Approved by the user on
   2026-10-01 together with the deviations below. Small extra deviations made while implementing are
   listed under Part 0C in `task.md` (e.g. the top-bar search keeps b1's compact input instead of
   `TextField`). The steps below are kept as the record of what was approved.

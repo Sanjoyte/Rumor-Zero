@@ -78,6 +78,13 @@ in `task.md`; transient continuation state belongs in `HANDOFF.md`.
 - **Evidence:** Part 0B verification; Stitch b2, d1 and a2 were screenshotted the same way for comparison.
 - **Limit (2026-10-01, Part 0C):** headless Edge does not shrink the layout viewport below roughly 500 px, so a `--window-size=390,…` shot shows a clipped desktop-ish page, not the phone layout. For phone widths use Playwright (installed since 0C) with `browser.newPage({ viewport: { width: 390, height: 844 } })` from a scratchpad script that `require`s `frontend/node_modules/@playwright/test`. Measured that way, the 0C shell has no horizontal overflow at 390 px.
 
+### 2026-10-01 — Agents can't read CI results here; the user reports them
+
+- **Applies to:** every part whose acceptance needs a green CI run (0C, 16, 17, 18) or a GitHub check.
+- **Fact:** the GitHub CLI (`gh`) is not installed on this machine (Git Bash: `gh: command not found`). The repository `Sanjoyte/Rumor-Zero` is private, so `WebFetch` of its Actions pages returns 404. The user reads results in the Actions tab and reports them, or pastes a screenshot of the failing log; that is how the first 0C failure arrived.
+- **Consequence:** don't plan on `gh run list/view`. Ask the user for the run result, and record it in HANDOFF as user-reported. Reproduce Linux-only failures in Docker (next entry) before asking for another push. If the user installs `gh` later, read-only `gh run …` calls are allowed (`gh api` is denied in `.claude/settings.json`).
+- **Evidence:** Part 0C, 2026-10-01: CI on `6e83866` failed (screenshot), and CI on `60cfffc` passed (user report).
+
 ### 2026-10-01 — Check Linux-only CI steps in Docker before asking the user to push
 
 - **Applies to:** 0C, 17, 18, and any change to the frontend lockfile, OpenNext/wrangler/vite versions or Linux-only CI steps.

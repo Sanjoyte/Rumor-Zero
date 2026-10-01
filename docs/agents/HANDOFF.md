@@ -6,22 +6,25 @@ read-only git output.
 
 ## Active work
 
-- **Part:** 0C (App shell, API relay, API client, CI). Parts 0A (2026-09-30), 0B and 0D (2026-10-01)
-  are done and committed.
-- **Owner:** none (fix finished; idle until the user commits and pushes it)
-- **Phase:** the first CI run (on `6e83866`) failed only in the frontend job's OpenNext build, with
-  `Cannot find package 'esbuild'`. The fix is in the working tree, uncommitted, and the whole
-  frontend job passes on Linux in Docker. task.md still shows `[~] In progress (awaiting first CI
-  run)` in both places, with 7 of 8 criteria ticked. The open one is "all CI jobs green on GitHub".
+- **Part:** none active. Parts 0A (2026-09-30), 0B, 0D and **0C (2026-10-01)** are done. 0C's code
+  and CI fix are committed (`6e83866`, `60cfffc`).
+- **Owner:** none (idle until the user starts Part 1)
+- **Phase:** 0C closed. CI on `60cfffc` passed all three jobs (user-reported). task.md shows
+  `[x] Done (2026-10-01)` in both places, with all 8 criteria ticked.
 - **Last approved plan:** [`docs/agents/plans/part-0C-app-shell-relay-ci.md`](plans/part-0C-app-shell-relay-ci.md)
-  (status: implemented 2026-10-01; awaiting CI)
-- **Last updated:** 2026-10-01 by Claude (Opus 5.5), fix for the first CI run
+  (status: done 2026-10-01)
+- **Last updated:** 2026-10-01 by Claude (Opus 5.5), 0C closed after green CI
 
 ## Completed checkpoints
 
 - Dual-agent setup, the pre-0A correction pass, Parts 0A, 0B and 0D (0D = `b695f09`), the
   multi-source spec change (`bd05636`) and the 0C plan (`90857ec`), all committed by the user.
-- 2026-10-01 (Claude, Opus 5.5): **fix for the first CI run** (uncommitted).
+- 2026-10-01: **CI green, Part 0C done.** The run on `60cfffc` passed Backend, Frontend (including
+  the OpenNext build) and E2E, as the user reported. The agent couldn't read it (`gh` not installed,
+  private repo; MEMORY.md). Closing edits, uncommitted: `task.md` (last criterion, both status spots,
+  CI note), the plan's status line, `docs/test-command.md` (Part 0C step 11), `MEMORY.md` (CI results
+  come from the user) and this file.
+- 2026-10-01 (Claude, Opus 5.5): **fix for the first CI run**, committed by the user as `60cfffc`.
   - CI on `6e83866`: backend and e2e were green; the frontend job failed at "OpenNext build" with
     `ERR_MODULE_NOT_FOUND: Cannot find package 'esbuild' imported from
     …/@opennextjs/cloudflare/dist/cli/build/bundle-server.js`.
@@ -68,10 +71,10 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `6e83866` (the 0C implementation, committed and pushed by the user).
-- **Uncommitted, the CI fix only:**
-  - `frontend/package.json` (+ `"esbuild": "0.28.1"` in devDependencies) and `frontend/package-lock.json`
-  - `docs/SETUP.md`, `task.md`, `docs/agents/HANDOFF.md`, `docs/agents/MEMORY.md`
+- HEAD is `60cfffc` (the CI fix), on top of `6e83866` (0C). Both were committed and pushed by the user.
+- **Uncommitted, the closing docs edits only:** `task.md`, `docs/test-command.md`,
+  `docs/agents/{HANDOFF,MEMORY}.md`, `docs/agents/plans/part-0C-app-shell-relay-ci.md`. No code or
+  dependency change.
 - `git status --short design` prints nothing.
 - No nested `frontend/AGENTS.md`/`CLAUDE.md`.
 - `frontend/playwright-report` and `frontend/test-results` exist locally; they are git-ignored.
@@ -152,19 +155,15 @@ read-only git output.
 
 ## Next exact action
 
-1. The user reviews the CI fix (`frontend/package.json`, `frontend/package-lock.json` and the four
-   docs), commits and pushes (all git operations are theirs).
-2. Check that CI run, either in GitHub's Actions tab or with `gh run list --workflow ci.yml --limit 1`
-   and `gh run view <id> --log-failed` (read-only; `gh api` is denied).
-   - **If all three jobs are green:** tick the last 0C criterion in task.md, set
-     `**Status:** [x] Done (YYYY-MM-DD)` and the summary row to `[x] Done (YYYY-MM-DD)`, then update
-     this file. The next part is **Part 1** (Auth core). Prompt: `Plan Part 1 from task.md. Do not
-     implement yet.`
-   - **If a job fails:** investigate and report before changing anything. Before asking the user to
-     push again, reproduce the job in Docker (MEMORY.md, "Check Linux-only CI steps in Docker").
-     - Already cleared on Linux, in CI run 1 and in Docker: 0D's brand tests (no librsvg drift), the
-       lint and type checks, and Playwright.
-     - Fixed: the OpenNext build's missing `esbuild`.
+1. The user commits the closing docs edits (all git operations are theirs).
+2. Start a fresh session for the next part in `task.md`'s order: **Part 1** (Auth core: sign up, log
+   in, tokens, log out). It depends only on 0C, which is done.
+   - Model: Opus 5.5 · xhigh to plan, Opus 5.5 · high to implement (task.md Part 1).
+   - Prompt: `Plan Part 1 from task.md. Do not implement yet.`
+   - Part 1's planner should read "Follow-ups noted during 0C" below first: the CSRF/Origin note for
+     refresh and logout through the relay, `avatar_url` in `/me`, and the 401 hook and lock wiring.
+   - CI results come from the user (MEMORY.md). Reproduce any Linux-only failure in Docker before
+     asking for another push.
 
 ## Blockers or user decisions
 

@@ -829,8 +829,10 @@ This is the one check the agent could not run, because only you push.
 - The frontend job's last step, "OpenNext build", proves the Cloudflare build works on Linux.
 - If the E2E job fails, its run page has a "playwright-report" artifact (kept 7 days) that shows
   why.
-- Optional, in a terminal: `gh run list --workflow ci.yml --limit 1` shows `completed` and
-  `success`.
+- Seen on 2026-10-01: the first run failed at "OpenNext build" (`Cannot find package 'esbuild'`).
+  The run on `60cfffc` ("Fix: add missing esbuild dependency") had all three jobs green.
+- Optional, only if you install the GitHub CLI (`gh`, not installed on this machine yet):
+  `gh run list --workflow ci.yml --limit 1` shows `completed` and `success`.
 
 ### 12. Stop and clean up
 

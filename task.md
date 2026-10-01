@@ -84,7 +84,7 @@ not let the review expand the part's scope without user approval.
 | 0A | Backend foundation | SETUP Part A | [x] Done (2026-09-30) |
 | 0B | Frontend foundation & design system | SETUP Part A | [x] Done (2026-10-01) |
 | 0D | Brand assets & Logo component | 0B | [x] Done (2026-10-01) |
-| 0C | App shell, API relay, API client, CI | 0A, 0B, 0D | [~] In progress (awaiting first CI run) |
+| 0C | App shell, API relay, API client, CI | 0A, 0B, 0D | [x] Done (2026-10-01) |
 | 1 | Auth core: sign up, log in, tokens, log out | 0C | [ ] |
 | 2 | Email verification & password reset | 1 | [ ] |
 | 3 | Continue with Google | 1 | [ ] |
@@ -340,7 +340,7 @@ Adjustments for real dependencies:
 ---
 
 ## Part 0C: App shell, API relay, API client, CI
-**Status:** [~] In progress (implemented and validated locally 2026-10-01; waiting for the first CI run on GitHub after your push)
+**Status:** [x] Done (2026-10-01)
 **Goal:** the three page layouts; the single-origin API relay (the core of the free topology); the base API client; and a CI pipeline that also proves the Cloudflare build works on Linux.
 **Depends on:** 0A, 0B, 0D.
 **Stitch files to convert:** app shell (sidebar + top bar) from `b1_home_feed`; `MarketingNav`/`MarketingFooter` from `a1_logged_out_home`; auth card layout from `a2_sign_up`. Every brand mark in them (text wordmark, emblem tiles, "Fact Social") becomes `<Logo/>` (ANALYSIS e.2).
@@ -387,7 +387,7 @@ All three jobs run on test values only; no secrets.
 - [x] The shell matches Stitch b1 at 1280 px and is usable at 1024 px (icon dock) and 390 px (bottom nav); the current page has `aria-current="page"`
 - [x] Every brand mark in the shell, auth and marketing layouts is `<Logo/>` (the 0D guard test still passes)
 - [x] The Playwright smoke test passes locally
-- [ ] After you push, all CI jobs are green on GitHub, including the OpenNext build on Linux
+- [x] After you push, all CI jobs are green on GitHub, including the OpenNext build on Linux
 
 **Deviations and decisions (2026-10-01):**
 - **User decisions:** the logged-out shell shows only Home and Search (plus Log in / Sign up); phones get a top bar and five bottom tabs (Home, Search, New post, Notifications, Profile) with an account sheet for Bookmarks, Settings and Moderation; marketing links go only to pages that exist (About, Community Guidelines, Press and Contact dropped). ARCHITECTURE §10 and ANALYSIS a.3 record them.
@@ -400,6 +400,7 @@ All three jobs run on test values only; no secrets.
   - Cause: `@opennextjs/cloudflare` imports esbuild without declaring it (upstream #1339). `vite` 8's optional esbuild peer stops npm from hoisting the copy it relied on.
   - Fix: `esbuild` 0.28.1 as an exact devDependency (wrangler's version, one shared copy, `npm audit` clean). See SETUP B3 for when to remove it.
   - The OpenNext build was then run on Linux in a `node:24` container, from exactly the files CI checks out (no env files).
+  - The next CI run (on `60cfffc`, "Fix: add missing esbuild dependency") passed all three jobs, as the user reported on 2026-10-01. The agent couldn't open the run itself: `gh` isn't installed and the repository is private.
 - **Basic `not-found`, `error` and `global-error`** now (ARCHITECTURE §14 places their logo in 0C); Part 15 polishes them. Fonts moved to `src/app/fonts.ts` so `global-error` can reuse them. The root title template is `"%s · Rumor Zero"`.
 - **The top-bar search box keeps b1's compact classes** instead of the 44 px `TextField`, so the bar matches Stitch.
 - **`/dev/shell`** (dev-only, 404 in production) shows the shell with a sample user for the Stitch comparison, because there is no sign-in until Part 1. `?user=none` shows the logged-out shell.
