@@ -15,7 +15,7 @@ Section refs like "guide §7.2" point to the PDF; "c-3" or "D1" point to ANALYSI
 | Frontend Worker (Cloudflare) | `rumor-zero` → `https://rumor-zero.<account-subdomain>.workers.dev` |
 | npm package name | `rumor-zero-frontend` |
 | Deployed URLs: **fill in at Part 17/18** | FRONTEND = `…` · BACKEND = `…` |
-| Cookie / header prefixes | cookie `rz_refresh`; headers `X-RZ-Proxy-Secret`, `X-RZ-Client-IP`, `X-RZ-Cron-Secret`; `X-Requested-With: rumor-zero` |
+| Cookie / header prefixes | cookies `rz_refresh` (httpOnly refresh token) and `rz_session` (readable hint); headers `X-RZ-Proxy-Secret`, `X-RZ-Client-IP`, `X-RZ-Cron-Secret`; `X-Requested-With: rumor-zero` |
 | Logo | master `design/logo.svg` (read-only; accessible name "Rumor Zero"). Derived assets come only from `npm run brand:build` (Part 0D). The UI shows the brand only through `<Logo/>`. See §14. |
 | Credibility score | called "Credibility score" in the UI and `reputation` in code (§4a) |
 
@@ -79,7 +79,7 @@ Conventions:
 | display_name | varchar(50) | blank → UI falls back to `@username` |
 | bio | varchar(280) | |
 | role | `user` \| `moderator` \| `senior_moderator` | default `user`. **Source of truth**: on save, syncs Django Groups "Moderators" / "Senior moderators" and `is_staff = is_superuser or role != user` (c-10). Groups are **cumulative**: `moderator` → "Moderators"; `senior_moderator` → both "Moderators" and "Senior moderators" (Part 10 gives the senior group only the extra permissions). Only those two groups are managed; other groups are left alone. The sync runs on create and when `role` changes, so a `last_login`-only save stays one query. In Django Admin `is_staff` and `groups` are read-only (editing them would fight the sync). `createsuperuser` leaves `role = user`, so the superuser keeps Django Admin access through `is_superuser`. |
-| is_email_verified | bool, default false | mirror of allauth `EmailAddress.verified` for the primary email (signal `email_confirmed`); true for Google sign-ups |
+| is_email_verified | bool, default false | mirror of allauth `EmailAddress.verified` for the primary email (signal `email_confirmed`); true for Google sign-ups. **Superusers count as verified** (user decision 2026-10-01): `createsuperuser` sets it and creates a verified primary `EmailAddress`, and migration `accounts.0002_verify_superuser_emails` did the same for existing superusers. |
 | is_active, is_staff, is_superuser, last_login | Django | |
 | avatar_version | varchar(16) null | null = no photo (initials). Set by the avatar service (14B); the photo URL is built from it (§9). Replaces the old unused `avatar_url`. |
 | avatar_uploads_blocked | bool, default false | set by a moderator (14B) |
@@ -290,7 +290,11 @@ DRF throttles (per user, Redis-backed; scope → rate):
 
 The emergency limit (1 per 24 h) is a service rule checked against the DB, not a throttle.
 
-Auth endpoints use allauth's `ACCOUNT_RATE_LIMITS` (login failures, signup, reset, confirm-email resend).
+Auth endpoints use allauth's `ACCOUNT_RATE_LIMITS`, keyed on `REMOTE_ADDR` (the real client IP from `ClientIPMiddleware`). Part 1 pins allauth 65.19.5's defaults:
+- `login` 30/min per IP (every login POST);
+- `login_failed` 10/min per IP **and** 5 per 300 s per account (key `host:email`, lowercased). It is counted *before* the password is checked, so a full IP bucket refuses even the right password; a success gives its own count back. The answer is **400 `too_many_login_attempts`**, not 429.
+- `signup` 20/min per IP → 429. Failed and unavailable Turnstile checks count too (§7).
+- Part 2 relies on allauth's `reset_password` (20/min per IP, 5/min per address) and `confirm_email` (one email per 3 min per address) defaults.
 
 ## 4. Post status lifecycle and routing (guide §5, §6, §7; fixes c-1…c-7)
 
@@ -578,59 +582,92 @@ class PipelineClient(Protocol):
 
 ## 7. Authentication (guide §4; D1, c-17, c-18, d)
 
-**Library:** django-allauth **headless**, client `app`, `HEADLESS_TOKEN_STRATEGY = allauth.headless.tokens.strategies.jwt.JWTTokenStrategy`. The settings map from our env vars:
+**Library:** django-allauth 65.19.5 **headless**, client `app`, with our strategy `apps.accounts.tokens.RumorZeroJWTTokenStrategy` (a subclass of allauth's `JWTTokenStrategy`; see "Tokens and sessions"). The settings map from our env vars:
 
 | allauth setting | Value |
 |---|---|
 | `HEADLESS_JWT_ALGORITHM` | `HS256` |
-| `HEADLESS_JWT_PRIVATE_KEY` | `JWT_SIGNING_KEY` |
-| `HEADLESS_JWT_ACCESS_TOKEN_EXPIRES_IN` | `JWT_ACCESS_TOKEN_MINUTES × 60` |
-| `HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN` | `JWT_REFRESH_TOKEN_DAYS × 86400` |
+| `HEADLESS_JWT_PRIVATE_KEY` | `JWT_SIGNING_KEY` (≥ 32 characters and ≠ `DJANGO_SECRET_KEY`, or Django refuses to start) |
+| `HEADLESS_JWT_ACCESS_TOKEN_EXPIRES_IN` | `JWT_ACCESS_TOKEN_MINUTES × 60` (1–60 min) |
+| `HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN` | `JWT_REFRESH_TOKEN_DAYS × 86400` (1–90 days) = `REFRESH_TOKEN_SECONDS` |
 | `HEADLESS_JWT_ROTATE_REFRESH_TOKEN` | True |
-| DRF authentication class | `allauth.headless.contrib.rest_framework.authentication.JWTTokenAuthentication` |
+| `HEADLESS_JWT_STATEFUL_VALIDATION_ENABLED` | False (set explicitly) |
+| DRF authentication class | `apps.accounts.authentication.JWTAuthentication` (allauth's `JWTTokenAuthentication`, plus: a deleted or inactive user's token → 401, never a 500) |
 
 Other settings:
 - `HEADLESS_ONLY=True`; `HEADLESS_CLIENTS=("app",)`
-- `HEADLESS_FRONTEND_URLS`: `account_confirm_email` = `FRONTEND_ORIGIN/verify-email/{key}`; `account_reset_password_from_key` = `FRONTEND_ORIGIN/reset-password/{key}`
-- `ACCOUNT_LOGIN_METHODS={"email"}`, `ACCOUNT_SIGNUP_FIELDS=["email*","username*","password1*"]`
-- `ACCOUNT_EMAIL_VERIFICATION="optional"`: unverified users can log in and browse; writes are blocked by the `IsEmailVerified` permission (guide §4.3 step 4)
+- `HEADLESS_FRONTEND_URLS` (set in Part 1: headless-only mode refuses to send the verification email without them): `account_confirm_email` = `FRONTEND_ORIGIN/verify-email/{key}`; `account_reset_password_from_key` = `FRONTEND_ORIGIN/reset-password/{key}`; `account_reset_password` = `FRONTEND_ORIGIN/forgot-password`; `account_signup` = `FRONTEND_ORIGIN/signup`
+- `FRONTEND_ORIGIN` must be a bare origin (normalised: lowercase, no trailing slash) and https when `DEBUG` is off. With `DEBUG` off, `AUTH_COOKIE_SECURE` must be True and `EMAIL_PROVIDER` must be `brevo` (console and file would put links in logs or on disk). Each guard fails naming the variable, never its value.
+- `ACCOUNT_ADAPTER = apps.accounts.adapter.AccountAdapter`: NFKC-folds the username before allauth's own (lowercase-only) uniqueness check; sets the token session's lifetime at login; a failed email send is logged by exception class only and never turns a saved sign-up into a 500.
+- `ACCOUNT_LOGIN_METHODS={"email"}`, `ACCOUNT_SIGNUP_FIELDS=["email*","username*","password1*"]`, `ACCOUNT_PRESERVE_USERNAME_CASING=False`, `ACCOUNT_EMAIL_SUBJECT_PREFIX="[Rumor Zero] "`
+- `ACCOUNT_EMAIL_VERIFICATION="optional"`: unverified users can log in and browse; writes are blocked by the `IsEmailVerified` permission (guide §4.3 step 4). Sign-up sends the verification email and logs the user in.
 - `ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS=1`
 - `ACCOUNT_LOGIN_ON_PASSWORD_RESET=True`
-- `SOCIALACCOUNT_EMAIL_AUTHENTICATION(_AUTO_CONNECT)=True`: Google emails are pre-verified, so they link to an existing email account
-- An adapter auto-generates a username for Google sign-ups (c-29)
+- `ACCOUNT_RATE_LIMITS`: allauth's defaults, pinned (§3)
+- `AUTHENTICATION_BACKENDS` = allauth's backend only. It also serves the Django Admin login (it accepts the email as `username`). Adding `ModelBackend` would hash a wrong password twice (Argon2 uses 100 MiB per hash).
+- `SESSION_ENGINE` stays Django's database backend: refresh locks the session row and logout deletes it.
+- `SOCIALACCOUNT_EMAIL_AUTHENTICATION(_AUTO_CONNECT)=True`: Google emails are pre-verified, so they link to an existing email account (Part 3)
+- An adapter auto-generates a username for Google sign-ups (c-29, Part 3)
 
-**Mount point:** `path("api/auth/", include("allauth.headless.urls"))`, so endpoints look like `/api/auth/app/v1/auth/login`. The exact paths are confirmed while planning Part 1; update this section if they differ.
+**Endpoints** (confirmed in Part 1; allauth's paths have no trailing slash). `path("api/auth/logout/", …)` and `path("api/auth/", include("allauth.headless.urls"))` come before `api/`:
 
-**Refresh-cookie adapter** (`apps/accounts/cookies.py`: a middleware on `/api/auth/` paths, ~100 lines, fully tested):
-- **Response contains `meta.refresh_token`** (login, signup, provider-token, reset-with-login, refresh):
-  - remove it from the JSON;
-  - set cookie `rz_refresh` with `HttpOnly; Secure(=AUTH_COOKIE_SECURE); SameSite=Lax; Path=/api/auth/; Max-Age=JWT_REFRESH_TOKEN_DAYS`;
-  - no `Domain` attribute, so it's a host-only cookie of `<FRONTEND>`, because it arrives through the relay.
-- **`POST …/tokens/refresh`:**
-  - require `Origin == FRONTEND_ORIGIN` and `X-Requested-With: rumor-zero` (CSRF, c-18);
-  - inject the cookie value as `refresh_token`;
-  - put the rotated token back into the cookie.
-- **`POST /api/auth/logout/`** (ours): same CSRF checks; ends the allauth session so the refresh token is revoked; deletes the cookie (`Max-Age=0`).
+| Path | Notes |
+|---|---|
+| `POST /api/auth/app/v1/auth/signup` | `{email, username, password, turnstile_token}` → 200 `{data.user, meta.access_token}`. Field errors carry `param` `email`, `username`, `password` or `turnstile_token`. |
+| `POST /api/auth/app/v1/auth/login` | `{email, password}` → 200, same shape. A wrong password is `email_password_mismatch` (param `password`); a rate limit is **400** `too_many_login_attempts` (no param). |
+| `POST /api/auth/app/v1/tokens/refresh` | no body (the cookie is the token) → 200 `{data.access_token}`; a bad, rotated or revoked token → bare `{"status":400}` |
+| `POST /api/auth/logout/` | ours → always 204 |
+
+**Allow-list:** `AuthApiMiddleware` (`apps/accounts/middleware.py`, right after allauth's `AccountMiddleware`) handles every request under `/api/auth/`. Only the three allauth endpoints above (POST only) and our logout answer; every other path or method under `/api/auth/` is 404 (allauth also mounts `config`, `auth/session`, `account/email`, password and phone endpoints). Parts 2 and 3 add theirs to `ALLAUTH_ENDPOINTS`.
+
+**CSRF:** allauth's app views are CSRF-exempt and parse any body as JSON whatever its Content-Type, so a cross-site `<form enctype="text/plain">` could log someone in. Every unsafe request under `/api/auth/` (not only refresh and logout) needs `Origin == FRONTEND_ORIGIN` exactly and `X-Requested-With: rumor-zero`, else **403 `csrf_failed`**. Through the relay Django sees `Host` = the backend and `Origin` = the frontend, so Django's own CSRF check couldn't work here; our logout view is `csrf_exempt` for that reason. SameSite=Lax on the cookie is a second layer.
+
+**Cookies and secrets:** allauth's login and signup bodies carry three secrets in `meta`: `access_token`, `refresh_token` and `session_token` (the raw Django session key, which works as `X-Session-Token`). Refresh puts the new pair in `data`.
+- The middleware removes `meta.refresh_token`, `meta.session_token` and `data.refresh_token` from every `/api/auth/` response; only the access token reaches JavaScript (memory only).
+- A refresh token found there is moved into **`rz_refresh`**: `HttpOnly; SameSite=Lax; Path=/api/auth/; Max-Age=REFRESH_TOKEN_SECONDS` (seconds, 1 209 600 by default); `Secure` = `AUTH_COOKIE_SECURE`; no `Domain`, so it is a host-only cookie of `<FRONTEND>` (it arrives through the relay).
+- **`rz_session=1`** is a non-secret hint (user decision 2026-10-01): same attributes but readable by JavaScript and `Path=/`. It is set and deleted together with `rz_refresh`, so an anonymous page load needs no refresh call.
+- Every body under `/api/auth/` becomes JSON. A non-JSON or unparsable one, such as Django's DEBUG 500 page (which prints cookies), is replaced by `{"status": <code>}`. Our own errors use allauth's envelope `{"status", "errors":[{code, param?, message}]}`. Every response gets `Cache-Control: no-store`.
+- Login, signup and refresh drop any incoming `Authorization` and `X-Session-Token` header, so they never run as an existing session (no 409 "already authenticated", no 410).
+- **Refresh:** the body is replaced with `{"refresh_token": <cookie>}`; a token sent in the body is never used. No cookie → 401 without touching the database. Two `rz_refresh` cookies (refresh or logout) → 400 `invalid_cookie`. A refresh answered 400/401/410 deletes both cookies; a 5xx keeps them.
+- **Log in again** (login or signup with an old `rz_refresh` cookie): the session behind the old cookie is deleted.
+
+**Turnstile:** on sign-up only (guide §4.1), checked **before allauth runs**, because Django validates all form fields together: a form-level check would still answer "email taken" to a bot.
+- First allauth's own `signup` limit in dry-run mode (the same IP bucket): when it is full → 429 and Cloudflare isn't asked.
+- `turnstile_token` missing, not a string, blank or over 2048 characters → 400 `turnstile_failed` (param `turnstile_token`).
+- `apps/accounts/turnstile.py` posts `secret`, `response`, `remoteip` and an `idempotency_key` to `https://challenges.cloudflare.com/turnstile/v0/siteverify` with the standard library (5 s timeout, one retry with the same key after a network error or 5xx). A rejected token → 400 `turnstile_failed`. **Fails closed** (user decision 2026-10-01): siteverify unreachable, unreadable, or answering `invalid-input-secret`, `missing-input-secret` or `internal-error` → 400 `turnstile_unavailable` "We couldn't run the bot check. Try again in a minute." A rejected secret is logged naming `TURNSTILE_SECRET_KEY`. The token and secret are never logged.
+- A failed or unavailable check counts against the signup limit; a passing one is counted by allauth itself, so each attempt counts once.
+- Local dev and CI use Cloudflare's always-pass test keys (site key `1x00000000000000000000AA`, secret `1x0000000000000000000000000000000AA`; the secret `2x0000000000000000000000000000000AA` always fails). The test token is `XXXX.DUMMY.TOKEN.XXXX`.
+
+**Tokens and sessions:**
+- Refresh-token state lives in the Django session (jti → exp). allauth's own rotation removes the used token at once, without a lock, so two tabs refreshing together overwrite each other's session save, and a response lost after the commit strands the browser with a dead cookie. `RumorZeroJWTTokenStrategy.refresh_token()` therefore:
+  1. locks the `django_session` row (`select_for_update`) for the whole refresh;
+  2. validates the token against the session read inside the lock;
+  3. keeps the used token valid for a **60 s grace period** (never longer than its own expiry) instead of removing it, and prunes expired ids;
+  4. issues the new pair and saves the session; a session deleted meanwhile (`UpdateError`) is a plain 400.
+  It reuses allauth's internal helpers (`headless/tokens/strategies/jwt/internal.py`), so it is re-checked whenever allauth is upgraded.
+- Access tokens are validated statelessly (signature and expiry), so one still works for up to 15 min after logout.
+- The token session's lifetime is set at login (`set_expiry(REFRESH_TOKEN_SECONDS)`) and slides with each refresh. Admin sessions keep `SESSION_COOKIE_AGE`. Run `clearsessions` periodically (Part 9/17).
+- Refresh goes through Django's `get_user`: an inactive user, or a changed password (session auth hash), ends every refresh token.
+- `sid` in a token is the session key encrypted with a key derived from `DJANGO_SECRET_KEY`, so rotating that key logs everyone out (ENV_GUIDE §2.13).
+- **Logout** deletes the session behind the cookie (only signature and expiry are checked, so a rotated cookie still identifies it), which ends every refresh token issued for it, and deletes both cookies. It is idempotent.
 
 **Flows** (frontend `lib/api` and `lib/auth`):
 
 | Flow | Steps |
 |---|---|
-| Sign up (a2) | email + username (live check `GET /api/v1/auth/username-available/?u=`) + password + Turnstile token → allauth signup. The server verifies Turnstile via `https://challenges.cloudflare.com/turnstile/v0/siteverify` in the custom signup form (if headless ignores extra fields, a pre-check on that endpoint). → access token in memory + refresh cookie → verification email sent → UI shows the a4 "check your inbox" state and the unverified banner. |
-| Verify email (a4) | link `<FRONTEND>/verify-email/{key}` → POST key to allauth → `users.is_email_verified=true` |
-| Log in (a3) | email + password → tokens. A generic error on failure; allauth rate-limits failures. |
-| Google (a2/a3) | Google Identity Services button → ID token → `POST …/auth/provider/token {provider:"google", process:"login", token:{client_id, id_token}}` → allauth verifies the token's `aud` = `GOOGLE_OAUTH_CLIENT_ID` → tokens. Only JS origins are registered; no redirect URI, no client secret. |
-| Forgot / reset (a5/a6) | request → always shows "if an account exists…" (no enumeration) → link `<FRONTEND>/reset-password/{key}` → new password → logged in; other sessions invalidated |
-| Stay logged in | Access token lives **only in memory** (React context), never in localStorage (guide §4.6). On load, and 60 s before expiry, call refresh. On a 401, refresh once and retry, else log out. Refreshes are serialised across tabs with the **Web Locks API** (`navigator.locks.request('rz-refresh')`), so token rotation can't race. |
-| Log out | `POST /api/auth/logout/` → clear memory + cookie |
+| Sign up (a2) | email + username (live check `GET /api/v1/auth/username-available/?u=`, 400 ms debounce) + password + the Turnstile token → allauth signup → access token in memory + refresh cookie → verification email sent → `/home` with the unverified banner. |
+| Verify email (a4) | link `<FRONTEND>/verify-email/{key}` → POST key to allauth → `users.is_email_verified=true` (Part 2) |
+| Log in (a3) | email + password → tokens → `safeNextPath(?next=)` or `/home`. One dismissible banner on failure; allauth rate-limits failures. |
+| Google (a2/a3) | Google Identity Services button → ID token → `POST …/auth/provider/token {provider:"google", process:"login", token:{client_id, id_token}}` → allauth verifies the token's `aud` = `GOOGLE_OAUTH_CLIENT_ID` → tokens. Only JS origins are registered; no redirect URI, no client secret. (Part 3) |
+| Forgot / reset (a5/a6) | request → always shows "if an account exists…" (no enumeration) → link `<FRONTEND>/reset-password/{key}` → new password → logged in; other sessions invalidated (Part 2) |
+| Stay logged in | `src/lib/auth/session.ts` (framework-free) behind `AuthProvider`. The access token lives **only in memory**, never in localStorage (guide §4.6). On load, refresh **only when the `rz_session` hint is present**, then `GET /api/v1/me/`. The next refresh is scheduled at `max(lifetime/2, lifetime − 60 s)` after a token arrives (the lifetime is `exp − iat`, so the browser's clock doesn't matter); a tab coming back into view refreshes at once if one is due. A refresh answered 400/401/403/410 → anonymous; a network error or 5xx → keep the state and retry after 2 s, 5 s, 15 s, then every 30 s while visible. On a 401 from the API: if a refresh finished in the last 10 s just retry, else refresh once and retry. Only the refresh POST runs inside the **Web Lock** `rz-refresh` (shared by all tabs; Web Locks aren't re-entrant, so `/me` never waits on it). If a refreshed token's `sub` differs from the current user (another account logged in in another tab), `/me` is reloaded. Login and logout are broadcast on `BroadcastChannel("rz-auth")`; an anonymous tab that hears "login" refreshes. |
+| Log out | `POST /api/auth/logout/` inside the lock → on 204 clear memory, timers and user, broadcast → `/login`. On failure nothing changes and a toast says "Couldn't log out. Check your connection and try again." |
 
 **Permissions:**
 - `IsAuthenticated` for all writes.
-- `IsEmailVerified` (code `email_unverified`, 403) for creating posts (including emergencies), comments, likes, follows, reposts, reports, appeals and profile photos (unverified = read-only). Bookmarks are private, so they only need a login.
+- `IsEmailVerified` (`apps/accounts/permissions.py`, code `email_unverified`, 403; anonymous still gets 401) for creating posts (including emergencies), comments, likes, follows, reposts, reports, appeals and profile photos (unverified = read-only). Bookmarks are private, so they only need a login.
 - `IsModerator` / `IsSeniorModerator` for admin.
-- The superuser is created from your PC (ENV_GUIDE §2.6).
-
-**Turnstile:** on signup only (guide §4.1). Local dev uses the always-pass test keys.
+- The superuser is created from your PC (ENV_GUIDE §2.6) and counts as verified (§2).
 
 ## 8. Moderation panel: Django Admin (guide §8; d2 is a reference only)
 
@@ -720,7 +757,7 @@ Other settings:
 | Part | Method & path | Purpose |
 |---|---|---|
 | 0A | GET `/api/health/` · GET `/api/health/deep/` | health |
-| 1 | allauth `/api/auth/app/v1/auth/signup`, `…/auth/login`, `…/tokens/refresh`, POST `/api/auth/logout/` · GET `/api/v1/auth/username-available/` · GET `/api/v1/me/` | auth core |
+| 1 | POST `/api/auth/app/v1/auth/signup`, `/api/auth/app/v1/auth/login`, `/api/auth/app/v1/tokens/refresh` (allauth; no trailing slash) · POST `/api/auth/logout/` · GET `/api/v1/auth/username-available/?u=` · GET `/api/v1/me/` | auth core (§7; shapes below) |
 | 2 | allauth `…/auth/email/verify`, `…/auth/email/verify/resend`, `…/auth/password/request`, `…/auth/password/reset` | email flows |
 | 3 | allauth `…/auth/provider/token` | Google |
 | 4 | POST/GET `/api/v1/posts/` (global recent) · GET `/api/v1/me/fact-quota/` | posts |
@@ -738,6 +775,10 @@ Other settings:
 | 13 | GET `/api/v1/notifications/` · GET `…/unread-count/` · POST `…/mark-read/` | notifications |
 | 14 | PATCH `/api/v1/me/` · POST `/api/v1/me/password/` · GET `/api/v1/me/export/` · DELETE `/api/v1/me/` | settings |
 | 14B | PUT/DELETE `/api/v1/me/avatar/` · GET `/api/v1/avatars/{user_id}/{version}-{size}.webp` | profile photos |
+
+**Auth payloads (Part 1):**
+- `GET /api/v1/me/` (`IsAuthenticated`, never cached, one query): `{id, username, display_name, email, is_email_verified, role, has_usable_password, google_connected, avatar_url}`. `google_connected` is false until Part 3; `avatar_url` follows the rule above (null until 14B). Staff (`is_staff`: moderators and superusers) also get `admin_url`, the absolute Django Admin URL on the backend host. Anonymous → 401 `not_authenticated`.
+- `GET /api/v1/auth/username-available/?u=` (no authentication, `username_check` 30/min per IP, never cached, at most one query): normalises like sign-up (NFKC, trimmed, lowercase), then answers `{username, available, reason: null|"invalid"|"reserved"|"taken", message}`. Input over 64 characters is `invalid` without normalising; a missing `u` → 400 `{"u": [...]}`.
 
 **Stats and credibility payloads (11B, 11D):**
 - `GET /api/v1/posts/{id}/stats/`:
@@ -776,9 +817,13 @@ Other settings:
 - The brand is shown **only** through `<Logo/>` (§14). Never re-create the old text wordmark or the emblem tiles.
 - **Layouts (Part 0C):** route groups `(marketing)` (MarketingNav + MarketingFooter), `(auth)` (AuthLayout: the a2 card with `<Logo size="lg"/>`) and `(app)` (AppShell); components in `src/components/shell/`.
   - AppShell (Stitch b1 classes): the `w-64` rail at ≥1280 px, a `w-16` icon dock at 768–1279 px (labels `sr-only xl:not-sr-only`, so links keep their names), and below 768 px a top bar (`<Logo size="sm"/>` + account avatar) plus a bottom bar. The fixed top bar (search → `GET /search?q=`, avatar) shows from 768 px. Pages choose their own container width.
-  - Rail items: Home `/home`, Search, Notifications, Profile `/u/<username>`, Bookmarks, **New post** (opens the composer from Part 4), then Moderation (only with `admin_url`; Django Admin in a new tab), Settings and the user card with a menu (Profile, Settings; Part 1 adds Log out).
-  - Phones (user decision 2026-10-01): bottom tabs Home, Search, New post, Notifications, Profile; the top-bar avatar opens a bottom sheet with Bookmarks, Settings, Moderation.
+  - Rail items: Home `/home`, Search, Notifications, Profile `/u/<username>`, Bookmarks, **New post** (opens the composer from Part 4), then Moderation (only with `admin_url`; Django Admin in a new tab), Settings and the user card with a menu (Profile, Settings, Log out).
+  - Phones (user decision 2026-10-01): bottom tabs Home, Search, New post, Notifications, Profile; the top-bar avatar opens a bottom sheet with Bookmarks, Settings, Moderation, Log out.
   - **Logged out** (user decision 2026-10-01): only Home and Search, with Log in / Sign up in place of the user card and avatar; the bottom bar is Home, Search, Log in.
+  - **Session states (Part 1):** the server render and the first client render are `loading` (the user isn't known yet). While loading, the user card (or Log in / Sign up), the top-bar avatar and the third bottom tab are same-size `Skeleton`s; the rail keeps its width. Without the `rz_session` hint the shell turns logged-out right after hydration.
+  - **Route guard:** `PROTECTED_PREFIXES` (`/notifications`, `/bookmarks`, `/settings`; `src/lib/auth/route-guard.ts`) show a page skeleton while loading and send anonymous visitors to `/login?next=<path and query>` (`router.replace`). `/home`, `/search` and profiles stay public. Logging out goes to `/login` (never back to the protected page).
+  - **`UnverifiedBanner`** at the top of `<main>` while `user.is_email_verified` is false: a warning `Alert` "Verify your email to post, comment and report. Check your inbox for the link." Part 2 adds Resend.
+  - **Auth pages:** `/login` and `/signup` stay prerendered. A logged-in visitor goes on to `safeNextPath(?next=)` or `/home`; `next` is read from `window.location` (useSearchParams on a static page needs a Suspense boundary). `safeNextPath` (`src/lib/auth/next-path.ts`) keeps only same-origin paths: no backslash or control character, no `//…` after resolving dot segments, and nothing under `/api`, `/login` or `/signup`.
   - Menus and the sheet are native `popover` elements with explicit positioning (a popover is centred by default). `aria-current="page"` comes from `usePathname()` on the item and everything below it (`/u/ada/followers` keeps Profile active).
   - Marketing links go only to pages that exist (user decision 2026-10-01): nav How it works, Log in, Sign up; footer How verification works, Privacy, Terms, "© 2026 Rumor Zero".
   - Titles: the root metadata template is `"%s · Rumor Zero"`. `not-found`, `error` and `global-error` are basic AuthLayout cards with the logo (Part 15 polishes them). `/dev/shell` previews the shell with a sample user in development only.
@@ -815,7 +860,7 @@ Other settings:
 |---|---|
 | SQL injection | ORM only; no string-built SQL |
 | XSS | plain-text rendering; no HTML from users; no tokens in storage |
-| CSRF | Bearer header for the API; refresh/logout checked by Origin + custom header + SameSite=Lax; admin uses Django CSRF |
+| CSRF | Bearer header for the API; **every unsafe `/api/auth/` request** (login, signup, refresh, logout) needs `Origin == FRONTEND_ORIGIN` + `X-Requested-With: rumor-zero` (allauth's views accept `text/plain` JSON), plus SameSite=Lax on the cookies; admin uses Django CSRF (§7) |
 | Brute force | allauth rate limits + DRF throttles on the real client IP (relay header + secret) |
 | Bots / brigading | Turnstile on signup, email verification before writes, new-account report weighting, report throttle |
 | Stolen DB | Argon2id; allauth stores only signed/hashed keys |

@@ -30,6 +30,8 @@ export default defineConfig({
     {
       command: `"${python}" manage.py migrate --noinput && "${python}" manage.py runserver 127.0.0.1:8000 --noreload`,
       cwd: backendDir,
+      // In-memory cache, so every run starts with empty allauth rate-limit counters.
+      env: { REDIS_URL: "" },
       url: `${BACKEND_ORIGIN}/api/health/`,
       reuseExistingServer: !CI,
       timeout: 120_000,

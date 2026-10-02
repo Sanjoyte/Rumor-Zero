@@ -1,7 +1,8 @@
 # Plan: Part 1, Auth core (sign up, log in, tokens, log out)
 
 - **Status:** APPROVED by the user on 2026-10-02, together with the decisions and deviations
-  below. Not started: no code has been written. The 0C dependency is satisfied.
+  below. **Implemented and validated 2026-10-03** (Claude, Opus 5.5): see task.md Part 1 and
+  HANDOFF for the results and the few small additions made while building.
 - **Drafted:** 2026-10-01 by Claude (Opus 5.5), with a separate adversarial review pass whose
   findings are folded in. **Implement with:** Opus 5.5 · high (task.md).
 - **Evidence:** allauth 65.19.5 behaviour was read in the installed source under

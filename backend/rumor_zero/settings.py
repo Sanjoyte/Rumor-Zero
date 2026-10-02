@@ -6,7 +6,15 @@ import environ
 from django.core.exceptions import ImproperlyConfigured
 
 from apps.core import platform_defaults
-from rumor_zero.env_helpers import cache_config, load_env_file, require
+from rumor_zero.env_helpers import (
+    bare_origin,
+    cache_config,
+    check_jwt_signing_key,
+    email_config,
+    int_in_range,
+    load_env_file,
+    require,
+)
 from rumor_zero.sentry import init_sentry
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -33,6 +41,24 @@ INTERNAL_CRON_SECRET = require(env, "INTERNAL_CRON_SECRET")
 # Initial PlatformSettings values, used by the seed migration and the model's get_or_create.
 PLATFORM_SETTINGS_SEED = platform_defaults.read_seed(env)
 
+# ---------- Frontend origin and auth cookies (ARCHITECTURE §7) ----------
+# Email links, the Origin check on /api/auth/ and HEADLESS_FRONTEND_URLS all use it.
+FRONTEND_ORIGIN = bare_origin(
+    "FRONTEND_ORIGIN", require(env, "FRONTEND_ORIGIN"), https_only=not DEBUG
+)
+AUTH_COOKIE_SECURE = env.bool("AUTH_COOKIE_SECURE", default=True)
+if not DEBUG and not AUTH_COOKIE_SECURE:
+    raise ImproperlyConfigured("AUTH_COOKIE_SECURE must be True when DJANGO_DEBUG is False")
+
+JWT_SIGNING_KEY = require(env, "JWT_SIGNING_KEY")
+check_jwt_signing_key(JWT_SIGNING_KEY, SECRET_KEY)
+JWT_ACCESS_TOKEN_MINUTES = int_in_range(env, "JWT_ACCESS_TOKEN_MINUTES", 15, 1, 60)
+JWT_REFRESH_TOKEN_DAYS = int_in_range(env, "JWT_REFRESH_TOKEN_DAYS", 14, 1, 90)
+# The rz_refresh cookie's Max-Age and the token session's lifetime.
+REFRESH_TOKEN_SECONDS = JWT_REFRESH_TOKEN_DAYS * 86400
+
+TURNSTILE_SECRET_KEY = require(env, "TURNSTILE_SECRET_KEY")
+
 # ---------- Apps and middleware ----------
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -43,6 +69,10 @@ INSTALLED_APPS = [
     "whitenoise.runserver_nostatic",
     "django.contrib.staticfiles",
     "rest_framework",
+    "allauth",
+    "allauth.account",
+    "allauth.headless",
+    "anymail",
     "apps.core",
     "apps.accounts",
 ]
@@ -58,9 +88,16 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
+    # CSRF guard, endpoint allow-list, Turnstile and the refresh cookie for /api/auth/ only.
+    "apps.accounts.middleware.AuthApiMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# allauth's backend alone: it also serves the Django Admin login (by email). Adding ModelBackend
+# would hash a wrong password twice (Argon2 uses 100 MiB per hash).
+AUTHENTICATION_BACKENDS = ["allauth.account.auth_backends.AuthenticationBackend"]
 
 ROOT_URLCONF = "rumor_zero.urls"
 WSGI_APPLICATION = "rumor_zero.wsgi.application"
@@ -120,8 +157,8 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "TEST_REQUEST_DEFAULT_FORMAT": "json",
-    # Part 1 adds the allauth JWT authentication class.
-    "DEFAULT_AUTHENTICATION_CLASSES": [],
+    # Bearer access tokens from allauth's JWT strategy; a deleted or inactive user gets 401.
+    "DEFAULT_AUTHENTICATION_CLASSES": ["apps.accounts.authentication.JWTAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticatedOrReadOnly"],
     "EXCEPTION_HANDLER": "apps.core.exceptions.api_exception_handler",
     "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.CursorPagination",
@@ -142,6 +179,55 @@ REST_FRAMEWORK = {
         "username_check": "30/min",
     },
 }
+
+# ---------- Authentication: django-allauth headless, JWT strategy (ARCHITECTURE §7) ----------
+ACCOUNT_ADAPTER = "apps.accounts.adapter.AccountAdapter"
+ACCOUNT_LOGIN_METHODS = {"email"}
+ACCOUNT_SIGNUP_FIELDS = ["email*", "username*", "password1*"]
+ACCOUNT_EMAIL_VERIFICATION = "optional"
+ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS = 1
+ACCOUNT_LOGIN_ON_PASSWORD_RESET = True
+ACCOUNT_PRESERVE_USERNAME_CASING = False
+ACCOUNT_EMAIL_SUBJECT_PREFIX = "[Rumor Zero] "
+# allauth's defaults, pinned because ARCHITECTURE §3 documents them. Keyed on REMOTE_ADDR, which
+# ClientIPMiddleware sets; login_failed's "key" is the email, so it is also per account.
+ACCOUNT_RATE_LIMITS = {
+    "login": "30/m/ip",
+    "login_failed": "10/m/ip,5/300s/key",
+    "signup": "20/m/ip",
+}
+ALLAUTH_TRUSTED_PROXY_COUNT = 0
+
+HEADLESS_ONLY = True
+HEADLESS_CLIENTS = ("app",)
+HEADLESS_TOKEN_STRATEGY = "apps.accounts.tokens.RumorZeroJWTTokenStrategy"
+HEADLESS_JWT_ALGORITHM = "HS256"
+HEADLESS_JWT_PRIVATE_KEY = JWT_SIGNING_KEY
+HEADLESS_JWT_ACCESS_TOKEN_EXPIRES_IN = JWT_ACCESS_TOKEN_MINUTES * 60
+HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = REFRESH_TOKEN_SECONDS
+HEADLESS_JWT_ROTATE_REFRESH_TOKEN = True
+# Access tokens are checked by signature and expiry only, so they outlive a logout by ≤ 15 min.
+HEADLESS_JWT_STATEFUL_VALIDATION_ENABLED = False
+# Headless-only mode refuses to send the verification email without these (Part 2 adds the pages).
+HEADLESS_FRONTEND_URLS = {
+    "account_confirm_email": f"{FRONTEND_ORIGIN}/verify-email/{{key}}",
+    "account_reset_password_from_key": f"{FRONTEND_ORIGIN}/reset-password/{{key}}",
+    "account_reset_password": f"{FRONTEND_ORIGIN}/forgot-password",
+    "account_signup": f"{FRONTEND_ORIGIN}/signup",
+}
+# The database session engine (Django's default) stays: refresh locks the session row, and logout
+# deletes it.
+SESSION_ENGINE = "django.contrib.sessions.backends.db"
+
+# ---------- Email (console | brevo | file) ----------
+EMAIL_PROVIDER = env.str("EMAIL_PROVIDER", default="console").strip()
+if not DEBUG and EMAIL_PROVIDER != "brevo":
+    # console and file would put verification links in the logs or on disk.
+    raise ImproperlyConfigured("EMAIL_PROVIDER must be brevo when DJANGO_DEBUG is False")
+DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", default="Rumor Zero <no-reply@example.com>")
+EMAIL_BACKEND, EMAIL_FILE_PATH, ANYMAIL = email_config(
+    EMAIL_PROVIDER, base_dir=BASE_DIR, brevo_api_key=env.str("BREVO_API_KEY", default="")
+)
 
 # ---------- Production security (HTTPS is terminated by Render's proxy) ----------
 # Render's health check uses plain HTTP, so the shallow endpoint is exempt from the redirect.

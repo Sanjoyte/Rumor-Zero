@@ -845,5 +845,371 @@ This is the one check the agent could not run, because only you push.
 
 ---
 
+## Part 1: Auth core (sign up, log in, tokens, log out)
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
+`frontend\.env.local`. Both keep Cloudflare's Turnstile **test** keys (ENV_GUIDE §1.5). Two things
+to know first:
+
+- Sign-up calls Cloudflare even with the test keys (the widget in the browser, siteverify from
+  Django), so it needs internet.
+- Open the site as **http://localhost:3000**. Every `/api/auth/` request must carry exactly the
+  `Origin` in `FRONTEND_ORIGIN` (`http://localhost:3000`); `http://127.0.0.1:3000` gets 403
+  `csrf_failed`.
+
+### 1. Terminal: migrate and check the settings
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate
+python manage.py check                # System check identified no issues (0 silenced).
+(Select-String -Path .\.env -Pattern '^JWT_SIGNING_KEY=(.*)$').Matches.Groups[1].Value.Trim().Length
+python manage.py shell -c "from apps.accounts.models import User; print([(u.is_email_verified, list(u.emailaddress_set.values_list('verified', 'primary'))) for u in User.objects.filter(is_superuser=True)])"
+```
+
+- `migrate`, the first time after Part 1: `Applying account.0001_initial... OK` through
+  `Applying account.0009_emailaddress_unique_primary_email... OK`, then
+  `Applying accounts.0002_verify_superuser_emails... OK`. Later runs: `No migrations to apply.`
+- The length line prints only a number (`67` here). Under 32, Django refuses to start with
+  `JWT_SIGNING_KEY must be at least 32 characters`; make a new key with ENV_GUIDE §1.2. Only the
+  length is shown, never the key.
+- The last command prints `9 objects imported automatically`, then `[(True, [(True, True)])]`: your
+  superuser from 0A now counts as verified and has a verified, primary email address (the backfill
+  migration).
+
+### 2. Terminal: automated backend checks
+
+Same window.
+
+```powershell
+python -m pytest                                    # 440 passed
+python -m pytest apps/accounts                      # 327 passed (the auth tests)
+ruff check . ; ruff format --check .                # All checks passed! / 66 files already formatted
+python manage.py makemigrations --check --dry-run   # No changes detected
+python -m pytest apps/accounts/tests/test_permissions.py -v   # 4 passed
+```
+
+- Four of the auth tests run refreshes and logouts in two threads at once. One of them is a control
+  run: allauth's stock token strategy loses a tab's token, ours doesn't.
+- Verified-only endpoints arrive with posts in Part 4, so the last command checks the permission on
+  a test-only view: unverified → 403 `email_unverified`, verified → 201, anonymous → 401.
+
+### 3. Terminal: sign up against Django
+
+Window 1: `python manage.py runserver` (in `backend\`, venv active). Leave it running.
+
+Window 2 (no venv needed):
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\backend
+$id = Get-Date -Format "HHmmss"
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'
+@"
+{"email": "part1-$id@example.test", "username": "part1_$id", "password": "correct-horse-battery-42", "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-signup.json
+$out = curl.exe -s -i -c $env:TEMP\rz-jar.txt @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-signup.json" http://localhost:8000/api/auth/app/v1/auth/signup
+$out | Select-String '^HTTP|^Set-Cookie|^Cache-Control' | ForEach-Object { $_.Line -replace 'rz_refresh=[^;]+', 'rz_refresh=<token>' }
+$body = $out[-1] | ConvertFrom-Json
+$access = $body.meta.access_token
+"user: $($body.data.user.username); meta fields: $(($body.meta.PSObject.Properties.Name) -join ', '); access token: $($access.Length) characters"
+curl.exe -s -H "Authorization: Bearer $access" http://localhost:8000/api/v1/me/
+```
+
+```text
+HTTP/1.1 200 OK
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+Set-Cookie:  rz_refresh=<token>; expires=…; HttpOnly; Max-Age=1209600; Path=/api/auth/; SameSite=Lax
+Set-Cookie:  rz_session=1; expires=…; Max-Age=1209600; Path=/; SameSite=Lax
+user: part1_014515; meta fields: is_authenticated, access_token; access token: 373 characters
+{"id":"…","username":"part1_014515","display_name":"","email":"part1-014515@example.test","is_email_verified":false,"role":"user","has_usable_password":true,"google_connected":false,"avatar_url":null}
+```
+
+- The number in the name is the time you ran it. PowerShell 5.1 strips the quotes from JSON typed
+  on the curl line, so the body goes through a file.
+- `meta` has only `is_authenticated` and `access_token`: no `refresh_token` and no
+  `session_token`. The refresh token lives only in the HttpOnly cookie (no `Domain`,
+  `Path=/api/auth/`). `Secure` is missing because `AUTH_COOKIE_SECURE=False` locally.
+- `rz_session=1` is the readable hint that tells the frontend there is a session to restore.
+- The `-replace` hides the cookie value. The access token stays in `$access` and is never printed.
+- `XXXX.DUMMY.TOKEN.XXXX` is the token Cloudflare's test widget produces. Django checked it with
+  siteverify, using the test secret.
+
+Window 1 now shows the verification email:
+
+```text
+Subject: [Rumor Zero] Please Confirm Your Email Address
+From: Rumor Zero <no-reply@example.com>
+To: part1-014515@example.test
+...
+To confirm this is correct, go to http://localhost:3000/verify-email/<key>
+```
+
+- The link points at the frontend (the page itself arrives in Part 2).
+- The text still says "Hello from localhost:8000!": allauth's default wording, which Part 2's
+  branded templates replace.
+
+Still in window 2, the live username check:
+
+```powershell
+foreach ($u in 'Ada_Lovelace', 'ADMIN', 'ab', "part1_$id") { curl.exe -s "http://localhost:8000/api/v1/auth/username-available/?u=$u"; "" }
+```
+
+```text
+{"username":"ada_lovelace","available":true,"reason":null,"message":"Available"}
+{"username":"admin","available":false,"reason":"reserved","message":"This username is reserved."}
+{"username":"ab","available":false,"reason":"invalid","message":"Usernames are 3–30 characters: lowercase letters, numbers and underscores only."}
+{"username":"part1_014515","available":false,"reason":"taken","message":"That username is taken."}
+```
+
+- An older console may show the dash in `3–30` as other characters; that is only the console's
+  code page.
+
+### 4. Terminal: refresh, rotation, the CSRF guard and log out
+
+Same window 2 (it still has `$h`, `$access` and the cookie jar).
+
+```powershell
+$refresh = 'http://localhost:8000/api/auth/app/v1/tokens/refresh'
+function Get-RefreshCookie { ((Get-Content $env:TEMP\rz-jar.txt) -match 'rz_refresh' -split "`t")[-1] }
+$first = Get-RefreshCookie
+curl.exe -s -b $env:TEMP\rz-jar.txt -c $env:TEMP\rz-jar.txt @h -X POST $refresh | ForEach-Object { $_ -replace '"access_token": "[^"]+"', '"access_token": "<token>"' }
+""
+"cookie rotated: $($first -ne (Get-RefreshCookie))"
+curl.exe -s -o NUL -w "old cookie at once: %{http_code}`n" @h -X POST -b "rz_refresh=$first" $refresh
+Start-Sleep -Seconds 61
+curl.exe -s -w " %{http_code}`n" @h -X POST -b "rz_refresh=$first" $refresh
+curl.exe -s -o NUL -w "current cookie: %{http_code}`n" -b $env:TEMP\rz-jar.txt -c $env:TEMP\rz-jar.txt @h -X POST $refresh
+```
+
+```text
+{"status": 200, "data": {"access_token": "<token>"}}
+
+cookie rotated: True
+old cookie at once: 200
+{"status": 400} 400
+current cookie: 200
+```
+
+- Every refresh replaces the cookie. The old one keeps working for 60 seconds, so two tabs
+  refreshing together, or a reply lost on a bad connection, never log you out. After that minute it
+  is dead (400).
+- The command waits 61 seconds on purpose.
+
+Without the `Origin` or the `X-Requested-With` header:
+
+```powershell
+curl.exe -s -w " %{http_code}`n" -b $env:TEMP\rz-jar.txt -H "X-Requested-With: rumor-zero" -X POST $refresh
+curl.exe -s -w " %{http_code}`n" -b $env:TEMP\rz-jar.txt -H "Origin: http://localhost:3000" -X POST $refresh
+curl.exe -s -w " %{http_code}`n" -b $env:TEMP\rz-jar.txt -H "Origin: http://localhost:3000" -X POST http://localhost:8000/api/auth/logout/
+```
+
+- All three print
+  `{"status": 403, "errors": [{"code": "csrf_failed", "message": "Reload the page and try again."}]} 403`.
+- Login and signup are guarded the same way.
+
+Log out:
+
+```powershell
+$last = Get-RefreshCookie
+curl.exe -s -i -b $env:TEMP\rz-jar.txt -c $env:TEMP\rz-jar.txt @h -X POST http://localhost:8000/api/auth/logout/ | Select-String '^HTTP|^Set-Cookie'
+curl.exe -s -w " %{http_code}`n" @h -X POST -b "rz_refresh=$last" $refresh
+curl.exe -s -w " %{http_code}`n" @h -X POST $refresh
+curl.exe -s -o NUL -w "logout again: %{http_code}`n" @h -X POST http://localhost:8000/api/auth/logout/
+curl.exe -s -o NUL -w "access token after logout: %{http_code}`n" -H "Authorization: Bearer $access" http://localhost:8000/api/v1/me/
+curl.exe -s -w " %{http_code}`n" @h -X POST http://localhost:8000/api/auth/app/v1/auth/session
+```
+
+```text
+HTTP/1.1 204 No Content
+Set-Cookie:  rz_refresh=""; expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; Max-Age=0; Path=/api/auth/; SameSite=Lax
+Set-Cookie:  rz_session=""; expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/; SameSite=Lax
+{"status": 400} 400
+{"status": 401} 401
+logout again: 204
+access token after logout: 200
+{"status": 404, "errors": [{"code": "not_found", "message": "Not found."}]} 404
+```
+
+- Logout deletes both cookies and ends the session, so the last refresh cookie now fails (400).
+  Without any cookie it is a 401. Logging out twice is fine.
+- The access token keeps working until it expires (at most 15 minutes after step 3; after that the
+  line says 401). That's by design: access tokens are checked by signature and expiry only, and
+  the browser forgets its copy at once.
+- Only login, signup, refresh and logout exist under `/api/auth/`. allauth's other endpoints, like
+  `auth/session` here, answer 404.
+
+### 5. Terminal: failed logins are limited per real client IP, through the relay
+
+Window 3: `npm run dev` (in `frontend\`). Back in window 2:
+
+```powershell
+1..11 | ForEach-Object {
+  "{""email"": ""nobody$_@example.test"", ""password"": ""wrong-password""}" | Set-Content -Encoding ascii $env:TEMP\rz-login.json
+  $r = curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-login.json" http://localhost:3000/api/auth/app/v1/auth/login | ConvertFrom-Json
+  "{0,2}  {1}  {2}" -f $_, $r.status, $r.errors[0].code
+}
+curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-login.json" http://127.0.0.1:8000/api/auth/app/v1/auth/login; ""
+```
+
+```text
+ 1  400  email_password_mismatch
+ 2  400  email_password_mismatch
+ 3  400  email_password_mismatch
+ 4  400  email_password_mismatch
+ 5  400  email_password_mismatch
+ 6  400  email_password_mismatch
+ 7  400  email_password_mismatch
+ 8  400  email_password_mismatch
+ 9  400  email_password_mismatch
+10  400  email_password_mismatch
+11  400  too_many_login_attempts
+{"status": 400, "errors": [{"message": "The email address and/or password you specified are not correct.", "code": "email_password_mismatch", "param": "password"}]}
+```
+
+- The first eleven go through the relay on port 3000. Each uses another email, so only the
+  per-address limit (10 failures a minute) is hit; the per-account limit is 5 failures in 5 minutes.
+- The relay passed your real address (`::1`) to Django with the shared secret. The last request goes
+  straight to Django from `127.0.0.1`, a different address, so it isn't blocked.
+- Within that minute, logging in at http://localhost:3000/login, even with a right password, shows
+  the red banner "Too many attempts. Try again in a few minutes."
+
+### 6. Browser: sign up, stay logged in, log out
+
+Window 3's `npm run dev` and window 1's `runserver` are running. Wait a minute after step 5.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/signup | The a2 card: the logo, "Create your account", Email address, Username, Password with a bar labelled "Password strength", the Cloudflare widget, a blue "Create account", the Terms/Privacy note and "Already have an account? Log in". No Google button yet (Part 3). |
+| Look at the widget | It says "Success!" after a second or two, with a red "For testing only…" line: that is the test key. "Create account" is pale (disabled) until then. |
+| Type a username, e.g. `Ada_Lovelace` | After a short pause, a teal "Available: @ada_lovelace" and a check mark in the field. `admin` says "This username is reserved."; `ab` shows the format rule at once. |
+| Fill a new email, a username and `correct-horse-battery-42`, then click **Create account** | The button spins briefly, then /home: the shell with your @username in the rail and an amber banner "Verify your email to post, comment and report. Check your inbox for the link." The email appears in window 1. |
+| F12 → Application → Cookies → http://localhost:3000 | `rz_refresh` (HttpOnly ✓, SameSite Lax, Path `/api/auth/`) and `rz_session` = `1` (Path `/`, not HttpOnly). Local storage and Session storage are empty. |
+| F12 → Console: `document.cookie` | `'rz_session=1'`. Scripts can't see the refresh token. |
+| Reload (F5) | Still logged in. The account area at the bottom of the rail shows grey placeholders for a moment while the session is restored. |
+| Open http://localhost:3000/home in a second tab | Logged in there too |
+| First tab: `•••` in the user card | A menu with Profile, Settings and **Log out** |
+| Click **Log out** | You land on /login, both cookies are gone (Application → Cookies), and the second tab switches to the logged-out shell by itself. |
+| Open http://localhost:3000/settings | It redirects to `/login?next=%2Fsettings`. Log in with the same email and password: you are back on /settings. |
+| Phone width (F12 → device toolbar, 390 px): tap the avatar at the top right | The account sheet ends with Log out |
+
+### 7. Browser: the error states
+
+Still on http://localhost:3000.
+
+| Do this | Expect |
+|---|---|
+| /signup with the email from step 6 and a new username | Under Email: "A user is already registered with this email address." |
+| /signup with the username from step 6 | While typing: "That username is taken." |
+| /signup with the password `password123` | After Create account: "This password is too common." under Password. The strength bar says Fair: it is only advice; Django decides. |
+| Any failed sign-up | The widget runs again ("Verifying…"), and Create account waits for its new token: each token works once. |
+| /login with a wrong password | A red banner "That email and password don't match." with an × that closes it |
+
+A failed bot check needs Cloudflare's always-fail **test** secret on the backend. Stop `runserver`
+in window 1 (`Ctrl+C`), then:
+
+```powershell
+$env:TURNSTILE_SECRET_KEY = "2x0000000000000000000000000000000AA"; python manage.py runserver
+```
+
+- Sign up with a new email and username: under the widget, "The bot check didn't pass. Try it
+  again.", and the widget starts over.
+- The `$env:` value lasts only for this window, and `backend\.env` is not changed. Stop the server,
+  **close the window**, and start `python manage.py runserver` normally in a new one (venv active).
+
+### 8. Terminal: automated frontend checks
+
+Stop `npm run dev` first (`Ctrl+C` in window 3), then in `frontend\`:
+
+```powershell
+npm run lint             # no output after the command line
+npm run lint:tokens      # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
+npm run typecheck        # no output after the command line
+npm run format:check     # All matched files use Prettier code style!
+npm test                 # Test Files  59 passed (59) / Tests  562 passed (562)
+npm run build
+```
+
+The build's route list still has these lines:
+
+```text
+├ ƒ /api/[...path]
+├ ○ /login
+├ ○ /signup
+```
+
+- The auth pages stay prerendered (`○`); the relay runs per request (`ƒ`).
+
+### 9. Terminal: the E2E tests, dev mode and CI mode
+
+Stop `runserver` too (`Ctrl+C` in window 1): Playwright then starts its own Django with an
+in-memory cache, so step 5's rate limit can't get in the way.
+
+```powershell
+npm run test:e2e
+```
+
+```text
+Running 11 tests using 6 workers
+
+  ok  6 [chromium] › e2e\smoke.spec.ts:8:5 › the relay forwards /api/health/ to Django (79ms)
+  ...
+  ok  2 [chromium] › e2e\auth.spec.ts:122:5 › two tabs open at token expiry both stay logged in (6.3s)
+  ok  3 [chromium] › e2e\auth.spec.ts:106:5 › two tabs that load at once, then reload together, stay logged in (6.8s)
+  ok  5 [chromium] › e2e\auth.spec.ts:43:5 › sign up, stay logged in across a reload, log out (7.8s)
+
+  11 passed (14.5s)
+```
+
+- The eight 0C smoke tests are unchanged. The three new ones sign up with the test widget, check
+  the cookie flags and that storage is empty, reload, log out, try the dead cookie (400) and a
+  refresh without the header (403), and use `/settings` → `/login?next=` → back.
+- "At token expiry" fast-forwards both tabs' clocks by 14½ minutes, so both refresh at the same
+  moment.
+
+Then the way CI runs it:
+
+```powershell
+npm run build
+$env:CI = "1"
+npm run test:e2e         # 11 passed, this time against `next start`
+Remove-Item Env:CI
+```
+
+### 10. Terminal: repository checks
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+git status --short design                          # prints nothing: design\ is untouched
+Test-Path frontend\AGENTS.md, frontend\CLAUDE.md   # False, then False
+git check-ignore backend/tmp/mail/example.eml      # prints the path: emails written by EMAIL_PROVIDER=file are never committed
+```
+
+### 11. Browser: CI on GitHub (after you push)
+
+| URL | Expect |
+|---|---|
+| Your repository's **Actions** tab on github.com | A "CI" run for your push with three green jobs |
+
+- New in this part: the E2E job signs up with the Turnstile test key, so the GitHub runner must reach
+  `challenges.cloudflare.com` (the browser and Django both call it). If the sign-up tests fail at
+  the widget, the run's "playwright-report" artifact shows the page.
+- The agent couldn't run CI: only you push.
+
+### 12. Stop and clean up
+
+- Stop the servers: `Ctrl+C` in each window. If `npm run dev` later says "Another next dev server is
+  already running" with a PID, end it with `taskkill /PID <that PID> /T /F`.
+- Delete the helper files: `Remove-Item $env:TEMP\rz-signup.json, $env:TEMP\rz-jar.txt, $env:TEMP\rz-login.json`.
+- The test accounts stay in your local database: `part1_…` from step 3, the E2E's `e2e_…`,
+  `tabs_…` and `expiry_…`, and the agent's own checks (`manual_check`, `visual_…`, `tf_…`,
+  `phone_…`). Delete them in Django Admin → Users if you like.
+  `docker compose down -v` (repo root) wipes the whole local database, which is destructive.
+- Stop the containers and keep the data: `docker compose down` (repo root).
+
+---
+
 <!-- Add the next part below in the same shape: "## Part <ID>: <title>", then numbered steps,
      each saying Terminal or Browser, each with the exact command and the expected result. -->

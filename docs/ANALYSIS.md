@@ -359,10 +359,11 @@ The original default was "drop all". Since 2026-09-29 the seven features you nam
     
     Fallback if you want the guide's literal libraries: simplejwt + custom DRF views + `google-auth`.
 18. **CSRF claim (§12):** "Django's CSRF protection still covers the refresh-token cookie endpoint." That's not automatic: DRF/allauth API views are CSRF-exempt.
-    → Explicit protection on the two cookie-reading endpoints (refresh, logout):
+    → Explicit protection, **widened in Part 1 to every unsafe request under `/api/auth/`** (login and signup too, not only the cookie-reading refresh and logout): allauth's app views parse any body as JSON whatever its Content-Type, so a cross-site `<form enctype="text/plain">` could post valid JSON to login (login CSRF).
     - `SameSite=Lax` + `Path=/api/auth/`;
     - `Origin` must equal `FRONTEND_ORIGIN`;
     - a required custom header `X-Requested-With: rumor-zero`, which a cross-site form cannot send.
+    - Django's own CSRF check can't be used: through the relay `Host` is the backend and `Origin` the frontend. Details: ARCHITECTURE §7.
 19. **Rate limiter (§4.5):** `django-ratelimit` is effectively unmaintained (last release 2023).
     → allauth's built-in `ACCOUNT_RATE_LIMITS` for auth endpoints. DRF scoped throttles, backed by the Redis cache, for posting, comments, likes, follows, reports and appeals.
     
@@ -465,10 +466,11 @@ Moderators ──► https://rumor-zero-api.onrender.com/<ADMIN_URL_PATH>   (Dja
   
   Why not `rewrites()`: they do work on OpenNext, but they drop `cf-connecting-ip` and give no header control. Worse, when a Worker calls another Cloudflare-fronted host (Render is behind Cloudflare), `CF-Connecting-IP` arrives as the **Worker's** IP. Without our own client-IP header, every user would look like one IP to the rate limiter. Waiting on `fetch()` doesn't count toward the 10 ms CPU limit, so the relay is cheap.
 - **Cookie:**
-  - The API sets `rz_refresh` with **no `Domain` attribute** and `HttpOnly; Secure; SameSite=Lax; Path=/api/auth/; Max-Age=14d`.
+  - The API sets `rz_refresh` with **no `Domain` attribute** and `HttpOnly; Secure; SameSite=Lax; Path=/api/auth/; Max-Age=1209600` (14 days, in seconds), plus a readable hint `rz_session=1` (`Path=/`, set and cleared with it; Part 1).
+  - allauth puts the refresh token (and the raw session key) in its JSON bodies; the cookie middleware strips both and moves the refresh token into the cookie (ARCHITECTURE §7).
   - The browser received it from the frontend origin, so it is stored as a **first-party cookie of the frontend host** and sent only to `/api/auth/*` on that host.
   - Locally, `AUTH_COOKIE_SECURE=False` (plain http://localhost).
-- **Access token:** kept in React state / memory only (guide §4.6) and sent as `Authorization: Bearer …`. After a page reload, the app calls `POST /api/auth/…/refresh` once to get a new one.
+- **Access token:** kept in memory only (guide §4.6) and sent as `Authorization: Bearer …`. After a page reload the app calls `POST /api/auth/app/v1/tokens/refresh` once, but only when the `rz_session` hint cookie is present, so anonymous visitors cost no request (Part 1).
 - **CSRF:** described in c-18. No CORS configuration is needed at all: the browser only ever talks to one origin. `django-cors-headers` is dropped.
 - **SSR (see c-35 for the CPU limit):**
   - Static pages are prerendered.

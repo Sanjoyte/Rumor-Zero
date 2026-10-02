@@ -10,7 +10,12 @@ import {
   type ShellUser,
 } from "./nav-items";
 
-const user: ShellUser = { username: "ada", display_name: "Ada", avatar_url: null };
+const user: ShellUser = {
+  username: "ada",
+  display_name: "Ada",
+  avatar_url: null,
+  is_email_verified: true,
+};
 const staff: ShellUser = { ...user, admin_url: "https://api.example.test/secret-admin/" };
 const labels = (items: { label: string }[]) => items.map((item) => item.label);
 

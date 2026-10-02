@@ -2,10 +2,12 @@ import Form from "next/form";
 import Link from "next/link";
 import { Avatar } from "@/components/ui/Avatar";
 import { Icon } from "@/components/ui/Icon";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { LOG_IN, nameOf, profileItem, SEARCH, type ShellUser } from "./nav-items";
 
 export interface TopBarProps {
   user: ShellUser | null;
+  loading?: boolean;
 }
 
 /**
@@ -13,7 +15,7 @@ export interface TopBarProps {
  * the account avatar (or Log in). Stitch's "Verification Ledger" pill is not built (ANALYSIS b-3).
  * The search box keeps b1's compact classes rather than the 44px TextField.
  */
-export function TopBar({ user }: TopBarProps) {
+export function TopBar({ user, loading }: TopBarProps) {
   return (
     <header className="fixed top-0 right-0 left-16 z-40 hidden h-16 items-center justify-between gap-space-lg border-b border-outline-variant/30 bg-surface-container-lowest px-space-lg md:flex xl:left-64">
       <Form action={SEARCH.href} role="search" className="relative max-w-xl flex-1">
@@ -34,7 +36,9 @@ export function TopBar({ user }: TopBarProps) {
         />
       </Form>
       <div className="flex items-center gap-space-md">
-        {user ? (
+        {loading ? (
+          <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
+        ) : user ? (
           <Link
             href={profileItem(user).href}
             aria-label="Your profile"

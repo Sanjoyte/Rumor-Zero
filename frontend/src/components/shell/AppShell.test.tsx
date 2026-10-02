@@ -10,10 +10,20 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
 }));
 
-const user: ShellUser = { username: "ada", display_name: "Ada Lovelace", avatar_url: null };
+const user: ShellUser = {
+  username: "ada",
+  display_name: "Ada Lovelace",
+  avatar_url: null,
+  is_email_verified: true,
+};
 const staff: ShellUser = { ...user, admin_url: "https://api.example.test/secret-admin/" };
 
-function renderShell(props: { user: ShellUser | null; onNewPost?: () => void }) {
+function renderShell(props: {
+  user: ShellUser | null;
+  status?: "loading" | "anonymous" | "authenticated";
+  onNewPost?: () => void;
+  onLogout?: () => void;
+}) {
   render(
     <AppShell {...props}>
       <p>Page content</p>
@@ -85,15 +95,18 @@ describe("AppShell, logged in", () => {
     expect(onNewPost).toHaveBeenCalledTimes(2);
   });
 
-  it("shows the user card with a menu of Profile and Settings", () => {
-    const { sidebar } = renderShell({ user });
+  it("shows the user card with a menu of Profile, Settings and Log out", async () => {
+    const onLogout = vi.fn();
+    const { sidebar } = renderShell({ user, onLogout });
     expect(within(sidebar).getByText("Ada Lovelace")).toBeInTheDocument();
     expect(within(sidebar).getByText("@ada")).toBeInTheDocument();
     const trigger = within(sidebar).getByRole("button", { name: "User menu" });
     const menu = document.getElementById(trigger.getAttribute("popovertarget") ?? "");
     expect(menu).toHaveAttribute("popover", "auto");
-    const items = within(menu as HTMLElement).getAllByRole("link", { hidden: true });
-    expect(items.map(textOf)).toEqual(["Profile", "Settings"]);
+    const entries = within(menu as HTMLElement).getAllByRole("listitem", { hidden: true });
+    expect(entries.map(textOf)).toEqual(["Profile", "Settings", "Log out"]);
+    await userEvent.click(within(menu as HTMLElement).getByRole("button", { hidden: true }));
+    expect(onLogout).toHaveBeenCalledTimes(1);
   });
 
   it("shows Moderation only to staff, opening Django Admin in a new tab", () => {
@@ -107,19 +120,62 @@ describe("AppShell, logged in", () => {
     expect(moderation).toHaveAttribute("rel", "noopener noreferrer");
   });
 
-  it("has five bottom tabs and an account sheet with the rest", () => {
-    const { bottomNav } = renderShell({ user: staff });
+  it("has five bottom tabs and an account sheet with the rest, then Log out", async () => {
+    const onLogout = vi.fn();
+    const { bottomNav } = renderShell({ user: staff, onLogout });
     const tabs = Array.from(bottomNav.children).map(textOf);
     expect(tabs).toEqual(["Home", "Search", "New post", "Notifications", "Profile"]);
     const trigger = screen.getByRole("button", { name: "Account menu" });
     const sheet = document.getElementById(trigger.getAttribute("popovertarget") ?? "");
-    const items = within(sheet as HTMLElement).getAllByRole("link", { hidden: true });
-    expect(items.map(textOf)).toEqual(["Bookmarks", "Settings", "Moderation (opens in a new tab)"]);
+    const entries = within(sheet as HTMLElement).getAllByRole("listitem", { hidden: true });
+    expect(entries.map(textOf)).toEqual([
+      "Bookmarks",
+      "Settings",
+      "Moderation (opens in a new tab)",
+      "Log out",
+    ]);
+    await userEvent.click(
+      within(sheet as HTMLElement).getByRole("button", { name: "Log out", hidden: true }),
+    );
+    expect(onLogout).toHaveBeenCalledTimes(1);
+  });
+
+  it("has no Log out entry without a handler", () => {
+    renderShell({ user });
+    expect(screen.queryByRole("button", { name: "Log out", hidden: true })).toBeNull();
+  });
+
+  it("shows the unverified banner only to unverified users", () => {
+    renderShell({ user: { ...user, is_email_verified: false } });
+    const main = screen.getByRole("main");
+    expect(within(main).getByText("Verify your email to post, comment and report.")).toBeVisible();
+    expect(within(main).getByText("Check your inbox for the link.")).toBeVisible();
+    document.body.innerHTML = "";
+    renderShell({ user });
+    expect(screen.queryByText(/Verify your email/)).toBeNull();
   });
 
   it("links the top-bar avatar to the profile", () => {
     renderShell({ user });
     expect(screen.getByRole("link", { name: "Your profile" })).toHaveAttribute("href", "/u/ada");
+  });
+});
+
+describe("AppShell, while the session loads", () => {
+  it("shows placeholders instead of the account areas, and no banner", () => {
+    const { sidebar, railNav, bottomNav } = renderShell({
+      user: { ...user, is_email_verified: false },
+      status: "loading",
+    });
+    expect(within(railNav).getAllByRole("link").map(textOf)).toEqual(["Home", "Search"]);
+    expect(within(sidebar).getByTestId("account-loading")).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("link", { name: "Log in" })).toBeNull();
+    expect(within(sidebar).queryByRole("link", { name: "Sign up" })).toBeNull();
+    expect(within(sidebar).queryByText("Ada Lovelace")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Your profile" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /menu/i })).toBeNull();
+    expect(within(bottomNav).getAllByRole("link").map(textOf)).toEqual(["Home", "Search"]);
+    expect(screen.queryByText(/Verify your email/)).toBeNull();
   });
 });
 

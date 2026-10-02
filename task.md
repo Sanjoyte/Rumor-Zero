@@ -85,7 +85,7 @@ not let the review expand the part's scope without user approval.
 | 0B | Frontend foundation & design system | SETUP Part A | [x] Done (2026-10-01) |
 | 0D | Brand assets & Logo component | 0B | [x] Done (2026-10-01) |
 | 0C | App shell, API relay, API client, CI | 0A, 0B, 0D | [x] Done (2026-10-01) |
-| 1 | Auth core: sign up, log in, tokens, log out | 0C | [ ] |
+| 1 | Auth core: sign up, log in, tokens, log out | 0C | [x] Done (2026-10-03) |
 | 2 | Email verification & password reset | 1 | [ ] |
 | 3 | Continue with Google | 1 | [ ] |
 | 4 | Posts: composer + Recent feed | 1 | [ ] |
@@ -416,7 +416,7 @@ All three jobs run on test values only; no secrets.
 ---
 
 ## Part 1: Auth core (sign up, log in, tokens, log out)
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-03)
 **Goal:** email + username + password sign-up with Turnstile; login; a 15-min access token in memory; a 14-day refresh token in an httpOnly cookie; logout; and unverified accounts treated as read-only.
 **Depends on:** 0C.
 **Stitch files to convert:** `a2_sign_up`, `a3_log_in` (plus the app-shell unverified banner). The Google button is visually present but hidden until Part 3.
@@ -451,15 +451,31 @@ All three jobs run on test values only; no secrets.
 **API endpoints:** allauth `…/auth/signup`, `…/auth/login`, `…/tokens/refresh` · `POST /api/auth/logout/` · `GET /api/v1/auth/username-available/` · `GET /api/v1/me/`.
 
 **Acceptance criteria**
-- [ ] Sign-up (test Turnstile key) logs you in; the "Verify your email" banner shows; the verification email appears in the `runserver` console
-- [ ] `refresh_token` never appears in any JSON body, JS-readable cookie, or local/session storage. `rz_refresh` is HttpOnly, SameSite=Lax, `Path=/api/auth/`, has no Domain, and is Secure when `AUTH_COOKIE_SECURE=True`.
-- [ ] A page reload keeps you logged in; logout clears memory and the cookie; the old refresh token then fails
-- [ ] Refresh and logout return 403 without the correct `Origin` or `X-Requested-With`
-- [ ] Stored password hashes start with `argon2$argon2id$`
-- [ ] Duplicate email, taken or invalid username, weak password and a failed Turnstile each show the right field error
-- [ ] Repeated failed logins are rate-limited per real client IP (through the relay)
-- [ ] Unverified users get 403 `email_unverified` on a verified-only endpoint
-- [ ] Two tabs open at token expiry both stay logged in (no rotation race)
+- [x] Sign-up (test Turnstile key) logs you in; the "Verify your email" banner shows; the verification email appears in the `runserver` console
+- [x] `refresh_token` never appears in any JSON body, JS-readable cookie, or local/session storage. `rz_refresh` is HttpOnly, SameSite=Lax, `Path=/api/auth/`, has no Domain, and is Secure when `AUTH_COOKIE_SECURE=True`.
+- [x] A page reload keeps you logged in; logout clears memory and the cookie; the old refresh token then fails
+- [x] Refresh and logout return 403 without the correct `Origin` or `X-Requested-With`
+- [x] Stored password hashes start with `argon2$argon2id$`
+- [x] Duplicate email, taken or invalid username, weak password and a failed Turnstile each show the right field error
+- [x] Repeated failed logins are rate-limited per real client IP (through the relay)
+- [x] Unverified users get 403 `email_unverified` on a verified-only endpoint (a test-only view until Part 4 adds real ones)
+- [x] Two tabs open at token expiry both stay logged in (no rotation race)
+
+**Deviations and decisions (plan approved 2026-10-02; built 2026-10-03; all recorded in ARCHITECTURE §2/§3/§7/§9/§10/§12 and ANALYSIS c-18/d):**
+- **User decisions:** superusers count as verified (`createsuperuser` + backfill migration `accounts.0002_verify_superuser_emails`); Turnstile fails closed ("We couldn't run the bot check. Try again in a minute."); a readable hint cookie `rz_session=1` lets anonymous page loads skip the refresh call.
+- **`AuthApiMiddleware`** (`apps/accounts/middleware.py`) instead of a cookie adapter alone. Every request under `/api/auth/` passes through it:
+  - only `auth/login`, `auth/signup` and `tokens/refresh` (POST) and our logout answer; everything else is 404;
+  - **every** unsafe request needs `Origin == FRONTEND_ORIGIN` + `X-Requested-With: rumor-zero` (allauth parses `text/plain` bodies as JSON, so login and signup needed it too);
+  - `meta.refresh_token`, `meta.session_token` (the raw session key) and `data.refresh_token` are stripped, and every body becomes JSON (the DEBUG 500 page printed cookies);
+  - login, signup and refresh ignore `Authorization`/`X-Session-Token`, so the "409 when already authenticated" case can't happen. Its test became "a Bearer token on signup is ignored".
+- **Turnstile is checked before allauth runs**, so a bot never learns "email taken". stdlib `urllib`, no new dependency. Failed checks count against the signup limit; a full limit answers 429 without calling Cloudflare.
+- **Race-safe refresh** (`apps/accounts/tokens.py`): the session row is locked, and a rotated token keeps working for 60 s. A concurrency test with allauth's own strategy shows one tab losing its token without it.
+- **Settings:** `HEADLESS_FRONTEND_URLS` moved here from Part 2 (headless-only mode refuses to send the verification email without them); `ACCOUNT_EMAIL_SUBJECT_PREFIX = "[Rumor Zero] "`; allauth's rate limits pinned; only allauth's auth backend; our `JWTAuthentication` (deleted/inactive user → 401, not 500). Startup guards: `JWT_SIGNING_KEY` ≥ 32 characters and ≠ `DJANGO_SECRET_KEY`; `FRONTEND_ORIGIN` a bare origin, https with `DEBUG` off; with `DEBUG` off, `AUTH_COOKIE_SECURE=True` and `EMAIL_PROVIDER=brevo`. `backend/.env.example`'s JWT placeholder grew from 30 to 40 characters. No new variable.
+- **Frontend:** `RequestOptions.token: false` also skips the 401 refresh hook (the session's own `/me` call passes its token explicitly, so it can't deadlock on a refresh). The session logic is framework-free (`src/lib/auth/session.ts`); `AuthProvider` binds it. Login and logout are broadcast on `BroadcastChannel("rz-auth")`. The username check shows nothing while debouncing.
+- **Copy:** a2 and a3 headings and subtitles kept; a2's "Protected by Turnstile" callout is the real widget; "Complexity metric" is "Password strength" (0B); the jargon footers, a3's attempt counter, "Remember me" and rate-limit notice are dropped (ANALYSIS b-2, b-5). "Forgot password?" waits for Part 2, the Google button for Part 3.
+- **`Avatar` initials skip a leading "@"** (a one-line 0B fix): every new account has a blank display name, so the shell showed "@V".
+- **Known until Part 2:** allauth's default verification email text names the backend host ("Hello from localhost:8000!"); its only link already points at `FRONTEND_ORIGIN`. Part 2 replaces the templates.
+- **Verified locally:** curl against `runserver` (signup cookies, console email, rotation + 60 s grace, 403 without `Origin`/header, logout), 11 failed logins through the relay (the 11th gets `too_many_login_attempts`, a direct call from another address doesn't), Playwright and headless-Chromium screenshots next to Stitch a2/a3 at 1280 and 390 px (0 px overflow), the always-fail Turnstile secret, and the E2E suite in dev and CI mode. CI itself runs when you push: its E2E job needs `challenges.cloudflare.com` from the runner (browser and Django).
 
 **Required tests**
 - Backend: signup, login, refresh and logout API; cookie attributes; the CSRF checks; username availability (case, reserved words, format); Turnstile verification mocked (pass/fail/missing); Argon2; rate limiting; `/me` fields including staff-only `admin_url`; `IsEmailVerified`.

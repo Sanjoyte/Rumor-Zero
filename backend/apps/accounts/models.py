@@ -50,11 +50,19 @@ class UserManager(BaseUserManager):
         return user
 
     def create_superuser(self, email, username, password=None, **extra_fields):
+        from allauth.account.models import EmailAddress
+
         # role stays "user": the superuser keeps admin access through is_superuser.
         extra_fields.setdefault("is_superuser", True)
         if extra_fields["is_superuser"] is not True:
             raise ValueError("Superuser must have is_superuser=True.")
-        return self.create_user(email, username, password, **extra_fields)
+        # Created from your own PC, so the address counts as verified (user decision 2026-10-01).
+        extra_fields.setdefault("is_email_verified", True)
+        user = self.create_user(email, username, password, **extra_fields)
+        EmailAddress.objects.create(
+            user=user, email=user.email, verified=user.is_email_verified, primary=True
+        )
+        return user
 
     def get_by_natural_key(self, email):
         return self.get(**{self.model.USERNAME_FIELD: normalize_email(email)})

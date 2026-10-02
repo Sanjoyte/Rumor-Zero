@@ -1,17 +1,23 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
+import type { MenuAction } from "./AccountMenu";
 import { MobileNav } from "./MobileNav";
-import type { ShellUser } from "./nav-items";
+import { LOG_OUT, type ShellUser } from "./nav-items";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
+import { UnverifiedBanner } from "./UnverifiedBanner";
 
 export interface AppShellProps {
   user: ShellUser | null;
+  /** `loading` while the session is restored: the account areas show placeholders. */
+  status?: "loading" | "anonymous" | "authenticated";
   children: ReactNode;
   /** Opens the composer (Part 4). */
   onNewPost?: () => void;
+  /** Adds Log out to the user menu and the phone account sheet. */
+  onLogout?: () => void;
   /** Overrides the current path for the active item (the `/dev/shell` preview). */
   activePath?: string;
 }
@@ -20,9 +26,22 @@ export interface AppShellProps {
  * The logged-in layout (Stitch b1; ARCHITECTURE §10): the full rail at ≥1280px, an icon dock at
  * 768–1279px, and a top bar plus bottom bar below 768px. Pages pick their own container width.
  */
-export function AppShell({ user, children, onNewPost, activePath }: AppShellProps) {
+export function AppShell({
+  user,
+  status,
+  children,
+  onNewPost,
+  onLogout,
+  activePath,
+}: AppShellProps) {
   const currentPath = usePathname();
   const pathname = activePath ?? currentPath ?? "/";
+  const loading = status === "loading";
+  const shownUser = loading ? null : user;
+  const actions = useMemo<MenuAction[]>(
+    () => (onLogout ? [{ ...LOG_OUT, onSelect: onLogout }] : []),
+    [onLogout],
+  );
 
   return (
     <div className="min-h-screen bg-surface">
@@ -32,10 +51,23 @@ export function AppShell({ user, children, onNewPost, activePath }: AppShellProp
       >
         Skip to content
       </a>
-      <Sidebar user={user} pathname={pathname} onNewPost={onNewPost} />
-      <TopBar user={user} />
-      <MobileNav user={user} pathname={pathname} onNewPost={onNewPost} />
+      <Sidebar
+        user={shownUser}
+        loading={loading}
+        pathname={pathname}
+        onNewPost={onNewPost}
+        actions={actions}
+      />
+      <TopBar user={shownUser} loading={loading} />
+      <MobileNav
+        user={shownUser}
+        loading={loading}
+        pathname={pathname}
+        onNewPost={onNewPost}
+        actions={actions}
+      />
       <main id="main" className="pt-16 pb-16 md:pb-0 md:pl-16 xl:pl-64">
+        {shownUser && !shownUser.is_email_verified && <UnverifiedBanner />}
         {children}
       </main>
     </div>

@@ -5,7 +5,10 @@
 import type { Me } from "@/lib/api/types";
 
 /** The part of `/api/v1/me/` the shell shows. */
-export type ShellUser = Pick<Me, "username" | "display_name" | "avatar_url" | "admin_url">;
+export type ShellUser = Pick<
+  Me,
+  "username" | "display_name" | "avatar_url" | "admin_url" | "is_email_verified"
+>;
 
 export interface NavItem {
   label: string;
@@ -28,6 +31,7 @@ export const SETTINGS: NavItem = { label: "Settings", icon: "settings", href: "/
 export const LOG_IN: NavItem = { label: "Log in", icon: "login", href: "/login" };
 
 export const NEW_POST = { label: "New post", icon: "edit_note" } as const;
+export const LOG_OUT = { label: "Log out", icon: "logout" } as const;
 
 export function profileItem(user: ShellUser): NavItem {
   return { label: "Profile", icon: "person", href: `/u/${user.username}` };
@@ -57,7 +61,7 @@ export function sheetItems(user: ShellUser): NavItem[] {
   return moderation ? [BOOKMARKS, SETTINGS, moderation] : [BOOKMARKS, SETTINGS];
 }
 
-/** The rail's user-card menu. Part 1 adds Log out. */
+/** The rail's user-card menu. Log out follows these links (an action, not a page). */
 export function userMenuItems(user: ShellUser): NavItem[] {
   return [profileItem(user), SETTINGS];
 }

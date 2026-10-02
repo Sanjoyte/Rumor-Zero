@@ -1,11 +1,61 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { AppShell } from "@/components/shell/AppShell";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { isProtectedPath, loginRedirectFor } from "@/lib/auth/route-guard";
 
-/** Every app page sits in the shell. Part 1 adds the route guard for pages that need a user. */
+const LOGOUT_FAILED = "Couldn't log out. Check your connection and try again.";
+
+/**
+ * Every app page sits in the shell. Pages that need a user (`PROTECTED_PREFIXES`) show a
+ * placeholder while the session is restored, and send anonymous visitors to `/login?next=…`.
+ */
 export default function AppLayout({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
-  return <AppShell user={user}>{children}</AppShell>;
+  const { status, user, logout } = useAuth();
+  const pathname = usePathname() ?? "/";
+  const router = useRouter();
+  const toast = useToast();
+  const loggingOut = useRef(false);
+  const guarded = isProtectedPath(pathname);
+
+  useEffect(() => {
+    if (!guarded || status !== "anonymous" || loggingOut.current) return;
+    router.replace(loginRedirectFor(window.location.pathname + window.location.search));
+  }, [guarded, status, router]);
+
+  const onLogout = useCallback(() => {
+    // Logging out on a protected page must go to /login, not /login?next=<that page>.
+    loggingOut.current = true;
+    logout().then(
+      () => router.replace("/login"),
+      () => {
+        loggingOut.current = false;
+        toast.show(LOGOUT_FAILED, { tone: "error" });
+      },
+    );
+  }, [logout, router, toast]);
+
+  return (
+    <AppShell user={user} status={status} onLogout={onLogout}>
+      {guarded && status !== "authenticated" ? <PageSkeleton /> : children}
+    </AppShell>
+  );
+}
+
+function PageSkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      className="mx-auto flex w-full max-w-reading flex-col gap-space-lg px-margin-mobile py-space-xl md:px-space-lg"
+    >
+      <span className="sr-only">Loading…</span>
+      <Skeleton className="h-10 w-48" />
+      <Skeleton className="h-24 w-full" />
+      <Skeleton className="h-24 w-full" />
+    </div>
+  );
 }

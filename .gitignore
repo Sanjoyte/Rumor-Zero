@@ -28,6 +28,8 @@ coverage.xml
 htmlcov/
 backend/staticfiles/
 backend/media/
+# EMAIL_PROVIDER=file writes emails here (Part 2's E2E reads them)
+backend/tmp/
 *.sqlite3
 
 # --- Node / Next.js / Cloudflare (frontend/) ---

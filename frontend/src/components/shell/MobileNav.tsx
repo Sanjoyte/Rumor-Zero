@@ -2,8 +2,9 @@ import Link from "next/link";
 import { Avatar } from "@/components/ui/Avatar";
 import { Icon } from "@/components/ui/Icon";
 import { Logo } from "@/components/ui/Logo";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/cn";
-import { AccountMenu } from "./AccountMenu";
+import { AccountMenu, type MenuAction } from "./AccountMenu";
 import {
   HOME,
   isActive,
@@ -23,8 +24,11 @@ export const ACCOUNT_SHEET_ID = "rz-account-sheet";
 
 export interface MobileNavProps {
   user: ShellUser | null;
+  loading?: boolean;
   pathname: string;
   onNewPost?: () => void;
+  /** Log out, the last entry of the account sheet. */
+  actions?: MenuAction[];
 }
 
 const TAB =
@@ -51,14 +55,16 @@ function Tab({ item, pathname }: { item: NavItem; pathname: string }) {
  * Phones (<768px; DESIGN.md "intended behavior"): a top bar with the logo and the account sheet,
  * and a bottom bar with five tabs (user decision, 2026-10-01). Logged out: Home, Search, Log in.
  */
-export function MobileNav({ user, pathname, onNewPost }: MobileNavProps) {
+export function MobileNav({ user, loading, pathname, onNewPost, actions }: MobileNavProps) {
   return (
     <>
       <header className="fixed top-0 right-0 left-0 z-40 flex h-16 items-center justify-between border-b border-outline-variant/30 bg-surface-container-lowest px-margin-mobile md:hidden">
         <Link href={HOME.href} className="rounded-lg">
           <Logo size="sm" />
         </Link>
-        {user ? (
+        {loading ? (
+          <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
+        ) : user ? (
           <>
             <button
               type="button"
@@ -73,6 +79,7 @@ export function MobileNav({ user, pathname, onNewPost }: MobileNavProps) {
               id={ACCOUNT_SHEET_ID}
               label="Account"
               items={sheetItems(user)}
+              actions={actions}
               placement="sheet"
               pathname={pathname}
             />
@@ -93,7 +100,12 @@ export function MobileNav({ user, pathname, onNewPost }: MobileNavProps) {
       >
         <Tab item={HOME} pathname={pathname} />
         <Tab item={SEARCH} pathname={pathname} />
-        {user ? (
+        {loading ? (
+          <div className={TAB}>
+            <Skeleton className="h-6 w-6 rounded-full" />
+            <Skeleton className="h-3 w-10" />
+          </div>
+        ) : user ? (
           <>
             <button
               type="button"

@@ -14,9 +14,12 @@ const SIZE = {
 
 export type AvatarSize = keyof typeof SIZE;
 
-/** First letters of the first two words, or the first two characters of a single word. */
+/**
+ * First letters of the first two words, or the first two characters of a single word. A handle
+ * ("@ada", the fallback for a blank display name) loses its "@".
+ */
 export function initialsFor(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
+  const words = name.trim().replace(/^@/, "").split(/\s+/).filter(Boolean);
   if (words.length === 0) return "?";
   if (words.length === 1) return Array.from(words[0]).slice(0, 2).join("").toUpperCase();
   return (Array.from(words[0])[0] + Array.from(words[1])[0]).toUpperCase();

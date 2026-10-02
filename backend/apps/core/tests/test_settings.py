@@ -7,17 +7,34 @@ import subprocess
 import sys
 from pathlib import Path
 
+import environ
 import pytest
 from django.contrib.auth.hashers import Argon2PasswordHasher
+from django.core.exceptions import ImproperlyConfigured
 from rest_framework.throttling import SimpleRateThrottle
 
 import rumor_zero.settings as project_settings
 from apps.core.platform_defaults import FIELDS
-from rumor_zero.env_helpers import cache_config
+from rumor_zero.env_helpers import (
+    bare_origin,
+    cache_config,
+    check_jwt_signing_key,
+    email_config,
+    int_in_range,
+)
 
 BACKEND_DIR = Path(__file__).resolve().parents[3]
 
 FAKE_DB_PASSWORD = "fake-db-pass-9f3"
+# Every secret production_env() sets; none may ever appear in output.
+SECRET_VARIABLES = (
+    "DJANGO_SECRET_KEY",
+    "PROXY_SHARED_SECRET",
+    "INTERNAL_CRON_SECRET",
+    "JWT_SIGNING_KEY",
+    "TURNSTILE_SECRET_KEY",
+    "BREVO_API_KEY",
+)
 
 
 def production_env(**overrides):
@@ -35,6 +52,15 @@ def production_env(**overrides):
             "REDIS_URL": "",
             "PROXY_SHARED_SECRET": secrets.token_urlsafe(24),
             "INTERNAL_CRON_SECRET": secrets.token_urlsafe(24),
+            "FRONTEND_ORIGIN": "https://app.example.test",
+            "AUTH_COOKIE_SECURE": "True",
+            "JWT_SIGNING_KEY": secrets.token_urlsafe(48),
+            "JWT_ACCESS_TOKEN_MINUTES": "15",
+            "JWT_REFRESH_TOKEN_DAYS": "14",
+            "TURNSTILE_SECRET_KEY": secrets.token_urlsafe(24),
+            "EMAIL_PROVIDER": "brevo",
+            "BREVO_API_KEY": "xkeysib-" + secrets.token_hex(16),
+            "DEFAULT_FROM_EMAIL": "Rumor Zero <no-reply@example.test>",
             "SENTRY_DSN": "",
             "SENTRY_ENVIRONMENT": "production",
             "SENTRY_TRACES_SAMPLE_RATE": "0.0",
@@ -95,8 +121,25 @@ def test_production_security_flags_are_on():
     assert flags["csrf_cookie_secure"] is True
 
 
+def assert_no_secret_in(output, env):
+    for name in SECRET_VARIABLES:
+        if env[name]:
+            assert env[name] not in output, name
+    assert FAKE_DB_PASSWORD not in output
+
+
 @pytest.mark.parametrize(
-    "name", ["DJANGO_SECRET_KEY", "DATABASE_URL", "PROXY_SHARED_SECRET", "INTERNAL_CRON_SECRET"]
+    "name",
+    [
+        "DJANGO_SECRET_KEY",
+        "DATABASE_URL",
+        "PROXY_SHARED_SECRET",
+        "INTERNAL_CRON_SECRET",
+        "FRONTEND_ORIGIN",
+        "JWT_SIGNING_KEY",
+        "TURNSTILE_SECRET_KEY",
+        "BREVO_API_KEY",
+    ],
 )
 def test_a_missing_required_variable_fails_by_name_without_leaking_values(name):
     env = production_env(**{name: ""})
@@ -104,11 +147,78 @@ def test_a_missing_required_variable_fails_by_name_without_leaking_values(name):
 
     assert result.returncode != 0
     assert f"Set the {name} environment variable" in result.stderr
-    output = result.stdout + result.stderr
-    for other in ("DJANGO_SECRET_KEY", "PROXY_SHARED_SECRET", "INTERNAL_CRON_SECRET"):
-        if other != name:
-            assert env[other] not in output
-    assert FAKE_DB_PASSWORD not in output
+    assert_no_secret_in(result.stdout + result.stderr, env)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"JWT_SIGNING_KEY": "k" * 31}, "JWT_SIGNING_KEY must be at least 32 characters"),
+        ({"FRONTEND_ORIGIN": "http://app.example.test"}, "FRONTEND_ORIGIN must use https"),
+        ({"FRONTEND_ORIGIN": "https://app.example.test/home"}, "FRONTEND_ORIGIN must be a bare"),
+        ({"AUTH_COOKIE_SECURE": "False"}, "AUTH_COOKIE_SECURE must be True"),
+        ({"EMAIL_PROVIDER": "console"}, "EMAIL_PROVIDER must be brevo"),
+        ({"EMAIL_PROVIDER": "file"}, "EMAIL_PROVIDER must be brevo"),
+        ({"JWT_ACCESS_TOKEN_MINUTES": "61"}, "JWT_ACCESS_TOKEN_MINUTES must be an integer"),
+        ({"JWT_REFRESH_TOKEN_DAYS": "0"}, "JWT_REFRESH_TOKEN_DAYS must be an integer"),
+    ],
+)
+def test_production_auth_guards_fail_by_name_without_leaking_values(overrides, message):
+    env = production_env(**overrides)
+    result = run_python(["manage.py", "check"], env)
+
+    assert result.returncode != 0
+    assert message in result.stderr
+    assert_no_secret_in(result.stdout + result.stderr, env)
+
+
+def test_the_jwt_key_must_not_be_the_django_secret_key():
+    env = production_env()
+    env["JWT_SIGNING_KEY"] = env["DJANGO_SECRET_KEY"]
+    result = run_python(["manage.py", "check"], env)
+
+    assert result.returncode != 0
+    assert "JWT_SIGNING_KEY must be different from DJANGO_SECRET_KEY" in result.stderr
+    assert_no_secret_in(result.stdout + result.stderr, env)
+
+
+AUTH_PROBE = """
+import json
+from django.conf import settings
+print(json.dumps({
+    "frontend_origin": settings.FRONTEND_ORIGIN,
+    "frontend_urls": settings.HEADLESS_FRONTEND_URLS,
+    "email_backend": settings.EMAIL_BACKEND,
+    "anymail_has_key": bool(settings.ANYMAIL.get("BREVO_API_KEY")),
+    "jwt_key_is_env": settings.HEADLESS_JWT_PRIVATE_KEY == settings.JWT_SIGNING_KEY,
+    "access_seconds": settings.HEADLESS_JWT_ACCESS_TOKEN_EXPIRES_IN,
+    "refresh_seconds": settings.HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN,
+    "cookie_seconds": settings.REFRESH_TOKEN_SECONDS,
+    "cookie_secure": settings.AUTH_COOKIE_SECURE,
+}))
+"""
+
+
+def test_production_auth_settings_come_from_the_environment():
+    env = production_env(FRONTEND_ORIGIN="HTTPS://App.Example.test/", JWT_ACCESS_TOKEN_MINUTES="10")
+    env["DJANGO_SETTINGS_MODULE"] = "rumor_zero.settings"
+    result = run_python(["-c", "import django; django.setup()\n" + AUTH_PROBE], env)
+    assert result.returncode == 0, result.stderr
+    probe = json.loads(result.stdout.strip().splitlines()[-1])
+    assert probe["frontend_origin"] == "https://app.example.test"
+    assert probe["frontend_urls"] == {
+        "account_confirm_email": "https://app.example.test/verify-email/{key}",
+        "account_reset_password_from_key": "https://app.example.test/reset-password/{key}",
+        "account_reset_password": "https://app.example.test/forgot-password",
+        "account_signup": "https://app.example.test/signup",
+    }
+    assert probe["email_backend"] == "anymail.backends.brevo.EmailBackend"
+    assert probe["anymail_has_key"] is True
+    assert probe["jwt_key_is_env"] is True
+    assert probe["access_seconds"] == 600
+    assert probe["refresh_seconds"] == probe["cookie_seconds"] == 14 * 86400
+    assert probe["cookie_secure"] is True
+    assert_no_secret_in(result.stdout + result.stderr, env)
 
 
 @pytest.mark.parametrize("path", ["/admin/", "admin", ""])
@@ -178,3 +288,84 @@ def test_all_ten_throttle_scopes_parse_to_the_documented_rates():
     assert {
         scope: SimpleRateThrottle.parse_rate(object(), rate) for scope, rate in rates.items()
     } == (expected)
+
+
+def test_drf_authenticates_with_the_project_jwt_class():
+    assert project_settings.REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"] == [
+        "apps.accounts.authentication.JWTAuthentication"
+    ]
+    assert project_settings.AUTHENTICATION_BACKENDS == [
+        "allauth.account.auth_backends.AuthenticationBackend"
+    ]
+    assert project_settings.SESSION_ENGINE == "django.contrib.sessions.backends.db"
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("http://localhost:3000", "http://localhost:3000"),
+        ("http://localhost:3000/", "http://localhost:3000"),
+        ("HTTPS://Rumor-Zero.Example.dev", "https://rumor-zero.example.dev"),
+        ("https://[::1]:8443", "https://[::1]:8443"),
+    ],
+)
+def test_bare_origin_normalises(value, expected):
+    assert bare_origin("FRONTEND_ORIGIN", value, https_only=False) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "localhost:3000",
+        "ftp://example.com",
+        "https://",
+        "https://example.com/app",
+        "https://example.com?x=1",
+        "https://example.com#top",
+        "https://user:pw@example.com",
+        "https://example.com:99999",
+    ],
+)
+def test_bare_origin_rejects_anything_but_an_origin(value):
+    with pytest.raises(ImproperlyConfigured, match="FRONTEND_ORIGIN must be a bare origin"):
+        bare_origin("FRONTEND_ORIGIN", value, https_only=False)
+
+
+def test_bare_origin_requires_https_when_asked():
+    with pytest.raises(ImproperlyConfigured, match="must use https"):
+        bare_origin("FRONTEND_ORIGIN", "http://example.com", https_only=True)
+
+
+def test_int_in_range_reads_defaults_and_rejects_out_of_range(monkeypatch):
+    env = environ.Env()
+    monkeypatch.delenv("RZ_TEST_NUMBER", raising=False)
+    assert int_in_range(env, "RZ_TEST_NUMBER", 15, 1, 60) == 15
+    monkeypatch.setenv("RZ_TEST_NUMBER", "60")
+    assert int_in_range(env, "RZ_TEST_NUMBER", 15, 1, 60) == 60
+    for bad in ("0", "61", "ten", "1.5"):
+        monkeypatch.setenv("RZ_TEST_NUMBER", bad)
+        with pytest.raises(ImproperlyConfigured, match="RZ_TEST_NUMBER must be an integer"):
+            int_in_range(env, "RZ_TEST_NUMBER", 15, 1, 60)
+
+
+def test_jwt_signing_key_check():
+    check_jwt_signing_key("k" * 32, "other")
+    with pytest.raises(ImproperlyConfigured, match="at least 32"):
+        check_jwt_signing_key("k" * 31, "other")
+    with pytest.raises(ImproperlyConfigured, match="different from DJANGO_SECRET_KEY"):
+        check_jwt_signing_key("k" * 40, "k" * 40)
+
+
+def test_email_config_for_each_provider(tmp_path):
+    console = email_config("console", base_dir=tmp_path, brevo_api_key="")
+    assert console == ("django.core.mail.backends.console.EmailBackend", None, {})
+    backend, path, anymail = email_config("file", base_dir=tmp_path, brevo_api_key="")
+    assert backend == "django.core.mail.backends.filebased.EmailBackend"
+    assert Path(path) == tmp_path / "tmp" / "mail"
+    assert anymail == {}
+    brevo = email_config("brevo", base_dir=tmp_path, brevo_api_key="xkeysib-fake")
+    assert brevo == ("anymail.backends.brevo.EmailBackend", None, {"BREVO_API_KEY": "xkeysib-fake"})
+    with pytest.raises(ImproperlyConfigured, match="Set the BREVO_API_KEY"):
+        email_config("brevo", base_dir=tmp_path, brevo_api_key=" ")
+    with pytest.raises(ImproperlyConfigured, match="EMAIL_PROVIDER must be one of"):
+        email_config("smtp", base_dir=tmp_path, brevo_api_key="")

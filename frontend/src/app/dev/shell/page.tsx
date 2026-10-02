@@ -10,8 +10,7 @@ export const metadata: Metadata = {
 type Props = { searchParams: Promise<{ user?: string; path?: string }> };
 
 /**
- * Development-only: the app shell with a sample user (there is no sign-in until Part 1), for the
- * Stitch b1 comparison. `?user=none` shows the logged-out shell; `?path=/search` moves the
+ * Development-only: the app shell with a sample user, for the Stitch b1 comparison. `?user=none` shows the logged-out shell; `?path=/search` moves the
  * active item. A production build answers 404 for this route.
  */
 export default async function DevShellPage({ searchParams }: Props) {

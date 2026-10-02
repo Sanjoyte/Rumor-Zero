@@ -48,6 +48,7 @@ in `task.md`; transient continuation state belongs in `HANDOFF.md`.
 - **Consequence:** `compose.yaml` binds both `127.0.0.1` and `[::1]` (still loopback-only). Keep both.
   If a Django command hangs on the DB, test with a socket/`connect_timeout` before suspecting the code.
 - **Evidence:** socket and psycopg probes; after adding `[::1]` the `localhost` connect took 0.04 s.
+- **Also (2026-10-03, Part 1):** when Docker Desktop restarts (sleep, update), our two containers stop (`Exited (255)`) while other projects' containers with restart policies come back. `pytest` then hangs silently on the first DB test. Check `docker compose ps` first and `docker compose up -d`.
 
 ### 2026-09-30 — sentry-sdk 2.71.0 default scrubbing is narrow
 
@@ -100,3 +101,23 @@ in `task.md`; transient continuation state belongs in `HANDOFF.md`.
 - **Fact:** stopping the background task ended only the Git Bash/npm wrapper. The `next dev` Node process kept running (with its `workerd.exe` children from `initOpenNextCloudflareForDev()`), stopped listening on its port, and blocked the next `next dev` with "Another next dev server is already running … PID n".
 - **Consequence:** after stopping a dev server, list leftovers (`Get-CimInstance Win32_Process` filtered on `next dev` / `next\dist\bin` / `workerd.exe`), check they are the ones you started, and end them with `taskkill /PID <id> /T /F`. Confirm ports 3000/8000 are free before handing over. Playwright's own `webServer` processes are cleaned up correctly.
 - **Evidence:** Part 0C verification (PIDs 11316 and 3956 plus two workerd children).
+
+### 2026-10-03 — django-allauth 65.19.5 headless: what the auth design depends on
+
+- **Applies to:** Parts 1–3, 14, 16, and every django-allauth upgrade.
+- **Facts (read in the installed source, `allauth/headless/…`):**
+  - App-client views are `csrf_exempt` and parse the body as JSON whatever the Content-Type (`restkit/views.py`), so login CSRF via `<form enctype="text/plain">` is possible without our Origin + header guard.
+  - Login/signup bodies carry `meta.access_token`, `meta.refresh_token` and `meta.session_token` (the raw Django session key; `restkit/response.py`); refresh answers in `data`. A bad refresh token is a bare `{"status":400}`.
+  - Refresh-token state lives in the session (`jwt/internal.py`, jti → exp); stock rotation deletes the used jti without a lock. Our `apps/accounts/tokens.py`, `cookies.revoke_refresh_token_session()` and logout call those internal helpers (`decode_token`, `validate_refresh_token`, `create_*_token`, `session_key_from_sid`).
+  - `JWTTokenAuthentication` returns a lazy user and skips `is_active` (a deleted user's token raised DoesNotExist → 500); our `JWTAuthentication` fixes that.
+  - `login_failed` (`10/m/ip,5/300s/key`) is consumed before the password check and answers 400 `too_many_login_attempts`, not 429. `signup` is 20/min per IP (429).
+  - A failed email send during signup is not caught by allauth (500 after the user is saved); our adapter catches it. Headless-only mode raises `ImproperlyConfigured` when sending the verification email without `HEADLESS_FRONTEND_URLS`.
+- **Consequence:** after any allauth upgrade, re-read those files and run `apps/accounts/tests/` (the strategy, cookie, middleware and concurrency tests pin the behaviour) before changing the pin.
+- **Evidence:** Part 1 plan (facts 1–15) and implementation; the control test in `test_tokens.py` shows allauth's stock strategy losing a tab's token.
+
+### 2026-10-03 — Windows PowerShell 5.1 strips the quotes in JSON passed to native programs
+
+- **Applies to:** `docs/test-command.md` and any PowerShell instructions that send JSON with `curl.exe`.
+- **Fact:** in Windows PowerShell 5.1 (5.1.26100), `curl.exe --data '{"email": "x@example.test", "password": "pw"}'` reaches the server with its inner quotes stripped, so allauth answers a bare `{"status": 400}` (unparsable JSON). Writing the JSON to a file with `Set-Content -Encoding ascii` and sending `--data-binary "@$env:TEMP\rz-login.json"` gives the real answer (`email_password_mismatch`). Header pairs can be splatted: `$h = '-H', 'Origin: …'`, then `curl.exe @h …`.
+- **Consequence:** test-command steps use the file form. The Part 1 section's commands were run that way and their output recorded.
+- **Evidence:** Part 1 test-command run, 2026-10-03.

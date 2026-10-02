@@ -42,7 +42,7 @@ Each run prints a new value of about 67 URL-safe characters. Copy each one into 
 | Variable | Where it goes | Note |
 |---|---|---|
 | `DJANGO_SECRET_KEY` | `backend/.env` | After Part 0A you can also use Django's generator: `python -c "from django.core.management.utils import get_random_secret_key as g; print(g())"`. Either is fine. |
-| `JWT_SIGNING_KEY` | `backend/.env` | Must differ from `DJANGO_SECRET_KEY` |
+| `JWT_SIGNING_KEY` | `backend/.env` | At least **32 characters** and different from `DJANGO_SECRET_KEY`; since Part 1 Django refuses to start otherwise and names the variable. The command above gives about 67. The `.env.example` placeholder works locally but is not a secret. |
 | `PROXY_SHARED_SECRET` | **both** `backend/.env` **and** `frontend/.env.local` | Must be **identical** in both files, or the API relay's client-IP header is ignored. Throttling still works in dev, but tests for it fail. |
 | `INTERNAL_CRON_SECRET` | `backend/.env` | Used by `/api/internal/tick/` and `/api/health/deep/` |
 
@@ -56,10 +56,10 @@ Gotcha: don't wrap these values in quotes, and don't leave trailing spaces.
 | `DJANGO_ALLOWED_HOSTS` | `localhost,127.0.0.1` | |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | `http://localhost:8000,http://127.0.0.1:8000` | For the Django Admin login form |
 | `ADMIN_URL_PATH` | `admin/` | Local admin at <http://localhost:8000/admin/> |
-| `FRONTEND_ORIGIN` | `http://localhost:3000` | `npm run dev` default |
-| `AUTH_COOKIE_SECURE` | `False` | Localhost is plain http |
+| `FRONTEND_ORIGIN` | `http://localhost:3000` | `npm run dev` default. Every `/api/auth/` request must carry exactly this `Origin`, so open the site as `http://localhost:3000`, not `http://127.0.0.1:3000` (that gets 403 `csrf_failed`). A bare origin only (no path); https is required when `DJANGO_DEBUG` is False. |
+| `AUTH_COOKIE_SECURE` | `False` | Localhost is plain http. Must be `True` when `DJANGO_DEBUG` is False. |
 | `JWT_ACCESS_TOKEN_MINUTES` / `JWT_REFRESH_TOKEN_DAYS` | `15` / `14` | Guide §4.6 |
-| `EMAIL_PROVIDER` | `console` | Verification and reset emails are **printed in the `runserver` terminal**. Copy the link from there. |
+| `EMAIL_PROVIDER` | `console` | Verification and reset emails are **printed in the `runserver` terminal**. Copy the link from there. `file` writes each email to `backend/tmp/mail/` instead (git-ignored; Part 2's E2E test reads it). With `DJANGO_DEBUG=False` only `brevo` is accepted. |
 | `DEFAULT_FROM_EMAIL` | `"Rumor Zero <no-reply@example.com>"` | Only shows in the printed email |
 | `BREVO_API_KEY` | *(empty)* | Not used locally |
 | `REPORT_THRESHOLD` … `FEED_CACHE_SECONDS` | defaults | Guide §6.2, §7.2, §9.2; ANALYSIS D7 |
@@ -101,6 +101,13 @@ Keep Cloudflare's **official test keys**, which are already in the examples. No 
 | "Token already spent" | — | `3x0000000000000000000000000000000AA` |
 
 Source: <https://developers.cloudflare.com/turnstile/troubleshooting/testing/>
+
+Since Part 1 both sides call Cloudflare even with test keys: the browser loads the widget from
+`challenges.cloudflare.com`, and Django checks the token with siteverify, so sign-up needs internet.
+To see the server-side failure, run Django with the always-fail **secret** for one session
+(`$env:TURNSTILE_SECRET_KEY = "2x0000000000000000000000000000000AA"` before `runserver`; the
+process env wins over `.env`): sign-up then answers "The bot check didn't pass". The always-fail
+**site key** never produces a token, so "Create account" simply stays disabled.
 
 ### 1.6 Google sign-in: `GOOGLE_OAUTH_CLIENT_ID` + `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (needed from Part 3)
 
@@ -438,7 +445,7 @@ Gotchas: 30 s timeout (the endpoint processes a small batch and returns quickly)
 
 | Secret | Rotate by | Side effect |
 |---|---|---|
-| `DJANGO_SECRET_KEY` | new value in Render | Admin sessions and pending email/reset links become invalid |
+| `DJANGO_SECRET_KEY` | new value in Render | Admin sessions and pending email/reset links become invalid, and **every user is logged out** (the session id inside each token is encrypted with a key derived from it; ARCHITECTURE §7) |
 | `JWT_SIGNING_KEY` | new value in Render | Every user is logged out once |
 | `PROXY_SHARED_SECRET` | change Render **and** the Cloudflare secret together | Until both match, all users share one IP for rate limiting |
 | `INTERNAL_CRON_SECRET` | Render + GitHub secret + cron-job.org header | Scheduled calls fail until all three match |

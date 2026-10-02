@@ -247,6 +247,26 @@ describe("apiFetch", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("token: false sends no managed token and never calls the 401 hook", async () => {
+    setAccessTokenGetter(() => "managed-token");
+    const handler = vi.fn(async () => true);
+    setUnauthorizedHandler(handler);
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+    await api.post("/auth/app/v1/auth/login", { email: "a@b.c" }, { token: false });
+    expect(sent(0).headers.has("authorization")).toBe(false);
+
+    // An explicit header is kept, and a 401 is final.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(401, { detail: "No.", code: "not_authenticated" }),
+    );
+    await expect(
+      api.get("/v1/me/", { token: false, headers: { Authorization: "Bearer explicit" } }),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(sent(1).headers.get("authorization")).toBe("Bearer explicit");
+    expect(handler).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("uses the relay for every call type", () => {
     expect(baseFor("app")).toBe("/api");
     expect(baseFor("auth")).toBe("/api");

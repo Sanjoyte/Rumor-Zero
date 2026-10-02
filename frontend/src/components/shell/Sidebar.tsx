@@ -3,8 +3,9 @@ import { Avatar } from "@/components/ui/Avatar";
 import { buttonClasses } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
 import { Logo } from "@/components/ui/Logo";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/cn";
-import { AccountMenu } from "./AccountMenu";
+import { AccountMenu, type MenuAction } from "./AccountMenu";
 import {
   footerItems,
   isActive,
@@ -22,9 +23,13 @@ export const USER_MENU_ID = "rz-user-menu";
 
 export interface SidebarProps {
   user: ShellUser | null;
+  /** While the session is restored, the account area is a same-size placeholder. */
+  loading?: boolean;
   pathname: string;
   /** Opens the composer (Part 4). Until then the button does nothing. */
   onNewPost?: () => void;
+  /** Log out, the last entry of the user menu. */
+  actions?: MenuAction[];
 }
 
 /** Stitch b1 L20/L21 (main list) and L32/L33 (footer list): same shape, footer is smaller. */
@@ -63,7 +68,7 @@ function SidebarLink({
  * The left rail (Stitch b1 L13–44): the full `w-64` rail at ≥1280px, a `w-16` icon dock at
  * 768–1279px, hidden on phones (MobileNav takes over).
  */
-export function Sidebar({ user, pathname, onNewPost }: SidebarProps) {
+export function Sidebar({ user, loading, pathname, onNewPost, actions }: SidebarProps) {
   const footer = footerItems(user);
 
   return (
@@ -109,7 +114,18 @@ export function Sidebar({ user, pathname, onNewPost }: SidebarProps) {
             ))}
           </div>
         )}
-        {user ? (
+        {loading ? (
+          <div
+            data-testid="account-loading"
+            className="flex items-center justify-center gap-space-sm border-t border-outline-variant/30 bg-surface-container-lowest p-space-sm xl:justify-start xl:p-space-md"
+          >
+            <Skeleton className="h-8 w-8 shrink-0 rounded-full" />
+            <div className="hidden min-w-0 flex-1 flex-col gap-space-xs xl:flex">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-3 w-16" />
+            </div>
+          </div>
+        ) : user ? (
           <div className="flex items-center justify-center gap-space-sm border-t border-outline-variant/30 bg-surface-container-lowest p-space-sm xl:justify-between xl:p-space-md">
             <div className="hidden min-w-0 flex-1 items-center gap-space-sm xl:flex">
               <Avatar name={nameOf(user)} src={user.avatar_url} size={8} decorative />
@@ -140,6 +156,7 @@ export function Sidebar({ user, pathname, onNewPost }: SidebarProps) {
               id={USER_MENU_ID}
               label="Account"
               items={userMenuItems(user)}
+              actions={actions}
               placement="rail"
               pathname={pathname}
             />

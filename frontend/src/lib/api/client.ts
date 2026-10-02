@@ -2,8 +2,8 @@
  * The only way the browser calls the API (ARCHITECTURE §10). Every call goes to the relative
  * "/api" base on the frontend origin, never to BACKEND_ORIGIN.
  *
- * Errors from DRF, allauth, the relay and the network all become one `ApiError` shape. Part 1 wires
- * token refresh into the 401 hook.
+ * Errors from DRF, allauth, the relay and the network all become one `ApiError` shape. A 401 from an
+ * app endpoint refreshes the token once (the AuthProvider's handler) and retries.
  */
 import type { AllauthBody } from "./types";
 
@@ -148,7 +148,7 @@ export function setAccessTokenGetter(getter: () => string | null): void {
 
 /**
  * Called on a 401 from an app endpoint. Resolve true after refreshing the token to retry the
- * request once. Concurrent 401s share one call. Part 1 wires the refresh in.
+ * request once. Concurrent 401s share one call. The AuthProvider registers it.
  */
 export function setUnauthorizedHandler(handler: (() => Promise<boolean>) | null): void {
   unauthorizedHandler = handler;
@@ -172,6 +172,12 @@ export interface RequestOptions {
   signal?: AbortSignal;
   /** Defaults to "auth" for `/auth/...` paths, else "app". */
   kind?: ApiKind;
+  /**
+   * `false`: never attach the in-memory access token, and never refresh on a 401. Login, signup,
+   * refresh and logout use it, and so does the session's own `/me` call, which passes its token
+   * in `headers` (so a 401 there can't wait on a refresh that is waiting on it).
+   */
+  token?: false;
 }
 
 function isRawBody(body: unknown): body is BodyInit {
@@ -214,7 +220,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
         body = JSON.stringify(options.body);
       }
     }
-    const token = accessTokenGetter();
+    const token = options.token === false ? null : accessTokenGetter();
     if (token) headers.set("Authorization", `Bearer ${token}`);
     return fetch(url, {
       method: options.method ?? "GET",
@@ -235,7 +241,12 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   };
 
   let response = await attempt();
-  if (response.status === 401 && kind === "app" && (await onUnauthorized())) {
+  if (
+    response.status === 401 &&
+    kind === "app" &&
+    options.token !== false &&
+    (await onUnauthorized())
+  ) {
     response = await attempt();
   }
 

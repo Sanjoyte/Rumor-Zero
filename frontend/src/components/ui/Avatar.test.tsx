@@ -8,6 +8,8 @@ describe("initialsFor", () => {
     ["ada", "AD"],
     ["  grace   brewster  hopper ", "GB"],
     ["élan vital", "ÉV"],
+    ["@visual_user", "VI"],
+    ["@", "?"],
     ["", "?"],
     ["   ", "?"],
   ])("%j gives %s", (name, expected) => {

@@ -9,6 +9,7 @@ const SAMPLE_USER: ShellUser = {
   display_name: "Ada Lovelace",
   avatar_url: null,
   admin_url: "http://localhost:8000/admin/",
+  is_email_verified: true,
 };
 
 const NOW = new Date("2026-10-01T12:00:00Z");

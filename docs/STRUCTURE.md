@@ -38,7 +38,8 @@ rumor-zero/
 │   ├── rumor_zero/              🅐  project package (Python needs the underscore)
 │   │   ├── settings.py          🔨 0A  single settings module driven by env (django-environ); no settings/ split
 │   │   ├── urls.py              🔨 0A  /api/health/, /api/v1/…, /api/auth/… (allauth headless), /<ADMIN_URL_PATH>
-│   │   ├── env_helpers.py       🔨 0A  load_env_file (optional .env; process env wins), require() (fails by variable name), cache_config()
+│   │   ├── env_helpers.py       🔨 0A  load_env_file (optional .env; process env wins), require() (fails by variable name), cache_config();
+│   │   │                            ✅ 1 int_in_range(), bare_origin(), check_jwt_signing_key(), email_config()
 │   │   ├── sentry.py            🔨 0A  sentry_options()/init_sentry(): PII off, no bodies or locals, X-RZ-* headers in the scrubber denylist
 │   │   ├── wsgi.py / asgi.py    🅐
 │   ├── apps/                    🔨 package (`__init__.py`); each app: create `apps/<name>/` first, then
@@ -52,7 +53,12 @@ rumor-zero/
 │   │   │                            views.py + urls.py (health), admin.py, migrations/0002_seed_platform_settings.py
 │   │   ├── accounts/            0A  custom User (UUID, role, avatar/credibility/emergency fields; must exist before the first migrate),
 │   │   │                            validators.py (username/email rules, RESERVED_USERNAMES), UserManager, admin.py
-│   │   │                        1–3 allauth adapters, refresh-cookie adapter, username check, verified-email permission
+│   │   │                        ✅ 1 adapter.py (AccountAdapter), tokens.py (locked, graceful refresh rotation),
+│   │   │                            cookies.py (rz_refresh + rz_session, secret stripping, revocation), middleware.py
+│   │   │                            (AuthApiMiddleware: allow-list, CSRF guard, Turnstile pre-check, cookie handling),
+│   │   │                            turnstile.py (siteverify, stdlib), authentication.py (JWTAuthentication), permissions.py
+│   │   │                            (IsEmailVerified), serializers.py + views.py + urls.py (logout, /me, username check),
+│   │   │                            migrations/0002_verify_superuser_emails.py; 2–3 email flows and Google
 │   │   │                        14B Avatar model, avatars.py (Pillow processing), avatar endpoints
 │   │   ├── posts/               4–5 Post model + status constraints, validators.py (sources/DOI), services (the only place
 │   │   │                            status changes), feeds, status polling; 11C emergency eligibility + pinned feeds;
@@ -70,7 +76,7 @@ rumor-zero/
 │   │       (every app: models.py, services.py, serializers.py, views.py, urls.py, admin.py,
 │   │        migrations/, tests/ with test_models.py, test_services.py, test_api.py …)
 │   ├── templates/               🔨 2   account/email/* (branded emails with the logo image); 10 admin/base_site.html (logo header)
-│   ├── conftest.py              🔨 0A  shared pytest fixtures (api_client, user factories)
+│   ├── conftest.py              🔨 0A  shared pytest fixtures (api_client, user factories); ✅ 1 fixed auth test values, no network
 │   ├── pyproject.toml           🔨 0A  ruff + pytest config (DJANGO_SETTINGS_MODULE=rumor_zero.settings)
 │   ├── requirements.txt         🔨 0A  pinned runtime deps (SETUP.md B1)
 │   └── requirements-dev.txt     🔨 0A  -r requirements.txt + test/lint tools (SETUP.md B2)
@@ -90,7 +96,7 @@ rumor-zero/
 │   ├── postcss.config.mjs       🅑
 │   ├── vitest.config.mts        ✅ 0B  jsdom, `@` alias, setup file
 │   ├── scripts/lint-tokens.mjs  ✅ 0B  `npm run lint:tokens`: fails on default-palette classes, raw hex, stray radius/shadow/text sizes, dangerouslySetInnerHTML (+ lint-tokens.test.ts)
-│   ├── playwright.config.ts     ✅ 0C  webServer starts Django (backend/.venv) + Next (`next dev`, or `next start` in CI)
+│   ├── playwright.config.ts     ✅ 0C  webServer starts Django (backend/.venv, `REDIS_URL=""` since 1) + Next (`next dev`, or `next start` in CI)
 │   ├── wrangler.jsonc           ✅ 0C  name "rumor-zero", main .open-next/worker.js, nodejs_compat, assets binding
 │   ├── open-next.config.ts      ✅ 0C  defineCloudflareConfig() with the default cache (no R2)
 │   ├── scripts/brand/           ✅ 0D  build-brand-assets.mjs + brand.config.json (`npm run brand:build`): reads
@@ -99,7 +105,7 @@ rumor-zero/
 │   ├── public/
 │   │   └── brand/               ✅ 0D  generated: logo.svg, mark.svg, icon-192/512/maskable-512.png, email-logo.png,
 │   │                                google-oauth-logo.png (never hand-edited)
-│   ├── e2e/                     ✅ 0C  Playwright specs: smoke.spec.ts (0C); one flow per later part
+│   ├── e2e/                     ✅ 0C  Playwright specs: smoke.spec.ts (0C), auth.spec.ts (1); one flow per later part
 │   └── src/
 │       ├── app/                 🅑 App Router (routes below)
 │       │   ├── layout.tsx       🔨 0B  fonts (next/font), <html lang="en">, providers
@@ -113,15 +119,15 @@ rumor-zero/
 │       │   │   ├── page.tsx                 "/"              ← a1 (15)
 │       │   │   ├── how-it-works/page.tsx    "/how-it-works"  ← root code.html layout, rewritten (15)
 │       │   │   ├── privacy/, terms/         "/privacy", "/terms" (15)
-│       │   ├── (auth)/          ✅ 0C AuthLayout (max-w-form card) + login/signup placeholders
-│       │   │   ├── signup/                  ← a2 (1)
-│       │   │   ├── login/                   ← a3 (1)
+│       │   ├── (auth)/          ✅ 0C AuthLayout (max-w-form card)
+│       │   │   ├── signup/                  ✅ 1 ← a2 (SignupForm)
+│       │   │   ├── login/                   ✅ 1 ← a3 (LoginForm)
 │       │   │   ├── verify-email/            ← a4 "check inbox" (2)
 │       │   │   ├── verify-email/[key]/      ← a4 link landing states (2)
 │       │   │   ├── forgot-password/         ← a5 (2)
 │       │   │   └── reset-password/[key]/    ← a6 (2)
 │       │   ├── (app)/           ✅ 0C AppShell (sidebar/top bar/mobile nav) + placeholders for every nav destination
-│       │   │   ├── layout.tsx
+│       │   │   ├── layout.tsx           ✅ 1 route guard (PROTECTED_PREFIXES → /login?next=), loading skeleton, Log out
 │       │   │   ├── home/                    "/home" ← b1 (4, following tab 6, reposts 7B, pinned emergencies 11C)
 │       │   │   ├── p/[id]/                  "/p/:id" ← b3 (5, comments 7, repost/bookmark 7B, appeal 11, stats 11D)
 │       │   │   ├── bookmarks/               "/bookmarks" ← b1 layout (7B)
@@ -142,9 +148,11 @@ rumor-zero/
 │       │   │                            ✅ 0D Logo (the only brand mark);
 │       │   │                            11D charts/ MeterBar, StatTile, BarChart, RingGauge, Sparkline
 │       │   └── shell/           ✅ 0C  AppShell, Sidebar, TopBar, MobileNav, AccountMenu, ShellLink, nav-items.ts, AuthLayout,
-│       │                                MarketingNav, MarketingFooter, Placeholder (all using <Logo/>); UnverifiedBanner (1)
+│       │                                MarketingNav, MarketingFooter, Placeholder (all using <Logo/>); ✅ 1 UnverifiedBanner,
+│       │                                loading skeletons, Log out in AccountMenu
 │       ├── features/            🔨 screen-specific pieces, one folder per domain:
-│       │   ├── auth/            1–3  SignupForm, LoginForm, GoogleButton, Turnstile, VerifyEmailStatus, ResetForms
+│       │   ├── auth/            ✅ 1 SignupForm, LoginForm, Turnstile, useUsernameAvailability, useRedirectWhenLoggedIn,
+│       │   │                        messages.ts (+ test-helpers.tsx for their tests); 2–3 GoogleButton, VerifyEmailStatus, ResetForms
 │       │   ├── posts/           ✅ 0B PostCard (props only); 4–5, 9  SourceLink, Composer(Modal), FeedList, PostDetail, useStatusPolling;
 │       │   │                        11C EmergencyChip, PinnedEmergencies; 11D PostStats
 │       │   ├── social/          6–7  FollowButton, UserRow, ProfileHeader, LikeButton, CommentList, CommentComposer;
@@ -160,7 +168,10 @@ rumor-zero/
 │       ├── lib/
 │       │   ├── api/             ✅ 0C  client.ts (fetch wrapper: base "/api", bearer token, single-flight 401 hook with one retry,
 │       │   │                            error normalisation), types.ts (API shapes from ARCHITECTURE §9), relay.ts (server-only relay logic)
-│       │   ├── auth/            ✅ 0C skeleton: token-store.ts (memory only), refresh-lock.ts (Web Locks API), AuthProvider.tsx; completed in 1
+│       │   ├── auth/            ✅ 0C token-store.ts (memory only), refresh-lock.ts (Web Locks API); ✅ 1 session.ts (framework-free
+│       │   │                            session: bootstrap, schedule, backoff, broadcasts), AuthProvider.tsx (React binding),
+│       │   │                            auth-api.ts, jwt.ts, session-hint.ts, next-path.ts (safeNextPath), route-guard.ts
+│       │   ├── turnstile.ts     ✅ 1  loads Cloudflare's Turnstile script (explicit render) once
 │       │   ├── brand-assets.json ✅ 0D  generated list of logo assets (read by Logo and manifest.ts); brand-guard.test.ts guards the rule
 │       │   └── cn.ts, format.ts, password-strength.ts, post-display.ts  ✅ 0B  className joiner, relative time / number formatting,
 │       │                                advisory password score, pure stripe + badge rules (ARCHITECTURE §4 table)

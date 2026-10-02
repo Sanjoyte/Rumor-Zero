@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 /**
  * Part 0C smoke test: the relay reaches Django, the layouts carry the logo, and the app shell
- * switches between rail, icon dock and bottom bar. Nobody is logged in until Part 1.
+ * switches between rail, icon dock and bottom bar, all logged out (auth.spec.ts logs in).
  */
 
 test("the relay forwards /api/health/ to Django", async ({ request }) => {
