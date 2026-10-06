@@ -6,22 +6,41 @@ read-only git output.
 
 ## Active work
 
-- **Part:** 1 (Auth core: sign up, log in, tokens, log out): **done locally on 2026-10-03**, not
-  committed yet. Parts 0A, 0B, 0D and 0C are done; 0C was closed in `d92f070`.
-- **Owner:** none (Claude stopped after Part 1; the user reviews, commits and pushes)
-- **Phase:** all plan steps 0–12 done; task.md shows Part 1 `[x] Done (2026-10-03)` in both places.
-  CI has not run on this code yet (only the user pushes).
-- **Approved plan:** [`docs/agents/plans/part-1-auth-core.md`](plans/part-1-auth-core.md)
-  (status line: implemented and validated 2026-10-03)
-- **Previous plan:** [`docs/agents/plans/part-0C-app-shell-relay-ci.md`](plans/part-0C-app-shell-relay-ci.md)
-  (done 2026-10-01)
-- **Last updated:** 2026-10-03 by Claude (Opus 5.5), Part 1 implemented, validated and documented
+- **Part:** none in progress. Parts 0A, 0B, 0D, 0C and **1 (auth core) are done**. Part 1 is
+  committed (`d9d1358`) and **CI is green** (user-reported 2026-10-06). **Next: Part 2** (email
+  verification & password reset), not started.
+- **Machine:** development moves from the Windows 11 PC to a **Linux PC (Ubuntu/Debian/Mint)** from
+  2026-10-06. A docs chore prepared that move (below); the user commits it.
+- **Owner:** none (Claude stopped after the chore; the user reviews, commits and pushes)
+- **Phase:** chore finished; its changes are **uncommitted** (see "Current workspace state").
+- **Approved plan (chore):**
+  [`docs/agents/plans/chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md)
+  (approved and executed 2026-10-06)
+- **Previous plans:** [`part-1-auth-core.md`](plans/part-1-auth-core.md) (done 2026-10-03),
+  [`part-0C-app-shell-relay-ci.md`](plans/part-0C-app-shell-relay-ci.md) (done 2026-10-01)
+- **Last updated:** 2026-10-06 by Claude (Sonnet 5.5), Linux machine-switch chore
 
 ## Completed checkpoints
 
-- 2026-10-03 (Claude, Opus 5.5): **Part 1 implemented** (uncommitted; see "Current workspace
-  state"). Started from HEAD `349dc96` (the plan + this file, committed by the user), whose
-  workspace matched this file's previous state.
+- 2026-10-06 (Claude, Sonnet 5.5): **Linux machine-switch chore** (docs and comments only; no code,
+  config, env or git change). Started from HEAD `d9d1358` (Part 1), a clean tree in sync with
+  `origin/main`; CI green (user-reported).
+  - **Dual docs, Linux first:** `docs/SETUP.md` (new "Part A (Linux)" with a clone-to-green-tests
+    quick start, troubleshooting, A1–A7 for Ubuntu/Debian/Mint, and "Moving to another machine"),
+    `docs/ENV_GUIDE.md` (Linux commands beside every PowerShell one, a one-command secret generator
+    that prints nothing, new §1.9), `docs/test-command.md` (a bash block above each of the 51 original
+    PowerShell blocks: 39 pairs plus 12 "same commands" blocks; the PowerShell blocks are unchanged),
+    `AGENTS.md` (Commands block now bash-first, two-machine bullet), header comments of both
+    `.env.example` files, and `.gitignore` (+`compose.override.yaml`, the local IPv6 workaround file
+    in SETUP; one line beyond the plan).
+  - **Left-behind audit:** everything git ignores is regenerable except `backend/.env` and
+    `frontend/.env.local`, which hold only local values and are recreated from the examples (ENV_GUIDE
+    §1.2 / §1.9). No CRLF in the index (28 tracked files have CRLF only in this Windows working copy),
+    no case-only duplicate paths, no shell scripts, every generated brand asset tracked.
+  - **Validation:** see "Validation of the Linux clean-room run (2026-10-06)".
+- 2026-10-03 (Claude, Opus 5.5): **Part 1 implemented** (committed by the user as `d9d1358`).
+  Started from HEAD `349dc96` (the plan + this file, committed by the user), whose workspace matched
+  this file's previous state.
   - **Backend** (`backend/apps/accounts/`): `middleware.py` (AuthApiMiddleware: allow-list, CSRF
     guard on every unsafe `/api/auth/` request, header stripping, Turnstile pre-check, refresh-cookie
     injection, secret stripping, JSON bodies, `no-store`), `tokens.py` (row lock + 60 s grace),
@@ -63,19 +82,18 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `349dc96` (Part 1 plan). Everything listed under the 2026-10-03 checkpoint is
-  **uncommitted**: 38 modified tracked files and 47 new files (`git diff --name-only`,
-  `git ls-files --others --exclude-standard`).
-- All changed files use LF, like the repository (`* text=auto eol=lf`); a CRLF slip from Python
-  edits was found and converted back.
+- HEAD is `d9d1358` (Part 1), in sync with `origin/main` at the start of the chore. **Uncommitted**
+  (`git status --short`): modified `.gitignore`, `AGENTS.md`, `backend/.env.example`,
+  `frontend/.env.example`, `docs/ENV_GUIDE.md`, `docs/SETUP.md`, `docs/test-command.md`,
+  `docs/agents/HANDOFF.md` (this file) and `docs/agents/MEMORY.md`; new
+  `docs/agents/plans/chore-linux-machine-switch.md`. Nothing else.
+- All index blobs use LF. `frontend/.env.example` (and 27 other tracked files) show CRLF in this
+  Windows working copy only; git normalises them, so `git diff` shows just the intended lines.
 - `git status --short design` prints nothing; no nested `frontend/AGENTS.md`/`CLAUDE.md`.
-- **Nothing left running.** The dev servers were stopped and their orphaned `next dev`/`workerd`
-  processes ended (MEMORY entry); ports 3000 and 8000 are free. The Docker containers (restarted by
-  the agent after Docker Desktop had stopped them) were stopped with `docker compose down`, which
-  keeps the data.
-- Scratchpad files (screenshots, Playwright scripts) are outside the repo. The `%TEMP%\rz-*`
-  helper files from the manual checks were deleted; older `%TEMP%\rz-edge-*`, `rz-dev*.log` and
-  similar files predate this session and were left alone.
+- **Nothing left running.** The throwaway clean-room containers (`rz-cr-*`) were removed; the local
+  `docker compose` containers were already down. Docker Desktop still holds the images
+  `ubuntu:24.04` (pulled for the check), `postgres:18`, `redis:8-alpine`, `node:24-bookworm-slim`.
+- Not copied by git, to recreate on the new machine: see SETUP "Moving to another machine".
 
 ## Validation of Part 1 (2026-10-03)
 
@@ -110,15 +128,60 @@ read-only git output.
     the always-fail Turnstile secret → the message under the widget and a reset; the rate-limit
     banner; `/settings` → `/login?next=%2Fsettings`; logout in one tab logs out the other; the
     loading placeholder; Log out at the end of the phone sheet.
-- **Not run:** CI on GitHub (the user pushes). New risk there: the E2E job's browser and Django must
-  reach `challenges.cloudflare.com` for the test-key sign-up.
+- **CI on GitHub:** green for Part 1 (user-reported 2026-10-06), including the E2E job's Turnstile
+  test-key sign-up.
+
+## Validation of the Linux clean-room run (2026-10-06)
+
+Goal: prove that a fresh Linux checkout plus the guides works. Method: pack
+`git ls-files -co --exclude-standard` (what `git pull` brings, plus the uncommitted doc edits; no
+real env file) into a tar, extract it into a fresh **Ubuntu 24.04 container** that shares its network
+namespace with throwaway `postgres:18` and `redis:8-alpine` containers (so `localhost:5432/6379` is as
+in the guide), then run the guides' Linux commands. Docker Desktop's Linux engine; all exit codes 0.
+
+- **SETUP Part A (Linux):** A1 `apt install git`; A2 `apt-cache policy python3.13` (none on Ubuntu
+  24.04), deadsnakes PPA, `python3.13` = **3.13.16**, `venv` works; A3 nvm **v0.40.8** →
+  `nvm install 24` = **Node v24.21.0**, npm 11.19.0; A7 `jq`, `npx playwright install --with-deps
+  chromium` (Chrome Headless Shell 153); A4: the Docker apt-repository block extracted verbatim from
+  SETUP resolved (`docker-ce` 5:29.8.2, `docker-compose-plugin` 5.6.0 candidates); not installed.
+- **ENV_GUIDE §1.2 one-command generator** (extracted verbatim from the doc): writes four 67-character
+  values, `PROXY_SHARED_SECRET` identical in both files, `JWT_SIGNING_KEY` ≠ `DJANGO_SECRET_KEY`;
+  nothing printed.
+- **Backend:** `pip install -r requirements-dev.txt`, `migrate`, `createsuperuser --noinput`,
+  `python -m pytest` → **440 passed**; `ruff check .` → "All checks passed!"; `ruff format --check .`
+  → "66 files already formatted"; `makemigrations --check --dry-run` → "No changes detected";
+  `manage.py check` → no issues.
+- **Frontend:** `npm ci`; `lint`, `typecheck`, `lint:tokens`, `format:check` clean; `npm test` →
+  **562 passed**; `npm run build` OK (route list as before, `/api/[...path]` `ƒ`).
+- **E2E:** `npm run test:e2e` → **11 passed** (Django + `next dev` started by Playwright).
+- **docs/test-command.md, Linux blocks run verbatim** (extracted by script) against live Django +
+  `next dev`: Part 0A steps 3 and 4, Part 1 steps 1, 3, 4, 5 (including the 61 s refresh grace, the
+  CSRF 403s, logout, 11 relay logins with the 11th `too_many_login_attempts`, and the final direct
+  request from `--interface 127.0.0.2` → `email_password_mismatch`); Part 0B step 3; Part 0D steps 1, 3,
+  4, 6, 7, 10, 11. Output matched the shared expected text each time. `npm run brand:build` on Linux
+  reproduced every committed brand asset byte for byte (`git status` clean).
+- **Syntax:** `bash -n` passes on all 51 bash blocks of `test-command.md`, all 14 of `SETUP.md`, all
+  5 of `ENV_GUIDE.md` and the one in `AGENTS.md`. A script confirmed all 51 original PowerShell
+  blocks survive unchanged (39 as the Windows twin, 12 as "same commands" bash blocks) and all 15
+  expected-output blocks are identical.
+- **Not provable here (listed in the guides as "if X fails, do Y"):** installing Docker Engine and the
+  `docker` group on the real PC, `docker compose up -d` itself (sibling containers stood in for it;
+  only the override file's syntax was checked with `docker compose config`), IPv6 `[::1]` publishing,
+  GitHub SSH auth, Linux Mint and Debian specifics (Playwright, Python 3.13 packaging), and Windows
+  Docker Desktop behaviour is unchanged.
+- **FYI, not caused by this chore:** `npm audit` reports 5 high-severity advisories, all in one
+  **dev-only** chain (`braces` → `micromatch` → `fast-glob` → `@next/eslint-plugin-next` →
+  `eslint-config-next`); production dependencies: 0. The "449 packages / 0 vulnerabilities" text in
+  `test-command.md` Part 0B/0D step 1 dates from Part 0B (the tree is 737 packages now).
 
 ## Next exact action
 
-1. **User:** review the diff, commit Part 1 and push. Report the CI result (MEMORY: the agent can't
-   read it). If the E2E job fails at the Turnstile widget or siteverify, that is one of the plan's
-   stop conditions: reproduce it from the "playwright-report" artifact before changing anything.
-2. Then start a fresh session for **Part 2** (email verification & password reset): plan it first
+1. **User (this PC):** review `git diff`, commit the chore (docs, `.gitignore`, `.env.example`
+   comments, this file, MEMORY, the plan) and push.
+2. **User (Linux PC):** install the tools (SETUP "Part A (Linux)" A1–A4, A7), `git clone`, then follow
+   the Quick start there; ENV_GUIDE §1.1–1.2 for the env files. All checks should end as the numbers
+   above (440 / 562 / 11). A failure there is new information: record it here and in MEMORY.
+3. Then start a fresh session for **Part 2** (email verification & password reset): plan it first
    (`Plan Part 2 from task.md. Do not implement yet.`). Read "Follow-ups noted during Part 1" below.
 
 ## Blockers or user decisions
@@ -183,6 +246,10 @@ read-only git output.
     itself (upstream #1339 / PR #1353). Then re-run the OpenNext build: in Docker first, then CI.
   - When bumping `wrangler`, keep `esbuild` on wrangler's own pin, so one copy is shared and it stays
     inside vite's peer range.
+  - `npm audit` (2026-10-06): 5 high advisories in the dev-only `braces` → `micromatch` →
+    `fast-glob` → `@next/eslint-plugin-next` → `eslint-config-next` chain; production dependencies
+    clean. Let Dependabot (Part 16) or a deliberate `eslint-config-next` bump resolve it; don't run
+    `npm audit fix --force` blindly.
   - `npm ci` on Linux warns that `eslint@9.39.5` is deprecated. Moving to a supported ESLint major is
     a separate, deliberate upgrade: check the flat config and `npm run lint`.
   - Any django-allauth upgrade: re-check the internals Part 1 depends on (MEMORY entry, 2026-10-03).

@@ -32,6 +32,9 @@ backend/media/
 backend/tmp/
 *.sqlite3
 
+# --- Local-only Docker Compose override (SETUP: IPv6 workaround on Linux) ---
+compose.override.yaml
+
 # --- Node / Next.js / Cloudflare (frontend/) ---
 node_modules/
 .next/

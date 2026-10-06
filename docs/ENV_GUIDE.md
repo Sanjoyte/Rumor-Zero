@@ -6,6 +6,8 @@ Order:
 
 Every variable in `backend/.env.example` and `frontend/.env.example` appears below. UI paths were checked on 2026-09-29; dashboards change, so if a button has moved, search the page for the setting's name.
 
+Commands come in two versions: **Linux (bash)** first, **Windows (PowerShell)** second. Use the one for your machine (SETUP.md Part A). Switching computers: see §1.9.
+
 > **Ground rules**
 > - **Never paste a secret into a chat with Claude Code, Codex or anyone else.** Paste secrets only
 >   into your local `.env` files or a provider dashboard. Either agent may read or edit
@@ -20,24 +22,68 @@ Every variable in `backend/.env.example` and `frontend/.env.example` appears bel
 
 ### 1.1 Create your local env files
 
-From the repo root in PowerShell:
+From the repo root.
+
+**Linux (bash):**
+
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env.local
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 Copy-Item backend\.env.example backend\.env
 Copy-Item frontend\.env.example frontend\.env.local
 ```
 
-Open both in VS Code (`code backend\.env frontend\.env.local`) and work through 1.2–1.8.
+Open both in VS Code (`code backend/.env frontend/.env.local`) and work through 1.2–1.8.
 
 ### 1.2 Generate local secrets: `DJANGO_SECRET_KEY`, `JWT_SIGNING_KEY`, `PROXY_SHARED_SECRET`, `INTERNAL_CRON_SECRET`
 
-These are just long random strings. Run this once per secret (Python must be installed, SETUP.md A2):
+These are just long random strings (SETUP.md A2 installs Python).
+
+**Linux: one command (recommended).** Run it from the repo root after §1.1. It writes fresh values into the
+two files and **prints none of them**; `PROXY_SHARED_SECRET` gets the same value in both files. It only
+changes those four `KEY=` lines and stops with an error if one is missing:
+
+```bash
+python3 - <<'PY'
+import pathlib, re, secrets
+
+def put(path, values):
+    p = pathlib.Path(path)
+    text = p.read_text()
+    for key, value in values.items():
+        text, n = re.subn(rf"^{key}=.*$", f"{key}={value}", text, flags=re.M)
+        if n != 1:
+            raise SystemExit(f"{path}: expected exactly one {key}= line")
+    p.write_text(text)
+
+proxy = secrets.token_urlsafe(50)
+put("backend/.env", {
+    "DJANGO_SECRET_KEY": secrets.token_urlsafe(50),
+    "JWT_SIGNING_KEY": secrets.token_urlsafe(50),
+    "INTERNAL_CRON_SECRET": secrets.token_urlsafe(50),
+    "PROXY_SHARED_SECRET": proxy,
+})
+put("frontend/.env.local", {"PROXY_SHARED_SECRET": proxy})
+print("Secrets written to backend/.env and frontend/.env.local (not shown).")
+PY
+```
+
+**Either system, by hand.** Run this once per secret and copy each value into the file as `KEY=value`:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(50))"
+```
 
 ```powershell
 py -3.13 -c "import secrets; print(secrets.token_urlsafe(50))"
 ```
 
-Each run prints a new value of about 67 URL-safe characters. Copy each one into the file as `KEY=value`.
+Each run prints a new value of about 67 URL-safe characters.
 
 | Variable | Where it goes | Note |
 |---|---|---|
@@ -82,7 +128,8 @@ REDIS_URL=redis://localhost:6379/0
 
 Start them with `docker compose up -d` from the repo root (after Part 0A). Check with `docker compose ps`: both should show `running (healthy)`.
 
-- **No Docker?** Install PostgreSQL 18 natively (SETUP.md A4). Then, in *SQL Shell (psql)* as `postgres`:
+- **No Docker?** Install PostgreSQL 18 natively (SETUP.md A4). Then open a SQL prompt as `postgres`
+  (Linux: `sudo -u postgres psql`; Windows: *SQL Shell (psql)*) and run:
   ```sql
   CREATE ROLE rumor_zero LOGIN PASSWORD 'rumor_zero' CREATEDB;
   CREATE DATABASE rumor_zero OWNER rumor_zero;
@@ -104,10 +151,18 @@ Source: <https://developers.cloudflare.com/turnstile/troubleshooting/testing/>
 
 Since Part 1 both sides call Cloudflare even with test keys: the browser loads the widget from
 `challenges.cloudflare.com`, and Django checks the token with siteverify, so sign-up needs internet.
-To see the server-side failure, run Django with the always-fail **secret** for one session
-(`$env:TURNSTILE_SECRET_KEY = "2x0000000000000000000000000000000AA"` before `runserver`; the
-process env wins over `.env`): sign-up then answers "The bot check didn't pass". The always-fail
-**site key** never produces a token, so "Create account" simply stays disabled.
+To see the server-side failure, run Django with the always-fail **secret** for one session (the process env
+wins over `.env`): sign-up then answers "The bot check didn't pass". The always-fail **site key** never
+produces a token, so "Create account" simply stays disabled.
+
+```bash
+TURNSTILE_SECRET_KEY=2x0000000000000000000000000000000AA python manage.py runserver
+```
+
+```powershell
+$env:TURNSTILE_SECRET_KEY = "2x0000000000000000000000000000000AA"   # then: python manage.py runserver
+Remove-Item Env:TURNSTILE_SECRET_KEY                                 # afterwards, in that window
+```
 
 ### 1.6 Google sign-in: `GOOGLE_OAUTH_CLIENT_ID` + `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (needed from Part 3)
 
@@ -164,6 +219,21 @@ Free. No billing account is needed; if Google offers to set one up, choose skip 
 
 No frontend variable was added. The logo, profile photos, reposts, bookmarks, credibility score and charts need no env values and no new accounts.
 
+### 1.9 Using the env files on another machine
+
+`backend/.env` and `frontend/.env.local` are git-ignored, so `git clone`/`git pull` never brings them. Before deployment (Parts 17–18) they hold **only local values**: generated random strings, Cloudflare's public Turnstile **test** keys and the example defaults. Nothing in them is worth protecting beyond the usual care, so the clean route is **not to copy them**:
+
+1. Create both files from the examples (§1.1).
+2. Generate fresh secrets (§1.2; Linux has a one-command version that prints nothing).
+3. Start the containers and run `python manage.py migrate` and `python manage.py createsuperuser`. The new machine has its own empty database, so changed secrets invalidate nothing.
+
+Copy a file across only if it holds something you added that the examples don't have. From Part 3 that is the Google client ID (public by design, and also easy to re-copy from the Google console, §1.6). If you do copy:
+
+- Use a private channel (USB stick, `scp`, a password manager). Never git, chat or email.
+- Remove Windows line endings after copying to Linux, or a value can end in an invisible carriage return: `sed -i 's/\r$//' backend/.env frontend/.env.local`.
+- Re-check the pairs: `PROXY_SHARED_SECRET` identical in both files; `JWT_SIGNING_KEY` at least 32 characters and different from `DJANGO_SECRET_KEY`.
+- Once deployment values exist (Part 17), keep them in the provider dashboards and your password manager, **never** in these local files.
+
 ---
 
 ## Part 2: Deployment-only values (Parts 17–18)
@@ -185,14 +255,14 @@ Write down your two final URLs. Below they're called **`<FRONTEND>`** (e.g. `htt
 
 ### 2.1 Generate production secrets (new values, never the local ones)
 
-Run `py -3.13 -c "import secrets; print(secrets.token_urlsafe(50))"` four times. Keep the results in a password manager until you've entered them in the dashboards:
+Run the generator four times (Linux: `python3 -c "import secrets; print(secrets.token_urlsafe(50))"`; Windows: `py -3.13 -c "import secrets; print(secrets.token_urlsafe(50))"`). Keep the results in a password manager until you've entered them in the dashboards:
 
 - `DJANGO_SECRET_KEY` (Render)
 - `JWT_SIGNING_KEY` (Render)
 - `PROXY_SHARED_SECRET` (Render **and** Cloudflare Worker secret, identical)
 - `INTERNAL_CRON_SECRET` (Render, GitHub Actions secret, cron-job.org header)
 
-Also pick `ADMIN_URL_PATH`: run `py -3.13 -c "import secrets; print('mod-' + secrets.token_hex(6) + '/')"` (for example `mod-3f9a1c2b7d4e/`). The moderation panel will live at `<BACKEND>/<that path>`.
+Also pick `ADMIN_URL_PATH`: run `python3 -c "import secrets; print('mod-' + secrets.token_hex(6) + '/')"` (Windows: `py -3.13 -c "..."` with the same text) (for example `mod-3f9a1c2b7d4e/`). The moderation panel will live at `<BACKEND>/<that path>`.
 
 ### 2.2 Neon → `DATABASE_URL`
 
@@ -316,7 +386,18 @@ Also pick `ADMIN_URL_PATH`: run `py -3.13 -c "import secrets; print('mod-' + sec
    | `WEB_CONCURRENCY` | `2` (read by gunicorn; matches `--workers`) |
 
 5. **Settings → Build & Deploy → Auto-Deploy:** **After CI Checks Pass**. This needs the CI workflow from Part 0C; Render won't deploy if zero checks run.
-6. **Create the first admin (superuser).** Render's free tier has no shell, so run it **from your PC against Neon**, in a fresh PowerShell window inside `backend/` with the venv active:
+6. **Create the first admin (superuser).** Render's free tier has no shell, so run it **from your PC against Neon**, in a fresh terminal window inside `backend/` with the venv active.
+
+   **Linux (bash):**
+
+   ```bash
+   read -rsp "Paste the Neon DATABASE_URL (not shown, never in chat): " DATABASE_URL; echo
+   export DATABASE_URL
+   python manage.py createsuperuser
+   unset DATABASE_URL
+   ```
+
+   **Windows (PowerShell):**
 
    ```powershell
    $env:DATABASE_URL = Read-Host "Paste the Neon DATABASE_URL (not shown in chat)"

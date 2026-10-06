@@ -1,15 +1,28 @@
 # Test commands by part
 
 Hands-on commands for trying each finished part yourself. Every part gets its own section, in
-build order. Each command says where to run it: **Terminal** (PowerShell, or the VS Code terminal)
-or **Browser**.
+build order. Each command says where to run it: **Terminal** (bash on Linux, PowerShell on Windows,
+or the VS Code terminal) or **Browser**.
+
+Every terminal command comes in two versions, **Linux (bash)** first and **Windows (PowerShell)**
+second. Use the one for your machine. A block marked **Linux and Windows (same commands)** works
+unchanged on both. The explanations and the expected output are shared.
 
 Conventions:
-- Repo root is `C:\Users\Nafis\Downloads\Rumor-Zero`. Backend commands run in `backend\` with the
-  venv active (`.\.venv\Scripts\Activate.ps1`; the prompt shows `(.venv)`).
+- **Linux:** the blocks assume a new terminal in the repo root (wherever you cloned it) and use paths
+  relative to it. Backend commands run in `backend/` with the venv active
+  (`source .venv/bin/activate`; the prompt shows `(.venv)`). The JSON commands need `jq`
+  (`sudo apt install jq`, SETUP.md A7). SETUP.md "Quick start" runs the same automated checks in one go.
+- **Windows:** the repo root is `C:\Users\Nafis\Downloads\Rumor-Zero`. Backend commands run in
+  `backend\` with the venv active (`.\.venv\Scripts\Activate.ps1`; the prompt shows `(.venv)`).
 - A server started with `runserver` keeps its window busy. Run everything else in a second window.
 - Real env values are never pasted or printed. Commands that need a secret read it from your own
-  `backend\.env` without displaying it.
+  `backend/.env` (`backend\.env` on Windows) without displaying it.
+- The outputs shown were recorded on Windows. Where Linux prints something different (path
+  separators, which address `localhost` resolves to), a note under the block says so.
+- Counts in the expected output (tests, packages, vulnerabilities) were recorded when each part was
+  finished. Later parts add tests and packages, and `npm audit` changes as advisories appear, so
+  they drift. The current totals are in `docs/agents/HANDOFF.md`.
 
 ---
 
@@ -17,11 +30,33 @@ Conventions:
 
 ### 1. Terminal: start the services
 
+**Linux (bash):**
+
+```bash
+# from the repo root
+docker compose up -d
+docker compose ps                     # postgres and redis both say (healthy)
+```
+
+**Windows (PowerShell):**
+
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero
 docker compose up -d
 docker compose ps                     # postgres and redis both say (healthy)
 ```
+
+**Linux (bash):**
+
+```bash
+cd backend
+source .venv/bin/activate
+python manage.py migrate              # "No migrations to apply" on a database that is already migrated
+python manage.py createsuperuser      # prompts for Email, Username, Password
+python manage.py runserver            # leave this window running
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd backend
@@ -40,7 +75,7 @@ python manage.py runserver            # leave this window running
 | URL | Expect |
 |---|---|
 | http://localhost:8000/api/health/ | `{"status":"ok"}` |
-| http://localhost:8000/admin/ | Login page. Sign in with your email and password. If it 404s, `ADMIN_URL_PATH` in `backend\.env` isn't `admin/`; use that path. |
+| http://localhost:8000/admin/ | Login page. Sign in with your email and password. If it 404s, `ADMIN_URL_PATH` in `backend/.env` (`backend\.env` on Windows) isn't `admin/`; use that path. |
 | http://localhost:8000/admin/accounts/user/ | Your user, plus an "Add user" button |
 | http://localhost:8000/admin/core/platformsettings/ | One row with 11 values; no add or delete |
 
@@ -53,6 +88,17 @@ Role check in the admin: add a second user, open it and set **Role = Moderator**
 ### 3. Terminal (second window): deep health
 
 Needs a request header, so it can't be done in the browser.
+
+**Linux (bash):**
+
+```bash
+cd backend                            # from the repo root
+curl -i http://localhost:8000/api/health/deep/
+secret=$(grep -m1 '^INTERNAL_CRON_SECRET=' .env | cut -d= -f2- | tr -d '\r')
+curl -i -H "X-RZ-Cron-Secret: $secret" http://localhost:8000/api/health/deep/
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\backend
@@ -67,9 +113,11 @@ curl.exe -i -H "X-RZ-Cron-Secret: $secret" http://localhost:8000/api/health/deep
 
 ### 4. Terminal: database rules
 
-Venv active, in `backend\`.
+Venv active, in `backend/` (`backend\` on Windows).
 
-```powershell
+**Linux and Windows (same commands):**
+
+```bash
 python manage.py shell -c "from apps.core.services import get_platform_settings as g; s=g(); print(s.report_threshold, s.emergency_min_reputation)"
 python manage.py shell -c "from apps.accounts.models import User; u=User.objects.first(); print(u.reputation_score); User.objects.filter(pk=u.pk).update(reputation_score=150)"
 ```
@@ -82,9 +130,11 @@ python manage.py shell -c "from apps.accounts.models import User; u=User.objects
 
 ### 5. Terminal: automated checks
 
-Venv active, in `backend\`. Needs the containers from step 1.
+Venv active, in `backend/` (`backend\` on Windows). Needs the containers from step 1.
 
-```powershell
+**Linux and Windows (same commands):**
+
+```bash
 python -m pytest                                    # 200 passed
 python -m pytest --cov=apps --cov=rumor_zero        # same tests plus coverage (about 93%)
 ruff check . ; ruff format --check .                # All checks passed! / files already formatted
@@ -102,10 +152,21 @@ python manage.py check                              # System check identified no
 
 ## Part 0B: Frontend foundation & design system
 
-Everything here runs in `frontend\`. No backend, Docker container or secret is needed: these pages
-make no API calls. (Next loads your `frontend\.env.local` by itself; you never open or print it.)
+Everything here runs in `frontend/` (`frontend\` on Windows). No backend, Docker container or
+secret is needed: these pages make no API calls. (Next loads your `frontend/.env.local`
+(`frontend\.env.local` on Windows) by itself; you never open or print it.)
 
 ### 1. Terminal: install and check the tools
+
+**Linux (bash):**
+
+```bash
+cd frontend                           # from the repo root
+node -v                               # v24.x.x (the project pins Node 24)
+npm install                           # "up to date, audited 449 packages" and "found 0 vulnerabilities"
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
@@ -121,7 +182,9 @@ npm install                           # "up to date, audited 449 packages" and "
 
 Same folder. Nothing else needs to be running.
 
-```powershell
+**Linux and Windows (same commands):**
+
+```bash
 npm run lint                          # only the npm header, no findings
 npm run lint:tokens                   # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
 npm run typecheck                     # only the npm header, no type errors
@@ -132,6 +195,17 @@ npm test                              # Test Files  32 passed (32) / Tests  251 
 ### 3. Terminal: try to break the design-token guard
 
 `lint:tokens` rejects anything outside the Stitch design system. Add a file that breaks two rules:
+
+**Linux (bash):**
+
+```bash
+printf '%s\n' 'export const x = "bg-blue-500 rounded-md";' > src/tmp-token-check.tsx
+npm run lint:tokens
+rm src/tmp-token-check.tsx
+npm run lint:tokens
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 Set-Content src\tmp-token-check.tsx 'export const x = "bg-blue-500 rounded-md";'
@@ -148,13 +222,16 @@ npm run lint:tokens
 
 ### 4. Terminal: start the dev server
 
-```powershell
+**Linux and Windows (same commands):**
+
+```bash
 npm run dev                           # leave this window running
 ```
 
 - Prints `▲ Next.js 16.3.8 (Turbopack)`, `- Local:         http://localhost:3000`,
   `- Environments: .env.local` and `✓ Ready in` a few hundred milliseconds.
-- It must not create `frontend\AGENTS.md` or `frontend\CLAUDE.md` (see step 8).
+- It must not create `frontend/AGENTS.md` or `frontend/CLAUDE.md` (`frontend\AGENTS.md` and
+  `frontend\CLAUDE.md` on Windows; see step 8).
 
 ### 5. Browser: while `npm run dev` is running
 
@@ -196,7 +273,9 @@ The post cards under "Stitch b1: PostCard" (eight of them, in this order):
 - Removed: a small box "Removed by a moderator", with no text, stripe or chips.
 
 The word "debunked" appears nowhere. For a side-by-side look, open
-`design\stitch\stitch_website_sitemap_grid_builder\b1_home_feed\code.html` next to the gallery.
+`design/stitch/stitch_website_sitemap_grid_builder/b1_home_feed/code.html`
+(`design\stitch\stitch_website_sitemap_grid_builder\b1_home_feed\code.html` on Windows) next to
+the gallery.
 Stitch also shows an affiliation line, an evidence drawer and an action bar (later parts) and
 strikes FALSE claims through (deliberately not copied).
 
@@ -216,9 +295,11 @@ Still on `/dev/ui`, scroll to "Stitch b2 and d1: modals".
 
 ### 7. Terminal: the production build hides the gallery
 
-Stop the dev server first (`Ctrl+C` in its window), then in `frontend\`:
+Stop the dev server first (`Ctrl+C` in its window), then in `frontend/` (`frontend\` on Windows):
 
-```powershell
+**Linux and Windows (same commands):**
+
+```bash
 npm run build
 npm start                             # leave this window running
 ```
@@ -229,6 +310,15 @@ npm start                             # leave this window running
 - Start: `▲ Next.js 16.3.8`, `- Local:         http://localhost:3000`, `✓ Ready in` about 100 ms.
 
 In a second window:
+
+**Linux (bash):**
+
+```bash
+curl -s -o /dev/null -w '/        %{http_code}\n' http://localhost:3000/
+curl -s -o /dev/null -w '/dev/ui  %{http_code}\n' http://localhost:3000/dev/ui
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 curl.exe -s -o NUL -w "/        %{http_code}`n" http://localhost:3000/
@@ -241,6 +331,16 @@ curl.exe -s -o NUL -w "/dev/ui  %{http_code}`n" http://localhost:3000/dev/ui
 
 ### 8. Terminal: repository checks
 
+**Linux (bash):**
+
+```bash
+cd "$(git rev-parse --show-toplevel)"              # the repo root, from any folder inside it
+git check-ignore frontend/.env.example             # prints nothing: the example env file is tracked
+for f in frontend/AGENTS.md frontend/CLAUDE.md; do [ -e "$f" ] && echo True || echo False; done   # False, then False
+```
+
+**Windows (PowerShell):**
+
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero
 git check-ignore frontend\.env.example             # prints nothing: the example env file is tracked
@@ -251,18 +351,30 @@ Test-Path frontend\AGENTS.md, frontend\CLAUDE.md   # False, then False
 
 - Stop the server: `Ctrl+C` in its window.
 - Nothing else is running for this part: no containers, no backend.
-- Optional: `Remove-Item -Recurse -Force frontend\.next` deletes the build output. It is recreated
-  by the next `npm run dev` or `npm run build`.
+- Optional: `rm -rf frontend/.next` (Windows: `Remove-Item -Recurse -Force frontend\.next`)
+  deletes the build output. It is recreated by the next `npm run dev` or `npm run build`.
 
 ---
 
 ## Part 0D: Brand assets & Logo component
 
-Everything here runs in `frontend\` unless a step says otherwise. No backend, Docker container or
-secret is needed. (Next loads your `frontend\.env.local` by itself; you never open or print it.)
-The master logo is `design\logo.svg`. It is read-only: nothing below changes it.
+Everything here runs in `frontend/` (`frontend\` on Windows) unless a step says otherwise. No backend, Docker container or
+secret is needed. (Next loads your `frontend/.env.local` by itself, `frontend\.env.local` on Windows; you never open or print it.)
+The master logo is `design/logo.svg` (`design\logo.svg` on Windows). It is read-only: nothing below changes it.
+Every command comes in a Linux (bash) and a Windows (PowerShell) version; use the one for your system.
+Blocks marked "same commands" work in both.
 
 ### 1. Terminal: the tools
+
+**Linux (bash):**
+
+```bash
+cd frontend                           # from the repo root of your clone
+npm install                           # "up to date, audited 449 packages" and "found 0 vulnerabilities"
+npm ls sharp --depth=0                # `-- sharp@0.35.5
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
@@ -275,16 +387,18 @@ npm ls sharp --depth=0                # `-- sharp@0.35.5
 
 ### 2. Terminal: build every logo asset
 
-```powershell
+**Linux and Windows (same commands):**
+
+```bash
 npm run brand:build
 ```
 
-- Prints `brand:build read design\logo.svg and wrote 16 files:` and a list: `logo.svg`, `mark.svg`,
+- Prints `brand:build read design/logo.svg and wrote 16 files:` (`design\logo.svg` on Windows) and a list: `logo.svg`, `mark.svg`,
   `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `email-logo.png` and
   `google-oauth-logo.png` under `frontend/public/brand/`; `icon.svg`, `favicon.ico`, `apple-icon.png`,
   `opengraph-image.png`, `twitter-image.png` and the two `.alt.txt` files under `frontend/src/app/`;
   `frontend/src/lib/brand-assets.json`; and `backend/apps/core/static/core/brand/logo-admin.png`.
-- Then the contrast table, which must read exactly like the one in `docs\ARCHITECTURE.md` section 14:
+- Then the contrast table, which must read exactly like the one in `docs/ARCHITECTURE.md` (`docs\ARCHITECTURE.md` on Windows) section 14:
 
 ```text
 Contrast on                       grey letters  cyan "0"
@@ -299,6 +413,22 @@ on-surface #131b2e                4.97 : 1      7.09 : 1
 
 ### 3. Terminal: nothing under `design\` changes, and a second run changes nothing
 
+**Linux (bash):**
+
+```bash
+paths=(public/brand/* src/app/favicon.ico src/app/icon.svg src/app/apple-icon.png src/app/opengraph-image.png src/app/twitter-image.png src/lib/brand-assets.json ../design/logo.svg ../backend/apps/core/static/core/brand/logo-admin.png)
+h1=$(sha256sum "${paths[@]}")
+printf '%s\n' "$h1" | wc -l           # 15
+npm run brand:build > /dev/null
+h2=$(sha256sum "${paths[@]}")
+printf '%s\n' "$h2" | grep -vxFf <(printf '%s\n' "$h1") | wc -l    # 0
+cd ..
+git status --short design             # prints nothing
+cd frontend
+```
+
+**Windows (PowerShell):**
+
 ```powershell
 $paths = @('public\brand\*', 'src\app\favicon.ico', 'src\app\icon.svg', 'src\app\apple-icon.png', 'src\app\opengraph-image.png', 'src\app\twitter-image.png', 'src\lib\brand-assets.json', '..\design\logo.svg', '..\backend\apps\core\static\core\brand\logo-admin.png')
 $h1 = Get-FileHash $paths | Select-Object Path, Hash
@@ -312,13 +442,24 @@ cd frontend
 ```
 
 - `15` files hashed, and `0` differences: building again gives the same bytes, including
-  `design\logo.svg`.
+  `design/logo.svg` (`design\logo.svg` on Windows).
 - `git status --short design` prints nothing: the master was only read.
 
 ### 4. Terminal: the build refuses an unsafe logo
 
 The script takes `--master <file>` so you can try another SVG. Each bad file below is a copy of the
-real logo with one thing added, kept in your temp folder.
+real logo with one thing added, kept in your temp folder (`/tmp/rz-bad-logo.svg` on Linux).
+
+**Linux (bash):**
+
+```bash
+bad=/tmp/rz-bad-logo.svg
+sed -E 's|<defs>|<script>alert(1)</script><text>x</text><defs>|g' ../design/logo.svg > "$bad"
+npm run brand:build -- --master "$bad"
+echo $?
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 $bad = Join-Path $env:TEMP "rz-bad-logo.svg"
@@ -328,7 +469,17 @@ $LASTEXITCODE
 ```
 
 - Prints `brand:build failed: rz-bad-logo.svg failed the safety check, so nothing was built:` with
-  `- <script> element (line 3)` and `- <text> element (line 3)`. `$LASTEXITCODE` is `1`.
+  `- <script> element (line 3)` and `- <text> element (line 3)`. The exit code (`echo $?` on Linux,
+  `$LASTEXITCODE` on Windows) is `1`.
+
+**Linux (bash):**
+
+```bash
+sed -E 's|<defs>|<use href="https://evil.example/x.svg#a"/><defs>|g' ../design/logo.svg > "$bad"
+npm run brand:build -- --master "$bad"
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 (Get-Content ..\design\logo.svg -Raw) -replace '<defs>', '<use href="https://evil.example/x.svg#a"/><defs>' | Set-Content $bad
@@ -337,6 +488,16 @@ npm run brand:build -- --master $bad
 
 - Fails with `- external href="https://evil.example/x.svg#a" on <use> (line 3)`.
 
+**Linux (bash):**
+
+```bash
+sed -E 's|viewBox="0 0 1000 1000"||g' ../design/logo.svg > "$bad"
+npm run brand:build -- --master "$bad"
+rm "$bad"
+```
+
+**Windows (PowerShell):**
+
 ```powershell
 (Get-Content ..\design\logo.svg -Raw) -replace 'viewBox="0 0 1000 1000"', '' | Set-Content $bad
 npm run brand:build -- --master $bad
@@ -344,14 +505,16 @@ Remove-Item $bad
 ```
 
 - Fails with `- the <svg> root has no viewBox`.
-- In all three, no asset is written and `design\logo.svg` is untouched. Running plain
+- In all three, no asset is written and `design/logo.svg` (`design\logo.svg` on Windows) is untouched. Running plain
   `npm run brand:build` again afterwards still works.
 
 ### 5. Terminal: automated checks
 
 Same folder. Nothing else needs to be running.
 
-```powershell
+**Linux and Windows (same commands):**
+
+```bash
 npm run lint                          # only the npm header, no findings
 npm run lint:tokens                   # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
 npm run typecheck                     # only the npm header, no type errors
@@ -360,13 +523,25 @@ npm test                              # Test Files  40 passed (40) / Tests  329 
 ```
 
 - The new tests are the SVG safety check, the ICO writer, the contrast table (compared with
-  `docs\ARCHITECTURE.md`), the PNG sizes, a full build into a scratch folder, `Logo`, `manifest.ts` and
+  `docs/ARCHITECTURE.md`, `docs\ARCHITECTURE.md` on Windows), the PNG sizes, a full build into a scratch folder, `Logo`, `manifest.ts` and
   the brand guard.
 
 ### 6. Terminal: try to break the brand guard
 
 Only `Logo.tsx`, `brand-assets.json` and `manifest.ts` may know where the logo files are, and nobody
 may re-create the old text wordmark. Add two files that break the rules:
+
+**Linux (bash):**
+
+```bash
+printf '%s\n' 'export const X = () => <span className="font-headline-sm">Rumor Zero</span>;' > src/tmp-wordmark.tsx
+printf '%s\n' 'export const src = "/brand/logo.svg";' > src/tmp-logo-ref.ts
+npx vitest run src/lib/brand-guard.test.ts
+rm src/tmp-wordmark.tsx src/tmp-logo-ref.ts
+npx vitest run src/lib/brand-guard.test.ts
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 Set-Content src\tmp-wordmark.tsx 'export const X = () => <span className="font-headline-sm">Rumor Zero</span>;'
@@ -381,6 +556,16 @@ npx vitest run src/lib/brand-guard.test.ts
 - Second run (files removed): `Tests  6 passed (6)`. Nothing is left behind.
 
 ### 7. Terminal: the production build carries the icon tags
+
+**Linux (bash):**
+
+```bash
+npm run build
+grep -oE '<link rel="(icon|apple-touch-icon|manifest)"[^>]*>' .next/server/app/index.html
+grep -oE '<meta (property|name)="(og:image|twitter:image|twitter:card|og:site_name)"[^>]*>' .next/server/app/index.html
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 npm run build
@@ -408,11 +593,26 @@ $html = Get-Content .next\server\app\index.html -Raw
 
 ### 8. Terminal: start the dev server and fetch every asset
 
-```powershell
+**Linux and Windows (same commands):**
+
+```bash
 npm run dev                           # leave this window running
 ```
 
 Second window:
+
+**Linux (bash):**
+
+```bash
+cd frontend                           # from the repo root of your clone
+for u in /favicon.ico /icon.svg /apple-icon.png /manifest.webmanifest /opengraph-image.png /twitter-image.png /brand/logo.svg /brand/mark.svg /brand/icon-192.png /brand/icon-512.png /brand/icon-maskable-512.png /brand/email-logo.png /brand/google-oauth-logo.png; do
+  curl -s -o /dev/null -w "$u  %{http_code}  %{content_type}\n" "http://localhost:3000$u"
+done
+curl -s http://localhost:3000/manifest.webmanifest; echo
+curl -s -o /dev/null -w "/brand/nope.png  %{http_code}\n" http://localhost:3000/brand/nope.png
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
@@ -474,7 +674,28 @@ Last, the manifest as the browser reads it: F12 → **Application** → **Manife
 
 ### 10. Terminal: exact sizes of the generated files
 
-Stop the dev server first (`Ctrl+C`), or use a new window. In `frontend\`:
+Stop the dev server first (`Ctrl+C`), or use a new window. In `frontend/` (`frontend\` on Windows):
+
+**Linux (bash):**
+
+```bash
+python3 - <<'EOF'
+import os
+import struct
+
+pngs = ['src/app/apple-icon.png', 'public/brand/icon-192.png', 'public/brand/icon-512.png', 'public/brand/icon-maskable-512.png', 'src/app/opengraph-image.png', 'src/app/twitter-image.png', 'public/brand/google-oauth-logo.png', 'public/brand/email-logo.png', '../backend/apps/core/static/core/brand/logo-admin.png']
+for p in pngs:
+    with open(p, 'rb') as f:
+        head = f.read(24)
+    w, h = struct.unpack('>II', head[16:24])
+    print('%-62s %d x %d  %d bytes' % (p, w, h, os.path.getsize(p)))
+with open('src/app/favicon.ico', 'rb') as f:
+    b = f.read()
+print('ico: images=%d; sizes=%s' % (struct.unpack('<H', b[4:6])[0], ','.join(str(x) for x in (b[6], b[22], b[38]))))
+EOF
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 Add-Type -AssemblyName System.Drawing
@@ -498,10 +719,23 @@ ico: images=3; sizes=16,32,48
 ```
 
 - The sizes are exact; the byte counts can differ a little on another machine.
+- On Linux the paths print with `/` instead of `\`; the sizes, byte counts and the `ico:` line are the same.
 - The Google logo is far under 1 MB. The apple icon is also opaque (its PNG has no alpha channel);
   the automated tests check that.
 
 ### 11. Terminal: repository checks
+
+**Linux (bash):**
+
+```bash
+cd ..                                 # the repo root (you are in frontend/)
+git check-ignore frontend/src/app/favicon.ico frontend/public/brand/logo.svg backend/apps/core/static/core/brand/logo-admin.png   # prints nothing: none of them is ignored
+git check-attr binary -- frontend/src/app/favicon.ico frontend/src/app/apple-icon.png     # both: binary: set
+git status --short design             # prints nothing: design/ is untouched
+for f in frontend/AGENTS.md frontend/CLAUDE.md; do [ -e "$f" ] && echo True || echo False; done   # False, then False
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero
@@ -516,21 +750,38 @@ Test-Path frontend\AGENTS.md, frontend\CLAUDE.md   # False, then False
 - Stop the server: `Ctrl+C` in its window.
 - Nothing else is running for this part: no containers, no backend.
 - The generated files are meant to be committed; do not delete them. To change the logo later:
-  replace `design\logo.svg` yourself, check that `markSelector` in
-  `frontend\scripts\brand\brand.config.json` still picks the "0" (the build fails if it does not
+  replace `design/logo.svg` (`design\logo.svg` on Windows) yourself, check that `markSelector` in
+  `frontend/scripts/brand/brand.config.json` (`frontend\scripts\brand\brand.config.json` on Windows) still picks the "0" (the build fails if it does not
   match exactly one shape), run `npm run brand:build`, and compare the contrast table with
-  `docs\ARCHITECTURE.md` section 14.
+  `docs/ARCHITECTURE.md` (`docs\ARCHITECTURE.md` on Windows) section 14.
 
 ---
 
 ## Part 0C: App shell, API relay, API client, CI
 
-Needs Part 0A's containers and virtualenv, and your own `backend\.env` and `frontend\.env.local`.
-The relay reads `BACKEND_ORIGIN` and `PROXY_SHARED_SECRET` from `frontend\.env.local`. The secret
-must be the same as the one in `backend\.env` (ENV_GUIDE §1.2). Nobody can log in yet (Part 1), so
+Needs Part 0A's containers and virtualenv, and your own `backend/.env` and `frontend/.env.local`
+(`backend\.env` and `frontend\.env.local` on Windows).
+The relay reads `BACKEND_ORIGIN` and `PROXY_SHARED_SECRET` from `frontend/.env.local`
+(`frontend\.env.local` on Windows). The secret
+must be the same as the one in `backend/.env` (`backend\.env` on Windows) (ENV_GUIDE §1.2). Nobody can log in yet (Part 1), so
 the app pages show the logged-out shell; `/dev/shell` shows the logged-in one with a sample user.
 
+On Linux, the blocks below assume each new terminal starts in the repo root (the folder that holds
+`backend/` and `frontend/`). The Windows blocks use full `C:\...` paths instead.
+
 ### 1. Terminal: install the new tools
+
+**Linux (bash):**
+
+```bash
+cd frontend                       # from the repo root
+npm install                       # up to date, audited 735 packages ... found 0 vulnerabilities
+npx playwright install chromium   # first time: downloads Chromium for the E2E test; later: prints nothing
+npx wrangler --version            # 4.145.0
+npx playwright --version          # Version 1.63.0
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
@@ -543,12 +794,17 @@ npx playwright --version          # Version 1.63.0
 - `npm install` also prints an `allow-scripts` warning: it did not run the install scripts of
   `workerd`, `esbuild` and `unrs-resolver`. That is expected. Their programs come from separate
   platform packages and work without those scripts.
-- Don't run `npm run preview`, `deploy` or `upload` on Windows. They are for Linux (CI and
-  Cloudflare), and they would copy your real `.env.local` into the Worker bundle.
+- Don't run `npm run preview`, `deploy` or `upload` on your own machine, on Windows or on Linux.
+  They are for CI and Cloudflare (Linux), and they would copy your real `.env.local` into the
+  Worker bundle.
+- On Linux only: if the E2E test later fails because Chromium reports missing shared libraries,
+  run `npx playwright install-deps chromium` once (it installs system packages with `sudo`).
 
 ### 2. Terminal: automated checks
 
-```powershell
+**Linux and Windows (same commands):**
+
+```bash
 npm run lint             # no output after the command line
 npm run lint:tokens      # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
 npm run typecheck        # no output after the command line
@@ -575,6 +831,17 @@ The build ends with a route list. These lines matter:
 
 Window 1:
 
+**Linux (bash):**
+
+```bash
+docker compose up -d              # from the repo root
+cd backend
+source .venv/bin/activate
+python manage.py runserver        # leave this window running
+```
+
+**Windows (PowerShell):**
+
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero
 docker compose up -d
@@ -585,15 +852,36 @@ python manage.py runserver        # leave this window running
 
 Window 2:
 
+**Linux (bash):**
+
+```bash
+cd frontend                       # from the repo root
+npm run dev                       # ✓ Ready in about 0.5 s, then "✓ Running next.config.ts took" 1 to 5 s
+```
+
+**Windows (PowerShell):**
+
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
 npm run dev                       # ✓ Ready in about 0.5 s, then "✓ Running next.config.ts took" 1 to 5 s
 ```
 
 - The extra seconds start `workerd`, Cloudflare's local runtime, for the OpenNext dev setup. If
-  Windows Firewall asks about it, local access is all it needs.
+  Windows Firewall asks about it (Windows only; Linux does not ask), local access is all it needs.
 
 ### 4. Terminal (third window): the relay
+
+**Linux (bash):**
+
+```bash
+curl -i http://localhost:3000/api/health/
+curl -s -i http://localhost:3000/api/health | grep -iE '^HTTP|^location'
+curl -s -o /dev/null -w "%{http_code}\n" "http://localhost:3000/api/a%2Fb/"
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/api/nope/
+curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" http://localhost:3000/home/
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 curl.exe -i http://localhost:3000/api/health/
@@ -611,6 +899,14 @@ curl.exe -s -o NUL -w "%{http_code} %{redirect_url}`n" http://localhost:3000/hom
 - Fifth: `308 http://localhost:3000/home`. Page URLs drop a trailing slash; API URLs keep it.
 
 Now stop Django (`Ctrl+C` in window 1) and ask again:
+
+**Linux (bash):**
+
+```bash
+curl -s -i http://localhost:3000/api/health/ | grep -iE '^HTTP|^retry-after|^cache-control|code'
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 curl.exe -s -i http://localhost:3000/api/health/ | Select-String '^HTTP|^retry-after|^cache-control|code'
@@ -636,6 +932,45 @@ First stop `npm run dev` (`Ctrl+C` in window 2): Next runs only one dev server p
 stop `runserver` in window 1 too; it isn't needed here.
 
 Window 1, the stand-in backend:
+
+**Linux (bash):**
+
+```bash
+cat > /tmp/rz-echo.cjs <<'EOF'
+// Stand-in backend for the Part 0C relay check. It prints header NAMES and true/false only.
+const http = require("node:http");
+http.createServer((req, res) => {
+  const chunks = [];
+  req.on("data", (chunk) => chunks.push(chunk));
+  req.on("end", () => {
+    const path = new URL(req.url, "http://x").pathname;
+    if (path === "/api/cookies/") {
+      res.setHeader("set-cookie", ["first=1; Path=/; HttpOnly", "second=2; Path=/api/auth/; SameSite=Lax"]);
+      return res.end("{}");
+    }
+    if (path === "/api/etag/") {
+      res.setHeader("etag", '"v1"');
+      res.setHeader("cache-control", "public, max-age=31536000, immutable");
+      if (req.headers["if-none-match"] === '"v1"') { res.statusCode = 304; return res.end(); }
+      return res.end("cached body");
+    }
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({
+      method: req.method,
+      secretMatches: req.headers["x-rz-proxy-secret"] === "echo-check-secret",
+      clientIp: req.headers["x-rz-client-ip"] ?? null,
+      forwardedHost: req.headers["x-forwarded-host"] ?? null,
+      contentLength: req.headers["content-length"] ?? null,
+      chunked: req.headers["transfer-encoding"] === "chunked",
+      bodyBytes: Buffer.concat(chunks).length,
+    }));
+  });
+}).listen(8765, "127.0.0.1", () => console.log("stand-in backend on http://127.0.0.1:8765"));
+EOF
+node /tmp/rz-echo.cjs             # stand-in backend on http://127.0.0.1:8765
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 @'
@@ -672,8 +1007,18 @@ http.createServer((req, res) => {
 node $env:TEMP\rz-echo.cjs        # stand-in backend on http://127.0.0.1:8765
 ```
 
-Window 2, a dev server pointed at it. The `$env:` values last only for this window;
-`.env.local` is not changed:
+Window 2, a dev server pointed at it. The environment values (`export` on Linux, `$env:` on
+Windows) last only for this window; `.env.local` is not changed:
+
+**Linux (bash):**
+
+```bash
+cd frontend                       # from the repo root
+export BACKEND_ORIGIN="http://127.0.0.1:8765" PROXY_SHARED_SECRET="echo-check-secret"
+npx next dev -p 3100
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
@@ -682,6 +1027,18 @@ npx next dev -p 3100
 ```
 
 Window 3:
+
+**Linux (bash):**
+
+```bash
+curl -s -H "X-RZ-Proxy-Secret: spoofed" -H "X-RZ-Client-IP: 6.6.6.6" -H "X-Forwarded-Host: evil.example" http://localhost:3100/api/echo/
+curl -s -H "Content-Type: text/plain" --data "hello relay" http://localhost:3100/api/echo/
+curl -s -i http://localhost:3100/api/cookies/ | grep -iE '^set-cookie'
+curl -s -i http://localhost:3100/api/etag/ | grep -iE '^HTTP|^etag|^cache-control'
+curl -s -i -H 'If-None-Match: "v1"' http://localhost:3100/api/etag/ | grep -iE '^HTTP|^etag|^cache-control'
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 curl.exe -s -H "X-RZ-Proxy-Secret: spoofed" -H "X-RZ-Client-IP: 6.6.6.6" -H "X-Forwarded-Host: evil.example" http://localhost:3100/api/echo/
@@ -706,19 +1063,22 @@ etag: "v1"
 
 - **Spoofing:** the faked `X-RZ-Proxy-Secret`, `X-RZ-Client-IP` and `X-Forwarded-Host` never
   arrive. The backend gets the relay's own secret (`secretMatches: true`) and your real address
-  (`::1` is this machine).
+  (`::1` is this machine; on Linux you may see `127.0.0.1` or `::ffff:127.0.0.1` instead, which is
+  also this machine).
 - **Body:** it arrives with its length (`contentLength: "11"`), never chunked, which Django needs.
 - **Cookies and caching:** both cookies and the `304 Not Modified` come back with `etag` and
   `cache-control` unchanged.
-- In PowerShell, the quotes inside `If-None-Match` need the `\"` form shown above.
+- In PowerShell, the quotes inside `If-None-Match` need the `\"` form shown above. In bash no
+  escaping is needed: the Linux command uses plain `"v1"` inside single quotes.
 
-Stop both servers (`Ctrl+C` in windows 1 and 2), then close window 2 so its `$env:` values are
-gone. Delete the script: `Remove-Item $env:TEMP\rz-echo.cjs`.
+Stop both servers (`Ctrl+C` in windows 1 and 2), then close window 2 so its environment values are
+gone (on Linux you can instead run `unset BACKEND_ORIGIN PROXY_SHARED_SECRET` in that window).
+Delete the script: `rm /tmp/rz-echo.cjs` on Linux, `Remove-Item $env:TEMP\rz-echo.cjs` on Windows.
 
 ### 6. Browser: the layouts
 
 Start the normal servers again: `python manage.py runserver` in window 1, and in a **new** window 2
-`npm run dev` (in `frontend\`).
+`npm run dev` (in `frontend/`; `frontend\` on Windows).
 
 | URL | Expect |
 |---|---|
@@ -749,7 +1109,9 @@ width. The layout switches at 1280 and 768 px.
 | 390 | A top bar with the small logo and the "AL" avatar; a bottom bar with Home · Search · New post · Notifications · Profile. Tapping the avatar opens a sheet from the bottom with Bookmarks, Settings and Moderation; `Esc` or a tap outside closes it. No sideways scrolling. |
 
 Compare with Stitch: open
-`C:\Users\Nafis\Downloads\Rumor-Zero\design\stitch\stitch_website_sitemap_grid_builder\b1_home_feed\code.html`
+`design/stitch/stitch_website_sitemap_grid_builder/b1_home_feed/code.html` in the repo root
+(on Windows:
+`C:\Users\Nafis\Downloads\Rumor-Zero\design\stitch\stitch_website_sitemap_grid_builder\b1_home_feed\code.html`)
 in the browser (it needs internet for its Tailwind script), next to /dev/shell, both at 1280.
 - The rail width, item positions, blue Home item, top bar height and search box line up.
 - Expected differences: the logo image instead of the "Rumor Zero" text; Bookmarks added; "New
@@ -761,6 +1123,15 @@ in the browser (it needs internet for its Tailwind script), next to /dev/shell, 
 Needs the containers from step 3. Django and the dev server may be running or not: Playwright
 starts what is missing and reuses what is already running. A reused dev server keeps its own
 `BACKEND_ORIGIN`.
+
+**Linux (bash):**
+
+```bash
+cd frontend                       # from the repo root
+npm run test:e2e
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
@@ -784,11 +1155,25 @@ Running 8 tests using 6 workers
 
 - The order and timings vary (six tests run in parallel). `[WebServer]` lines are Django's request
   log.
+- On Linux the paths read `e2e/smoke.spec.ts`, the passing mark is `✓` instead of `ok`, and the
+  number of workers depends on your CPU.
 
 ### 8. Terminal: the same test the way CI runs it
 
 CI tests the production build and starts its own servers. First stop `npm run dev` and `runserver`
 (`Ctrl+C`); in this mode Playwright won't reuse them.
+
+**Linux (bash):**
+
+```bash
+cd frontend                       # from the repo root
+npm run build
+export CI=1
+npm run test:e2e         # 8 passed, this time against `next start`
+unset CI
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
@@ -800,6 +1185,18 @@ Remove-Item Env:CI
 
 ### 9. Terminal: the backend is unchanged and still passes
 
+**Linux (bash):**
+
+```bash
+cd backend                                          # from the repo root
+source .venv/bin/activate
+python -m pytest                                    # 200 passed
+ruff check . ; ruff format --check .                # All checks passed! / 43 files already formatted
+python manage.py makemigrations --check --dry-run   # No changes detected
+```
+
+**Windows (PowerShell):**
+
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\backend
 .\.venv\Scripts\Activate.ps1
@@ -809,6 +1206,18 @@ python manage.py makemigrations --check --dry-run   # No changes detected
 ```
 
 ### 10. Terminal: repository checks
+
+**Linux (bash):**
+
+```bash
+# run from the repo root
+git status --short design                          # prints nothing: design/ is untouched
+for f in frontend/AGENTS.md frontend/CLAUDE.md; do [ -e "$f" ] && echo True || echo False; done   # False, then False
+git check-ignore frontend/playwright-report frontend/test-results   # prints both: test reports are never committed
+git check-ignore .github/workflows/ci.yml frontend/wrangler.jsonc frontend/playwright.config.ts   # prints nothing: all three are committed
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero
@@ -831,25 +1240,29 @@ This is the one check the agent could not run, because only you push.
   why.
 - Seen on 2026-10-01: the first run failed at "OpenNext build" (`Cannot find package 'esbuild'`).
   The run on `60cfffc` ("Fix: add missing esbuild dependency") had all three jobs green.
-- Optional, only if you install the GitHub CLI (`gh`, not installed on this machine yet):
+- Optional, only if you install the GitHub CLI (`gh`, not installed on the Windows machine yet;
+  on Linux it has to be installed too):
   `gh run list --workflow ci.yml --limit 1` shows `completed` and `success`.
 
 ### 12. Stop and clean up
 
 - Stop the servers: `Ctrl+C` in each window.
 - If `npm run dev` later says "Another next dev server is already running" with a PID, the old
-  server is still alive. End it with `taskkill /PID <that PID> /T /F`.
+  server is still alive. On Linux, end it with `kill <that PID>` (`pgrep -af 'next|workerd'` lists
+  leftover dev servers, and `ss -ltnp | grep -E ':(3000|8000)\b'` shows what holds the ports). On
+  Windows, end it with `taskkill /PID <that PID> /T /F` (Windows only).
 - Stop the containers and keep the data: `docker compose down` (repo root).
-- `frontend\playwright-report` and `frontend\test-results` are git-ignored; delete them whenever
+- `frontend/playwright-report` and `frontend/test-results` (`frontend\playwright-report` and
+  `frontend\test-results` on Windows) are git-ignored; delete them whenever
   you like.
 
 ---
 
 ## Part 1: Auth core (sign up, log in, tokens, log out)
 
-Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
-`frontend\.env.local`. Both keep Cloudflare's Turnstile **test** keys (ENV_GUIDE §1.5). Two things
-to know first:
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
+`frontend/.env.local` (`backend\.env` and `frontend\.env.local` on Windows). Both keep Cloudflare's
+Turnstile **test** keys (ENV_GUIDE §1.5). Two things to know first:
 
 - Sign-up calls Cloudflare even with the test keys (the widget in the browser, siteverify from
   Django), so it needs internet.
@@ -858,6 +1271,23 @@ to know first:
   `csrf_failed`.
 
 ### 1. Terminal: migrate and check the settings
+
+**Linux (bash):**
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate
+python manage.py check                # System check identified no issues (0 silenced).
+v=$(grep -m1 '^JWT_SIGNING_KEY=' .env | cut -d= -f2- | tr -d '\r')
+printf %s "$v" | wc -c
+unset v
+python manage.py shell -c "from apps.accounts.models import User; print([(u.is_email_verified, list(u.emailaddress_set.values_list('verified', 'primary'))) for u in User.objects.filter(is_superuser=True)])"
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero
@@ -884,7 +1314,9 @@ python manage.py shell -c "from apps.accounts.models import User; print([(u.is_e
 
 Same window.
 
-```powershell
+**Linux and Windows (same commands):**
+
+```bash
 python -m pytest                                    # 440 passed
 python -m pytest apps/accounts                      # 327 passed (the auth tests)
 ruff check . ; ruff format --check .                # All checks passed! / 66 files already formatted
@@ -899,9 +1331,27 @@ python -m pytest apps/accounts/tests/test_permissions.py -v   # 4 passed
 
 ### 3. Terminal: sign up against Django
 
-Window 1: `python manage.py runserver` (in `backend\`, venv active). Leave it running.
+Window 1: `python manage.py runserver` (in `backend/`, or `backend\` on Windows, venv active). Leave
+it running.
 
-Window 2 (no venv needed):
+Window 2 (no venv needed; on Linux it needs `jq`, which the Linux setup guide installs):
+
+**Linux (bash):**
+
+```bash
+cd backend                            # from the repo root
+id=$(date +%H%M%S)
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')
+json=$(jq -nc --arg id "$id" '{email: "part1-\($id)@example.test", username: "part1_\($id)", password: "correct-horse-battery-42", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX"}')
+out=$(curl -s -i -c /tmp/rz-jar.txt "${h[@]}" -H "Content-Type: application/json" --data-binary "$json" http://localhost:8000/api/auth/app/v1/auth/signup | tr -d '\r')
+printf '%s\n' "$out" | grep -iE '^(HTTP|Set-Cookie|Cache-Control)' | sed -E 's/rz_refresh=[^;]+/rz_refresh=<token>/'
+body=$(printf '%s\n' "$out" | sed -n '$p')
+access=$(printf '%s' "$body" | jq -r .meta.access_token)
+printf '%s' "$body" | jq -r '"user: \(.data.user.username); meta fields: \(.meta | keys_unsorted | join(", ")); access token: \(.meta.access_token | length) characters"'
+curl -s -H "Authorization: Bearer $access" http://localhost:8000/api/v1/me/; echo
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\backend
@@ -927,13 +1377,15 @@ user: part1_014515; meta fields: is_authenticated, access_token; access token: 3
 {"id":"…","username":"part1_014515","display_name":"","email":"part1-014515@example.test","is_email_verified":false,"role":"user","has_usable_password":true,"google_connected":false,"avatar_url":null}
 ```
 
-- The number in the name is the time you ran it. PowerShell 5.1 strips the quotes from JSON typed
-  on the curl line, so the body goes through a file.
+- The number in the name is the time you ran it. On Windows, PowerShell 5.1 strips the quotes from
+  JSON typed on the curl line, so the body goes through a file. bash keeps the quotes, so the Linux
+  command builds the JSON with `jq` and passes it to curl directly (no file).
 - `meta` has only `is_authenticated` and `access_token`: no `refresh_token` and no
   `session_token`. The refresh token lives only in the HttpOnly cookie (no `Domain`,
   `Path=/api/auth/`). `Secure` is missing because `AUTH_COOKIE_SECURE=False` locally.
 - `rz_session=1` is the readable hint that tells the frontend there is a session to restore.
-- The `-replace` hides the cookie value. The access token stays in `$access` and is never printed.
+- The `-replace` (on Linux, `sed`) hides the cookie value. The access token stays in `$access` and
+  is never printed.
 - `XXXX.DUMMY.TOKEN.XXXX` is the token Cloudflare's test widget produces. Django checked it with
   siteverify, using the test secret.
 
@@ -953,6 +1405,14 @@ To confirm this is correct, go to http://localhost:3000/verify-email/<key>
 
 Still in window 2, the live username check:
 
+**Linux (bash):**
+
+```bash
+for u in Ada_Lovelace ADMIN ab "part1_$id"; do curl -s "http://localhost:8000/api/v1/auth/username-available/?u=$u"; echo; done
+```
+
+**Windows (PowerShell):**
+
 ```powershell
 foreach ($u in 'Ada_Lovelace', 'ADMIN', 'ab', "part1_$id") { curl.exe -s "http://localhost:8000/api/v1/auth/username-available/?u=$u"; "" }
 ```
@@ -964,12 +1424,30 @@ foreach ($u in 'Ada_Lovelace', 'ADMIN', 'ab', "part1_$id") { curl.exe -s "http:/
 {"username":"part1_014515","available":false,"reason":"taken","message":"That username is taken."}
 ```
 
-- An older console may show the dash in `3–30` as other characters; that is only the console's
-  code page.
+- An older Windows console may show the dash in `3–30` as other characters; that is only the
+  console's code page. A Linux terminal in UTF-8 (the default) shows it correctly.
 
 ### 4. Terminal: refresh, rotation, the CSRF guard and log out
 
 Same window 2 (it still has `$h`, `$access` and the cookie jar).
+
+**Linux (bash):**
+
+```bash
+refresh=http://localhost:8000/api/auth/app/v1/tokens/refresh
+get_refresh_cookie() { grep rz_refresh /tmp/rz-jar.txt | cut -f7 | sed -n '$p'; }
+first=$(get_refresh_cookie)
+curl -s -w '\n' -b /tmp/rz-jar.txt -c /tmp/rz-jar.txt "${h[@]}" -X POST "$refresh" | sed -E 's/"access_token": "[^"]+"/"access_token": "<token>"/'
+echo
+[ "$first" != "$(get_refresh_cookie)" ] && rotated=True || rotated=False
+echo "cookie rotated: $rotated"
+curl -s -o /dev/null -w 'old cookie at once: %{http_code}\n' "${h[@]}" -X POST -b "rz_refresh=$first" "$refresh"
+sleep 61
+curl -s -w ' %{http_code}\n' "${h[@]}" -X POST -b "rz_refresh=$first" "$refresh"
+curl -s -o /dev/null -w 'current cookie: %{http_code}\n' -b /tmp/rz-jar.txt -c /tmp/rz-jar.txt "${h[@]}" -X POST "$refresh"
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 $refresh = 'http://localhost:8000/api/auth/app/v1/tokens/refresh'
@@ -1000,6 +1478,16 @@ current cookie: 200
 
 Without the `Origin` or the `X-Requested-With` header:
 
+**Linux (bash):**
+
+```bash
+curl -s -w ' %{http_code}\n' -b /tmp/rz-jar.txt -H 'X-Requested-With: rumor-zero' -X POST "$refresh"
+curl -s -w ' %{http_code}\n' -b /tmp/rz-jar.txt -H 'Origin: http://localhost:3000' -X POST "$refresh"
+curl -s -w ' %{http_code}\n' -b /tmp/rz-jar.txt -H 'Origin: http://localhost:3000' -X POST http://localhost:8000/api/auth/logout/
+```
+
+**Windows (PowerShell):**
+
 ```powershell
 curl.exe -s -w " %{http_code}`n" -b $env:TEMP\rz-jar.txt -H "X-Requested-With: rumor-zero" -X POST $refresh
 curl.exe -s -w " %{http_code}`n" -b $env:TEMP\rz-jar.txt -H "Origin: http://localhost:3000" -X POST $refresh
@@ -1011,6 +1499,20 @@ curl.exe -s -w " %{http_code}`n" -b $env:TEMP\rz-jar.txt -H "Origin: http://loca
 - Login and signup are guarded the same way.
 
 Log out:
+
+**Linux (bash):**
+
+```bash
+last=$(get_refresh_cookie)
+curl -s -i -b /tmp/rz-jar.txt -c /tmp/rz-jar.txt "${h[@]}" -X POST http://localhost:8000/api/auth/logout/ | tr -d '\r' | grep -iE '^(HTTP|Set-Cookie)'
+curl -s -w ' %{http_code}\n' "${h[@]}" -X POST -b "rz_refresh=$last" "$refresh"
+curl -s -w ' %{http_code}\n' "${h[@]}" -X POST "$refresh"
+curl -s -o /dev/null -w 'logout again: %{http_code}\n' "${h[@]}" -X POST http://localhost:8000/api/auth/logout/
+curl -s -o /dev/null -w 'access token after logout: %{http_code}\n' -H "Authorization: Bearer $access" http://localhost:8000/api/v1/me/
+curl -s -w ' %{http_code}\n' "${h[@]}" -X POST http://localhost:8000/api/auth/app/v1/auth/session
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 $last = Get-RefreshCookie
@@ -1043,7 +1545,21 @@ access token after logout: 200
 
 ### 5. Terminal: failed logins are limited per real client IP, through the relay
 
-Window 3: `npm run dev` (in `frontend\`). Back in window 2:
+Window 3: `npm run dev` (in `frontend/`, or `frontend\` on Windows). Back in window 2:
+
+**Linux (bash):**
+
+```bash
+for i in $(seq 1 11); do
+  login=$(printf '{"email": "nobody%s@example.test", "password": "wrong-password"}' "$i")
+  r=$(curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary "$login" http://localhost:3000/api/auth/app/v1/auth/login)
+  printf '%2d  ' "$i"
+  printf '%s' "$r" | jq -r '"\(.status)  \(.errors[0].code)"'
+done
+curl -s --interface 127.0.0.2 "${h[@]}" -H "Content-Type: application/json" --data-binary "$login" http://127.0.0.1:8000/api/auth/app/v1/auth/login; echo
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 1..11 | ForEach-Object {
@@ -1071,8 +1587,11 @@ curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-
 
 - The first eleven go through the relay on port 3000. Each uses another email, so only the
   per-address limit (10 failures a minute) is hit; the per-account limit is 5 failures in 5 minutes.
-- The relay passed your real address (`::1`) to Django with the shared secret. The last request goes
-  straight to Django from `127.0.0.1`, a different address, so it isn't blocked.
+- The relay passed your real address to Django with the shared secret: `::1` on the Windows PC this
+  guide was written on; on Linux `localhost` may resolve to `127.0.0.1` instead. The last request
+  goes straight to Django from a different address, so it isn't blocked: `127.0.0.1` on Windows.
+  On Linux the command adds `--interface 127.0.0.2` (another loopback address), because plain
+  `127.0.0.1` could be the very address the relay reported.
 - Within that minute, logging in at http://localhost:3000/login, even with a right password, shows
   the red banner "Too many attempts. Try again in a few minutes."
 
@@ -1110,20 +1629,32 @@ Still on http://localhost:3000.
 A failed bot check needs Cloudflare's always-fail **test** secret on the backend. Stop `runserver`
 in window 1 (`Ctrl+C`), then:
 
+**Linux (bash):**
+
+```bash
+TURNSTILE_SECRET_KEY="2x0000000000000000000000000000000AA" python manage.py runserver
+```
+
+**Windows (PowerShell):**
+
 ```powershell
 $env:TURNSTILE_SECRET_KEY = "2x0000000000000000000000000000000AA"; python manage.py runserver
 ```
 
 - Sign up with a new email and username: under the widget, "The bot check didn't pass. Try it
   again.", and the widget starts over.
-- The `$env:` value lasts only for this window, and `backend\.env` is not changed. Stop the server,
-  **close the window**, and start `python manage.py runserver` normally in a new one (venv active).
+- The `$env:` value (on Linux, the `TURNSTILE_SECRET_KEY=…` in front of the command) lasts only for
+  this window (on Linux, only for that one command), and `backend/.env` (`backend\.env` on Windows)
+  is not changed. Stop the server, **close the window** (on Windows; on Linux you can keep it), and
+  start `python manage.py runserver` normally in a new one (venv active).
 
 ### 8. Terminal: automated frontend checks
 
-Stop `npm run dev` first (`Ctrl+C` in window 3), then in `frontend\`:
+Stop `npm run dev` first (`Ctrl+C` in window 3), then in `frontend/` (`frontend\` on Windows):
 
-```powershell
+**Linux and Windows (same commands):**
+
+```bash
 npm run lint             # no output after the command line
 npm run lint:tokens      # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
 npm run typecheck        # no output after the command line
@@ -1147,7 +1678,9 @@ The build's route list still has these lines:
 Stop `runserver` too (`Ctrl+C` in window 1): Playwright then starts its own Django with an
 in-memory cache, so step 5's rate limit can't get in the way.
 
-```powershell
+**Linux and Windows (same commands):**
+
+```bash
 npm run test:e2e
 ```
 
@@ -1163,6 +1696,8 @@ Running 11 tests using 6 workers
   11 passed (14.5s)
 ```
 
+- On Linux Playwright prints the spec paths with `/` (`e2e/smoke.spec.ts`); the `\` is Windows. The
+  timings and the worker count vary from machine to machine.
 - The eight 0C smoke tests are unchanged. The three new ones sign up with the test widget, check
   the cookie flags and that storage is empty, reload, log out, try the dead cookie (400) and a
   refresh without the header (403), and use `/settings` → `/login?next=` → back.
@@ -1170,6 +1705,15 @@ Running 11 tests using 6 workers
   moment.
 
 Then the way CI runs it:
+
+**Linux (bash):**
+
+```bash
+npm run build
+CI=1 npm run test:e2e    # 11 passed, this time against `next start`
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 npm run build
@@ -1179,6 +1723,17 @@ Remove-Item Env:CI
 ```
 
 ### 10. Terminal: repository checks
+
+**Linux (bash):**
+
+```bash
+cd "$(git rev-parse --show-toplevel)"              # the repo root, from any folder inside it
+git status --short design                          # prints nothing: design/ is untouched
+for f in frontend/AGENTS.md frontend/CLAUDE.md; do [ -e "$f" ] && echo True || echo False; done   # False, then False
+git check-ignore backend/tmp/mail/example.eml      # prints the path: emails written by EMAIL_PROVIDER=file are never committed
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero
@@ -1201,8 +1756,11 @@ git check-ignore backend/tmp/mail/example.eml      # prints the path: emails wri
 ### 12. Stop and clean up
 
 - Stop the servers: `Ctrl+C` in each window. If `npm run dev` later says "Another next dev server is
-  already running" with a PID, end it with `taskkill /PID <that PID> /T /F`.
-- Delete the helper files: `Remove-Item $env:TEMP\rz-signup.json, $env:TEMP\rz-jar.txt, $env:TEMP\rz-login.json`.
+  already running" with a PID, end it with `kill <that PID>` on Linux (`pgrep -af 'next|workerd'`
+  lists leftover dev servers, and `ss -ltnp | grep -E ':(3000|8000)\b'` shows what holds the ports)
+  or with `taskkill /PID <that PID> /T /F` on Windows (Windows only).
+- Delete the helper files. On Linux the commands above create only the cookie jar:
+  `rm -f /tmp/rz-jar.txt`. On Windows: `Remove-Item $env:TEMP\rz-signup.json, $env:TEMP\rz-jar.txt, $env:TEMP\rz-login.json`.
 - The test accounts stay in your local database: `part1_…` from step 3, the E2E's `e2e_…`,
   `tabs_…` and `expiry_…`, and the agent's own checks (`manual_check`, `visual_…`, `tf_…`,
   `phone_…`). Delete them in Django Admin → Users if you like.

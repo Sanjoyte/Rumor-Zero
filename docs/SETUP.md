@@ -1,14 +1,284 @@
 # Rumor Zero: Setup (dependencies and accounts)
 
-Target machine (detected 2026-09-29): **Windows 11 Pro x64, Windows PowerShell 5.1**, with winget.
-Every command below is for **PowerShell**. Open it with *Start → "Terminal"* (or "Windows PowerShell").
-After each install, **close and reopen the terminal** so `PATH` updates.
+Rumor Zero is set up on two kinds of machine. Every step has both versions, **Linux first**:
 
-All versions and limits were checked on 2026-09-29. Sources are at the bottom.
+- **Linux** (Ubuntu, Debian or Linux Mint; `bash`): the development machine from 2026-10-06.
+- **Windows 11 Pro x64** (Windows PowerShell 5.1, winget): the original machine, detected 2026-09-29.
+
+Follow **Part A (Linux)** or **Part A (Windows)**, not both. Parts B and C are the same on both
+systems. After each install, **close and reopen the terminal** so `PATH` updates. Coming from another
+computer? Read "Moving to another machine" (between Part A and Part B) first.
+
+All versions and limits were checked on 2026-09-29; the Linux install commands were checked against
+their vendors' documentation on 2026-10-06. Sources are at the bottom.
 
 ---
 
-## Part A: System tools you install yourself
+## Part A (Linux): system tools you install yourself
+
+Written for Ubuntu 22.04 / 24.04 / 26.04, Debian 12 / 13 and Linux Mint (Ubuntu-based). The apt steps
+need your `sudo` password. Every command below is for **bash** (any terminal, or the VS Code terminal).
+
+| Tool | Minimum | Recommended | How |
+|---|---|---|---|
+| Git | 2.40 | latest | A1 |
+| Python | 3.12 | **3.13.x** | A2 |
+| Node.js | 22.12 | **24 LTS** | A3 (nvm) |
+| Docker Engine + Compose plugin | engine 24 | current | A4 |
+| `jq`, Playwright's browser libraries | any | distro | A7 |
+| k6 (load testing, **Part 16 only**) | 1.0 | 2.x | A6, optional now |
+
+### Quick start: from `git clone` to green tests
+
+After A1–A4 and A7 are done. Run these in order from where you want the project folder:
+
+```bash
+git clone git@github.com:Sanjoyte/Rumor-Zero.git
+cd Rumor-Zero
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env.local
+```
+
+Now fill in the secrets: run the one command in `docs/ENV_GUIDE.md` §1.2 ("Linux: one command"). It
+writes four generated values into the two files and prints none of them. Then:
+
+```bash
+docker compose up -d                          # Postgres 18 + Redis; `docker compose ps` shows (healthy)
+cd backend
+python3.13 -m venv .venv
+source .venv/bin/activate                     # every new terminal; the prompt shows (.venv)
+pip install -r requirements-dev.txt
+python manage.py migrate
+python manage.py createsuperuser              # only needed for Django Admin (prompts for email, username, password)
+python -m pytest                              # backend tests
+ruff check . ; ruff format --check .
+cd ../frontend
+npm ci                                        # not `npm install`: it keeps package-lock.json untouched
+npm run lint ; npm run typecheck ; npm test
+npx playwright install --with-deps chromium   # once; asks for sudo
+npm run test:e2e                              # starts Django and the dev server by itself
+```
+
+At the end of Part 1 that is 440 backend tests, 562 frontend tests and 11 E2E tests; later parts add
+more. If all of it passes, the machine is ready for the next part of `task.md`.
+
+If something fails, the cause is almost always one of these:
+
+| Symptom | Fix |
+|---|---|
+| `docker: permission denied` | You are not in the `docker` group yet (A4). Log out and in again. |
+| `docker compose up` fails binding `[::1]` ("cannot assign requested address") | IPv6 is off on this machine. See the override file right below this table. |
+| Port 5432 or 6379 already in use | A system Postgres or Redis is running (`sudo systemctl stop postgresql redis-server`), or change the host port (ENV_GUIDE §1.4). |
+| `python3.13: command not found` | A2 was skipped or the PPA was not added. |
+| `ensurepip is not available` when creating the venv | Install `python3.13-venv` (A2). |
+| `pytest` hangs on the first database test | The containers are not running: `docker compose ps`, then `docker compose up -d`. |
+| `npx playwright install --with-deps` says the platform is unsupported | See A7 (Playwright and Linux Mint). |
+| The sign-up form never shows the Cloudflare widget | It needs internet (`challenges.cloudflare.com`), even with the test keys. |
+
+**IPv6 override.** `compose.yaml` publishes Postgres and Redis on `127.0.0.1` **and** `[::1]` (Windows
+needs both, because `localhost` resolves to `::1` first). If your Linux has IPv6 switched off, create
+`compose.override.yaml` next to `compose.yaml` (Compose reads it automatically; **don't commit it**)
+with the IPv4-only ports, then run `docker compose up -d` again:
+
+```yaml
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:5432:5432"
+  redis:
+    ports: !override
+      - "127.0.0.1:6379:6379"
+```
+
+Delete the file when IPv6 is back. Don't edit `compose.yaml` for this.
+
+### A1. Git
+
+```bash
+sudo apt update
+sudo apt install git
+git --version                                  # expect: git version 2.40 or newer
+git config --global user.name "<your name>"
+git config --global user.email "<the email on your GitHub account>"
+```
+
+The project repository `Sanjoyte/Rumor-Zero` is private, so the new machine needs its own GitHub
+credentials. The simplest is an SSH key:
+
+```bash
+ssh-keygen -t ed25519 -C "<the email on your GitHub account>"   # accept the default path; set a passphrase
+cat ~/.ssh/id_ed25519.pub                      # copy this line into GitHub → Settings → SSH and GPG keys → New SSH key
+ssh -T git@github.com                          # first time: answer "yes"; expect "Hi Sanjoyte! You've successfully authenticated"
+```
+
+You run every git command yourself. Claude Code is blocked from state-changing git commands by
+`.claude/settings.json`; Codex is blocked by `.codex/rules/default.rules`. The shared prohibition in
+`AGENTS.md` still applies if a tool surface cannot enforce those files. Git's line-ending setting needs
+no change: the repository's `.gitattributes` keeps every file on LF.
+
+### A2. Python 3.13
+
+**Why 3.13 and not 3.14?** Django 5.2 LTS supports both, but several dependencies don't list 3.14 yet.
+Render's default is 3.14, so the repo pins 3.13 explicitly. Never replace the system `python3`; use the
+versioned `python3.13` command.
+
+First see whether your distribution ships it:
+
+```bash
+apt-cache policy python3.13                    # "Candidate: 3.13.x" → use option 1; "Candidate: (none)" or no output → option 2
+```
+
+1. **Debian 13, Ubuntu 25.04** (the distribution has it):
+
+   ```bash
+   sudo apt update
+   sudo apt install python3.13 python3.13-venv python3.13-dev
+   ```
+
+2. **Ubuntu 22.04 / 24.04 / 26.04 and Linux Mint** (not in the distribution; the deadsnakes PPA provides
+   it, and it installs next to the system Python):
+
+   ```bash
+   sudo apt update
+   sudo apt install software-properties-common
+   sudo add-apt-repository ppa:deadsnakes/ppa      # press Enter to confirm
+   sudo apt update
+   sudo apt install python3.13 python3.13-venv python3.13-dev
+   ```
+
+   Debian 12 is not covered by deadsnakes. Use Debian 13, or `pyenv`/`uv` to install Python 3.13.
+
+Verify:
+
+```bash
+python3.13 --version                           # expect: Python 3.13.x
+python3.13 -m venv --help | head -n 1          # prints a usage line; an error means python3.13-venv is missing
+```
+
+### A3. Node.js 24 LTS (with nvm)
+
+⚠ **Node 26 becomes the LTS on 2026-10-28.** The project pins **24** (Vitest 5 supports Node ^22.12 / ^24;
+wrangler needs ≥22). nvm installs exactly the major you ask for, in your home folder, with no `sudo`:
+
+```bash
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.8/install.sh | bash   # v0.40.8 was the latest on 2026-10-06
+# close and reopen the terminal, then:
+nvm install 24
+nvm alias default 24
+node -v                                        # expect: v24.x.x
+npm -v                                         # expect: 11.x or newer
+```
+
+If a newer nvm release exists, take the version number from <https://github.com/nvm-sh/nvm>.
+
+### A4. Docker Engine and the Compose plugin
+
+Used only for local **PostgreSQL 18** (matching Neon's default) and **Redis 8**, via the repo's
+`compose.yaml`. On Linux you install Docker **Engine** (free, no Docker Desktop and no license question).
+
+**Ubuntu and Linux Mint** (Mint is not officially supported by Docker, but it reports its Ubuntu base
+in `UBUNTU_CODENAME`, which this snippet uses):
+
+```bash
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+sudo apt update
+sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+**Debian** (same steps; only the repository address and codename differ):
+
+```bash
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/debian
+Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+sudo apt update
+sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+Then let your user run Docker without `sudo`, and check it:
+
+```bash
+sudo usermod -aG docker "$USER"                # the group already exists after the install
+# log out and back in (or run: newgrp docker), then:
+docker run --rm hello-world                    # prints "Hello from Docker!"
+docker version --format "client={{.Client.Version}} server={{.Server.Version}}"   # both must print a version
+docker compose version                         # expect: v2 or newer
+```
+
+On Debian and Ubuntu the Docker service starts on boot by default. Membership of the `docker` group is
+equivalent to root on that machine: fine for your own PC, not for a shared one.
+
+- **Fallback without Docker:** install PostgreSQL 18 from the PostgreSQL apt repository
+  (<https://wiki.postgresql.org/wiki/Apt>), create the role and database from ENV_GUIDE §1.4, and
+  leave `REDIS_URL` empty. The backend then uses an in-memory cache locally.
+
+### A5. Script execution policy: not needed on Linux
+
+Windows needs `RemoteSigned` to run the venv activation script. On Linux the activation is
+`source .venv/bin/activate`, with nothing to configure.
+
+### A6. k6: only needed for Part 16 (load test)
+
+Skip it for now. When Part 16 arrives, install it from <https://grafana.com/docs/k6/latest/set-up/install-k6/>
+(the Linux section) and check `k6 version` (expect v2.x).
+
+### A7. Other tools
+
+```bash
+sudo apt install jq                            # used by the Linux commands in docs/test-command.md
+```
+
+- **Playwright's browser (needed for `npm run test:e2e`):** from `frontend/`, once per machine:
+
+  ```bash
+  npx playwright install --with-deps chromium  # downloads Chromium to ~/.cache/ms-playwright and apt-installs its libraries (sudo)
+  ```
+
+  Playwright officially supports Ubuntu and Debian. **Linux Mint** is not on its list: if the command
+  stops with an "unsupported platform" message, tell Playwright to treat the machine as the Ubuntu
+  release Mint is based on (Mint 22 = Ubuntu 24.04, Mint 21 = Ubuntu 22.04), for example
+  `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu24.04-x64 npx playwright install --with-deps chromium`, and
+  put the same variable in front of `npm run test:e2e`. See
+  <https://github.com/microsoft/playwright/issues/28078>.
+- **VS Code extensions:** Python, Pylance, Ruff, ESLint, Tailwind CSS IntelliSense, Playwright Test.
+- **No WSL, no Windows tools:** none of Part A (Windows) applies. The OpenNext/Cloudflare build runs
+  natively on Linux (`npx opennextjs-cloudflare build`), but **never from a checkout that has a real
+  `frontend/.env.local`** (the build copies it into the Worker bundle; see B3).
+- **Not needed:** gunicorn only runs on Render. Locally you use Django's `runserver`.
+
+---
+
+## Part A (Windows): system tools you install yourself
+
+Target machine (detected 2026-09-29): **Windows 11 Pro x64, Windows PowerShell 5.1**, with winget.
+Every command in this part is for **PowerShell**. Open it with *Start → "Terminal"* (or "Windows
+PowerShell").
 
 | Tool | Minimum | Recommended | Status on your machine |
 |---|---|---|---|
@@ -110,6 +380,31 @@ k6 version     # expect: k6 v2.x
 
 ---
 
+## Moving to another machine
+
+`git clone` (or `git pull` in an existing checkout) brings everything that is tracked: all source,
+`docs/` (including `docs/agents/` with the handoff, memory and approved plans), `design/`, the generated
+brand assets, `package-lock.json`, `requirements*.txt`, both `.env.example` files, `compose.yaml`,
+`.claude/settings.json` and `.codex/`. Everything git ignores is rebuilt on the new machine:
+
+| Not in git | On the new machine |
+|---|---|
+| `backend/.env`, `frontend/.env.local` (real env files) | Create them from the examples and generate fresh secrets (ENV_GUIDE §1.1, §1.2). Nothing real is in them before deployment (Parts 17–18). To copy them instead, see ENV_GUIDE §1.9. |
+| `backend/.venv` | Create a new virtual environment (Part A). A venv is tied to its operating system and path; never copy one. |
+| `frontend/node_modules` | `npm ci` |
+| `.next/`, `.wrangler/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`, `.coverage`, `test-results/`, `playwright-report/`, `tsconfig.tsbuildinfo`, `next-env.d.ts` | Regenerated by the commands that use them. |
+| The Docker volume `pgdata` (the local database) | `docker compose up -d`, `python manage.py migrate`, `python manage.py createsuperuser`. Old test accounts are not needed. To keep the data anyway: `docker compose exec postgres pg_dump -U rumor_zero rumor_zero > rz.dump` on the old machine (`*.dump` is git-ignored) and `docker compose exec -T postgres psql -U rumor_zero rumor_zero < rz.dump` on the new one, into the empty database and **before** `migrate`. |
+| `compose.override.yaml` (optional, local) | Only if the machine needs it (Part A (Linux) troubleshooting). |
+| Playwright's downloaded browser | `npx playwright install --with-deps chromium` (Windows: `npx playwright install chromium`). |
+| GitHub credentials, `git config user.*` | Set up again (A1). |
+| Claude Code and Codex logins | Log in again on the new machine. Neither keeps project knowledge outside the repository: it lives in `docs/agents/`. |
+
+Check the new machine with the test commands in Part A (Linux) "Quick start" (Windows: the checks in
+`docs/test-command.md`). Only one machine should write to a branch at a time: commit and push on the
+old one, then pull on the new one.
+
+---
+
 ## Part B: Project packages (installed later, in Part 0, **not now**)
 
 Versions are the latest stable releases as of 2026-09-29. Part 0 re-checks patch numbers and pins exact versions in the lock/requirements files.
@@ -126,7 +421,7 @@ Versions are the latest stable releases as of 2026-09-29. Part 0 re-checks patch
 | `django-environ` | 0.14.0 | Reads settings from environment / `.env`, parses `DATABASE_URL` |
 | `redis` | 8.1.0 | Client for Django's built-in Redis cache (feed cache, throttles). Set `protocol=2` for Upstash. |
 | `whitenoise` | 6.12.0 | Serves the admin's static files on Render |
-| `gunicorn` | 26.2.0 | Production WSGI server on Render (not used on Windows) |
+| `gunicorn` | 26.2.0 | Production WSGI server on Render (not used locally: `runserver` is; it also doesn't run on Windows) |
 | `django-anymail[brevo]` | 15.2 | Sends email through Brevo's HTTPS API. Switchable to Resend later. |
 | `sentry-sdk[django]` | 2.71.0 | Error tracking, active only when `SENTRY_DSN` is set |
 | `Pillow` | 12.3.x (12.3.0 released 2026-07-01; the next quarterly release is due 2026-10-15) | **Added in Part 14B.** Decodes, validates and re-encodes profile photos to WebP, dropping EXIF/GPS. Prebuilt wheels for Windows and Linux (Render), with WebP support built in. |
@@ -168,15 +463,15 @@ Versions are the latest stable releases as of 2026-09-29. Part 0 re-checks patch
 | `material-symbols` | 0.47.5 | Self-hosted Material Symbols Outlined icon font (Stitch icon set) |
 | `eslint`, `eslint-config-next` | ^9, same as `next` | Linting. `next lint` is removed in Next 16, so the script runs `eslint`. |
 | `prettier` (+ `prettier-plugin-tailwindcss`) | 3.9.9 (+ 0.8.1) | Formatting, and sorts Tailwind classes |
-| `@opennextjs/cloudflare` (dev) | 1.20.7 (exact pin, **installed in 0C**) | Adapter that builds Next.js for Cloudflare Workers. Peers: `next >=16.3.6`, `wrangler ^4.125`; the optional `rclone.js` peer is not installed. CLI: `npx opennextjs-cloudflare build` (Linux only: CI and Workers Builds). |
+| `@opennextjs/cloudflare` (dev) | 1.20.7 (exact pin, **installed in 0C**) | Adapter that builds Next.js for Cloudflare Workers. Peers: `next >=16.3.6`, `wrangler ^4.125`; the optional `rclone.js` peer is not installed. CLI: `npx opennextjs-cloudflare build` (Linux only: CI, Workers Builds or your own Linux PC; it does not run on Windows). |
 | `wrangler` (dev) | **4.145.0** (exact pin, installed in 0C; this table said 4.143.0) | Cloudflare CLI used by the adapter (needs Node ≥22). It brings `workerd` (1.20260930.x), so `wrangler.jsonc` uses `compatibility_date` 2026-09-30. |
 | `esbuild` (dev) | **0.28.1** (exact pin, added in 0C after the first CI run failed) | **Workaround, not used by our code.** `@opennextjs/cloudflare` 1.20.7 imports `esbuild` without declaring it (upstream issue opennextjs-cloudflare#1339, fix PR #1353 unreleased). It only worked when npm happened to hoist `@opennextjs/aws`'s nested 0.25.4, and here `vite` 8's optional peer (`esbuild ^0.27.0 \|\| ^0.28.0`) blocks that hoist, so `npx opennextjs-cloudflare build` failed with `ERR_MODULE_NOT_FOUND: Cannot find package 'esbuild'`. 0.28.1 is wrangler's own pin (one shared copy), inside vite's peer range, and the first release fixed for GHSA-g7r4-m6w7-qqqr (0.27.3–0.28.0). **Remove it** once an OpenNext release declares `esbuild` itself, then re-run the OpenNext build. |
 | `vitest` | 5.0.3 | Unit/component test runner |
 | `@vitejs/plugin-react` | 6.1.1 | React support for Vitest |
 | `jsdom` | 30.1.1 | Browser-like test DOM. `vite-tsconfig-paths` is **not** used: `vitest.config.mts` aliases `@` to `src` directly. |
 | `@testing-library/react`, `@testing-library/dom`, `@testing-library/user-event`, `@testing-library/jest-dom` | RTL 16.3.3, dom 10.4.2, user-event 14.6.7, jest-dom 7.0.1 | Component testing |
-| `@playwright/test` | 1.63.0 (exact pin, installed in 0C) | End-to-end tests. Browsers are installed once by `npx playwright install chromium` (to `%LOCALAPPDATA%ms-playwright`); CI uses `--with-deps`. |
-| `sharp` (dev) | 0.35.5 (exact pin) | **Added in Part 0D** (2026-10-01). Renders `design/logo.svg` into the favicon, app icons, share image and email/admin logos (`npm run brand:build`). Prebuilt Windows x64 binaries. Used only by `frontend/scripts/brand/`, never by app code or the Worker bundle. |
+| `@playwright/test` | 1.63.0 (exact pin, installed in 0C) | End-to-end tests. The browser is installed once per machine: Linux `npx playwright install --with-deps chromium` (to `~/.cache/ms-playwright`, plus apt libraries); Windows `npx playwright install chromium` (to `%LOCALAPPDATA%\ms-playwright`). CI uses `--with-deps`. |
+| `sharp` (dev) | 0.35.5 (exact pin) | **Added in Part 0D** (2026-10-01). Renders `design/logo.svg` into the favicon, app icons, share image and email/admin logos (`npm run brand:build`). Prebuilt Windows x64 and Linux binaries. Used only by `frontend/scripts/brand/`, never by app code or the Worker bundle. |
 
 **Scaffolding notes (verified in Part 0B, 2026-10-01):**
 - `create-next-app` 16.3.8 has no `--turbopack` option any more (Turbopack is the default). Part 0B ran it with `--ts --tailwind --eslint --app --src-dir --import-alias "@/*" --use-npm --empty --no-react-compiler --no-agents-md --disable-git --skip-install --yes` in a scratch folder and copied the result into `frontend/`, because it refuses a folder that holds `.env.example` or `.env.local`.

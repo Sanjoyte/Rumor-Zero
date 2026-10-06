@@ -115,6 +115,30 @@ in `task.md`; transient continuation state belongs in `HANDOFF.md`.
 - **Consequence:** after any allauth upgrade, re-read those files and run `apps/accounts/tests/` (the strategy, cookie, middleware and concurrency tests pin the behaviour) before changing the pin.
 - **Evidence:** Part 1 plan (facts 1–15) and implementation; the control test in `test_tokens.py` shows allauth's stock strategy losing a tab's token.
 
+### 2026-10-06 — Development moves to Linux; docs carry both OSes; how the Linux check was done
+
+- **Applies to:** every part that adds or changes a command in `docs/SETUP.md`, `docs/ENV_GUIDE.md`,
+  `docs/test-command.md` or `AGENTS.md`; anyone verifying install steps from this Windows PC.
+- **Fact:** from 2026-10-06 the user works on a Linux PC (Ubuntu/Debian/Mint, bash); the Windows 11 PC
+  stays documented. Those three docs hold **both** versions, Linux first: a `**Linux (bash):**` block
+  above the `**Windows (PowerShell):**` block, or one `**Linux and Windows (same commands):**` bash
+  block when the text is identical. Expected output and prose are shared. The MEMORY entries below that
+  mention PowerShell, Edge or `taskkill` are Windows-only.
+- **Consequence:** a new test-command step or setup command needs both versions (`bash -n` the Linux
+  one). The Linux commands were checked by running them verbatim in a fresh container (below), not
+  only by reading them.
+- **Method (reusable):** pack `git ls-files -co --exclude-standard` into a tar; start `postgres:18` and
+  `redis:8-alpine`, then an `ubuntu:24.04` container with `--network container:<postgres>` so
+  `localhost:5432/6379` behave as in the guide; run the SETUP/ENV_GUIDE blocks and the test-command
+  blocks **extracted from the docs by script**, not retyped. A bare `ubuntu:24.04` has no `sudo`,
+  `python3`, `curl`, `pkill` or `ss` (install them as harness setup; a real Ubuntu desktop has them).
+- **Gotchas:** Git Bash rewrites a path argument like `/root/p0.sh` in `docker exec` into
+  `C:/Program Files/Git/root/p0.sh`; set `MSYS_NO_PATHCONV=1` and pass `docker cp` sources through
+  `cygpath -w`. Docker can't run inside that container, so `docker compose up -d`, the Docker Engine
+  install and IPv6 `[::1]` publishing were not exercised (SETUP has an uncommitted
+  `compose.override.yaml` workaround, git-ignored).
+- **Evidence:** results and numbers in HANDOFF "Validation of the Linux clean-room run (2026-10-06)".
+
 ### 2026-10-03 — Windows PowerShell 5.1 strips the quotes in JSON passed to native programs
 
 - **Applies to:** `docs/test-command.md` and any PowerShell instructions that send JSON with `curl.exe`.

@@ -103,13 +103,13 @@ design/     logo.svg (master logo) · logo.png (old, unused) · stitch/ (Stitch 
 .github/workflows/ci.yml · compose.yaml (local Postgres + Redis) · task.md
 ```
 
-## Commands (exist after Part 0; PowerShell)
+## Commands (exist after Part 0; Linux bash, Windows differences below)
 
-```powershell
+```bash
 docker compose up -d                        # repo root: local Postgres 18 + Redis
 # backend (cd backend)
-py -3.13 -m venv .venv                      # once
-.\.venv\Scripts\Activate.ps1                # every new terminal
+python3.13 -m venv .venv                    # once
+source .venv/bin/activate                   # every new terminal
 pip install -r requirements-dev.txt
 python manage.py migrate
 python manage.py runserver                  # http://localhost:8000 (admin: /admin/)
@@ -120,7 +120,7 @@ ruff check . ; ruff format --check .        # lint + format check (fix: ruff for
 ruff check --fix . ; ruff format .          # right after startproject/startapp/makemigrations
 python manage.py makemigrations --check --dry-run
 # frontend (cd frontend)
-npm install
+npm ci                                      # clean install from package-lock.json (first time)
 npm run dev                                 # http://localhost:3000
 npm run lint ; npm run typecheck ; npm test # eslint, tsc --noEmit, vitest run
 npm run test:e2e                            # Playwright (starts both servers)
@@ -128,10 +128,15 @@ npm run build
 npm run brand:build                         # after Part 0D: regenerate assets from design/logo.svg
 ```
 
-- The user's shell is **Windows PowerShell 5.1**: no `&&`; use `;` or `if ($?) { … }`. Git Bash
-  also exists.
-- gunicorn and the OpenNext build do not run on Windows. They run in CI, on Render and in
-  Cloudflare Workers Builds.
+- **Two machines.** From 2026-10-06 the user works on **Linux** (Ubuntu/Debian/Mint, bash). The earlier
+  machine is **Windows 11 with PowerShell 5.1**. Check the platform before choosing shell syntax.
+  `docs/SETUP.md`, `docs/ENV_GUIDE.md` and `docs/test-command.md` hold both versions, Linux first.
+- Windows differences: `py -3.13 -m venv .venv` and `.\.venv\Scripts\Activate.ps1`; PowerShell 5.1 has
+  no `&&` (use `;` or `if ($?) { … }`); Git Bash also exists; `npx playwright install chromium`
+  without `--with-deps`.
+- gunicorn does not run on Windows, and neither does the OpenNext build. The build runs on Linux (CI,
+  Cloudflare Workers Builds, the user's Linux PC), never from a checkout with a real `.env.local`.
+  gunicorn runs on Render.
 
 ## Code conventions
 
