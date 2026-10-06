@@ -6,22 +6,34 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none in progress. Parts 0A, 0B, 0D, 0C and **1 (auth core) are done**. Part 1 is
-  committed (`d9d1358`) and **CI is green** (user-reported 2026-10-06). **Next: Part 2** (email
-  verification & password reset), not started.
-- **Machine:** development moves from the Windows 11 PC to a **Linux PC (Ubuntu/Debian/Mint)** from
-  2026-10-06. A docs chore prepared that move (below); the user commits it.
-- **Owner:** none (Claude stopped after the chore; the user reviews, commits and pushes)
-- **Phase:** chore finished; its changes are **uncommitted** (see "Current workspace state").
-- **Approved plan (chore):**
-  [`docs/agents/plans/chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md)
-  (approved and executed 2026-10-06)
-- **Previous plans:** [`part-1-auth-core.md`](plans/part-1-auth-core.md) (done 2026-10-03),
-  [`part-0C-app-shell-relay-ci.md`](plans/part-0C-app-shell-relay-ci.md) (done 2026-10-01)
-- **Last updated:** 2026-10-06 by Claude (Sonnet 5.5), Linux machine-switch chore
+- **Part:** **2 (email verification & password reset)**, planned and approved, **not implemented**.
+  Parts 0A, 0B, 0D, 0C and 1 are done; Part 1 CI green (user-reported 2026-10-06).
+- **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash) from 2026-10-06. `backend/.venv` and
+  `frontend/node_modules` exist there.
+- **Owner:** none (Claude stopped after saving the plan; implementation starts in a new session)
+- **Phase:** plan approved; no code written, no setup commands run, `task.md` untouched.
+- **Approved plan:**
+  [`docs/agents/plans/part-2-email-verification-reset.md`](plans/part-2-email-verification-reset.md)
+  (approved by the user 2026-10-07)
+- **Previous plans:** [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md) (done
+  2026-10-06), [`part-1-auth-core.md`](plans/part-1-auth-core.md) (done 2026-10-03)
+- **Last updated:** 2026-10-07 by Claude (Opus 5.5), Part 2 planning
 
 ## Completed checkpoints
 
+- 2026-10-07 (Claude, Opus 5.5): **Part 2 planned and approved** (plan linked above). Started from
+  HEAD `353ee19` (the Linux chore, committed by the user), a clean tree in sync with `origin/main`.
+  Read-only research only: allauth 65.19.5, Django 5.2 and Next 16.3.8 source, plus a review pass
+  against the code. User decisions (2026-10-06):
+  - sign-up lands on `/verify-email`;
+  - New post is `aria-disabled` until the email is verified;
+  - verification emails 1 per 60 s per address, plus 10 resends/day per address; reset requests keep
+    allauth's per-minute limits, plus 10/day per address and 50/day per IP;
+  - no email to unknown addresses (`ACCOUNT_EMAIL_UNKNOWN_ACCOUNTS = False`).
+
+  Also recorded in the plan: the documented `auth/email/verify/resend` is code-mode only, so resend
+  becomes our `POST /api/v1/me/verification-email/`; daily caps need separate allauth actions
+  (rates sharing a "per" type share one history); reset links last 24 h.
 - 2026-10-06 (Claude, Sonnet 5.5): **Linux machine-switch chore** (docs and comments only; no code,
   config, env or git change). Started from HEAD `d9d1358` (Part 1), a clean tree in sync with
   `origin/main`; CI green (user-reported).
@@ -82,18 +94,10 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `d9d1358` (Part 1), in sync with `origin/main` at the start of the chore. **Uncommitted**
-  (`git status --short`): modified `.gitignore`, `AGENTS.md`, `backend/.env.example`,
-  `frontend/.env.example`, `docs/ENV_GUIDE.md`, `docs/SETUP.md`, `docs/test-command.md`,
-  `docs/agents/HANDOFF.md` (this file) and `docs/agents/MEMORY.md`; new
-  `docs/agents/plans/chore-linux-machine-switch.md`. Nothing else.
-- All index blobs use LF. `frontend/.env.example` (and 27 other tracked files) show CRLF in this
-  Windows working copy only; git normalises them, so `git diff` shows just the intended lines.
-- `git status --short design` prints nothing; no nested `frontend/AGENTS.md`/`CLAUDE.md`.
-- **Nothing left running.** The throwaway clean-room containers (`rz-cr-*`) were removed; the local
-  `docker compose` containers were already down. Docker Desktop still holds the images
-  `ubuntu:24.04` (pulled for the check), `postgres:18`, `redis:8-alpine`, `node:24-bookworm-slim`.
-- Not copied by git, to recreate on the new machine: see SETUP "Moving to another machine".
+- HEAD is `353ee19` (Linux chore), in sync with `origin/main`, tree clean at the start of planning.
+  **Uncommitted** after planning: modified `docs/agents/HANDOFF.md` (this file); new
+  `docs/agents/plans/part-2-email-verification-reset.md`. Nothing else.
+- No code, config, env file or `task.md` changed. Nothing was started (no servers, no containers).
 
 ## Validation of Part 1 (2026-10-03)
 
@@ -176,13 +180,11 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-1. **User (this PC):** review `git diff`, commit the chore (docs, `.gitignore`, `.env.example`
-   comments, this file, MEMORY, the plan) and push.
-2. **User (Linux PC):** install the tools (SETUP "Part A (Linux)" A1–A4, A7), `git clone`, then follow
-   the Quick start there; ENV_GUIDE §1.1–1.2 for the env files. All checks should end as the numbers
-   above (440 / 562 / 11). A failure there is new information: record it here and in MEMORY.
-3. Then start a fresh session for **Part 2** (email verification & password reset): plan it first
-   (`Plan Part 2 from task.md. Do not implement yet.`). Read "Follow-ups noted during Part 1" below.
+1. **User:** review and commit the plan and this file.
+2. **Implement Part 2 from the approved plan**
+   ([`part-2-email-verification-reset.md`](plans/part-2-email-verification-reset.md)), starting at its
+   "Ordered steps" step 2 (step 1, saving the plan, is done). Fresh session, task.md's implement
+   model (Sonnet 5.5 · high); first `git status` and `docker compose up -d`.
 
 ## Blockers or user decisions
 
