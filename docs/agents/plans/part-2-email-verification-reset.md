@@ -1,7 +1,9 @@
 # Plan: Part 2, Email verification & password reset
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-07, together with the decisions
-  below. Not implemented yet.
+  below. **IMPLEMENTED 2026-10-07** (Claude, Sonnet 5.5). Deviations: see `task.md` Part 2 and
+  `docs/agents/HANDOFF.md` (the `ready()` preload of allauth's deferred libraries, the tinted waiting
+  Resend button, "Forgot password?" in a3's options row, `e2e/helpers.ts`).
 - **Drafted:** 2026-10-06/07 by Claude (Opus 5.5), with a separate review pass against the code
   whose findings are folded in. **Implement with:** Sonnet 5.5 · high (task.md).
 - **Evidence:** allauth 65.19.5 and Django 5.2 behaviour read in the installed source under

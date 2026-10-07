@@ -9,6 +9,15 @@ export const MESSAGES = {
   network: "Can't reach Rumor Zero. Check your connection and try again.",
   generic: "Something went wrong. Try again.",
   turnstileUnavailable: "We couldn't run the bot check. Try again in a minute.",
+  // Part 2: verification and password reset
+  resendSent: "We sent a new verification link. Check your inbox.",
+  resendThrottled: "We sent one recently. Wait a little before asking again.",
+  alreadyVerified: "Your email is already verified.",
+  newPostBlocked:
+    "Verify your email to post. Check your inbox, or resend the link from the banner.",
+  passwordChanged: "Password changed. You're logged in.",
+  passwordChangedLogIn: "Password changed. Log in with your new password.",
+  resetUnreachable: "We couldn't check this link. Try again.",
 } as const;
 
 /** The banner text for errors that don't belong to one field. */

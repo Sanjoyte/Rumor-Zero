@@ -26,7 +26,8 @@ function validate(email: string, password: string): FieldErrors {
 
 /**
  * `/login` (Stitch a3). One dismissible banner for failures; no "Remember me" and no attempt
- * counter (ANALYSIS b-2). "Forgot password?" arrives with its page in Part 2, Google in Part 3.
+ * counter (ANALYSIS b-2). "Forgot password?" sits in a3's options row (Part 2); Google waits for
+ * Part 3.
  */
 export function LoginForm() {
   const { login } = useAuth();
@@ -92,6 +93,14 @@ export function LoginForm() {
           onChange={(event) => setPassword(event.target.value)}
           error={fieldErrors.password}
         />
+        <div className="flex items-center justify-end pt-0.5">
+          <Link
+            href="/forgot-password"
+            className="font-body-sm text-body-sm font-medium text-secondary transition-colors hover:underline"
+          >
+            Forgot password?
+          </Link>
+        </div>
         <div className="pt-space-sm">
           <Button type="submit" block loading={submitting}>
             <span>Log in</span>

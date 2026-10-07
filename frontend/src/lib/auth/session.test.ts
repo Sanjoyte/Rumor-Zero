@@ -433,6 +433,108 @@ describe("login, signup, logout and other tabs", () => {
     await session.reloadMe();
     expect(session.getState().user?.display_name).toBe("Ada L.");
   });
+
+  it("signInWithToken logs in with a token another call returned, and tells the other tabs", async () => {
+    const bus = fakeBus();
+    const tabA = makeSession({ hasHint: () => false, channel: bus.channel() });
+    const tabB = makeSession({ hasHint: () => false, channel: bus.channel() });
+    await Promise.all([tabA.session.bootstrap(), tabB.session.bootstrap()]);
+    expect(tabB.session.getState().status).toBe("anonymous");
+
+    const token = accessToken("user-1");
+    await tabA.session.signInWithToken(token);
+
+    expect(tabA.api.login).not.toHaveBeenCalled();
+    expect(tabA.api.fetchMe).toHaveBeenCalledWith(token);
+    expect(tabA.store.value).toBe(token);
+    expect(tabA.session.getState()).toMatchObject({ status: "authenticated", user: me() });
+    await vi.waitFor(() => expect(tabB.session.getState().status).toBe("authenticated"));
+  });
+});
+
+// ---------- the email got verified in another tab ----------
+
+describe("user-changed across tabs", () => {
+  /** A bus that also counts what each tab posts. */
+  function countingBus() {
+    const bus = fakeBus();
+    const posted: AuthMessage[] = [];
+    return {
+      posted,
+      channel(): AuthChannel {
+        const inner = bus.channel();
+        return {
+          subscribe: inner.subscribe,
+          post: (message) => {
+            posted.push(message);
+            inner.post(message);
+          },
+        };
+      },
+    };
+  }
+
+  it("reloadMe tells the other signed-in tabs, which reload /me once and say nothing back", async () => {
+    const bus = countingBus();
+    const verified = { ...me(), is_email_verified: true };
+    const apiA = fakeApi();
+    const apiB = fakeApi();
+    const tabA = makeSession({ channel: bus.channel(), api: apiA }); // the sign-up tab
+    const tabB = makeSession({ channel: bus.channel(), api: apiB }); // the link's tab
+    await Promise.all([tabA.session.bootstrap(), tabB.session.bootstrap()]);
+    expect(tabA.session.getState().user?.is_email_verified).toBe(false);
+    const fetchesBefore = apiA.fetchMe.mock.calls.length;
+    apiA.fetchMe.mockResolvedValue(verified);
+    apiB.fetchMe.mockResolvedValue(verified);
+    bus.posted.length = 0;
+
+    await tabB.session.reloadMe();
+
+    await vi.waitFor(() => expect(tabA.session.getState().user?.is_email_verified).toBe(true));
+    expect(apiA.fetchMe).toHaveBeenCalledTimes(fetchesBefore + 1); // exactly one /me
+    expect(apiA.refresh).toHaveBeenCalledTimes(1); // only the bootstrap one
+    expect(bus.posted).toEqual([{ type: "user-changed" }]); // B's one message, no echo from A
+  });
+
+  it("an anonymous tab ignores it: no refresh, no login", async () => {
+    const bus = countingBus();
+    const anonymousApi = fakeApi();
+    const signedIn = makeSession({ channel: bus.channel() });
+    const anonymous = makeSession({
+      channel: bus.channel(),
+      hasHint: () => false,
+      api: anonymousApi,
+    });
+    await Promise.all([signedIn.session.bootstrap(), anonymous.session.bootstrap()]);
+
+    await signedIn.session.reloadMe();
+
+    expect(anonymous.session.getState().status).toBe("anonymous");
+    expect(anonymousApi.refresh).not.toHaveBeenCalled();
+    expect(anonymousApi.fetchMe).not.toHaveBeenCalled();
+  });
+
+  it("a /me failure in the receiving tab changes nothing", async () => {
+    const bus = countingBus();
+    const apiA = fakeApi();
+    const tabA = makeSession({ channel: bus.channel(), api: apiA });
+    const tabB = makeSession({ channel: bus.channel() });
+    await Promise.all([tabA.session.bootstrap(), tabB.session.bootstrap()]);
+    apiA.fetchMe.mockRejectedValue(apiError(0));
+
+    await tabB.session.reloadMe();
+    await Promise.resolve();
+
+    expect(tabA.session.getState()).toMatchObject({ status: "authenticated", user: me() });
+  });
+
+  it("reloadMe says nothing when there is no token", async () => {
+    const bus = countingBus();
+    const { session } = makeSession({ channel: bus.channel(), hasHint: () => false });
+    await session.bootstrap();
+    await session.reloadMe();
+    expect(bus.posted).toEqual([]);
+  });
 });
 
 // ---------- two tabs, one strictly rotating backend ----------

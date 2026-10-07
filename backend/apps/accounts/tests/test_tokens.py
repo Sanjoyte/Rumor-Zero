@@ -43,15 +43,6 @@ def jti_of(token):
     return claims(token)["jti"]
 
 
-@pytest.fixture
-def clock(monkeypatch):
-    """Moves time.time() forward; PyJWT's own expiry check uses datetime and is unaffected."""
-    real = time.time
-    offset = {"seconds": 0}
-    monkeypatch.setattr(time, "time", lambda: real() + offset["seconds"])
-    return offset
-
-
 @pytest.mark.django_db
 class TestRotation:
     def test_refresh_returns_a_new_pair_and_locks_the_session_row(self):

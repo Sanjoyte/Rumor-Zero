@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { useRef, useState, type FormEvent } from "react";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
@@ -10,6 +11,7 @@ import { PasswordStrengthMeter } from "@/components/ui/PasswordStrengthMeter";
 import { TextField } from "@/components/ui/TextField";
 import { ApiError } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { safeNextPath } from "@/lib/auth/next-path";
 import { scorePassword } from "@/lib/password-strength";
 import { bannerMessage } from "./messages";
 import { Turnstile } from "./Turnstile";
@@ -53,7 +55,10 @@ export interface SignupFormProps {
 export function SignupForm({ siteKey: siteKeyProp }: SignupFormProps) {
   const siteKey = siteKeyProp ?? process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
   const { signup } = useAuth();
-  useRedirectWhenLoggedIn();
+  const router = useRouter();
+  // Set just before signup() so the redirect hook leaves a brand-new account to this form.
+  const submitted = useRef(false);
+  useRedirectWhenLoggedIn({ skip: submitted });
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -72,6 +77,7 @@ export function SignupForm({ siteKey: siteKeyProp }: SignupFormProps) {
     if (Object.keys(errors).length > 0 || !turnstileToken) return;
 
     setSubmitting(true);
+    submitted.current = true;
     try {
       await signup({
         email: email.trim(),
@@ -79,8 +85,11 @@ export function SignupForm({ siteKey: siteKeyProp }: SignupFormProps) {
         password,
         turnstileToken,
       });
-      // useRedirectWhenLoggedIn moves on to /home, where the "Verify your email" banner shows.
+      // A new account lands on "check your inbox"; `next` rides along for "Continue browsing".
+      const next = safeNextPath(new URLSearchParams(window.location.search).get("next"));
+      router.replace(`/verify-email${next ? `?next=${encodeURIComponent(next)}` : ""}`);
     } catch (error) {
+      submitted.current = false;
       const fromServer: FieldErrors = {};
       if (error instanceof ApiError) {
         for (const field of FIELDS) {

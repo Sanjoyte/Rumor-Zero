@@ -8,6 +8,12 @@ import { AuthProvider } from "@/lib/auth/AuthProvider";
 import { AuthSession } from "@/lib/auth/session";
 import AppLayout from "./layout";
 
+const resendMock = vi.hoisted(() => vi.fn<() => Promise<void>>());
+vi.mock("@/lib/auth/auth-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/auth/auth-api")>()),
+  resendVerificationEmail: resendMock,
+}));
+
 let pathname = "/settings";
 const replace = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -59,6 +65,8 @@ function renderLayout(session: AuthSession) {
 }
 
 beforeEach(() => {
+  resendMock.mockReset();
+  resendMock.mockResolvedValue(undefined);
   pathname = "/settings";
   window.history.pushState({}, "", "/settings?tab=email");
   replace.mockClear();
@@ -128,5 +136,58 @@ describe("(app) layout logout", () => {
     ).toBeInTheDocument();
     expect(replace).not.toHaveBeenCalled();
     expect(session.getState().status).toBe("authenticated");
+  });
+});
+
+describe("(app) layout, unverified email", () => {
+  const unverified = { ...ME, is_email_verified: false };
+  const sessionUnverified = () =>
+    sessionWith("authenticated", { fetchMe: vi.fn(async () => unverified) });
+
+  it("explains why New post does nothing, with a toast", async () => {
+    pathname = "/home";
+    renderLayout(sessionUnverified());
+    const sidebar = await screen.findByRole("complementary");
+    await within(sidebar).findByText("Ada Lovelace");
+    await userEvent.click(within(sidebar).getByRole("button", { name: "New post" }));
+    expect(
+      await screen.findByText(
+        "Verify your email to post. Check your inbox, or resend the link from the banner.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("resends from the banner, answers with a toast and starts the countdown", async () => {
+    pathname = "/home";
+    renderLayout(sessionUnverified());
+    await userEvent.click(await screen.findByRole("button", { name: "Resend link" }));
+    expect(resendMock).toHaveBeenCalledTimes(1);
+    expect(
+      await screen.findByText("We sent a new verification link. Check your inbox."),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Resend link \(60s\)/ })).toBeDisabled();
+  });
+
+  it("shows a throttled resend as a toast", async () => {
+    pathname = "/home";
+    resendMock.mockRejectedValue(
+      new ApiError({ status: 429, code: "verification_email_throttled", detail: "Wait." }),
+    );
+    renderLayout(sessionUnverified());
+    await userEvent.click(await screen.findByRole("button", { name: "Resend link" }));
+    expect(
+      await screen.findByText("We sent one recently. Wait a little before asking again."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows neither the banner nor a blocked New post to a verified user", async () => {
+    pathname = "/home";
+    renderLayout(sessionWith("authenticated"));
+    const sidebar = await screen.findByRole("complementary");
+    await within(sidebar).findByText("Ada Lovelace");
+    expect(screen.queryByRole("button", { name: /Resend/ })).toBeNull();
+    expect(within(sidebar).getByRole("button", { name: "New post" })).not.toHaveAttribute(
+      "aria-disabled",
+    );
   });
 });

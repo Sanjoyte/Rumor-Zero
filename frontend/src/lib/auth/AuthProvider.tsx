@@ -33,6 +33,8 @@ export type { AuthState, AuthStatus };
 export interface AuthContextValue extends AuthState {
   login: (email: string, password: string) => Promise<void>;
   signup: (input: SignupInput) => Promise<void>;
+  /** Log in with the access token a password reset returned (the refresh cookie is already set). */
+  signInWithToken: (token: string) => Promise<void>;
   /** Throws (and changes nothing) when the server can't be reached. */
   logout: () => Promise<void>;
   reloadMe: () => Promise<void>;
@@ -120,6 +122,7 @@ export function AuthProvider({
       ...state,
       login: (email, password) => requireSession(session).login(email, password),
       signup: (input) => requireSession(session).signup(input),
+      signInWithToken: (token) => requireSession(session).signInWithToken(token),
       logout: () => requireSession(session).logout(),
       reloadMe: () => requireSession(session).reloadMe(),
     }),

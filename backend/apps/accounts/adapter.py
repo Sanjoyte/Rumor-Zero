@@ -23,7 +23,27 @@ class AccountAdapter(DefaultAccountAdapter):
         # the lifetime slides. Admin sessions keep SESSION_COOKIE_AGE.
         request.session.set_expiry(settings.REFRESH_TOKEN_SECONDS)
 
+    def add_message(
+        self,
+        request,
+        level,
+        message_template=None,
+        message_context=None,
+        extra_tags="",
+        message=None,
+    ):
+        # Headless-only: nothing renders Django messages, and storing one would set a `messages`
+        # cookie on the frontend origin (allauth skips this only for headless-marked requests).
+        return None
+
     def send_mail(self, template_prefix, email, context):
+        # The templates link to the frontend and show the logo from it; the context allauth passes
+        # has the (backend) request's host, which is never wanted in an email.
+        context = {
+            **context,
+            "frontend_origin": settings.FRONTEND_ORIGIN,
+            "email_logo_url": f"{settings.FRONTEND_ORIGIN}/brand/email-logo.png",
+        }
         # A failed send must not turn a saved sign-up into a 500. Exception messages can contain
         # addresses or provider details, so only the class name is logged.
         try:

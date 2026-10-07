@@ -1,36 +1,51 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself. Every part gets its own section, in
-build order. Each command says where to run it: **Terminal** (bash on Linux, PowerShell on Windows,
-or the VS Code terminal) or **Browser**.
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2).
+The file has two complete guides. Pick the one for your computer and stay in it:
 
-Every terminal command comes in two versions, **Linux (bash)** first and **Windows (PowerShell)**
-second. Use the one for your machine. A block marked **Linux and Windows (same commands)** works
-unchanged on both. The explanations and the expected output are shared.
+- [Guide 1: Linux (bash)](#guide-1-linux-bash)
+- [Guide 2: Windows (PowerShell)](#guide-2-windows-powershell)
 
-Conventions:
-- **Linux:** the blocks assume a new terminal in the repo root (wherever you cloned it) and use paths
-  relative to it. Backend commands run in `backend/` with the venv active
-  (`source .venv/bin/activate`; the prompt shows `(.venv)`). The JSON commands need `jq`
-  (`sudo apt install jq`, SETUP.md A7). SETUP.md "Quick start" runs the same automated checks in one go.
-- **Windows:** the repo root is `C:\Users\Nafis\Downloads\Rumor-Zero`. Backend commands run in
-  `backend\` with the venv active (`.\.venv\Scripts\Activate.ps1`; the prompt shows `(.venv)`).
-- A server started with `runserver` keeps its window busy. Run everything else in a second window.
+How to read a step:
+
+- **Where** says which window to use: *Terminal window 1* (the server, which stays busy), *Terminal
+  window 2* (where you type the commands), or the *Browser*.
+- **What this does** says why you run it. **You should see** shows the output you should get and what
+  it means. **If it differs** appears only where there is a known cause.
+- Variables such as `access` or `id` live only in the terminal that set them. A step that needs one
+  says which earlier step sets it. Opening a new terminal loses them, so redo that step.
 - Real env values are never pasted or printed. Commands that need a secret read it from your own
-  `backend/.env` (`backend\.env` on Windows) without displaying it.
-- The outputs shown were recorded on Windows. Where Linux prints something different (path
-  separators, which address `localhost` resolves to), a note under the block says so.
+  `backend/.env` without displaying it.
 - Counts in the expected output (tests, packages, vulnerabilities) were recorded when each part was
-  finished. Later parts add tests and packages, and `npm audit` changes as advisories appear, so
-  they drift. The current totals are in `docs/agents/HANDOFF.md`.
+  finished and drift later. The current totals are in `docs/agents/HANDOFF.md`.
 
 ---
 
-## Part 0A: Backend foundation
+## Guide 1: Linux (bash)
 
-### 1. Terminal: start the services
+- Blocks assume a new terminal in the repo root (wherever you cloned it) and use paths relative to it.
+  Backend commands run in `backend/` with the venv active (`source .venv/bin/activate`; the prompt
+  shows `(.venv)`). JSON commands need `jq` (`sudo apt install jq`, SETUP.md A7). SETUP.md
+  "Quick start" runs the same automated checks in one go.
+- A server started with `runserver` keeps its window busy. Run everything else in a second window.
+- Some recorded outputs were captured on Windows; where Linux prints something different (path
+  separators, which address `localhost` resolves to), a note says so.
 
-**Linux (bash):**
+### Part 0A: Backend foundation
+
+This part starts the local database and cache, runs the Django backend, and checks that it works.
+
+| Window | Used for | Stays busy? |
+|---|---|---|
+| Terminal window 1 (server) | Steps 1 to 2: containers, migrate, create your admin user, `runserver` | Yes, `runserver` keeps it busy. Leave it running. |
+| Terminal window 2 (commands) | Steps 3 to 5: health checks, database rules, tests | No |
+| Browser | Step 2 | - |
+
+#### Step 1: Start the services and the backend server
+
+**Where:** Terminal window 1 (server), in the repo root first, then in `backend/`.
+
+**What this does:** `docker compose` starts Postgres (the database) and Redis (the cache) in containers. Then you prepare the backend, create your own admin account and start the Django development server.
 
 ```bash
 # from the repo root
@@ -38,15 +53,7 @@ docker compose up -d
 docker compose ps                     # postgres and redis both say (healthy)
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-cd C:\Users\Nafis\Downloads\Rumor-Zero
-docker compose up -d
-docker compose ps                     # postgres and redis both say (healthy)
-```
-
-**Linux (bash):**
+**You should see:** two rows, `postgres` and `redis`, both with `(healthy)`. If they say `starting`, wait a few seconds and run `docker compose ps` again.
 
 ```bash
 cd backend
@@ -56,26 +63,22 @@ python manage.py createsuperuser      # prompts for Email, Username, Password
 python manage.py runserver            # leave this window running
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-cd backend
-.\.venv\Scripts\Activate.ps1
-python manage.py migrate              # "No migrations to apply" on a database that is already migrated
-python manage.py createsuperuser      # prompts for Email, Username, Password
-python manage.py runserver            # leave this window running
-```
+**You should see:** after `source .venv/bin/activate` the prompt starts with `(.venv)`. `migrate` ends with "No migrations to apply" if the database is already migrated (a fresh database lists many `Applying ...` lines instead). `createsuperuser` asks you for an email, a username and a password (the password is not shown while you type). `runserver` prints that it is running at `http://127.0.0.1:8000/` and then does not return to a prompt. That is normal: the window is now busy serving the backend.
 
 - The username can't be a reserved word (`admin`, `root`, `staff` and others are blocked). Use
   something like `nafis_admin`.
 - Django Admin logs in with the **email**, not the username.
 
-### 2. Browser: while `runserver` is running
+#### Step 2: Look at the backend in the browser
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Opens the health page and Django Admin to confirm the server answers and that your admin account works.
 
 | URL | Expect |
 |---|---|
 | http://localhost:8000/api/health/ | `{"status":"ok"}` |
-| http://localhost:8000/admin/ | Login page. Sign in with your email and password. If it 404s, `ADMIN_URL_PATH` in `backend/.env` (`backend\.env` on Windows) isn't `admin/`; use that path. |
+| http://localhost:8000/admin/ | Login page. Sign in with your email and password. If it 404s, `ADMIN_URL_PATH` in `backend/.env` isn't `admin/`; use that path. |
 | http://localhost:8000/admin/accounts/user/ | Your user, plus an "Add user" button |
 | http://localhost:8000/admin/core/platformsettings/ | One row with 11 values; no add or delete |
 
@@ -85,42 +88,39 @@ Role check in the admin: add a second user, open it and set **Role = Moderator**
 - Senior moderator shows both groups; setting the role back to User clears them.
 - Your superuser stays staff whatever its role.
 
-### 3. Terminal (second window): deep health
+#### Step 3: Check the deep health endpoint
 
-Needs a request header, so it can't be done in the browser.
+**Where:** Terminal window 2 (commands), a new terminal in the repo root. Window 1 must still be running `runserver`.
 
-**Linux (bash):**
+**What this does:** The deep health check needs a secret request header, so it can't be done in the browser. The first request has no header and must be refused. The second sends the secret (read from your own `backend/.env` without printing it) and must succeed, which proves Postgres and Redis both answer.
 
 ```bash
 cd backend                            # from the repo root
 curl -i http://localhost:8000/api/health/deep/
-secret=$(grep -m1 '^INTERNAL_CRON_SECRET=' .env | cut -d= -f2- | tr -d '\r')
+secret=$(grep -m1 '^INTERNAL_CRON_SECRET=' .env | cut -d= -f2- | tr -d '\r')    # sets $secret for the next line; nothing is printed
 curl -i -H "X-RZ-Cron-Secret: $secret" http://localhost:8000/api/health/deep/
 ```
 
-**Windows (PowerShell):**
+**You should see:**
 
-```powershell
-cd C:\Users\Nafis\Downloads\Rumor-Zero\backend
-curl.exe -i http://localhost:8000/api/health/deep/
-$secret = (Select-String -Path .\.env -Pattern '^INTERNAL_CRON_SECRET=(.*)$').Matches.Groups[1].Value
-curl.exe -i -H "X-RZ-Cron-Secret: $secret" http://localhost:8000/api/health/deep/
-```
-
-- First request: **403** with `permission_denied`.
+- First request: **403** with `permission_denied` (no secret, so refused, as intended).
 - Second request: **200** with `{"status":"ok","database":"ok","cache":"ok"}`. This proves Postgres
   and Redis.
 
-### 4. Terminal: database rules
+**If it differs:** a `Connection refused` means window 1 is not running `runserver`. An empty `$secret` (second request also 403) means `INTERNAL_CRON_SECRET` is missing from `backend/.env`.
 
-Venv active, in `backend/` (`backend\` on Windows).
+#### Step 4: Check that the database refuses bad data
 
-**Linux and Windows (same commands):**
+**Where:** Same terminal as step 3 (window 2), in `backend/` with the venv active (run `source .venv/bin/activate` if the prompt has no `(.venv)`).
+
+**What this does:** Reads the platform settings, then tries to write a credibility score of 150 (the allowed range is 0 to 100). The database must refuse it.
 
 ```bash
 python manage.py shell -c "from apps.core.services import get_platform_settings as g; s=g(); print(s.report_threshold, s.emergency_min_reputation)"
 python manage.py shell -c "from apps.accounts.models import User; u=User.objects.first(); print(u.reputation_score); User.objects.filter(pk=u.pk).update(reputation_score=150)"
 ```
+
+**You should see:**
 
 - First command prints `5 40`.
 - Second prints `50`, then a long traceback ending in
@@ -128,11 +128,11 @@ python manage.py shell -c "from apps.accounts.models import User; u=User.objects
   is the expected result: the database refused a score above 100 and the user keeps 50. The
   traceback shows your email and the start of your password hash, so don't share it.
 
-### 5. Terminal: automated checks
+#### Step 5: Run the automated checks
 
-Venv active, in `backend/` (`backend\` on Windows). Needs the containers from step 1.
+**Where:** Same terminal as step 3 (window 2), in `backend/` with the venv active. Needs the containers from step 1.
 
-**Linux and Windows (same commands):**
+**What this does:** Runs the backend test suite, the code-style checks and the Django consistency checks. The test run takes a little while and prints dots as it goes.
 
 ```bash
 python -m pytest                                    # 200 passed
@@ -142,7 +142,11 @@ python manage.py makemigrations --check --dry-run   # No changes detected
 python manage.py check                              # System check identified no issues
 ```
 
-### 6. Stop and clean up
+**You should see:** the result in each comment above. The first two commands end with a summary line; the others print one short sentence.
+
+#### Step 6: Stop and clean up
+
+**Where:** Window 1 for the server, then any terminal in the repo root.
 
 - Stop the server: `Ctrl+C` in its window.
 - Stop the containers and keep the data: `docker compose down` (repo root).
@@ -150,15 +154,25 @@ python manage.py check                              # System check identified no
 
 ---
 
-## Part 0B: Frontend foundation & design system
+### Part 0B: Frontend foundation & design system
 
-Everything here runs in `frontend/` (`frontend\` on Windows). No backend, Docker container or
+Everything here runs in `frontend/`. No backend, Docker container or
 secret is needed: these pages make no API calls. (Next loads your `frontend/.env.local`
-(`frontend\.env.local` on Windows) by itself; you never open or print it.)
+by itself; you never open or print it.)
 
-### 1. Terminal: install and check the tools
+| Window | Used for | Stays busy? |
+|---|---|---|
+| Terminal window 1 (server) | Steps 4 and 7: `npm run dev`, later `npm start` | Yes, leave it running while you use the browser |
+| Terminal window 2 (commands) | Steps 1 to 3, the second half of step 7, and step 8 | No |
+| Browser | Steps 5 to 7 | - |
 
-**Linux (bash):**
+Steps 1 to 3 need only one terminal. Open a second one when step 4 starts the server.
+
+#### Step 1: Install and check the tools
+
+**Where:** Terminal (the one you will use for the checks), in the repo root first.
+
+**What this does:** Confirms Node is the right version and installs the frontend packages.
 
 ```bash
 cd frontend                           # from the repo root
@@ -166,23 +180,17 @@ node -v                               # v24.x.x (the project pins Node 24)
 npm install                           # "up to date, audited 449 packages" and "found 0 vulnerabilities"
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
-node -v                               # v24.x.x (the project pins Node 24)
-npm install                           # "up to date, audited 449 packages" and "found 0 vulnerabilities"
-```
+**You should see:** a Node version starting with `v24`, then npm's summary lines as in the comments. `npm install` can be quiet for a few seconds.
 
 - npm also prints `npm warn allow-scripts ... unrs-resolver`. It is harmless.
 - On a fresh clone the first install can stop with `ERR_SSL_CIPHER_OPERATION_FAILED` on this
   network. Run `npm cache verify`, then `npm install` again. Don't turn TLS checks off.
 
-### 2. Terminal: automated checks
+#### Step 2: Run the automated checks
 
-Same folder. Nothing else needs to be running.
+**Where:** Same terminal as step 1, same folder. Nothing else needs to be running.
 
-**Linux and Windows (same commands):**
+**What this does:** Runs the linter, the design-token guard, the type checker, the formatter check and the unit tests.
 
 ```bash
 npm run lint                          # only the npm header, no findings
@@ -192,27 +200,22 @@ npm run format:check                  # All matched files use Prettier code styl
 npm test                              # Test Files  32 passed (32) / Tests  251 passed (251)
 ```
 
-### 3. Terminal: try to break the design-token guard
+**You should see:** the result in each comment. "Only the npm header" means a couple of lines starting with `>` and nothing after them: no news is good news.
 
-`lint:tokens` rejects anything outside the Stitch design system. Add a file that breaks two rules:
+#### Step 3: Try to break the design-token guard
 
-**Linux (bash):**
+**Where:** Same terminal as step 1, in `frontend/`.
+
+**What this does:** `lint:tokens` rejects anything outside the Stitch design system. You add a file that breaks two rules, watch the guard complain, then delete the file and watch it pass again.
 
 ```bash
-printf '%s\n' 'export const x = "bg-blue-500 rounded-md";' > src/tmp-token-check.tsx
-npm run lint:tokens
-rm src/tmp-token-check.tsx
-npm run lint:tokens
+printf '%s\n' 'export const x = "bg-blue-500 rounded-md";' > src/tmp-token-check.tsx   # creates the bad file
+npm run lint:tokens                   # must fail
+rm src/tmp-token-check.tsx            # removes the bad file
+npm run lint:tokens                   # must pass again
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-Set-Content src\tmp-token-check.tsx 'export const x = "bg-blue-500 rounded-md";'
-npm run lint:tokens
-Remove-Item src\tmp-token-check.tsx
-npm run lint:tokens
-```
+**You should see:**
 
 - First run exits with code 1 and prints
   `src/tmp-token-check.tsx:1  Tailwind default palette colour: bg-blue-500`,
@@ -220,20 +223,27 @@ npm run lint:tokens
   `lint:tokens found 2 problem(s).`
 - Second run (file removed) is back to `lint:tokens OK ...`. Nothing is left behind.
 
-### 4. Terminal: start the dev server
+#### Step 4: Start the dev server
 
-**Linux and Windows (same commands):**
+**Where:** Terminal window 1 (server), in `frontend/`.
+
+**What this does:** Starts the Next.js development server so you can open the pages in the browser.
 
 ```bash
 npm run dev                           # leave this window running
 ```
 
-- Prints `▲ Next.js 16.3.8 (Turbopack)`, `- Local:         http://localhost:3000`,
-  `- Environments: .env.local` and `✓ Ready in` a few hundred milliseconds.
-- It must not create `frontend/AGENTS.md` or `frontend/CLAUDE.md` (`frontend\AGENTS.md` and
-  `frontend\CLAUDE.md` on Windows; see step 8).
+**You should see:**
 
-### 5. Browser: while `npm run dev` is running
+- `▲ Next.js 16.3.8 (Turbopack)`, `- Local:         http://localhost:3000`,
+  `- Environments: .env.local` and `✓ Ready in` a few hundred milliseconds. The window then stays busy. That is normal.
+- It must not create `frontend/AGENTS.md` or `frontend/CLAUDE.md` (see step 8).
+
+#### Step 5: Look at the pages and try the controls
+
+**Where:** Browser, while `npm run dev` is running in window 1.
+
+**What this does:** Checks the home page, the UI gallery and the 404 page, then tries each control in the gallery.
 
 | URL | Expect |
 |---|---|
@@ -274,14 +284,15 @@ The post cards under "Stitch b1: PostCard" (eight of them, in this order):
 
 The word "debunked" appears nowhere. For a side-by-side look, open
 `design/stitch/stitch_website_sitemap_grid_builder/b1_home_feed/code.html`
-(`design\stitch\stitch_website_sitemap_grid_builder\b1_home_feed\code.html` on Windows) next to
-the gallery.
+next to the gallery.
 Stitch also shows an affiliation line, an evidence drawer and an action bar (later parts) and
 strikes FALSE claims through (deliberately not copied).
 
-### 6. Browser: the two modals
+#### Step 6: Try the two modals
 
-Still on `/dev/ui`, scroll to "Stitch b2 and d1: modals".
+**Where:** Browser, still on `/dev/ui`. Scroll to "Stitch b2 and d1: modals".
+
+**What this does:** Opens the post composer and the report dialog and checks their behaviour (focus, Esc, counters).
 
 | Do this | Expect |
 |---|---|
@@ -293,45 +304,42 @@ Still on `/dev/ui`, scroll to "Stitch b2 and d1: modals".
 | Click **Open the report modal (d1)** | Header "Report this post" with a small "REPORT" line above it, a quoted claim with a dark left edge, five radio cards (the first selected, blue border), a blue "What happens next" note, and a white footer with Cancel and **Submit report**. Focus starts on the × button. |
 | Press Esc | The dialog closes and focus returns to **Open the report modal (d1)** |
 
-### 7. Terminal: the production build hides the gallery
+#### Step 7: Check that the production build hides the gallery
 
-Stop the dev server first (`Ctrl+C` in its window), then in `frontend/` (`frontend\` on Windows):
+**Where:** Terminal window 1 (server). First stop the dev server with `Ctrl+C`, then run the commands in `frontend/`. The checks afterwards go in window 2.
 
-**Linux and Windows (same commands):**
+**What this does:** Builds the production version and starts it. In production the `/dev/ui` gallery must answer 404 while the home page still works.
 
 ```bash
-npm run build
+npm run build                         # takes a little while; prints a route list at the end
 npm start                             # leave this window running
 ```
+
+**You should see:**
 
 - Build: `✓ Compiled successfully in` a few seconds, `Generating static pages ... (4/4)`, and a
   route list with `/`, `/_not-found` and `/dev/ui`, all marked `○ (Static)`. The route is listed
   but answers 404 at runtime, as the next commands show.
-- Start: `▲ Next.js 16.3.8`, `- Local:         http://localhost:3000`, `✓ Ready in` about 100 ms.
+- Start: `▲ Next.js 16.3.8`, `- Local:         http://localhost:3000`, `✓ Ready in` about 100 ms. The window stays busy.
 
-In a second window:
-
-**Linux (bash):**
+Now in **Terminal window 2 (commands)**, a second terminal:
 
 ```bash
 curl -s -o /dev/null -w '/        %{http_code}\n' http://localhost:3000/
 curl -s -o /dev/null -w '/dev/ui  %{http_code}\n' http://localhost:3000/dev/ui
 ```
 
-**Windows (PowerShell):**
+**You should see:**
 
-```powershell
-curl.exe -s -o NUL -w "/        %{http_code}`n" http://localhost:3000/
-curl.exe -s -o NUL -w "/dev/ui  %{http_code}`n" http://localhost:3000/dev/ui
-```
-
-- Expect `/        200` and `/dev/ui  404`.
+- `/        200` and `/dev/ui  404`.
 - Browser: http://localhost:3000/dev/ui shows "This page could not be found", while
   http://localhost:3000/ still shows "Frontend foundation".
 
-### 8. Terminal: repository checks
+#### Step 8: Repository checks
 
-**Linux (bash):**
+**Where:** Terminal window 2 (commands), any folder inside the repo.
+
+**What this does:** Confirms the example env file is tracked by git and that `create-next-app` did not leave agent instruction files in `frontend/`.
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"              # the repo root, from any folder inside it
@@ -339,34 +347,38 @@ git check-ignore frontend/.env.example             # prints nothing: the example
 for f in frontend/AGENTS.md frontend/CLAUDE.md; do [ -e "$f" ] && echo True || echo False; done   # False, then False
 ```
 
-**Windows (PowerShell):**
+**You should see:** nothing from `git check-ignore`, then `False` and `False`.
 
-```powershell
-cd C:\Users\Nafis\Downloads\Rumor-Zero
-git check-ignore frontend\.env.example             # prints nothing: the example env file is tracked
-Test-Path frontend\AGENTS.md, frontend\CLAUDE.md   # False, then False
-```
+#### Step 9: Stop and clean up
 
-### 9. Stop and clean up
+**Where:** Terminal window 1 for the server.
 
 - Stop the server: `Ctrl+C` in its window.
 - Nothing else is running for this part: no containers, no backend.
-- Optional: `rm -rf frontend/.next` (Windows: `Remove-Item -Recurse -Force frontend\.next`)
+- Optional: `rm -rf frontend/.next`
   deletes the build output. It is recreated by the next `npm run dev` or `npm run build`.
 
 ---
 
-## Part 0D: Brand assets & Logo component
+### Part 0D: Brand assets & Logo component
 
-Everything here runs in `frontend/` (`frontend\` on Windows) unless a step says otherwise. No backend, Docker container or
-secret is needed. (Next loads your `frontend/.env.local` by itself, `frontend\.env.local` on Windows; you never open or print it.)
-The master logo is `design/logo.svg` (`design\logo.svg` on Windows). It is read-only: nothing below changes it.
-Every command comes in a Linux (bash) and a Windows (PowerShell) version; use the one for your system.
-Blocks marked "same commands" work in both.
+Everything here runs in `frontend/` unless a step says otherwise. No backend, Docker container or
+secret is needed. (Next loads your `frontend/.env.local` by itself; you never open or print it.)
+The master logo is `design/logo.svg`. It is read-only: nothing below changes it.
 
-### 1. Terminal: the tools
+| Window | Used for | Stays busy? |
+|---|---|---|
+| Terminal window 1 (server) | Step 8: `npm run dev` | Yes, leave it running through step 9 |
+| Terminal window 2 (commands) | Steps 1 to 7, the fetch part of step 8, steps 10 to 11 | No |
+| Browser | Step 9 | - |
 
-**Linux (bash):**
+Steps 1 to 7 need just one terminal, in `frontend/`.
+
+#### Step 1: Check the tools
+
+**Where:** Terminal window 2 (commands), in the repo root first.
+
+**What this does:** Installs the frontend packages and confirms `sharp` (the image library that draws the PNGs) is present.
 
 ```bash
 cd frontend                           # from the repo root of your clone
@@ -374,31 +386,29 @@ npm install                           # "up to date, audited 449 packages" and "
 npm ls sharp --depth=0                # `-- sharp@0.35.5
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
-npm install                           # "up to date, audited 449 packages" and "found 0 vulnerabilities"
-npm ls sharp --depth=0                # `-- sharp@0.35.5
-```
+**You should see:** the summary lines in the comments.
 
 - npm also prints `npm warn allow-scripts ... unrs-resolver`. It is harmless.
 - `sharp` is the image library that draws the PNGs. Only the brand script uses it.
 
-### 2. Terminal: build every logo asset
+#### Step 2: Build every logo asset
 
-**Linux and Windows (same commands):**
+**Where:** Same terminal as step 1, in `frontend/`.
+
+**What this does:** Reads the master logo and generates all icons, social images and the admin logo from it. It can pause for a moment while images are drawn.
 
 ```bash
 npm run brand:build
 ```
 
-- Prints `brand:build read design/logo.svg and wrote 16 files:` (`design\logo.svg` on Windows) and a list: `logo.svg`, `mark.svg`,
+**You should see:**
+
+- `brand:build read design/logo.svg and wrote 16 files:` and a list: `logo.svg`, `mark.svg`,
   `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `email-logo.png` and
   `google-oauth-logo.png` under `frontend/public/brand/`; `icon.svg`, `favicon.ico`, `apple-icon.png`,
   `opengraph-image.png`, `twitter-image.png` and the two `.alt.txt` files under `frontend/src/app/`;
   `frontend/src/lib/brand-assets.json`; and `backend/apps/core/static/core/brand/logo-admin.png`.
-- Then the contrast table, which must read exactly like the one in `docs/ARCHITECTURE.md` (`docs\ARCHITECTURE.md` on Windows) section 14:
+- Then the contrast table, which must read exactly like the one in `docs/ARCHITECTURE.md` section 14:
 
 ```text
 Contrast on                       grey letters  cyan "0"
@@ -411,15 +421,17 @@ on-surface #131b2e                4.97 : 1      7.09 : 1
 - The last line is `The contrast table matches ARCHITECTURE 14.` If you ever change the logo's colours and see
   `DIFFERS from ARCHITECTURE 14` instead, update that section.
 
-### 3. Terminal: nothing under `design\` changes, and a second run changes nothing
+#### Step 3: Check that nothing under `design/` changes, and a second run changes nothing
 
-**Linux (bash):**
+**Where:** Same terminal as step 1, in `frontend/`.
+
+**What this does:** Takes a checksum of every generated file, builds again, and compares. Identical checksums mean the build is repeatable. It also confirms git sees no change under `design/`. The variables `paths`, `h1` and `h2` are set inside this block, so run the whole block in one go.
 
 ```bash
 paths=(public/brand/* src/app/favicon.ico src/app/icon.svg src/app/apple-icon.png src/app/opengraph-image.png src/app/twitter-image.png src/lib/brand-assets.json ../design/logo.svg ../backend/apps/core/static/core/brand/logo-admin.png)
 h1=$(sha256sum "${paths[@]}")
 printf '%s\n' "$h1" | wc -l           # 15
-npm run brand:build > /dev/null
+npm run brand:build > /dev/null       # runs the build again, output hidden
 h2=$(sha256sum "${paths[@]}")
 printf '%s\n' "$h2" | grep -vxFf <(printf '%s\n' "$h1") | wc -l    # 0
 cd ..
@@ -427,30 +439,18 @@ git status --short design             # prints nothing
 cd frontend
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-$paths = @('public\brand\*', 'src\app\favicon.ico', 'src\app\icon.svg', 'src\app\apple-icon.png', 'src\app\opengraph-image.png', 'src\app\twitter-image.png', 'src\lib\brand-assets.json', '..\design\logo.svg', '..\backend\apps\core\static\core\brand\logo-admin.png')
-$h1 = Get-FileHash $paths | Select-Object Path, Hash
-$h1.Count                             # 15
-npm run brand:build | Out-Null
-$h2 = Get-FileHash $paths | Select-Object Path, Hash
-@(Compare-Object $h1 $h2 -Property Path, Hash).Count    # 0
-cd ..
-git status --short design             # prints nothing
-cd frontend
-```
+**You should see:**
 
 - `15` files hashed, and `0` differences: building again gives the same bytes, including
-  `design/logo.svg` (`design\logo.svg` on Windows).
+  `design/logo.svg`.
 - `git status --short design` prints nothing: the master was only read.
 
-### 4. Terminal: the build refuses an unsafe logo
+#### Step 4: Check that the build refuses an unsafe logo
 
-The script takes `--master <file>` so you can try another SVG. Each bad file below is a copy of the
-real logo with one thing added, kept in your temp folder (`/tmp/rz-bad-logo.svg` on Linux).
+**Where:** Same terminal as step 1, in `frontend/`.
 
-**Linux (bash):**
+**What this does:** The script takes `--master <file>` so you can try another SVG. Each bad file below is a copy of the
+real logo with one thing added, kept in your temp folder (`/tmp/rz-bad-logo.svg`). The build must refuse all three. The variable `bad` is set in the first block and reused in the next two, so use the same terminal throughout.
 
 ```bash
 bad=/tmp/rz-bad-logo.svg
@@ -459,60 +459,34 @@ npm run brand:build -- --master "$bad"
 echo $?
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-$bad = Join-Path $env:TEMP "rz-bad-logo.svg"
-(Get-Content ..\design\logo.svg -Raw) -replace '<defs>', '<script>alert(1)</script><text>x</text><defs>' | Set-Content $bad
-npm run brand:build -- --master $bad
-$LASTEXITCODE
-```
-
-- Prints `brand:build failed: rz-bad-logo.svg failed the safety check, so nothing was built:` with
-  `- <script> element (line 3)` and `- <text> element (line 3)`. The exit code (`echo $?` on Linux,
-  `$LASTEXITCODE` on Windows) is `1`.
-
-**Linux (bash):**
+**You should see:** `brand:build failed: rz-bad-logo.svg failed the safety check, so nothing was built:` with
+`- <script> element (line 3)` and `- <text> element (line 3)`. The exit code (`echo $?`) is `1`.
 
 ```bash
 sed -E 's|<defs>|<use href="https://evil.example/x.svg#a"/><defs>|g' ../design/logo.svg > "$bad"
 npm run brand:build -- --master "$bad"
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-(Get-Content ..\design\logo.svg -Raw) -replace '<defs>', '<use href="https://evil.example/x.svg#a"/><defs>' | Set-Content $bad
-npm run brand:build -- --master $bad
-```
-
-- Fails with `- external href="https://evil.example/x.svg#a" on <use> (line 3)`.
-
-**Linux (bash):**
+**You should see:** it fails with `- external href="https://evil.example/x.svg#a" on <use> (line 3)`.
 
 ```bash
 sed -E 's|viewBox="0 0 1000 1000"||g' ../design/logo.svg > "$bad"
 npm run brand:build -- --master "$bad"
-rm "$bad"
+rm "$bad"                             # deletes the temporary bad file
 ```
 
-**Windows (PowerShell):**
+**You should see:** it fails with `- the <svg> root has no viewBox`.
 
-```powershell
-(Get-Content ..\design\logo.svg -Raw) -replace 'viewBox="0 0 1000 1000"', '' | Set-Content $bad
-npm run brand:build -- --master $bad
-Remove-Item $bad
-```
-
-- Fails with `- the <svg> root has no viewBox`.
-- In all three, no asset is written and `design/logo.svg` (`design\logo.svg` on Windows) is untouched. Running plain
+- In all three, no asset is written and `design/logo.svg` is untouched. Running plain
   `npm run brand:build` again afterwards still works.
 
-### 5. Terminal: automated checks
+**If it differs:** if `$bad` is empty ("No such file" or the script reads the wrong file), you opened a new terminal after the first block. Set `bad=/tmp/rz-bad-logo.svg` again.
 
-Same folder. Nothing else needs to be running.
+#### Step 5: Run the automated checks
 
-**Linux and Windows (same commands):**
+**Where:** Same terminal as step 1, in `frontend/`. Nothing else needs to be running.
+
+**What this does:** Runs lint, the token guard, type check, format check and the unit tests.
 
 ```bash
 npm run lint                          # only the npm header, no findings
@@ -522,57 +496,46 @@ npm run format:check                  # All matched files use Prettier code styl
 npm test                              # Test Files  40 passed (40) / Tests  329 passed (329)
 ```
 
+**You should see:** the result in each comment.
+
 - The new tests are the SVG safety check, the ICO writer, the contrast table (compared with
-  `docs/ARCHITECTURE.md`, `docs\ARCHITECTURE.md` on Windows), the PNG sizes, a full build into a scratch folder, `Logo`, `manifest.ts` and
+  `docs/ARCHITECTURE.md`), the PNG sizes, a full build into a scratch folder, `Logo`, `manifest.ts` and
   the brand guard.
 
-### 6. Terminal: try to break the brand guard
+#### Step 6: Try to break the brand guard
 
-Only `Logo.tsx`, `brand-assets.json` and `manifest.ts` may know where the logo files are, and nobody
-may re-create the old text wordmark. Add two files that break the rules:
+**Where:** Same terminal as step 1, in `frontend/`.
 
-**Linux (bash):**
+**What this does:** Only `Logo.tsx`, `brand-assets.json` and `manifest.ts` may know where the logo files are, and nobody
+may re-create the old text wordmark. You add two files that break the rules, run the guard test (it must fail), delete the files and run it again (it must pass).
 
 ```bash
 printf '%s\n' 'export const X = () => <span className="font-headline-sm">Rumor Zero</span>;' > src/tmp-wordmark.tsx
 printf '%s\n' 'export const src = "/brand/logo.svg";' > src/tmp-logo-ref.ts
-npx vitest run src/lib/brand-guard.test.ts
-rm src/tmp-wordmark.tsx src/tmp-logo-ref.ts
-npx vitest run src/lib/brand-guard.test.ts
+npx vitest run src/lib/brand-guard.test.ts     # must show failures
+rm src/tmp-wordmark.tsx src/tmp-logo-ref.ts    # removes both bad files
+npx vitest run src/lib/brand-guard.test.ts     # must pass
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-Set-Content src\tmp-wordmark.tsx 'export const X = () => <span className="font-headline-sm">Rumor Zero</span>;'
-Set-Content src\tmp-logo-ref.ts 'export const src = "/brand/logo.svg";'
-npx vitest run src/lib/brand-guard.test.ts
-Remove-Item src\tmp-wordmark.tsx, src\tmp-logo-ref.ts
-npx vitest run src/lib/brand-guard.test.ts
-```
+**You should see:**
 
 - First run: `Tests  3 failed | 3 passed (6)`. The failures name `tmp-logo-ref.ts` (twice: it refers to
   `/brand/` and names a logo image) and `tmp-wordmark.tsx` (it re-creates the text wordmark).
 - Second run (files removed): `Tests  6 passed (6)`. Nothing is left behind.
 
-### 7. Terminal: the production build carries the icon tags
+#### Step 7: Check that the production build carries the icon tags
 
-**Linux (bash):**
+**Where:** Same terminal as step 1, in `frontend/`.
+
+**What this does:** Builds the site and searches the generated home page for the icon, manifest and social-share tags.
 
 ```bash
-npm run build
+npm run build                         # takes a little while
 grep -oE '<link rel="(icon|apple-touch-icon|manifest)"[^>]*>' .next/server/app/index.html
 grep -oE '<meta (property|name)="(og:image|twitter:image|twitter:card|og:site_name)"[^>]*>' .next/server/app/index.html
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-npm run build
-$html = Get-Content .next\server\app\index.html -Raw
-[regex]::Matches($html, '<link rel="(?:icon|apple-touch-icon|manifest)"[^>]*>') | ForEach-Object { $_.Value }
-[regex]::Matches($html, '<meta (?:property|name)="(?:og:image|twitter:image|twitter:card|og:site_name)"[^>]*>') | ForEach-Object { $_.Value }
-```
+**You should see:**
 
 - Build: `✓ Compiled successfully`, `Generating static pages ... (10/10)`, and a route list that now also
   has `/apple-icon.png`, `/icon.svg`, `/manifest.webmanifest`, `/opengraph-image.png` and
@@ -591,17 +554,19 @@ $html = Get-Content .next\server\app\index.html -Raw
   with the value from your `.env.local`).
 - `<hash>` differs from run to run.
 
-### 8. Terminal: start the dev server and fetch every asset
+#### Step 8: Start the dev server and fetch every asset
 
-**Linux and Windows (same commands):**
+**Where:** `npm run dev` in Terminal window 1 (server); the `curl` commands in Terminal window 2 (commands).
+
+**What this does:** Starts the dev server, then requests every generated file to confirm each one is served with the right content type.
 
 ```bash
 npm run dev                           # leave this window running
 ```
 
-Second window:
+**You should see:** the Next.js start-up lines, then a busy window. That is normal.
 
-**Linux (bash):**
+Second window (window 2):
 
 ```bash
 cd frontend                           # from the repo root of your clone
@@ -612,16 +577,7 @@ curl -s http://localhost:3000/manifest.webmanifest; echo
 curl -s -o /dev/null -w "/brand/nope.png  %{http_code}\n" http://localhost:3000/brand/nope.png
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
-foreach ($u in '/favicon.ico','/icon.svg','/apple-icon.png','/manifest.webmanifest','/opengraph-image.png','/twitter-image.png','/brand/logo.svg','/brand/mark.svg','/brand/icon-192.png','/brand/icon-512.png','/brand/icon-maskable-512.png','/brand/email-logo.png','/brand/google-oauth-logo.png') {
-  curl.exe -s -o NUL -w "$u  %{http_code}  %{content_type}`n" "http://localhost:3000$u"
-}
-curl.exe -s http://localhost:3000/manifest.webmanifest
-curl.exe -s -o NUL -w "/brand/nope.png  %{http_code}`n" http://localhost:3000/brand/nope.png
-```
+**You should see:**
 
 - All 13 lines say `200`. Content types: `image/x-icon` for the .ico, `image/svg+xml` for the three SVGs,
   `application/manifest+json` for the manifest, and `image/png` for the rest.
@@ -630,7 +586,11 @@ curl.exe -s -o NUL -w "/brand/nope.png  %{http_code}`n" http://localhost:3000/br
   `192x192` (`any`), `512x512` (`any`) and `512x512` (`maskable`).
 - The last line says `404`: only generated files exist.
 
-### 9. Browser: while `npm run dev` is running
+#### Step 9: Look at the logo and icons in the browser
+
+**Where:** Browser, while `npm run dev` is running in window 1.
+
+**What this does:** Checks by eye that the logo renders correctly at each size and on each background, and that every generated image looks right.
 
 | URL | Expect |
 |---|---|
@@ -672,11 +632,11 @@ Last, the manifest as the browser reads it: F12 → **Application** → **Manife
 "Rumor Zero", theme and background colour `#283044`, and the three icons, including one marked
 "maskable".
 
-### 10. Terminal: exact sizes of the generated files
+#### Step 10: Check the exact sizes of the generated files
 
-Stop the dev server first (`Ctrl+C`), or use a new window. In `frontend/` (`frontend\` on Windows):
+**Where:** Terminal window 2 (commands), in `frontend/`. Stop the dev server first (`Ctrl+C` in window 1), or just use this new window.
 
-**Linux (bash):**
+**What this does:** A small Python script reads each PNG's width and height and the icon sizes inside `favicon.ico`, and prints them with the file sizes.
 
 ```bash
 python3 - <<'EOF'
@@ -695,15 +655,7 @@ print('ico: images=%d; sizes=%s' % (struct.unpack('<H', b[4:6])[0], ','.join(str
 EOF
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-Add-Type -AssemblyName System.Drawing
-$pngs = 'src\app\apple-icon.png','public\brand\icon-192.png','public\brand\icon-512.png','public\brand\icon-maskable-512.png','src\app\opengraph-image.png','src\app\twitter-image.png','public\brand\google-oauth-logo.png','public\brand\email-logo.png','..\backend\apps\core\static\core\brand\logo-admin.png'
-foreach ($p in $pngs) { $img = [System.Drawing.Image]::FromFile((Resolve-Path $p)); "{0,-62} {1} x {2}  {3} bytes" -f $p, $img.Width, $img.Height, (Get-Item $p).Length; $img.Dispose() }
-$b = [System.IO.File]::ReadAllBytes((Resolve-Path src\app\favicon.ico))
-"ico: images=$([BitConverter]::ToUInt16($b,4)); sizes=" + (($b[6], $b[22], $b[38]) -join ',')
-```
+**You should see** (recorded output):
 
 ```text
 src\app\apple-icon.png               180 x 180  2333 bytes
@@ -719,13 +671,15 @@ ico: images=3; sizes=16,32,48
 ```
 
 - The sizes are exact; the byte counts can differ a little on another machine.
-- On Linux the paths print with `/` instead of `\`; the sizes, byte counts and the `ico:` line are the same.
+- On Linux the paths print with `/` instead of `\` (the recorded output above came from Windows); the sizes, byte counts and the `ico:` line are the same.
 - The Google logo is far under 1 MB. The apple icon is also opaque (its PNG has no alpha channel);
   the automated tests check that.
 
-### 11. Terminal: repository checks
+#### Step 11: Repository checks
 
-**Linux (bash):**
+**Where:** Terminal window 2 (commands), in `frontend/`.
+
+**What this does:** Confirms git does not ignore the generated files, marks the binary ones correctly, and that `design/` and `frontend/` have no unexpected changes or files.
 
 ```bash
 cd ..                                 # the repo root (you are in frontend/)
@@ -735,43 +689,47 @@ git status --short design             # prints nothing: design/ is untouched
 for f in frontend/AGENTS.md frontend/CLAUDE.md; do [ -e "$f" ] && echo True || echo False; done   # False, then False
 ```
 
-**Windows (PowerShell):**
+**You should see:** nothing from the first `git` command, two lines saying `binary: set`, nothing from `git status`, then `False` and `False`.
 
-```powershell
-cd C:\Users\Nafis\Downloads\Rumor-Zero
-git check-ignore frontend\src\app\favicon.ico frontend\public\brand\logo.svg backend\apps\core\static\core\brand\logo-admin.png   # prints nothing: none of them is ignored
-git check-attr binary -- frontend/src/app/favicon.ico frontend/src/app/apple-icon.png     # both: binary: set
-git status --short design             # prints nothing: design\ is untouched
-Test-Path frontend\AGENTS.md, frontend\CLAUDE.md   # False, then False
-```
+#### Step 12: Stop and clean up
 
-### 12. Stop and clean up
+**Where:** Terminal window 1 for the server.
 
 - Stop the server: `Ctrl+C` in its window.
 - Nothing else is running for this part: no containers, no backend.
 - The generated files are meant to be committed; do not delete them. To change the logo later:
-  replace `design/logo.svg` (`design\logo.svg` on Windows) yourself, check that `markSelector` in
-  `frontend/scripts/brand/brand.config.json` (`frontend\scripts\brand\brand.config.json` on Windows) still picks the "0" (the build fails if it does not
+  replace `design/logo.svg` yourself, check that `markSelector` in
+  `frontend/scripts/brand/brand.config.json` still picks the "0" (the build fails if it does not
   match exactly one shape), run `npm run brand:build`, and compare the contrast table with
-  `docs/ARCHITECTURE.md` (`docs\ARCHITECTURE.md` on Windows) section 14.
+  `docs/ARCHITECTURE.md` section 14.
+### Part 0C: App shell, API relay, API client, CI
 
----
-
-## Part 0C: App shell, API relay, API client, CI
-
-Needs Part 0A's containers and virtualenv, and your own `backend/.env` and `frontend/.env.local`
-(`backend\.env` and `frontend\.env.local` on Windows).
-The relay reads `BACKEND_ORIGIN` and `PROXY_SHARED_SECRET` from `frontend/.env.local`
-(`frontend\.env.local` on Windows). The secret
-must be the same as the one in `backend/.env` (`backend\.env` on Windows) (ENV_GUIDE §1.2). Nobody can log in yet (Part 1), so
+Needs Part 0A's containers and virtualenv, and your own `backend/.env` and `frontend/.env.local`.
+The relay reads `BACKEND_ORIGIN` and `PROXY_SHARED_SECRET` from `frontend/.env.local`. The secret
+must be the same as the one in `backend/.env` (ENV_GUIDE §1.2). Nobody can log in yet (Part 1), so
 the app pages show the logged-out shell; `/dev/shell` shows the logged-in one with a sample user.
 
-On Linux, the blocks below assume each new terminal starts in the repo root (the folder that holds
-`backend/` and `frontend/`). The Windows blocks use full `C:\...` paths instead.
+The blocks below assume each new terminal starts in the repo root (the folder that holds
+`backend/` and `frontend/`).
 
-### 1. Terminal: install the new tools
+**Windows used in this part** (a "window" is one terminal window or tab):
 
-**Linux (bash):**
+| Window | What it does | Busy? |
+|---|---|---|
+| Window 1 | Django server (`runserver`), later the stand-in backend (step 5) | Yes: leave it running |
+| Window 2 | Frontend dev server (`npm run dev`), or one-off commands when no server is needed | Yes while the dev server runs |
+| Window 3 | Extra window for `curl` commands (steps 4 and 5) | No |
+| Browser | Steps 6 and 11 | n/a |
+
+A server started with `runserver` or `npm run dev` keeps its window busy until you press `Ctrl+C`.
+Open a new window whenever you need to type more commands.
+
+#### Step 1: Install the new tools
+
+**Where:** Any terminal, starting in the repo root.
+
+**What this does:** Installs the frontend packages and downloads the browser (Chromium) that the
+end-to-end tests drive, then prints the tool versions so you know they are present.
 
 ```bash
 cd frontend                       # from the repo root
@@ -781,28 +739,29 @@ npx wrangler --version            # 4.145.0
 npx playwright --version          # Version 1.63.0
 ```
 
-**Windows (PowerShell):**
+**You should see:**
 
-```powershell
-cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
-npm install                       # up to date, audited 735 packages ... found 0 vulnerabilities
-npx playwright install chromium   # first time: downloads Chromium for the E2E test; later: prints nothing
-npx wrangler --version            # 4.145.0
-npx playwright --version          # Version 1.63.0
-```
+- `npm install`: `up to date, audited 735 packages ... found 0 vulnerabilities`. It can take a
+  while the first time.
+- `npx playwright install chromium`: a download progress bar the first time (slow, be patient);
+  nothing on later runs.
+- `4.145.0` from wrangler (Cloudflare's tool) and `Version 1.63.0` from Playwright.
 
 - `npm install` also prints an `allow-scripts` warning: it did not run the install scripts of
   `workerd`, `esbuild` and `unrs-resolver`. That is expected. Their programs come from separate
   platform packages and work without those scripts.
-- Don't run `npm run preview`, `deploy` or `upload` on your own machine, on Windows or on Linux.
-  They are for CI and Cloudflare (Linux), and they would copy your real `.env.local` into the
-  Worker bundle.
-- On Linux only: if the E2E test later fails because Chromium reports missing shared libraries,
-  run `npx playwright install-deps chromium` once (it installs system packages with `sudo`).
+- Don't run `npm run preview`, `deploy` or `upload` on your own machine. They are for CI and
+  Cloudflare, and they would copy your real `.env.local` into the Worker bundle.
 
-### 2. Terminal: automated checks
+**If it differs:** If the E2E test later fails because Chromium reports missing shared libraries,
+run `npx playwright install-deps chromium` once (it installs system packages with `sudo`).
 
-**Linux and Windows (same commands):**
+#### Step 2: Run the automated frontend checks
+
+**Where:** Same terminal as step 1 (you are in `frontend/`).
+
+**What this does:** Runs the linter, the design-token check, the type checker, the formatter check,
+the unit tests and a production build. All of them must pass.
 
 ```bash
 npm run lint             # no output after the command line
@@ -810,10 +769,11 @@ npm run lint:tokens      # lint:tokens OK (no default palette, raw hex, stray ra
 npm run typecheck        # no output after the command line
 npm run format:check     # All matched files use Prettier code style!
 npm test                 # Test Files  51 passed (51) / Tests  412 passed (412)
-npm run build
+npm run build            # slow (up to a minute or more); ends with a route list
 ```
 
-The build ends with a route list. These lines matter:
+**You should see:** The comment on each line is the expected result. "No output" means success for
+`lint` and `typecheck`. The build ends with a route list. These lines matter:
 
 ```text
 ┌ ○ /
@@ -827,11 +787,14 @@ The build ends with a route list. These lines matter:
 - `○` means prerendered at build time; `ƒ` means it runs per request. The relay (`/api/[...path]`)
   must be `ƒ`; the landing and auth pages must be `○`.
 
-### 3. Terminal: start Django and the frontend
+#### Step 3: Start Django and the frontend
+
+**Where:** Terminal window 1 (server), then terminal window 2.
+
+**What this does:** Starts the database containers and the Django backend (window 1), then the
+Next.js dev server (window 2), so the site is reachable at http://localhost:3000.
 
 Window 1:
-
-**Linux (bash):**
 
 ```bash
 docker compose up -d              # from the repo root
@@ -840,38 +803,26 @@ source .venv/bin/activate
 python manage.py runserver        # leave this window running
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-cd C:\Users\Nafis\Downloads\Rumor-Zero
-docker compose up -d
-cd backend
-.\.venv\Scripts\Activate.ps1
-python manage.py runserver        # leave this window running
-```
-
 Window 2:
-
-**Linux (bash):**
 
 ```bash
 cd frontend                       # from the repo root
 npm run dev                       # ✓ Ready in about 0.5 s, then "✓ Running next.config.ts took" 1 to 5 s
 ```
 
-**Windows (PowerShell):**
+**You should see:** In window 1 Django prints its "Starting development server at
+http://127.0.0.1:8000/" lines. In window 2 `✓ Ready in about 0.5 s`, then
+`✓ Running next.config.ts took` 1 to 5 s. Both windows stay busy; that is correct.
 
-```powershell
-cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
-npm run dev                       # ✓ Ready in about 0.5 s, then "✓ Running next.config.ts took" 1 to 5 s
-```
+- The extra seconds start `workerd`, Cloudflare's local runtime, for the OpenNext dev setup. Linux
+  does not ask about firewall access.
 
-- The extra seconds start `workerd`, Cloudflare's local runtime, for the OpenNext dev setup. If
-  Windows Firewall asks about it (Windows only; Linux does not ask), local access is all it needs.
+#### Step 4: Check the relay
 
-### 4. Terminal (third window): the relay
+**Where:** Terminal window 3 (a new window).
 
-**Linux (bash):**
+**What this does:** Sends requests to the frontend on port 3000 and checks that the relay passes
+them to Django on port 8000 and handles errors the right way.
 
 ```bash
 curl -i http://localhost:3000/api/health/
@@ -881,35 +832,20 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/api/nope/
 curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" http://localhost:3000/home/
 ```
 
-**Windows (PowerShell):**
+**You should see:** One result per command, in order:
 
-```powershell
-curl.exe -i http://localhost:3000/api/health/
-curl.exe -s -i http://localhost:3000/api/health | Select-String '^HTTP|^location'
-curl.exe -s -o NUL -w "%{http_code}`n" "http://localhost:3000/api/a%2Fb/"
-curl.exe -s -o NUL -w "%{http_code}`n" http://localhost:3000/api/nope/
-curl.exe -s -o NUL -w "%{http_code} %{redirect_url}`n" http://localhost:3000/home/
-```
+1. `HTTP/1.1 200 OK` and the body `{"status":"ok"}`. That is Django's answer, fetched through the
+   relay on port 3000, with no redirect.
+2. `HTTP/1.1 301 Moved Permanently` and `location: /api/health/`. That is Django adding the
+   missing slash; the relay keeps the target relative, so it stays on port 3000.
+3. `400` (an encoded `/` is refused).
+4. `404` (Django has no such path).
+5. `308 http://localhost:3000/home`. Page URLs drop a trailing slash; API URLs keep it.
 
-- First: `HTTP/1.1 200 OK` and the body `{"status":"ok"}`. That is Django's answer, fetched through
-  the relay on port 3000, with no redirect.
-- Second: `HTTP/1.1 301 Moved Permanently` and `location: /api/health/`. That is Django adding the
-  missing slash; the relay keeps the target relative, so it stays on port 3000.
-- Third: `400` (an encoded `/` is refused). Fourth: `404` (Django has no such path).
-- Fifth: `308 http://localhost:3000/home`. Page URLs drop a trailing slash; API URLs keep it.
-
-Now stop Django (`Ctrl+C` in window 1) and ask again:
-
-**Linux (bash):**
+Now stop Django (`Ctrl+C` in window 1) and ask again from window 3:
 
 ```bash
 curl -s -i http://localhost:3000/api/health/ | grep -iE '^HTTP|^retry-after|^cache-control|code'
-```
-
-**Windows (PowerShell):**
-
-```powershell
-curl.exe -s -i http://localhost:3000/api/health/ | Select-String '^HTTP|^retry-after|^cache-control|code'
 ```
 
 ```text
@@ -922,18 +858,18 @@ retry-after: 30
 It answers at once, because nothing is listening on port 8000. Start `python manage.py runserver`
 again in window 1.
 
-### 5. Terminal: what the backend receives (stand-in backend)
+#### Step 5: See what the backend receives (stand-in backend)
 
-Django removes the `X-RZ-*` headers before any code can see them, so this check uses a small
-stand-in backend. It reports what arrived as true/false and names only. It uses the made-up value
-`echo-check-secret`, never your real secret.
+**Where:** Windows 1, 2 and 3, as marked below.
+
+**What this does:** Django removes the `X-RZ-*` headers before any code can see them, so this check
+uses a small stand-in backend. It reports what arrived as true/false and names only. It uses the
+made-up value `echo-check-secret`, never your real secret.
 
 First stop `npm run dev` (`Ctrl+C` in window 2): Next runs only one dev server per folder. Then
 stop `runserver` in window 1 too; it isn't needed here.
 
-Window 1, the stand-in backend:
-
-**Linux (bash):**
+Window 1, the stand-in backend (it keeps the window busy):
 
 ```bash
 cat > /tmp/rz-echo.cjs <<'EOF'
@@ -970,7 +906,2199 @@ EOF
 node /tmp/rz-echo.cjs             # stand-in backend on http://127.0.0.1:8765
 ```
 
-**Windows (PowerShell):**
+The first command writes the script file (no output); the second runs it and prints
+`stand-in backend on http://127.0.0.1:8765`.
+
+Window 2, a dev server pointed at it. The `export` values last only for this window;
+`.env.local` is not changed:
+
+```bash
+cd frontend                       # from the repo root
+export BACKEND_ORIGIN="http://127.0.0.1:8765" PROXY_SHARED_SECRET="echo-check-secret"
+npx next dev -p 3100
+```
+
+Window 3, the checks:
+
+```bash
+curl -s -H "X-RZ-Proxy-Secret: spoofed" -H "X-RZ-Client-IP: 6.6.6.6" -H "X-Forwarded-Host: evil.example" http://localhost:3100/api/echo/
+curl -s -H "Content-Type: text/plain" --data "hello relay" http://localhost:3100/api/echo/
+curl -s -i http://localhost:3100/api/cookies/ | grep -iE '^set-cookie'
+curl -s -i http://localhost:3100/api/etag/ | grep -iE '^HTTP|^etag|^cache-control'
+curl -s -i -H 'If-None-Match: "v1"' http://localhost:3100/api/etag/ | grep -iE '^HTTP|^etag|^cache-control'
+```
+
+**You should see:** One block of output per command, in order (lines 1 to 2 are the first two
+commands, then the cookies, then the two etag requests):
+
+```text
+{"method":"GET","secretMatches":true,"clientIp":"::1","forwardedHost":null,"contentLength":null,"chunked":false,"bodyBytes":0}
+{"method":"POST","secretMatches":true,"clientIp":"::1","forwardedHost":null,"contentLength":"11","chunked":false,"bodyBytes":11}
+set-cookie: first=1; Path=/; HttpOnly
+set-cookie: second=2; Path=/api/auth/; SameSite=Lax
+HTTP/1.1 200 OK
+cache-control: public, max-age=31536000, immutable
+etag: "v1"
+HTTP/1.1 304 Not Modified
+cache-control: public, max-age=31536000, immutable
+etag: "v1"
+```
+
+- **Spoofing:** the faked `X-RZ-Proxy-Secret`, `X-RZ-Client-IP` and `X-Forwarded-Host` never
+  arrive. The backend gets the relay's own secret (`secretMatches: true`) and your real address
+  (`::1` is this machine; on Linux you may see `127.0.0.1` or `::ffff:127.0.0.1` instead, which is
+  also this machine).
+- **Body:** it arrives with its length (`contentLength: "11"`), never chunked, which Django needs.
+- **Cookies and caching:** both cookies and the `304 Not Modified` come back with `etag` and
+  `cache-control` unchanged.
+- In bash no escaping is needed for `If-None-Match`: the command uses plain `"v1"` inside single
+  quotes.
+
+**Clean up:** Stop both servers (`Ctrl+C` in windows 1 and 2), then close window 2 so its
+environment values are gone (or run `unset BACKEND_ORIGIN PROXY_SHARED_SECRET` in that window).
+Delete the script:
+
+```bash
+rm /tmp/rz-echo.cjs
+```
+
+#### Step 6: Look at the layouts in the browser
+
+**Where:** Terminal windows 1 and 2, then the browser.
+
+**What this does:** Starts the normal servers again and lets you check by eye that every page and
+screen size looks right.
+
+Start the normal servers again: `python manage.py runserver` in window 1, and in a **new** window 2
+`npm run dev` (in `frontend/`).
+
+| URL | Expect |
+|---|---|
+| http://localhost:3000/ | Placeholder landing page. Top: the logo, "How it works", "Log in" and a blue "Sign up" button. Footer: the small logo, How verification works · Privacy · Terms, and "© 2026 Rumor Zero". Tab title "Rumor Zero". |
+| http://localhost:3000/home | The logged-out app shell. Left rail: the logo, Home (blue) and Search; Log in and Sign up at the bottom. Top bar: "Search posts and people" and a Log in link. Tab title "Home · Rumor Zero". |
+| http://localhost:3000/home/ | Redirects to `/home` |
+| http://localhost:3000/dev/shell | The logged-in shell with the sample user Ada Lovelace: Home, Search, Notifications, Profile, Bookmarks, a blue "New post" button; Moderation and Settings at the bottom; the user card with "AL" and `@ada` |
+| http://localhost:3000/dev/shell?user=none | The same page with the logged-out shell |
+| http://localhost:3000/login and /signup | A centred white card with the large logo, "Welcome back" or "Create your account" |
+| http://localhost:3000/no-such-page | "Page not found" card with the logo and "Go to the home page" |
+| http://localhost:3000/dev/ui | The intro text now links to /dev/shell |
+
+On http://localhost:3000/dev/shell:
+- Type in the search box and press Enter: the address becomes `/search?q=…` and the page title is
+  Search.
+- Click `•••` in the user card: a small menu with Profile and Settings opens above it. `Esc` closes
+  it.
+- Reload, then press `Tab` once: a blue "Skip to content" link appears at the top left.
+- The round "N" button at the bottom left is Next's dev indicator; it doesn't exist in production.
+
+Narrower screens: open DevTools (`F12`), switch on the device toolbar (`Ctrl+Shift+M`) and set the
+width. The layout switches at 1280 and 768 px.
+
+| Width | Expect on /dev/shell |
+|---|---|
+| 1280 | The full 256 px rail with labels |
+| 1024 | An icon dock: the cyan "0" mark at the top, icons only (hovering shows each name), the "AL" avatar at the bottom |
+| 390 | A top bar with the small logo and the "AL" avatar; a bottom bar with Home · Search · New post · Notifications · Profile. Tapping the avatar opens a sheet from the bottom with Bookmarks, Settings and Moderation; `Esc` or a tap outside closes it. No sideways scrolling. |
+
+Compare with Stitch: open
+`design/stitch/stitch_website_sitemap_grid_builder/b1_home_feed/code.html` in the repo root
+in the browser (it needs internet for its Tailwind script), next to /dev/shell, both at 1280.
+- The rail width, item positions, blue Home item, top bar height and search box line up.
+- Expected differences: the logo image instead of the "Rumor Zero" text; Bookmarks added; "New
+  post" instead of "Submit Claim"; Moderation instead of "Audit Queue"; no "Verification Ledger"
+  pill; and sample cards instead of Stitch's feed.
+
+#### Step 7: Run the E2E smoke test
+
+**Where:** A terminal in `frontend/` (any free window, for example window 3).
+
+**What this does:** Playwright opens a real Chromium browser and clicks through the main pages
+automatically. It needs the containers from step 3. Django and the dev server may be running or
+not: Playwright starts what is missing and reuses what is already running. A reused dev server
+keeps its own `BACKEND_ORIGIN`.
+
+```bash
+cd frontend                       # from the repo root
+npm run test:e2e                  # takes about 10 s once started
+```
+
+**You should see:** A list of 8 passing tests and `8 passed`:
+
+```text
+Running 8 tests using 6 workers
+
+  ok 1 [chromium] › e2e\smoke.spec.ts:8:5 › the relay forwards /api/health/ to Django (120ms)
+  ok 5 [chromium] › e2e\smoke.spec.ts:14:5 › the landing page shows the logo and the footer (1.4s)
+  ok 7 [chromium] › e2e\smoke.spec.ts:73:5 › the auth card shows the large logo (1.7s)
+  ok 2 [chromium] › e2e\smoke.spec.ts:25:5 › page URLs drop a trailing slash (2.2s)
+  ok 3 [chromium] › e2e\smoke.spec.ts:31:5 › the app shell has the full rail at 1280px (2.2s)
+  ok 6 [chromium] › e2e\smoke.spec.ts:60:5 › the app shell has a top bar and bottom bar at 390px (2.0s)
+  ok 8 [chromium] › e2e\smoke.spec.ts:82:5 › an unknown URL shows the 404 page with the logo (745ms)
+  ok 4 [chromium] › e2e\smoke.spec.ts:44:5 › the app shell has the icon dock at 1024px (2.3s)
+
+  8 passed (9.3s)
+```
+
+- The order and timings vary (six tests run in parallel). `[WebServer]` lines are Django's request
+  log.
+- On Linux the paths read `e2e/smoke.spec.ts`, the passing mark is `✓` instead of `ok`, and the
+  number of workers depends on your CPU.
+
+#### Step 8: Run the same test the way CI runs it
+
+**Where:** A terminal in `frontend/`.
+
+**What this does:** CI tests the production build and starts its own servers. First stop
+`npm run dev` and `runserver` (`Ctrl+C`); in this mode Playwright won't reuse them.
+
+```bash
+cd frontend                       # from the repo root
+npm run build                     # slow, no need to watch it
+export CI=1
+npm run test:e2e         # 8 passed, this time against `next start`
+unset CI
+```
+
+**You should see:** `8 passed`. `export CI=1` only lasts for this window; `unset CI` removes it
+again.
+
+#### Step 9: Check the backend is unchanged and still passes
+
+**Where:** Any terminal; this one needs the virtualenv.
+
+**What this does:** Part 0C touched only the frontend, so the backend tests and lint must still
+pass exactly as before.
+
+```bash
+cd backend                                          # from the repo root
+source .venv/bin/activate
+python -m pytest                                    # 200 passed
+ruff check . ; ruff format --check .                # All checks passed! / 43 files already formatted
+python manage.py makemigrations --check --dry-run   # No changes detected
+```
+
+**You should see:** `200 passed`, then `All checks passed!` and `43 files already formatted`, then
+`No changes detected` (no new database changes are pending).
+
+#### Step 10: Repository checks
+
+**Where:** Any terminal, in the repo root.
+
+**What this does:** Confirms that `design/` was not modified, that no unwanted agent files appeared
+in `frontend/`, and that git ignores the test reports but not the config files.
+
+```bash
+# run from the repo root
+git status --short design                          # prints nothing: design/ is untouched
+for f in frontend/AGENTS.md frontend/CLAUDE.md; do [ -e "$f" ] && echo True || echo False; done   # False, then False
+git check-ignore frontend/playwright-report frontend/test-results   # prints both: test reports are never committed
+git check-ignore .github/workflows/ci.yml frontend/wrangler.jsonc frontend/playwright.config.ts   # prints nothing: all three are committed
+```
+
+**You should see:** Nothing for the first command; `False` and `False`; the two report paths; then
+nothing for the last command.
+
+#### Step 11: CI on GitHub (after you push)
+
+**Where:** Browser.
+
+**What this does:** This is the one check the agent could not run, because only you push.
+
+| URL | Expect |
+|---|---|
+| Your repository's **Actions** tab on github.com | A "CI" run for your push with three green jobs: "Backend (ruff, migrations, pytest)", "Frontend (lint, types, tests, OpenNext build)" and "E2E (Playwright, Chromium)" |
+
+- The frontend job's last step, "OpenNext build", proves the Cloudflare build works on Linux.
+- If the E2E job fails, its run page has a "playwright-report" artifact (kept 7 days) that shows
+  why.
+- Seen on 2026-10-01: the first run failed at "OpenNext build" (`Cannot find package 'esbuild'`).
+  The run on `60cfffc` ("Fix: add missing esbuild dependency") had all three jobs green.
+- Optional, only if you install the GitHub CLI (`gh`; on Linux it has to be installed too):
+  `gh run list --workflow ci.yml --limit 1` shows `completed` and `success`.
+
+#### Step 12: Stop and clean up
+
+**Where:** Every terminal window you still have open.
+
+**What this does:** Shuts everything down.
+
+- Stop the servers: `Ctrl+C` in each window.
+- If `npm run dev` later says "Another next dev server is already running" with a PID, the old
+  server is still alive. End it with `kill <that PID>` (`pgrep -af 'next|workerd'` lists
+  leftover dev servers, and `ss -ltnp | grep -E ':(3000|8000)\b'` shows what holds the ports).
+- Stop the containers and keep the data: `docker compose down` (repo root).
+- `frontend/playwright-report` and `frontend/test-results` are git-ignored; delete them whenever
+  you like.
+
+---
+
+### Part 1: Auth core (sign up, log in, tokens, log out)
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
+`frontend/.env.local`. Both keep Cloudflare's Turnstile **test** keys (ENV_GUIDE §1.5). Two things
+to know first:
+
+- Sign-up calls Cloudflare even with the test keys (the widget in the browser, siteverify from
+  Django), so it needs internet.
+- Open the site as **http://localhost:3000**. Every `/api/auth/` request must carry exactly the
+  `Origin` in `FRONTEND_ORIGIN` (`http://localhost:3000`); `http://127.0.0.1:3000` gets 403
+  `csrf_failed`.
+
+**Windows used in this part:**
+
+| Window | What it does | Busy? |
+|---|---|---|
+| Window 1 | Django server (`runserver`, venv active, in `backend/`) | Yes: leave it running |
+| Window 2 | Commands: `curl` checks in steps 3 to 5 (variables like `$h` and `$access` live here; do not close it between steps 3 and 4) | No |
+| Window 3 | Frontend dev server (`npm run dev`, in `frontend/`), needed from step 5 | Yes |
+| Browser | Steps 6, 7 and 11 | n/a |
+
+A server started with `runserver` or `npm run dev` keeps its window busy until you press `Ctrl+C`.
+
+#### Step 1: Migrate and check the settings
+
+**Where:** Terminal window 1 (it will become the server window in step 3).
+
+**What this does:** Starts the database, applies the new Part 1 database changes, runs Django's
+self-check, and checks your JWT signing key length without showing the key.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate
+python manage.py check                # System check identified no issues (0 silenced).
+v=$(grep -m1 '^JWT_SIGNING_KEY=' .env | cut -d= -f2- | tr -d '\r')
+printf %s "$v" | wc -c
+unset v
+python manage.py shell -c "from apps.accounts.models import User; print([(u.is_email_verified, list(u.emailaddress_set.values_list('verified', 'primary'))) for u in User.objects.filter(is_superuser=True)])"
+```
+
+**You should see:**
+
+- `migrate`, the first time after Part 1: `Applying account.0001_initial... OK` through
+  `Applying account.0009_emailaddress_unique_primary_email... OK`, then
+  `Applying accounts.0002_verify_superuser_emails... OK`. Later runs: `No migrations to apply.`
+- `check`: `System check identified no issues (0 silenced).`
+- The length line prints only a number (`67` here). Under 32, Django refuses to start with
+  `JWT_SIGNING_KEY must be at least 32 characters`; make a new key with ENV_GUIDE §1.2. Only the
+  length is shown, never the key.
+- The last command prints `9 objects imported automatically`, then `[(True, [(True, True)])]`: your
+  superuser from 0A now counts as verified and has a verified, primary email address (the backfill
+  migration).
+
+#### Step 2: Run the automated backend checks
+
+**Where:** Same terminal as step 1 (`backend/`, venv active).
+
+**What this does:** Runs the whole backend test suite plus lint and the migration check.
+
+```bash
+python -m pytest                                    # 440 passed
+python -m pytest apps/accounts                      # 327 passed (the auth tests)
+ruff check . ; ruff format --check .                # All checks passed! / 66 files already formatted
+python manage.py makemigrations --check --dry-run   # No changes detected
+python -m pytest apps/accounts/tests/test_permissions.py -v   # 4 passed
+```
+
+**You should see:** The count in each comment. The full test run takes a while.
+
+- Four of the auth tests run refreshes and logouts in two threads at once. One of them is a control
+  run: allauth's stock token strategy loses a tab's token, ours doesn't.
+- Verified-only endpoints arrive with posts in Part 4, so the last command checks the permission on
+  a test-only view: unverified → 403 `email_unverified`, verified → 201, anonymous → 401.
+
+#### Step 3: Sign up against Django
+
+**Where:** Terminal window 1 (server), then terminal window 2 (commands).
+
+**What this does:** Creates a real account by calling Django's sign-up endpoint with `curl`,
+shows the cookies Django sets (the refresh token is hidden), and reads your profile with the access
+token.
+
+Window 1: `python manage.py runserver` (in `backend/`, venv active). Leave it running.
+
+Window 2 (no venv needed; it needs `jq`, which the Linux setup guide installs). **Keep this window
+open until the end of step 4**: it sets the variables `id`, `h`, `json`, `out`, `body` and `access`
+that step 4 reuses:
+
+```bash
+cd backend                            # from the repo root
+id=$(date +%H%M%S)
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')
+json=$(jq -nc --arg id "$id" '{email: "part1-\($id)@example.test", username: "part1_\($id)", password: "correct-horse-battery-42", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX"}')
+out=$(curl -s -i -c /tmp/rz-jar.txt "${h[@]}" -H "Content-Type: application/json" --data-binary "$json" http://localhost:8000/api/auth/app/v1/auth/signup | tr -d '\r')
+printf '%s\n' "$out" | grep -iE '^(HTTP|Set-Cookie|Cache-Control)' | sed -E 's/rz_refresh=[^;]+/rz_refresh=<token>/'
+body=$(printf '%s\n' "$out" | sed -n '$p')
+access=$(printf '%s' "$body" | jq -r .meta.access_token)
+printf '%s' "$body" | jq -r '"user: \(.data.user.username); meta fields: \(.meta | keys_unsorted | join(", ")); access token: \(.meta.access_token | length) characters"'
+curl -s -H "Authorization: Bearer $access" http://localhost:8000/api/v1/me/; echo
+```
+
+**You should see:** The first four lines are the HTTP status and headers (from the `printf ... grep`
+line), the fifth is the summary (from the `jq` line), and the last is your profile (from the final
+`curl`):
+
+```text
+HTTP/1.1 200 OK
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+Set-Cookie:  rz_refresh=<token>; expires=…; HttpOnly; Max-Age=1209600; Path=/api/auth/; SameSite=Lax
+Set-Cookie:  rz_session=1; expires=…; Max-Age=1209600; Path=/; SameSite=Lax
+user: part1_014515; meta fields: is_authenticated, access_token; access token: 373 characters
+{"id":"…","username":"part1_014515","display_name":"","email":"part1-014515@example.test","is_email_verified":false,"role":"user","has_usable_password":true,"google_connected":false,"avatar_url":null}
+```
+
+Sanity check that `access` is set: `echo ${#access}` should print a number near `373`. If it prints
+`0` or `null`, redo this step (usually Django is not running in window 1, or you are offline).
+
+- The number in the name is the time you ran it. bash keeps the quotes, so the command builds the
+  JSON with `jq` and passes it to curl directly (no file).
+- `meta` has only `is_authenticated` and `access_token`: no `refresh_token` and no
+  `session_token`. The refresh token lives only in the HttpOnly cookie (no `Domain`,
+  `Path=/api/auth/`). `Secure` is missing because `AUTH_COOKIE_SECURE=False` locally.
+- `rz_session=1` is the readable hint that tells the frontend there is a session to restore.
+- The `sed` hides the cookie value. The access token stays in `$access` and is never printed.
+- `XXXX.DUMMY.TOKEN.XXXX` is the token Cloudflare's test widget produces. Django checked it with
+  siteverify, using the test secret.
+
+Window 1 now shows the verification email:
+
+```text
+Subject: [Rumor Zero] Please Confirm Your Email Address
+From: Rumor Zero <no-reply@example.com>
+To: part1-014515@example.test
+...
+To confirm this is correct, go to http://localhost:3000/verify-email/<key>
+```
+
+- The link points at the frontend (the page itself arrives in Part 2).
+- The text still says "Hello from localhost:8000!": allauth's default wording, which Part 2's
+  branded templates replace.
+
+Still in window 2, the live username check (it uses `id` from above):
+
+```bash
+for u in Ada_Lovelace ADMIN ab "part1_$id"; do curl -s "http://localhost:8000/api/v1/auth/username-available/?u=$u"; echo; done
+```
+
+```text
+{"username":"ada_lovelace","available":true,"reason":null,"message":"Available"}
+{"username":"admin","available":false,"reason":"reserved","message":"This username is reserved."}
+{"username":"ab","available":false,"reason":"invalid","message":"Usernames are 3–30 characters: lowercase letters, numbers and underscores only."}
+{"username":"part1_014515","available":false,"reason":"taken","message":"That username is taken."}
+```
+
+Four lines, one per name: free, reserved, invalid format, taken (your own new account).
+
+- A Linux terminal in UTF-8 (the default) shows the dash in `3–30` correctly.
+
+#### Step 4: Refresh, rotation, the CSRF guard and log out
+
+**Where:** Same terminal as step 3 (window 2).
+
+**What this does:** Shows how the refresh cookie rotates, that the old cookie works for 60 seconds,
+that requests without the right headers are refused, and what log out does.
+
+This window must still have `h`, `access`, `id` and the cookie jar `/tmp/rz-jar.txt` from step 3.
+Sanity check: `echo "${h[@]}"` prints the two headers and `ls /tmp/rz-jar.txt` finds the file. If
+not, redo step 3.
+
+```bash
+refresh=http://localhost:8000/api/auth/app/v1/tokens/refresh
+get_refresh_cookie() { grep rz_refresh /tmp/rz-jar.txt | cut -f7 | sed -n '$p'; }
+first=$(get_refresh_cookie)
+curl -s -w '\n' -b /tmp/rz-jar.txt -c /tmp/rz-jar.txt "${h[@]}" -X POST "$refresh" | sed -E 's/"access_token": "[^"]+"/"access_token": "<token>"/'
+echo
+[ "$first" != "$(get_refresh_cookie)" ] && rotated=True || rotated=False
+echo "cookie rotated: $rotated"
+curl -s -o /dev/null -w 'old cookie at once: %{http_code}\n' "${h[@]}" -X POST -b "rz_refresh=$first" "$refresh"
+sleep 61                              # nothing prints for 61 seconds: this wait is on purpose
+curl -s -w ' %{http_code}\n' "${h[@]}" -X POST -b "rz_refresh=$first" "$refresh"
+curl -s -o /dev/null -w 'current cookie: %{http_code}\n' -b /tmp/rz-jar.txt -c /tmp/rz-jar.txt "${h[@]}" -X POST "$refresh"
+```
+
+**You should see:**
+
+```text
+{"status": 200, "data": {"access_token": "<token>"}}
+
+cookie rotated: True
+old cookie at once: 200
+{"status": 400} 400
+current cookie: 200
+```
+
+- Line 1: the first refresh succeeded. `cookie rotated: True`: the cookie in the jar changed.
+- `old cookie at once: 200`: the old cookie still works right away.
+- After the 61 s wait, `{"status": 400} 400`: the old cookie is dead. `current cookie: 200`: the new
+  one works.
+- Every refresh replaces the cookie. The old one keeps working for 60 seconds, so two tabs
+  refreshing together, or a reply lost on a bad connection, never log you out. After that minute it
+  is dead (400).
+
+Without the `Origin` or the `X-Requested-With` header:
+
+```bash
+curl -s -w ' %{http_code}\n' -b /tmp/rz-jar.txt -H 'X-Requested-With: rumor-zero' -X POST "$refresh"
+curl -s -w ' %{http_code}\n' -b /tmp/rz-jar.txt -H 'Origin: http://localhost:3000' -X POST "$refresh"
+curl -s -w ' %{http_code}\n' -b /tmp/rz-jar.txt -H 'Origin: http://localhost:3000' -X POST http://localhost:8000/api/auth/logout/
+```
+
+- All three print
+  `{"status": 403, "errors": [{"code": "csrf_failed", "message": "Reload the page and try again."}]} 403`.
+- Login and signup are guarded the same way.
+
+Log out:
+
+```bash
+last=$(get_refresh_cookie)
+curl -s -i -b /tmp/rz-jar.txt -c /tmp/rz-jar.txt "${h[@]}" -X POST http://localhost:8000/api/auth/logout/ | tr -d '\r' | grep -iE '^(HTTP|Set-Cookie)'
+curl -s -w ' %{http_code}\n' "${h[@]}" -X POST -b "rz_refresh=$last" "$refresh"
+curl -s -w ' %{http_code}\n' "${h[@]}" -X POST "$refresh"
+curl -s -o /dev/null -w 'logout again: %{http_code}\n' "${h[@]}" -X POST http://localhost:8000/api/auth/logout/
+curl -s -o /dev/null -w 'access token after logout: %{http_code}\n' -H "Authorization: Bearer $access" http://localhost:8000/api/v1/me/
+curl -s -w ' %{http_code}\n' "${h[@]}" -X POST http://localhost:8000/api/auth/app/v1/auth/session
+```
+
+```text
+HTTP/1.1 204 No Content
+Set-Cookie:  rz_refresh=""; expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; Max-Age=0; Path=/api/auth/; SameSite=Lax
+Set-Cookie:  rz_session=""; expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/; SameSite=Lax
+{"status": 400} 400
+{"status": 401} 401
+logout again: 204
+access token after logout: 200
+{"status": 404, "errors": [{"code": "not_found", "message": "Not found."}]} 404
+```
+
+- The first three lines come from the logout call itself (204 and both cookies cleared).
+- `400`: the last refresh cookie now fails. `401`: with no cookie at all. `logout again: 204`:
+  logging out twice is fine.
+- `access token after logout: 200`: the access token keeps working until it expires (at most 15
+  minutes after step 3; after that the line says 401). That's by design: access tokens are checked
+  by signature and expiry only, and the browser forgets its copy at once.
+- Only login, signup, refresh and logout exist under `/api/auth/`. allauth's other endpoints, like
+  `auth/session` here, answer 404.
+
+#### Step 5: Failed logins are limited per real client IP, through the relay
+
+**Where:** Terminal window 3 (frontend), then window 2 (commands).
+
+**What this does:** Sends 11 wrong logins through the frontend relay to show that Django limits
+them by your real address, and that a different address is not blocked.
+
+Window 3: `npm run dev` (in `frontend/`). It keeps the window busy. Back in window 2 (it uses `h`
+from step 3; sanity check: `echo "${h[@]}"` prints the two headers):
+
+```bash
+for i in $(seq 1 11); do
+  login=$(printf '{"email": "nobody%s@example.test", "password": "wrong-password"}' "$i")
+  r=$(curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary "$login" http://localhost:3000/api/auth/app/v1/auth/login)
+  printf '%2d  ' "$i"
+  printf '%s' "$r" | jq -r '"\(.status)  \(.errors[0].code)"'
+done
+curl -s --interface 127.0.0.2 "${h[@]}" -H "Content-Type: application/json" --data-binary "$login" http://127.0.0.1:8000/api/auth/app/v1/auth/login; echo
+```
+
+**You should see:** Eleven numbered lines, then Django's answer to the last request:
+
+```text
+ 1  400  email_password_mismatch
+ 2  400  email_password_mismatch
+ 3  400  email_password_mismatch
+ 4  400  email_password_mismatch
+ 5  400  email_password_mismatch
+ 6  400  email_password_mismatch
+ 7  400  email_password_mismatch
+ 8  400  email_password_mismatch
+ 9  400  email_password_mismatch
+10  400  email_password_mismatch
+11  400  too_many_login_attempts
+{"status": 400, "errors": [{"message": "The email address and/or password you specified are not correct.", "code": "email_password_mismatch", "param": "password"}]}
+```
+
+- The first eleven go through the relay on port 3000. Each uses another email, so only the
+  per-address limit (10 failures a minute) is hit (line 11); the per-account limit is 5 failures in
+  5 minutes.
+- The relay passed your real address to Django with the shared secret; on Linux `localhost` may
+  resolve to `127.0.0.1` or `::1`. The last request goes straight to Django from a different
+  address, so it isn't blocked (it gets the normal "not correct" answer). The command adds
+  `--interface 127.0.0.2` (another loopback address), because plain `127.0.0.1` could be the very
+  address the relay reported.
+- Within that minute, logging in at http://localhost:3000/login, even with a right password, shows
+  the red banner "Too many attempts. Try again in a few minutes."
+
+#### Step 6: Browser: sign up, stay logged in, log out
+
+**Where:** Browser. Window 3's `npm run dev` and window 1's `runserver` must be running.
+
+**What this does:** Walks through the real sign-up screens. Wait a minute after step 5 so the
+login limit has cleared.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/signup | The a2 card: the logo, "Create your account", Email address, Username, Password with a bar labelled "Password strength", the Cloudflare widget, a blue "Create account", the Terms/Privacy note and "Already have an account? Log in". No Google button yet (Part 3). |
+| Look at the widget | It says "Success!" after a second or two, with a red "For testing only…" line: that is the test key. "Create account" is pale (disabled) until then. |
+| Type a username, e.g. `Ada_Lovelace` | After a short pause, a teal "Available: @ada_lovelace" and a check mark in the field. `admin` says "This username is reserved."; `ab` shows the format rule at once. |
+| Fill a new email, a username and `correct-horse-battery-42`, then click **Create account** | The button spins briefly, then /home: the shell with your @username in the rail and an amber banner "Verify your email to post, comment and report. Check your inbox for the link." The email appears in window 1. |
+| F12 → Application → Cookies → http://localhost:3000 | `rz_refresh` (HttpOnly ✓, SameSite Lax, Path `/api/auth/`) and `rz_session` = `1` (Path `/`, not HttpOnly). Local storage and Session storage are empty. |
+| F12 → Console: `document.cookie` | `'rz_session=1'`. Scripts can't see the refresh token. |
+| Reload (F5) | Still logged in. The account area at the bottom of the rail shows grey placeholders for a moment while the session is restored. |
+| Open http://localhost:3000/home in a second tab | Logged in there too |
+| First tab: `•••` in the user card | A menu with Profile, Settings and **Log out** |
+| Click **Log out** | You land on /login, both cookies are gone (Application → Cookies), and the second tab switches to the logged-out shell by itself. |
+| Open http://localhost:3000/settings | It redirects to `/login?next=%2Fsettings`. Log in with the same email and password: you are back on /settings. |
+| Phone width (F12 → device toolbar, 390 px): tap the avatar at the top right | The account sheet ends with Log out |
+
+#### Step 7: Browser: the error states
+
+**Where:** Browser, still on http://localhost:3000; one part needs window 1.
+
+**What this does:** Triggers each sign-up and login error on purpose to see the messages.
+
+| Do this | Expect |
+|---|---|
+| /signup with the email from step 6 and a new username | Under Email: "A user is already registered with this email address." |
+| /signup with the username from step 6 | While typing: "That username is taken." |
+| /signup with the password `password123` | After Create account: "This password is too common." under Password. The strength bar says Fair: it is only advice; Django decides. |
+| Any failed sign-up | The widget runs again ("Verifying…"), and Create account waits for its new token: each token works once. |
+| /login with a wrong password | A red banner "That email and password don't match." with an × that closes it |
+
+A failed bot check needs Cloudflare's always-fail **test** secret on the backend. Stop `runserver`
+in window 1 (`Ctrl+C`), then in window 1 (in `backend/`, venv active):
+
+```bash
+TURNSTILE_SECRET_KEY="2x0000000000000000000000000000000AA" python manage.py runserver
+```
+
+- Sign up with a new email and username: under the widget, "The bot check didn't pass. Try it
+  again.", and the widget starts over.
+- The `TURNSTILE_SECRET_KEY=…` in front of the command lasts only for that one command, and
+  `backend/.env` is not changed. Stop the server (`Ctrl+C`) and start `python manage.py runserver`
+  normally again (you can keep the same window).
+
+#### Step 8: Run the automated frontend checks
+
+**Where:** A terminal in `frontend/`. Stop `npm run dev` first (`Ctrl+C` in window 3), then you can
+reuse window 3.
+
+**What this does:** The same lint, type, format and unit-test checks as Part 0C, now with the auth
+tests included, plus a production build.
+
+```bash
+npm run lint             # no output after the command line
+npm run lint:tokens      # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
+npm run typecheck        # no output after the command line
+npm run format:check     # All matched files use Prettier code style!
+npm test                 # Test Files  59 passed (59) / Tests  562 passed (562)
+npm run build            # slow; ends with the route list below
+```
+
+**You should see:** The comment on each line is the expected result. The build's route list still
+has these lines:
+
+```text
+├ ƒ /api/[...path]
+├ ○ /login
+├ ○ /signup
+```
+
+- The auth pages stay prerendered (`○`); the relay runs per request (`ƒ`).
+
+#### Step 9: The E2E tests, dev mode and CI mode
+
+**Where:** A terminal in `frontend/` (window 3).
+
+**What this does:** Playwright drives a real browser through sign-up, reload and log out.
+
+Stop `runserver` too (`Ctrl+C` in window 1): Playwright then starts its own Django with an
+in-memory cache, so step 5's rate limit can't get in the way.
+
+```bash
+npm run test:e2e
+```
+
+**You should see:** 11 passed:
+
+```text
+Running 11 tests using 6 workers
+
+  ok  6 [chromium] › e2e\smoke.spec.ts:8:5 › the relay forwards /api/health/ to Django (79ms)
+  ...
+  ok  2 [chromium] › e2e\auth.spec.ts:122:5 › two tabs open at token expiry both stay logged in (6.3s)
+  ok  3 [chromium] › e2e\auth.spec.ts:106:5 › two tabs that load at once, then reload together, stay logged in (6.8s)
+  ok  5 [chromium] › e2e\auth.spec.ts:43:5 › sign up, stay logged in across a reload, log out (7.8s)
+
+  11 passed (14.5s)
+```
+
+- On Linux Playwright prints the spec paths with `/` (`e2e/smoke.spec.ts`). The timings and the
+  worker count vary from machine to machine.
+- The eight 0C smoke tests are unchanged. The three new ones sign up with the test widget, check
+  the cookie flags and that storage is empty, reload, log out, try the dead cookie (400) and a
+  refresh without the header (403), and use `/settings` → `/login?next=` → back.
+- "At token expiry" fast-forwards both tabs' clocks by 14½ minutes, so both refresh at the same
+  moment.
+
+Then the way CI runs it:
+
+```bash
+npm run build
+CI=1 npm run test:e2e    # 11 passed, this time against `next start`
+```
+
+#### Step 10: Repository checks
+
+**Where:** Any terminal.
+
+**What this does:** Confirms `design/` is untouched, no unwanted agent files appeared, and that
+saved test emails are git-ignored.
+
+```bash
+cd "$(git rev-parse --show-toplevel)"              # the repo root, from any folder inside it
+git status --short design                          # prints nothing: design/ is untouched
+for f in frontend/AGENTS.md frontend/CLAUDE.md; do [ -e "$f" ] && echo True || echo False; done   # False, then False
+git check-ignore backend/tmp/mail/example.eml      # prints the path: emails written by EMAIL_PROVIDER=file are never committed
+```
+
+**You should see:** Nothing; `False` and `False`; then `backend/tmp/mail/example.eml`.
+
+#### Step 11: CI on GitHub (after you push)
+
+**Where:** Browser.
+
+**What this does:** Checks that GitHub's automatic build passes after you push.
+
+| URL | Expect |
+|---|---|
+| Your repository's **Actions** tab on github.com | A "CI" run for your push with three green jobs |
+
+- New in this part: the E2E job signs up with the Turnstile test key, so the GitHub runner must reach
+  `challenges.cloudflare.com` (the browser and Django both call it). If the sign-up tests fail at
+  the widget, the run's "playwright-report" artifact shows the page.
+- The agent couldn't run CI: only you push.
+
+#### Step 12: Stop and clean up
+
+**Where:** Every terminal window you still have open.
+
+**What this does:** Shuts everything down and removes helper files.
+
+- Stop the servers: `Ctrl+C` in each window. If `npm run dev` later says "Another next dev server is
+  already running" with a PID, end it with `kill <that PID>` (`pgrep -af 'next|workerd'`
+  lists leftover dev servers, and `ss -ltnp | grep -E ':(3000|8000)\b'` shows what holds the ports).
+- Delete the helper files. The commands above create only the cookie jar:
+  `rm -f /tmp/rz-jar.txt`.
+- The test accounts stay in your local database: `part1_…` from step 3, the E2E's `e2e_…`,
+  `tabs_…` and `expiry_…`, and the agent's own checks (`manual_check`, `visual_…`, `tf_…`,
+  `phone_…`). Delete them in Django Admin → Users if you like.
+  `docker compose down -v` (repo root) wipes the whole local database, which is destructive.
+- Stop the containers and keep the data: `docker compose down` (repo root).
+### Part 2: Email verification & password reset
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
+`frontend/.env.local`. `EMAIL_PROVIDER=console` (the default) prints every email in the `runserver`
+terminal. Part 2 adds no migration, no dependency and no env variable.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend/`, venv active. Leave it running. Every email the app "sends" is printed here. | 3 to 9 (step 9 restarts it) |
+| Window 2 (commands) | All the `curl` commands. **Use the same window for steps 3 to 7**: the variables you set in step 3 (`id`, `h`, `access`, `resend`) and later (`raw`, `key`, `verify`, `rp`, `login`, `refresh`, `rk`, `reset`) only live in that one terminal. If you close it, or open a new one, redo step 3. Needs `jq`. | 1 to 7, 9, 12 |
+| Window 3 (frontend) | `npm run dev` in `frontend/`. Leave it running. | 8 (stopped before step 10) |
+
+Things to know first:
+
+- Sign-up still calls Cloudflare (Turnstile test keys), so it needs internet.
+- Open the site as **http://localhost:3000**, as in Part 1.
+- The outputs below were recorded on Linux on 2026-10-07. Numbers in names and times differ per run.
+- A link in an email carries a key: the verification key has two `:` that arrive as `%3A`, and the
+  commands below turn them back (`${raw//%3A/:}`). A browser does this for you.
+- The limits count per address and per IP, and your local Redis remembers them for up to a day.
+  Every command here uses a new address, so repeated runs are fine; if you test the per-IP limit of
+  50 reset requests a day by hand, wait a day or restart Redis (`docker compose restart redis`).
+
+#### Step 1: Check that nothing needs migrating and the email templates are in place
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment and confirms
+Django has nothing to migrate (Part 2 adds no tables) and that the new email templates exist.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                          # No migrations to apply.
+python manage.py check                            # System check identified no issues (0 silenced).
+python manage.py makemigrations --check --dry-run # No changes detected
+ls templates/account/email
+```
+
+**You should see:** the three comments above are the expected messages of the three `python` lines
+(nothing to apply, no problems, no model changes). The `ls` prints the template files:
+
+```text
+base_message.html
+base_message.txt
+email_confirmation_message.html
+email_confirmation_message.txt
+email_confirmation_signup_message.html
+email_confirmation_signup_message.txt
+email_confirmation_signup_subject.txt
+email_confirmation_subject.txt
+password_reset_key_message.html
+password_reset_key_message.txt
+password_reset_key_subject.txt
+```
+
+- The templates live in `backend/templates/`, not inside the app: `allauth` comes before
+  `apps.accounts` in `INSTALLED_APPS`, so its own templates would win.
+
+#### Step 2: Run the automated backend checks
+
+**Where:** Same terminal as step 1 (window 2, in `backend/`, venv active).
+
+**What this does:** Runs the whole backend test suite, then only the new Part 2 test files, then the
+linter and formatter check.
+
+```bash
+python -m pytest                                    # 577 passed
+python -m pytest apps/accounts/tests/test_email_verification.py apps/accounts/tests/test_resend_verification.py apps/accounts/tests/test_password_reset.py apps/accounts/tests/test_emails.py apps/accounts/tests/test_startup.py -q   # 101 passed
+ruff check . ; ruff format --check .                # All checks passed! / 73 files already formatted
+```
+
+**You should see:** the full run takes a while and ends with `577 passed`; the second command ends
+with `101 passed`; the last prints `All checks passed!` and `73 files already formatted`. (Counts may
+grow later; what matters is that nothing fails.)
+
+- The new files cover the verification link (including the `%3A` key and the exact 24-hour expiry),
+  the resend cooldown and daily cap, the reset flow (identical answers and bytes for existing,
+  unknown and inactive addresses, the limits, expiry, other browsers' refresh tokens), the emails
+  themselves (subject, `From`, every link and the logo on the frontend origin, the Brevo payload) and
+  the startup preload of allauth's deferred libraries.
+- `test_middleware.py` and the settings tests changed too: the verify and password endpoints are now
+  on the allow-list, and the new limits are pinned.
+
+#### Step 3: Sign up a test account, and try the resend limits
+
+**Where:** First window 1 (start the server), then window 2 (the commands). **Keep using window 2
+for steps 4 to 7.**
+
+**What this does:** Window 1 runs the Django server. In window 2 you create a brand-new account
+through the API (which makes the server print the sign-up email in window 1), then check the account
+is not verified yet.
+
+Window 1: `python manage.py runserver` (in `backend/`, venv active). Leave it running; it prints
+nothing more until a request or an email arrives.
+
+Window 2 (no venv needed; needs `jq`):
+
+```bash
+cd backend                            # from the repo root
+id=$(date +%H%M%S)                    # a unique suffix so the address is new each run
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every API call needs
+json=$(jq -nc --arg id "$id" '{email: "part2-\($id)@example.test", username: "part2_\($id)", password: "correct-horse-battery-42", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX"}')
+access=$(curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary "$json" http://localhost:8000/api/auth/app/v1/auth/signup | jq -r .meta.access_token)   # access = your login token
+curl -s -H "Authorization: Bearer $access" http://localhost:8000/api/v1/me/ | jq -c '{username, is_email_verified}'
+```
+
+Sanity check (this step sets `id`, `h` and `access`; `access` must not be empty):
+
+```bash
+echo ${access:0:10}                   # prints the first 10 characters of the token, not an empty line
+```
+
+**You should see** in window 2 (the number in the name is your `id`, so it differs):
+
+```text
+{"username":"part2_010027","is_email_verified":false}
+```
+
+That means the account exists and its email is not verified yet.
+
+**If it differs:** if `access` is empty or says `null`, the sign-up failed (`runserver` not running, or `jq` missing). Fix that and run this step again from
+`id=$(date +%H%M%S)`.
+
+Window 1 now shows the sign-up email:
+
+```text
+Subject: [Rumor Zero] Welcome to Rumor Zero: verify your email
+From: Rumor Zero <no-reply@example.com>
+To: part2-010027@example.test
+...
+Content-Type: text/plain; charset="utf-8"
+
+Welcome to Rumor Zero
+
+You can already read everything. Confirm your email address to post, comment and report.
+
+Verify your email:
+http://localhost:3000/verify-email/NzU%3A1xEAOb%3AbiPbvPBWC_1KxA5hYCK9XQPDSoulXssAgTKbBUd_AKE
+
+This link expires 24 hours after it was sent. If you didn't create this account, you can ignore this email.
+
+Rumor Zero
+...
+Content-Type: text/html; charset="utf-8"
+
+<!DOCTYPE html>
+...
+<img src="http://localhost:3000/brand/email-logo.png" alt="Rumor Zero" width="160" ...>
+```
+
+- Two parts: the plain text (no image), then the HTML with the logo. No "Hello from localhost:8000!"
+  any more. Every link, and the logo, points at `http://localhost:3000`; `From` is
+  `DEFAULT_FROM_EMAIL`.
+
+**Now the resend limits.** Run this in **window 2, the same terminal that signed up** (it uses
+`$access` from the block above). Three requests to the "send me a verification email again" address:
+
+- line 1: asks for a new link with your token, right after sign-up;
+- line 2: asks again without any token;
+- line 3: after waiting 61 seconds, asks again with your token.
+
+```bash
+resend=http://localhost:8000/api/v1/me/verification-email/
+curl -s -w ' %{http_code}\n' -X POST -H "Authorization: Bearer $access" $resend     # 1: with token, too soon
+curl -s -w ' %{http_code}\n' -X POST $resend                                        # 2: no token
+sleep 61                                                                            # 3: nothing prints for 61 seconds: normal, just wait
+curl -s -o /dev/null -w 'after 61 s: %{http_code}\n' -X POST -H "Authorization: Bearer $access" $resend
+```
+
+**You should see** three output lines, one per curl (the `sleep` prints nothing):
+
+```text
+{"detail":"We sent one recently. Wait a little before asking again.","code":"verification_email_throttled"} 429
+{"detail":"Authentication credentials were not provided.","code":"not_authenticated"} 401
+after 61 s: 204
+```
+
+1. `429`: cooldown refused. The sign-up email counts for the 60-second cooldown, so the first resend
+   is refused.
+2. `401`: no token, so the server doesn't know who you are.
+3. `204`: sent. After a minute it works, and window 1 prints a second email, now called "Verify your
+   email" (no "Welcome").
+
+- The answer to the throttled call has no `Retry-After`: the full bucket may be the minute one or
+  the daily one (10 resends a day per address; the sign-up email doesn't count).
+- The command waits 61 seconds on purpose.
+
+**If it differs:** if line 1 says `401` instead of `429`, `access` is empty: redo the sign-up part of
+this step. If it says `204` instead of `429`, more than a minute passed since sign-up (that is fine,
+the limit just wasn't tested).
+
+#### Step 4: Verify the account with the link from the email
+
+**Where:** Same terminal as step 3 (window 2). Needs `h`, `access` and `resend` from step 3.
+
+**What this does:** Pretends to be the browser opening the link from the email: it sends the key to
+the verify endpoint, then checks the account is now verified, then tries several things that must
+fail (reusing the link, a forged key, no headers, resending once verified).
+
+Copy the part of the **last** link in window 1 after `/verify-email/` into `raw` (the `%3A` stays as
+it is). Replace the placeholder text:
+
+```bash
+raw='PASTE_THE_PART_AFTER_/verify-email/'
+key=${raw//%3A/:}                      # turn %3A back into :
+verify=http://localhost:8000/api/auth/app/v1/auth/email/verify
+body=$(jq -nc --arg key "$key" '{key: $key}')
+curl -s -i "${h[@]}" -H "Content-Type: application/json" --data-binary "$body" $verify | tr -d '\r' | grep -iE '^(HTTP|Cache-Control|Set-Cookie|\{)'   # 1: verify (prints 3 lines)
+curl -s -H "Authorization: Bearer $access" http://localhost:8000/api/v1/me/ | jq -c '{username, is_email_verified}'                                  # 2: am I verified now?
+curl -s -w ' %{http_code}\n' "${h[@]}" -H "Content-Type: application/json" --data-binary "$body" $verify                                              # 3: same link again
+curl -s -w ' %{http_code}\n' "${h[@]}" -H "Content-Type: application/json" --data-binary '{"key": "forged"}' $verify                                   # 4: made-up key
+curl -s -w ' %{http_code}\n' -H "Content-Type: application/json" --data-binary "$body" $verify                                                         # 5: without Origin / X-Requested-With headers
+curl -s -w ' %{http_code}\n' -X POST -H "Authorization: Bearer $access" $resend                                                                        # 6: resend when already verified
+curl -s -w ' %{http_code}\n' "${h[@]}" -X POST http://localhost:8000/api/auth/app/v1/auth/email/verify/resend                                          # 7: allauth's own resend address
+```
+
+**You should see** (7 commands, 9 lines; command 1 prints 3 lines):
+
+```text
+HTTP/1.1 200 OK
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+{"status": 200}
+{"username":"part2_010027","is_email_verified":true}
+{"status": 400, "errors": [{"message": "Invalid or expired key.", "code": "invalid_or_expired_key", "param": "key"}]} 400
+{"status": 400, "errors": [{"message": "Invalid or expired key.", "code": "invalid_or_expired_key", "param": "key"}]} 400
+{"status": 403, "errors": [{"code": "csrf_failed", "message": "Reload the page and try again."}]} 403
+{"detail":"Your email is already verified.","code":"already_verified"} 409
+{"status": 404, "errors": [{"code": "not_found", "message": "Not found."}]} 404
+```
+
+1. Lines 1 to 3: the verification worked (`200`), with no cookie line.
+2. Line 4: `is_email_verified` is now `true`.
+3. Line 5: `400`, the same link used a second time is refused.
+4. Line 6: `400`, a forged key is refused with the same message.
+5. Line 7: `403`, refused because the `Origin` and `X-Requested-With` headers were missing.
+6. Line 8: `409`, already verified, so nothing is sent.
+7. Line 9: `404`, allauth's own resend address stays closed.
+
+- The verification answered 200 with no cookies: a link never logs anyone in. allauth itself says
+  401 here ("verified, but nobody is logged in"); the middleware turns that into 200.
+- The same link again, and a forged one, both say `invalid_or_expired_key`: an expired link says
+  the same. The call without `Origin` and `X-Requested-With` is refused like every other unsafe
+  `/api/auth/` call.
+- Once verified, the resend is a 409 and sends nothing. allauth's own `auth/email/verify/resend` is
+  the code-flow view and stays closed (404).
+
+**If it differs:** if command 1 prints a 400 and no `200`, the pasted key is from an older email or
+still has a stray character; copy the **last** link in window 1 again. If commands 2 and later fail
+with 401, `access` is empty: redo step 3.
+
+#### Step 5: Forgot password gives the same answer for every address
+
+**Where:** Same terminal as step 3 (window 2). Needs `h` and `id` from step 3.
+
+**What this does:** Asks for a password reset for a real address and for an address that does not
+exist, and checks the server answers byte for byte the same, so nobody can find out who has an
+account.
+
+```bash
+rp=http://localhost:8000/api/auth/app/v1/auth/password/request
+ask() { curl -s -i "${h[@]}" -H "Content-Type: application/json" --data-binary "$(jq -nc --arg e "$1" '{email: $e}')" $rp | tr -d '\r' | grep -v -iE '^(Date|Expires|Set-Cookie):'; }   # defines a helper, prints nothing
+ask "part2-$id@example.test" > /tmp/rz-known.txt      # real account: answer saved to a file
+ask "nobody-$id@example.test" > /tmp/rz-unknown.txt   # unknown address: answer saved to a file
+cat /tmp/rz-known.txt
+diff /tmp/rz-known.txt /tmp/rz-unknown.txt && echo "identical: status, headers and body"
+```
+
+**You should see:** the `ask` line and the two `ask ...` lines print nothing (their output goes to
+files). `cat` shows the saved answer, then `diff` finds no difference:
+
+```text
+HTTP/1.1 200 OK
+Server: WSGIServer/0.2 CPython/3.13.16
+Content-Type: application/json
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+X-Frame-Options: DENY
+Content-Length: 15
+X-Content-Type-Options: nosniff
+Referrer-Policy: same-origin
+Cross-Origin-Opener-Policy: same-origin
+
+{"status": 200}
+identical: status, headers and body
+```
+
+- Window 1 shows **one** new email, "Reset your password", addressed to the real account. Nothing is
+  printed for the unknown address. The time-dependent headers (`Date`, `Expires`) are left out of the
+  comparison on purpose.
+- The link in that email is `http://localhost:3000/reset-password/<key>`: 32 hex digits, a time and
+  a hash, valid for 24 hours and for one use.
+
+**If it differs:** if `diff` prints lines instead of the "identical" message, that is a real bug in
+the server; note it down. If the answer is `403`, `h` is empty: redo step 3.
+
+**The limits** (each uses a new address, and an address that doesn't exist is limited the same way,
+so the limit leaks nothing). Same window 2. The loop sends 6 requests for one address in a row, then
+one request with a malformed address:
+
+```bash
+for i in 1 2 3 4 5 6; do
+  r=$(curl -s -w ' %{http_code}' "${h[@]}" -H "Content-Type: application/json" --data-binary "$(jq -nc --arg e "busy-$id@example.test" '{email: $e}')" $rp)
+  printf '%d  %s\n' "$i" "$r"
+done
+curl -s -w ' %{http_code}\n' "${h[@]}" -H "Content-Type: application/json" --data-binary '{"email": "not-an-email"}' $rp
+```
+
+**You should see:**
+
+```text
+1  {"status": 200} 200
+2  {"status": 200} 200
+3  {"status": 200} 200
+4  {"status": 200} 200
+5  {"status": 200} 200
+6  {"status": 429} 429
+{"status": 400, "errors": [{"message": "Enter a valid email address.", "code": "invalid", "param": "email"}]} 400
+```
+
+Requests 1 to 5 are accepted (`200`), request 6 is refused (`429`, too many), and the malformed
+address is a `400`.
+
+- Five a minute per address. There are also 10 a day per address and 50 a day per IP (the
+  automated tests walk through both with a moved clock). A malformed address is a 400 and never
+  counts.
+
+#### Step 6: The reset logs you in and ends the other sessions
+
+**Where:** Same terminal as step 3 (window 2), with window 1 open to read the email. Needs `h`, `id`
+and `rp` from steps 3 and 5.
+
+**What this does:** Logs in "in another browser" with the old password (its own cookie file), then
+resets the password with the emailed key. Afterwards the other browser must be logged out, the new
+session must work, and only the new password must log in.
+
+First, log in "in another browser" with the old password. The `-c` option saves that browser's
+cookies to `/tmp/rz-other.txt`:
+
+```bash
+login=http://localhost:8000/api/auth/app/v1/auth/login
+refresh=http://localhost:8000/api/auth/app/v1/tokens/refresh
+curl -s -c /tmp/rz-other.txt "${h[@]}" -H "Content-Type: application/json" --data-binary "$(jq -nc --arg e "part2-$id@example.test" '{email: $e, password: "correct-horse-battery-42"}')" $login | jq -c '{status}'
+curl -s -o /dev/null -w 'other browser refresh before the reset: %{http_code}\n' -b /tmp/rz-other.txt -c /tmp/rz-other.txt "${h[@]}" -X POST $refresh
+```
+
+**You should see:**
+
+```text
+{"status":200}
+other browser refresh before the reset: 200
+```
+
+The login worked and the other browser can refresh its session.
+
+Next, ask for a link for the real address once more, wait for it in window 1, and copy the part
+after `/reset-password/` into `rk` (replace the placeholder):
+
+```bash
+curl -s -o /dev/null -w 'request: %{http_code}\n' "${h[@]}" -H "Content-Type: application/json" --data-binary "$(jq -nc --arg e "part2-$id@example.test" '{email: $e}')" $rp
+rk='PASTE_THE_PART_AFTER_/reset-password/'
+reset=http://localhost:8000/api/auth/app/v1/auth/password/reset
+curl -s -o /dev/null -w 'key check: %{http_code}\n' -H "X-Password-Reset-Key: $rk" $reset
+curl -s -w ' %{http_code}\n' -H "X-Password-Reset-Key: nonsense" $reset
+curl -s -w ' %{http_code}\n' "${h[@]}" -H "Content-Type: application/json" --data-binary "$(jq -nc --arg k "$rk" '{key: $k, password: "short"}')" $reset
+out=$(curl -s -i -c /tmp/rz-new.txt "${h[@]}" -H "Content-Type: application/json" --data-binary "$(jq -nc --arg k "$rk" '{key: $k, password: "a-brand-new-passphrase-77"}')" $reset | tr -d '\r')
+printf '%s\n' "$out" | grep -iE '^(HTTP|Set-Cookie|Cache-Control)' | sed -E 's/rz_refresh=[^;]+/rz_refresh=<token>/'
+printf '%s' "$(printf '%s\n' "$out" | sed -n '$p')" | jq -r '"user: \(.data.user.username); meta fields: \(.meta | keys_unsorted | join(", ")); access token: \(.meta.access_token | length) characters"'
+curl -s -w ' %{http_code}\n' -b /tmp/rz-other.txt "${h[@]}" -X POST $refresh
+curl -s -o /dev/null -w 'the new session refreshes: %{http_code}\n' -b /tmp/rz-new.txt -c /tmp/rz-new.txt "${h[@]}" -X POST $refresh
+curl -s -w ' %{http_code}\n' "${h[@]}" -H "Content-Type: application/json" --data-binary "$(jq -nc --arg k "$rk" '{key: $k, password: "yet-another-passphrase-55"}')" $reset
+curl -s -o /dev/null -w 'old password: %{http_code}\n' "${h[@]}" -H "Content-Type: application/json" --data-binary "$(jq -nc --arg e "part2-$id@example.test" '{email: $e, password: "correct-horse-battery-42"}')" $login
+curl -s -o /dev/null -w 'new password: %{http_code}\n' "${h[@]}" -H "Content-Type: application/json" --data-binary "$(jq -nc --arg e "part2-$id@example.test" '{email: $e, password: "a-brand-new-passphrase-77"}')" $login
+```
+
+**You should see** (the `rk=` and `reset=` lines print nothing):
+
+```text
+request: 200
+key check: 200
+{"status": 400, "errors": [{"message": "The password reset token was invalid.", "code": "invalid_password_reset", "param": "key"}]} 400
+{"status": 400, "errors": [{"message": "This password is too short. It must contain at least 8 characters.", "code": "password_too_short", "param": "password"}]} 400
+HTTP/1.1 200 OK
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+Set-Cookie:  rz_refresh=<token>; expires=…; HttpOnly; Max-Age=1209600; Path=/api/auth/; SameSite=Lax
+Set-Cookie:  rz_session=1; expires=…; Max-Age=1209600; Path=/; SameSite=Lax
+user: part2_010027; meta fields: is_authenticated, access_token; access token: 373 characters
+{"status": 400} 400
+the new session refreshes: 200
+{"status": 400, "errors": [{"message": "The password reset token was invalid.", "code": "invalid_password_reset", "param": "key"}]} 400
+old password: 400
+new password: 200
+```
+
+What each line means, in order:
+
+1. `request: 200`: the reset email was requested (it appears in window 1).
+2. `key check: 200`: the emailed key is valid.
+3. `... 400` with "token was invalid": the made-up key `nonsense` is refused.
+4. `... 400` with "too short": a weak password is refused (and does not use the key up).
+5. Lines `HTTP/1.1 200 OK` to the two `Set-Cookie` lines, then `user: ...`: the real reset worked and
+   logged this session in (an access token and two cookies, like a login).
+6. `{"status": 400} 400`: **the other browser's refresh now fails**.
+7. `the new session refreshes: 200`: the session created by the reset still works.
+8. `... 400` with "token was invalid": the same link a second time is refused.
+9. `old password: 400`: the old password no longer logs in.
+10. `new password: 200`: the new password does.
+
+- The key check is the page's pre-check: `GET` with the key in `X-Password-Reset-Key` (it answers
+  with the account's details, which the page ignores). A refused weak password doesn't use the key up.
+- The reset answers like a login: an access token in `meta` and the same two cookies, and the
+  browser that did it is logged in.
+- **The other browser's refresh now fails (400):** the password changed, so every other session
+  ends the next time it refreshes. Its access token still works for up to 15 minutes, like after a
+  logout. The same link again is refused.
+
+**If it differs:** if `key check` is not `200`, `rk` is wrong or empty: copy the part after
+`/reset-password/` from the **last** reset email in window 1 and set `rk` again.
+
+#### Step 7: An expired verification link
+
+**Where:** A terminal in `backend/` with the venv active (window 2 after `source .venv/bin/activate`,
+or a spare window). It only reads the database, so `runserver` can keep running.
+
+**What this does:** Builds the key a verification link would have had 25 hours ago, so you can see
+the "expired" screen in step 8.
+
+Needs an account whose address is still unverified: sign up another one the way step 3 does (a new
+`id`), then forge the key a link would have had 25 hours ago:
+
+```bash
+# in backend/ with the venv active; replace ID with the id of the unverified account
+python manage.py shell -c "import time; from unittest import mock; from allauth.account.models import EmailAddress, EmailConfirmationHMAC; a = EmailAddress.objects.get(email='part2-ID@example.test'); real = time.time; mock.patch('time.time', lambda: real() - 25 * 3600).start(); print(EmailConfirmationHMAC(a).key)"
+```
+
+**You should see:** a key with two `:` (after Django's "objects imported" line).
+
+- Open `http://localhost:3000/verify-email/<that key>` in the browser (step 8) and you get the
+  expired state, with a working "Send a new link" once you are logged in as that account.
+- The automated tests do the same with an exact 86 399 s / 86 401 s boundary.
+
+**If it differs:** if you get `EmailAddress matching query does not exist`, the `ID` is wrong; use
+the `id` of the account you signed up (its email is `part2-<id>@example.test`).
+
+#### Step 8: Look at the pages in the browser
+
+**Where:** Browser (http://localhost:3000), with window 1 (`runserver`) and window 3 (`npm run dev`)
+running.
+
+**What this does:** Walks through every new screen by hand: verify email, forgot password and reset
+password.
+
+Window 1's `runserver` and a third window's `npm run dev` (in `frontend/`) are running. Use
+http://localhost:3000, a new email address each time, and compare with the Stitch screens
+`a4_verify_email`, `a5_forgot_password` and `a6_reset_password` in
+`design/stitch/stitch_website_sitemap_grid_builder/` (the logo replaces their emblem tiles, and
+their state switcher, "Simulate instant link click" and jargon footers are gone).
+
+**You should see**, for each row, what is in the "Expect" column:
+
+| Do this | Expect |
+|---|---|
+| Sign up at /signup with a new email, username and `correct-horse-battery-42` | You land on **/verify-email** (not /home): "Verify your email", "We sent a verification link to **your address**", a blue "Read-only for now" callout, a tinted "Resend email (58s)" counting down, the spam hint, "Continue browsing read-only →" and "Links expire 24 hours after they're sent." |
+| Wait for the countdown to reach 0 | The button turns blue: "Resend email". Click it: the text "We sent a new verification link. Check your inbox." appears under it, the countdown starts again at 60, and window 1 prints a second email. |
+| Click "Continue browsing read-only →" | /home with the amber banner "Verify your email to post, comment and report." and a **Resend link** button. The rail's **New post** button is faded. |
+| Click **New post** (rail, or the bottom tab at 390 px) | Nothing opens; a dark toast says "Verify your email to post. Check your inbox, or resend the link from the banner." Tab to the button: it takes focus, and a screen reader reads "Verify your email to post." |
+| Click **Resend link** twice in a row | The first click is refused if you signed up less than a minute ago (toast: "We sent one recently. Wait a little before asking again.") and the button shows "Resend link (60s)"; after a minute it works (toast: "We sent a new verification link. Check your inbox."). |
+| Copy the link from the **last** email in window 1 and open it in a second tab | "Your email is verified" with **Start posting →**. The first tab's banner disappears by itself within a moment (the tabs tell each other), and New post is no longer faded. |
+| Reload the link's tab | "Your email is already verified": the link was used. |
+| Log out, then open the same link again | "This link has expired" with "Log in to send a new link" (it points at `/login?next=%2Fverify-email`). |
+| Open `/verify-email/Mg%3A1vABcd%3Aabc-DEF_123` | The same expired state (a made-up key). |
+| Open /login and click **Forgot password?** (right under the password field) | /forgot-password: "Reset your password", an email field, "Send reset link →", "Back to log in". |
+| Submit an empty field, then `not-an-email` | "Enter your email address.", then "Enter a valid email address." under the field. |
+| Submit the real address, then repeat with an address that doesn't exist | The same "Check your inbox" message both times: "If an account exists for **that address**, we've sent a link to reset your password. It expires in 24 hours." Window 1 printed an email only for the real one. "Use a different email" goes back to the form. |
+| Open the link from the reset email | A short skeleton, then "Create new password": New password with the strength bar, Confirm new password, show/hide toggles, "Use at least 8 characters.", and the callout "This also signs you out on your other devices." |
+| Type `abc` and `abd`, submit | "Use at least 8 characters." under New password; nothing is sent. |
+| Type a good password and a different confirmation | "The passwords don't match." under Confirm; nothing is sent. |
+| Type `password1234` in both | Django refuses it: "This password is too common." under New password. |
+| Type a good password in both and submit | The toast "Password changed. You're logged in." and /home with your @username in the rail. |
+| Open the same reset link again | "This link has expired" with **Request a new link** (→ /forgot-password), before any password field is shown. |
+| Log out and log in with the new password | /home. The old password says "That email and password don't match." |
+| Phone width (F12 → device toolbar, 390 px) on every page above | No sideways scrolling; the Resend button, the callouts and the form fit the card. |
+
+#### Step 9: The emails on disk, and where every link points
+
+**Where:** First window 1 (restart the server), then window 2 (from the repo root).
+
+**What this does:** Restarts the server so emails are written to files instead of the terminal, then
+inspects the newest email file to prove every link points at the frontend (`localhost:3000`) and never
+at the backend.
+
+Stop `runserver` in window 1 (`Ctrl+C`) and start it so that emails go to files (in `backend/`, venv
+active):
+
+```bash
+EMAIL_PROVIDER=file python manage.py runserver
+```
+
+Sign up or request a reset in the browser (so an email is written), then in window 2 (repo root):
+
+```bash
+f=$(ls -t backend/tmp/mail/*.log | head -1)                                                    # the newest email file
+grep -E '^(From|To|Subject):' "$f"                                                             # who, to whom, subject
+grep -oE '(href|src)="[^"]+"' "$f" | sed -E 's|(="https?://[^/"]+).*|\1…|' | sort -u          # every link and the logo, shortened to the origin
+grep -oE 'https?://[^ "<]+' "$f" | sed -E 's|^(https?://[^/]+).*|\1|' | sort -u               # every URL in the file, shortened to the origin
+git check-ignore "$f"                                                                          # prints the path if git ignores it
+```
+
+**You should see** (the subject depends on which email you triggered; the address and file name differ):
+
+```text
+Subject: [Rumor Zero] Reset your password
+From: Rumor Zero <no-reply@example.com>
+To: part2-012510@example.test
+href="http://localhost:3000…
+src="http://localhost:3000…
+http://localhost:3000
+backend/tmp/mail/20261006-192649-135804298251632.log
+```
+
+- `From` is your `DEFAULT_FROM_EMAIL`. Every `href`, the logo `src` and every URL in the file start
+  with `http://localhost:3000` (your `FRONTEND_ORIGIN`): there is no backend address in any email.
+- `git check-ignore` prints the path: emails written by `EMAIL_PROVIDER=file` are never committed.
+  This is the folder the E2E tests read.
+- Stop this server and start a normal `python manage.py runserver` again if you want the console
+  emails back.
+
+**If it differs:** if `ls` says there is no such file, the server was not started with
+`EMAIL_PROVIDER=file`, or no email was triggered yet; start it as above and sign up again.
+
+#### Step 10: Automated frontend checks
+
+**Where:** A terminal in `frontend/` (stop `npm run dev` in window 3 first with `Ctrl+C`, then reuse
+window 3).
+
+**What this does:** Runs the frontend linters, type check, unit tests and a production build.
+
+```bash
+npm run lint             # no output after the command line
+npm run lint:tokens      # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
+npm run typecheck        # no output after the command line
+npm run format:check     # All matched files use Prettier code style!
+npm test                 # Test Files  65 passed (65) / Tests  708 passed (708)
+npm run build
+```
+
+**You should see:** the messages in the comments (`npm run lint` and `npm run typecheck` print
+nothing after the command line; that means success). `npm run build` takes a minute and ends with a
+route list that gains these lines (the two key pages are dynamic, because the key is a route
+parameter):
+
+```text
+├ ○ /forgot-password
+├ ƒ /reset-password/[key]
+├ ○ /verify-email
+└ ƒ /verify-email/[key]
+```
+
+- The new screens have tests for every state: verifying, verified, already verified, expired and
+  failed; the idle and sent forms; the expired, checking, mismatch and weak-password states; the
+  resend countdown; New post gating (both copies, with their own hint ids); the banner's Resend; the
+  sign-up redirect with and without `?next=`; the two-tab "user-changed" message.
+
+#### Step 11: The E2E tests, dev mode and CI mode
+
+**Where:** The same terminal in `frontend/` (window 3). Stop `runserver` in window 1 first.
+
+**What this does:** Playwright drives a real browser through the whole flow. It starts its own
+servers, so window 1 must be stopped to free the ports.
+
+Stop `runserver` too: Playwright then starts its own Django with an in-memory cache, and with
+`EMAIL_PROVIDER=file`.
+
+```bash
+npm run test:e2e
+```
+
+**You should see** (takes about half a minute; the order of the tests and the timings differ):
+
+```text
+Running 15 tests using 6 workers
+
+  ok   4 [chromium] › e2e/email-flows.spec.ts:101:5 › an unknown address gets the same page and no email (6.0s)
+  ...
+  ok   6 [chromium] › e2e/email-flows.spec.ts:53:5 › forgot password → read the email → reset → logged in → log in with the new password (18.3s)
+
+  15 passed (29.2s)
+```
+
+- Eleven tests are Parts 0C and 1 (`auth.spec.ts` now continues from `/verify-email` to `/home`). The
+  four new ones are in `email-flows.spec.ts`:
+  1. sign up → New post is `aria-disabled` → read the email from `backend/tmp/mail` → open the link
+     → verified → "Start posting" → the banner is gone and New post is enabled → the used link says
+     "already verified";
+  2. forgot password → read the email → a mismatch error → reset → logged in → log out → the old
+     password fails and the new one works, and the used link is expired;
+  3. an unknown address gets the same page and no email;
+  4. dead reset and verification links show their expired states.
+- The first request of a cold Django used to fail now and then with a 500 when several sign-ups
+  arrived together; that is fixed (MEMORY, 2026-10-07).
+
+Then the way CI runs it (a production build, tested with `next start`):
+
+```bash
+npm run build
+CI=1 npm run test:e2e    # 15 passed, this time against `next start`
+```
+
+**You should see:** `15 passed` again.
+
+#### Step 12: Repository checks
+
+**Where:** Terminal window 2 (any terminal; the first command moves to the repo root).
+
+**What this does:** Confirms nothing you should not commit (design files, env files, mail logs) is
+pending in git. These are read-only git commands.
+
+```bash
+cd "$(git rev-parse --show-toplevel)"              # the repo root, from any folder inside it
+git status --short design                          # prints nothing: design/ is untouched
+git status --short | grep -E '\.env|tmp/'          # prints nothing: no env file and no mail file is a candidate for a commit
+git status --short backend/templates               # ?? backend/templates/ (new, until you commit it)
+```
+
+**You should see:** nothing from the second and third lines of output (the comments explain), and
+`?? backend/templates/` from the last command until you commit it.
+
+#### Step 13: CI on GitHub (after you push)
+
+**Where:** Browser.
+
+**What this does:** Checks that the automatic tests also pass on GitHub once you have pushed.
+
+| URL | Expect |
+|---|---|
+| Your repository's **Actions** tab on github.com | A "CI" run for your push with three green jobs |
+
+- No workflow change was needed: Playwright sets `EMAIL_PROVIDER=file` for the Django it starts, and
+  the process environment wins over the `backend/.env` the job copies from `.env.example`.
+- The agent couldn't run CI: only you push.
+
+#### Step 14: Stop and clean up
+
+**Where:** Every terminal window, plus the repo root for the last commands.
+
+**What this does:** Stops the servers and removes the temporary files these steps created.
+
+- Stop the servers: `Ctrl+C` in each window (leftover `next dev`: step 12 of Part 1).
+- Delete the helper files:
+
+  ```bash
+  rm -f /tmp/rz-known.txt /tmp/rz-unknown.txt /tmp/rz-other.txt /tmp/rz-new.txt
+  ```
+
+- `backend/tmp/mail/` fills up with `.log` files from `EMAIL_PROVIDER=file` and the E2E runs. It is
+  git-ignored; delete the folder whenever you like.
+- The test accounts stay in your local database: `part2_…` from these steps, the E2E's `verify_…`
+  and `reset_…`, and the agent's `shot_…`/`p_shot_…`. Delete them in Django Admin → Users if you
+  like. `docker compose down -v` (repo root) wipes the whole local database, which is destructive.
+- Stop the containers and keep the data: `docker compose down` (repo root).
+
+---
+
+## Guide 2: Windows (PowerShell)
+
+- The repo root is `C:\Users\Nafis\Downloads\Rumor-Zero`. Backend commands run in `backend\` with the
+  venv active (`.\.venv\Scripts\Activate.ps1`; the prompt shows `(.venv)`).
+- PowerShell 5.1 has no `&&`; use `;` or `if ($?) { ... }`. Playwright installs with
+  `npx playwright install chromium` (no `--with-deps`).
+- A server started with `runserver` keeps its window busy. Run everything else in a second window.
+- Some recorded outputs were captured on Linux (Part 2) and some on Windows; a note says where it
+  matters.
+
+### Part 0A: Backend foundation
+
+This part starts the local database and cache, runs the Django backend, and checks that it works. All commands are PowerShell 5.1. The repo root is `C:\Users\Nafis\Downloads\Rumor-Zero`. PowerShell 5.1 has no `&&`, so run commands on separate lines.
+
+| Window | Used for | Stays busy? |
+|---|---|---|
+| Terminal window 1 (server) | Steps 1 to 2: containers, migrate, create your admin user, `runserver` | Yes, `runserver` keeps it busy. Leave it running. |
+| Terminal window 2 (commands) | Steps 3 to 5: health checks, database rules, tests | No |
+| Browser | Step 2 | - |
+
+#### Step 1: Start the services and the backend server
+
+**Where:** Terminal window 1 (server), in the repo root first, then in `backend\`.
+
+**What this does:** `docker compose` starts Postgres (the database) and Redis (the cache) in containers. Then you prepare the backend, create your own admin account and start the Django development server.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+docker compose ps                     # postgres and redis both say (healthy)
+```
+
+**You should see:** two rows, `postgres` and `redis`, both with `(healthy)`. If they say `starting`, wait a few seconds and run `docker compose ps` again.
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate              # "No migrations to apply" on a database that is already migrated
+python manage.py createsuperuser      # prompts for Email, Username, Password
+python manage.py runserver            # leave this window running
+```
+
+**You should see:** after the `Activate.ps1` line the prompt starts with `(.venv)`. `migrate` ends with "No migrations to apply" if the database is already migrated (a fresh database lists many `Applying ...` lines instead). `createsuperuser` asks you for an email, a username and a password (the password is not shown while you type). `runserver` prints that it is running at `http://127.0.0.1:8000/` and then does not return to a prompt. That is normal: the window is now busy serving the backend.
+
+- The username can't be a reserved word (`admin`, `root`, `staff` and others are blocked). Use
+  something like `nafis_admin`.
+- Django Admin logs in with the **email**, not the username.
+
+#### Step 2: Look at the backend in the browser
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Opens the health page and Django Admin to confirm the server answers and that your admin account works.
+
+| URL | Expect |
+|---|---|
+| http://localhost:8000/api/health/ | `{"status":"ok"}` |
+| http://localhost:8000/admin/ | Login page. Sign in with your email and password. If it 404s, `ADMIN_URL_PATH` in `backend\.env` isn't `admin/`; use that path. |
+| http://localhost:8000/admin/accounts/user/ | Your user, plus an "Add user" button |
+| http://localhost:8000/admin/core/platformsettings/ | One row with 11 values; no add or delete |
+
+Role check in the admin: add a second user, open it and set **Role = Moderator**, then save.
+
+- "Is staff" (read-only) becomes ticked and Groups shows "Moderators".
+- Senior moderator shows both groups; setting the role back to User clears them.
+- Your superuser stays staff whatever its role.
+
+#### Step 3: Check the deep health endpoint
+
+**Where:** Terminal window 2 (commands), a new PowerShell window. Window 1 must still be running `runserver`.
+
+**What this does:** The deep health check needs a secret request header, so it can't be done in the browser. The first request has no header and must be refused. The second sends the secret (read from your own `backend\.env` without printing it) and must succeed, which proves Postgres and Redis both answer.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\backend
+curl.exe -i http://localhost:8000/api/health/deep/
+$secret = (Select-String -Path .\.env -Pattern '^INTERNAL_CRON_SECRET=(.*)$').Matches.Groups[1].Value    # sets $secret for the next line; nothing is printed
+curl.exe -i -H "X-RZ-Cron-Secret: $secret" http://localhost:8000/api/health/deep/
+```
+
+**You should see:**
+
+- First request: **403** with `permission_denied` (no secret, so refused, as intended).
+- Second request: **200** with `{"status":"ok","database":"ok","cache":"ok"}`. This proves Postgres
+  and Redis.
+
+**If it differs:** a `Failed to connect` means window 1 is not running `runserver`. An empty `$secret` (second request also 403) means `INTERNAL_CRON_SECRET` is missing from `backend\.env`.
+
+#### Step 4: Check that the database refuses bad data
+
+**Where:** Same terminal as step 3 (window 2), in `backend\` with the venv active (run `.\.venv\Scripts\Activate.ps1` if the prompt has no `(.venv)`).
+
+**What this does:** Reads the platform settings, then tries to write a credibility score of 150 (the allowed range is 0 to 100). The database must refuse it.
+
+```powershell
+python manage.py shell -c "from apps.core.services import get_platform_settings as g; s=g(); print(s.report_threshold, s.emergency_min_reputation)"
+python manage.py shell -c "from apps.accounts.models import User; u=User.objects.first(); print(u.reputation_score); User.objects.filter(pk=u.pk).update(reputation_score=150)"
+```
+
+**You should see:**
+
+- First command prints `5 40`.
+- Second prints `50`, then a long traceback ending in
+  `IntegrityError ... violates check constraint "accounts_user_reputation_score_range"`. That error
+  is the expected result: the database refused a score above 100 and the user keeps 50. The
+  traceback shows your email and the start of your password hash, so don't share it.
+
+#### Step 5: Run the automated checks
+
+**Where:** Same terminal as step 3 (window 2), in `backend\` with the venv active. Needs the containers from step 1.
+
+**What this does:** Runs the backend test suite, the code-style checks and the Django consistency checks. The test run takes a little while and prints dots as it goes.
+
+```powershell
+python -m pytest                                    # 200 passed
+python -m pytest --cov=apps --cov=rumor_zero        # same tests plus coverage (about 93%)
+ruff check . ; ruff format --check .                # All checks passed! / files already formatted
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues
+```
+
+**You should see:** the result in each comment above. The first two commands end with a summary line; the others print one short sentence.
+
+#### Step 6: Stop and clean up
+
+**Where:** Window 1 for the server, then any terminal in the repo root.
+
+- Stop the server: `Ctrl+C` in its window.
+- Stop the containers and keep the data: `docker compose down` (repo root).
+- Wipe the local database (destructive): `docker compose down -v` (repo root).
+
+---
+
+### Part 0B: Frontend foundation & design system
+
+Everything here runs in `frontend\`. No backend, Docker container or
+secret is needed: these pages make no API calls. (Next loads your `frontend\.env.local`
+by itself; you never open or print it.)
+
+| Window | Used for | Stays busy? |
+|---|---|---|
+| Terminal window 1 (server) | Steps 4 and 7: `npm run dev`, later `npm start` | Yes, leave it running while you use the browser |
+| Terminal window 2 (commands) | Steps 1 to 3, the second half of step 7, and step 8 | No |
+| Browser | Steps 5 to 7 | - |
+
+Steps 1 to 3 need only one terminal. Open a second one when step 4 starts the server.
+
+#### Step 1: Install and check the tools
+
+**Where:** Terminal (the one you will use for the checks).
+
+**What this does:** Confirms Node is the right version and installs the frontend packages.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+node -v                               # v24.x.x (the project pins Node 24)
+npm install                           # "up to date, audited 449 packages" and "found 0 vulnerabilities"
+```
+
+**You should see:** a Node version starting with `v24`, then npm's summary lines as in the comments. `npm install` can be quiet for a few seconds.
+
+- npm also prints `npm warn allow-scripts ... unrs-resolver`. It is harmless.
+- On a fresh clone the first install can stop with `ERR_SSL_CIPHER_OPERATION_FAILED` on this
+  network. Run `npm cache verify`, then `npm install` again. Don't turn TLS checks off.
+
+#### Step 2: Run the automated checks
+
+**Where:** Same terminal as step 1, same folder. Nothing else needs to be running.
+
+**What this does:** Runs the linter, the design-token guard, the type checker, the formatter check and the unit tests.
+
+```powershell
+npm run lint                          # only the npm header, no findings
+npm run lint:tokens                   # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
+npm run typecheck                     # only the npm header, no type errors
+npm run format:check                  # All matched files use Prettier code style!
+npm test                              # Test Files  32 passed (32) / Tests  251 passed (251)
+```
+
+**You should see:** the result in each comment. "Only the npm header" means a couple of lines starting with `>` and nothing after them: no news is good news.
+
+#### Step 3: Try to break the design-token guard
+
+**Where:** Same terminal as step 1, in `frontend\`.
+
+**What this does:** `lint:tokens` rejects anything outside the Stitch design system. You add a file that breaks two rules, watch the guard complain, then delete the file and watch it pass again.
+
+```powershell
+Set-Content src\tmp-token-check.tsx 'export const x = "bg-blue-500 rounded-md";'   # creates the bad file
+npm run lint:tokens                   # must fail
+Remove-Item src\tmp-token-check.tsx   # removes the bad file
+npm run lint:tokens                   # must pass again
+```
+
+**You should see:**
+
+- First run exits with code 1 and prints
+  `src/tmp-token-check.tsx:1  Tailwind default palette colour: bg-blue-500`,
+  `src/tmp-token-check.tsx:1  radius other than rounded-lg / rounded-full: rounded-md` and
+  `lint:tokens found 2 problem(s).`
+- Second run (file removed) is back to `lint:tokens OK ...`. Nothing is left behind.
+
+#### Step 4: Start the dev server
+
+**Where:** Terminal window 1 (server), in `frontend\`.
+
+**What this does:** Starts the Next.js development server so you can open the pages in the browser.
+
+```powershell
+npm run dev                           # leave this window running
+```
+
+**You should see:**
+
+- `▲ Next.js 16.3.8 (Turbopack)`, `- Local:         http://localhost:3000`,
+  `- Environments: .env.local` and `✓ Ready in` a few hundred milliseconds. The window then stays busy. That is normal.
+- It must not create `frontend\AGENTS.md` or `frontend\CLAUDE.md` (see step 8).
+
+#### Step 5: Look at the pages and try the controls
+
+**Where:** Browser, while `npm run dev` is running in window 1.
+
+**What this does:** Checks the home page, the UI gallery and the 404 page, then tries each control in the gallery.
+
+| URL | Expect |
+|---|---|
+| http://localhost:3000/ | Heading "Frontend foundation" and one sentence ("The design system is in place. ..."). Tab title "Rumor Zero". |
+| http://localhost:3000/dev/ui | The gallery. Tab title and heading "UI gallery", a row of section links, and 13 sections from Icon down to "Stitch b2 and d1: modals". |
+| http://localhost:3000/nope | Next's standard 404 page |
+
+On `/dev/ui` (a 1280 px wide window shows it as designed), check the look first:
+
+- Page background is a pale lavender; headings are a serif (Newsreader), body text is Inter, small
+  caps labels are monospace.
+- Icons are glyphs. If you read words like `check_circle` instead, the icon font didn't load.
+
+Then try each control:
+
+| Do this | Expect |
+|---|---|
+| Tabs: click **Recent**, or focus a tab and press the right arrow | Recent is selected, the blue underline moves under it, the text below reads "Panel for recent" |
+| Post type control: click **Fact** | Nothing is chosen at first; after the click Fact is the raised white pill and Opinion is not |
+| Password field (in the "TextField, PasswordField, Textarea" section): click the eye icon | The dots turn into the text `hunter2hunter2`; the button now says "Hide password" |
+| "Try a password" box: type `abc`, then `abcdefg1`, then `abcdefg1X`, then `correct horse battery 9` | The label under the bar reads **Weak** (red), **Fair** (amber), **Good** (teal), **Strong** (teal), filling 1, 2, 3 and 4 segments |
+| Toggle row: click the first (off) toggle | It switches on. The third toggle is violet (emergency), the last is greyed out and does nothing |
+| Radio list ("Why are you reporting this post?"): click **Spam or fake accounts** | Its card gets the blue border and the first card loses it |
+| Avatar section, "a photo that fails to load" | Two dark circles with the initials **GH** and **RU**. No broken-image icon. |
+| Red alert "Could not log in": click the **×** | The alert disappears |
+| **Show a live toast** | A dark toast "Saved just now" appears bottom-centre and is gone after about 4 seconds |
+
+The post cards under "Stitch b1: PostCard" (eight of them, in this order):
+
+- Verified 94%: teal stripe, `VERIFIED 94%`.
+- FALSE 88%: red stripe, `FALSE 88%`. The claim is not struck through.
+- Emergency: the only card with a **violet** stripe, with `CHECKING FACTS…` and `EMERGENCY` chips.
+- Under review: amber stripe, `UNDER REVIEW` and `APPEAL PENDING`.
+- Opinion: grey stripe, italic serif text, an `OPINION` chip and no status badge.
+- Moderator-verified: `VERIFIED · REVIEWED`, no percentage.
+- Moderator-FALSE, emergency over: red again, `FALSE · REVIEWED`, no `EMERGENCY` chip.
+- Removed: a small box "Removed by a moderator", with no text, stripe or chips.
+
+The word "debunked" appears nowhere. For a side-by-side look, open
+`design\stitch\stitch_website_sitemap_grid_builder\b1_home_feed\code.html`
+next to the gallery.
+Stitch also shows an affiliation line, an evidence drawer and an action bar (later parts) and
+strikes FALSE claims through (deliberately not copied).
+
+#### Step 6: Try the two modals
+
+**Where:** Browser, still on `/dev/ui`. Scroll to "Stitch b2 and d1: modals".
+
+**What this does:** Opens the post composer and the report dialog and checks their behaviour (focus, Esc, counters).
+
+| Do this | Expect |
+|---|---|
+| Click **Open the composer (b2)** | A 620 px dialog, centred, over a dimmed and slightly blurred page. Header "New post". The cursor is already in the large serif text box, with `0 / 500 characters` under it. Fact is selected, the violet Emergency toggle is on with a violet "Misuse has consequences." callout, and there is a Source field. Footer: "7 of 10 fact posts left today", Cancel, **Post fact, will be checked**. |
+| Type `Solar capacity grew 30% last year.` | The counter reads `34 / 500 characters` |
+| Click **Opinion** | The button becomes **Post opinion** and the Emergency toggle and Source field disappear |
+| Press Tab over and over | Focus cycles through the dialog's own controls and never reaches the page behind it. After the last button it leaves the page for the browser's own controls, then comes back to Close. |
+| Press Esc | The dialog closes and focus is back on **Open the composer (b2)** |
+| Click **Open the report modal (d1)** | Header "Report this post" with a small "REPORT" line above it, a quoted claim with a dark left edge, five radio cards (the first selected, blue border), a blue "What happens next" note, and a white footer with Cancel and **Submit report**. Focus starts on the × button. |
+| Press Esc | The dialog closes and focus returns to **Open the report modal (d1)** |
+
+#### Step 7: Check that the production build hides the gallery
+
+**Where:** Terminal window 1 (server). First stop the dev server with `Ctrl+C`, then run the commands in `frontend\`. The checks afterwards go in window 2.
+
+**What this does:** Builds the production version and starts it. In production the `/dev/ui` gallery must answer 404 while the home page still works.
+
+```powershell
+npm run build                         # takes a little while; prints a route list at the end
+npm start                             # leave this window running
+```
+
+**You should see:**
+
+- Build: `✓ Compiled successfully in` a few seconds, `Generating static pages ... (4/4)`, and a
+  route list with `/`, `/_not-found` and `/dev/ui`, all marked `○ (Static)`. The route is listed
+  but answers 404 at runtime, as the next commands show.
+- Start: `▲ Next.js 16.3.8`, `- Local:         http://localhost:3000`, `✓ Ready in` about 100 ms. The window stays busy.
+
+Now in **Terminal window 2 (commands)**, a second PowerShell window:
+
+```powershell
+curl.exe -s -o NUL -w "/        %{http_code}`n" http://localhost:3000/
+curl.exe -s -o NUL -w "/dev/ui  %{http_code}`n" http://localhost:3000/dev/ui
+```
+
+**You should see:**
+
+- `/        200` and `/dev/ui  404`.
+- Browser: http://localhost:3000/dev/ui shows "This page could not be found", while
+  http://localhost:3000/ still shows "Frontend foundation".
+
+#### Step 8: Repository checks
+
+**Where:** Terminal window 2 (commands).
+
+**What this does:** Confirms the example env file is tracked by git and that `create-next-app` did not leave agent instruction files in `frontend\`.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+git check-ignore frontend\.env.example             # prints nothing: the example env file is tracked
+Test-Path frontend\AGENTS.md, frontend\CLAUDE.md   # False, then False
+```
+
+**You should see:** nothing from `git check-ignore`, then `False` and `False`.
+
+#### Step 9: Stop and clean up
+
+**Where:** Terminal window 1 for the server.
+
+- Stop the server: `Ctrl+C` in its window.
+- Nothing else is running for this part: no containers, no backend.
+- Optional: `Remove-Item -Recurse -Force frontend\.next`
+  deletes the build output. It is recreated by the next `npm run dev` or `npm run build`.
+
+---
+
+### Part 0D: Brand assets & Logo component
+
+Everything here runs in `frontend\` unless a step says otherwise. No backend, Docker container or
+secret is needed. (Next loads your `frontend\.env.local` by itself; you never open or print it.)
+The master logo is `design\logo.svg`. It is read-only: nothing below changes it.
+
+| Window | Used for | Stays busy? |
+|---|---|---|
+| Terminal window 1 (server) | Step 8: `npm run dev` | Yes, leave it running through step 9 |
+| Terminal window 2 (commands) | Steps 1 to 7, the fetch part of step 8, steps 10 to 11 | No |
+| Browser | Step 9 | - |
+
+Steps 1 to 7 need just one terminal, in `frontend\`.
+
+#### Step 1: Check the tools
+
+**Where:** Terminal window 2 (commands).
+
+**What this does:** Installs the frontend packages and confirms `sharp` (the image library that draws the PNGs) is present.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm install                           # "up to date, audited 449 packages" and "found 0 vulnerabilities"
+npm ls sharp --depth=0                # `-- sharp@0.35.5
+```
+
+**You should see:** the summary lines in the comments.
+
+- npm also prints `npm warn allow-scripts ... unrs-resolver`. It is harmless.
+- `sharp` is the image library that draws the PNGs. Only the brand script uses it.
+
+#### Step 2: Build every logo asset
+
+**Where:** Same terminal as step 1, in `frontend\`.
+
+**What this does:** Reads the master logo and generates all icons, social images and the admin logo from it. It can pause for a moment while images are drawn.
+
+```powershell
+npm run brand:build
+```
+
+**You should see:**
+
+- `brand:build read design\logo.svg and wrote 16 files:` and a list: `logo.svg`, `mark.svg`,
+  `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `email-logo.png` and
+  `google-oauth-logo.png` under `frontend/public/brand/`; `icon.svg`, `favicon.ico`, `apple-icon.png`,
+  `opengraph-image.png`, `twitter-image.png` and the two `.alt.txt` files under `frontend/src/app/`;
+  `frontend/src/lib/brand-assets.json`; and `backend/apps/core/static/core/brand/logo-admin.png`.
+- Then the contrast table, which must read exactly like the one in `docs\ARCHITECTURE.md` section 14:
+
+```text
+Contrast on                       grey letters  cyan "0"
+surface-container-lowest #ffffff  3.45 : 1      2.42 : 1
+surface #faf8ff                   3.28 : 1      2.30 : 1
+inverse-surface #283044           3.81 : 1      5.43 : 1
+on-surface #131b2e                4.97 : 1      7.09 : 1
+```
+
+- The last line is `The contrast table matches ARCHITECTURE 14.` If you ever change the logo's colours and see
+  `DIFFERS from ARCHITECTURE 14` instead, update that section.
+
+#### Step 3: Check that nothing under `design\` changes, and a second run changes nothing
+
+**Where:** Same terminal as step 1, in `frontend\`.
+
+**What this does:** Takes a checksum of every generated file, builds again, and compares. Identical checksums mean the build is repeatable. It also confirms git sees no change under `design\`. The variables `$paths`, `$h1` and `$h2` are set inside this block, so run the whole block in one go.
+
+```powershell
+$paths = @('public\brand\*', 'src\app\favicon.ico', 'src\app\icon.svg', 'src\app\apple-icon.png', 'src\app\opengraph-image.png', 'src\app\twitter-image.png', 'src\lib\brand-assets.json', '..\design\logo.svg', '..\backend\apps\core\static\core\brand\logo-admin.png')
+$h1 = Get-FileHash $paths | Select-Object Path, Hash
+$h1.Count                             # 15
+npm run brand:build | Out-Null        # runs the build again, output hidden
+$h2 = Get-FileHash $paths | Select-Object Path, Hash
+@(Compare-Object $h1 $h2 -Property Path, Hash).Count    # 0
+cd ..
+git status --short design             # prints nothing
+cd frontend
+```
+
+**You should see:**
+
+- `15` files hashed, and `0` differences: building again gives the same bytes, including
+  `design\logo.svg`.
+- `git status --short design` prints nothing: the master was only read.
+
+#### Step 4: Check that the build refuses an unsafe logo
+
+**Where:** Same terminal as step 1, in `frontend\`.
+
+**What this does:** The script takes `--master <file>` so you can try another SVG. Each bad file below is a copy of the
+real logo with one thing added, kept in your temp folder. The build must refuse all three. The variable `$bad` is set in the first block and reused in the next two, so use the same terminal throughout.
+
+```powershell
+$bad = Join-Path $env:TEMP "rz-bad-logo.svg"
+(Get-Content ..\design\logo.svg -Raw) -replace '<defs>', '<script>alert(1)</script><text>x</text><defs>' | Set-Content $bad
+npm run brand:build -- --master $bad
+$LASTEXITCODE
+```
+
+**You should see:** `brand:build failed: rz-bad-logo.svg failed the safety check, so nothing was built:` with
+`- <script> element (line 3)` and `- <text> element (line 3)`. The exit code (`$LASTEXITCODE`) is `1`.
+
+```powershell
+(Get-Content ..\design\logo.svg -Raw) -replace '<defs>', '<use href="https://evil.example/x.svg#a"/><defs>' | Set-Content $bad
+npm run brand:build -- --master $bad
+```
+
+**You should see:** it fails with `- external href="https://evil.example/x.svg#a" on <use> (line 3)`.
+
+```powershell
+(Get-Content ..\design\logo.svg -Raw) -replace 'viewBox="0 0 1000 1000"', '' | Set-Content $bad
+npm run brand:build -- --master $bad
+Remove-Item $bad                      # deletes the temporary bad file
+```
+
+**You should see:** it fails with `- the <svg> root has no viewBox`.
+
+- In all three, no asset is written and `design\logo.svg` is untouched. Running plain
+  `npm run brand:build` again afterwards still works.
+
+**If it differs:** if `$bad` is empty (errors about an empty path), you opened a new terminal after the first block. Run `$bad = Join-Path $env:TEMP "rz-bad-logo.svg"` again.
+
+#### Step 5: Run the automated checks
+
+**Where:** Same terminal as step 1, in `frontend\`. Nothing else needs to be running.
+
+**What this does:** Runs lint, the token guard, type check, format check and the unit tests.
+
+```powershell
+npm run lint                          # only the npm header, no findings
+npm run lint:tokens                   # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
+npm run typecheck                     # only the npm header, no type errors
+npm run format:check                  # All matched files use Prettier code style!
+npm test                              # Test Files  40 passed (40) / Tests  329 passed (329)
+```
+
+**You should see:** the result in each comment.
+
+- The new tests are the SVG safety check, the ICO writer, the contrast table (compared with
+  `docs\ARCHITECTURE.md`), the PNG sizes, a full build into a scratch folder, `Logo`, `manifest.ts` and
+  the brand guard.
+
+#### Step 6: Try to break the brand guard
+
+**Where:** Same terminal as step 1, in `frontend\`.
+
+**What this does:** Only `Logo.tsx`, `brand-assets.json` and `manifest.ts` may know where the logo files are, and nobody
+may re-create the old text wordmark. You add two files that break the rules, run the guard test (it must fail), delete the files and run it again (it must pass).
+
+```powershell
+Set-Content src\tmp-wordmark.tsx 'export const X = () => <span className="font-headline-sm">Rumor Zero</span>;'
+Set-Content src\tmp-logo-ref.ts 'export const src = "/brand/logo.svg";'
+npx vitest run src/lib/brand-guard.test.ts     # must show failures
+Remove-Item src\tmp-wordmark.tsx, src\tmp-logo-ref.ts    # removes both bad files
+npx vitest run src/lib/brand-guard.test.ts     # must pass
+```
+
+**You should see:**
+
+- First run: `Tests  3 failed | 3 passed (6)`. The failures name `tmp-logo-ref.ts` (twice: it refers to
+  `/brand/` and names a logo image) and `tmp-wordmark.tsx` (it re-creates the text wordmark).
+- Second run (files removed): `Tests  6 passed (6)`. Nothing is left behind.
+
+#### Step 7: Check that the production build carries the icon tags
+
+**Where:** Same terminal as step 1, in `frontend\`.
+
+**What this does:** Builds the site and searches the generated home page for the icon, manifest and social-share tags. `$html` is set in this block and used by the two lines after it.
+
+```powershell
+npm run build                         # takes a little while
+$html = Get-Content .next\server\app\index.html -Raw
+[regex]::Matches($html, '<link rel="(?:icon|apple-touch-icon|manifest)"[^>]*>') | ForEach-Object { $_.Value }
+[regex]::Matches($html, '<meta (?:property|name)="(?:og:image|twitter:image|twitter:card|og:site_name)"[^>]*>') | ForEach-Object { $_.Value }
+```
+
+**You should see:**
+
+- Build: `✓ Compiled successfully`, `Generating static pages ... (10/10)`, and a route list that now also
+  has `/apple-icon.png`, `/icon.svg`, `/manifest.webmanifest`, `/opengraph-image.png` and
+  `/twitter-image.png`, all `○ (Static)`.
+- The links:
+
+```text
+<link rel="manifest" href="/manifest.webmanifest"/>
+<link rel="icon" href="/favicon.ico?favicon.<hash>.ico" sizes="48x48" type="image/x-icon"/>
+<link rel="icon" href="/icon.svg?icon.<hash>.svg" sizes="any" type="image/svg+xml"/>
+<link rel="apple-touch-icon" href="/apple-icon.png?apple-icon.<hash>.png" sizes="180x180" type="image/png"/>
+```
+
+- The meta tags: `og:site_name` is `Rumor Zero`, `twitter:card` is `summary_large_image`, and `og:image` and
+  `twitter:image` are full URLs built from `NEXT_PUBLIC_SITE_URL` (`http://localhost:3000/opengraph-image.png?...`
+  with the value from your `.env.local`).
+- `<hash>` differs from run to run.
+
+#### Step 8: Start the dev server and fetch every asset
+
+**Where:** `npm run dev` in Terminal window 1 (server); the `curl.exe` commands in Terminal window 2 (commands).
+
+**What this does:** Starts the dev server, then requests every generated file to confirm each one is served with the right content type.
+
+```powershell
+npm run dev                           # leave this window running
+```
+
+**You should see:** the Next.js start-up lines, then a busy window. That is normal.
+
+Second window (window 2):
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+foreach ($u in '/favicon.ico','/icon.svg','/apple-icon.png','/manifest.webmanifest','/opengraph-image.png','/twitter-image.png','/brand/logo.svg','/brand/mark.svg','/brand/icon-192.png','/brand/icon-512.png','/brand/icon-maskable-512.png','/brand/email-logo.png','/brand/google-oauth-logo.png') {
+  curl.exe -s -o NUL -w "$u  %{http_code}  %{content_type}`n" "http://localhost:3000$u"
+}
+curl.exe -s http://localhost:3000/manifest.webmanifest
+curl.exe -s -o NUL -w "/brand/nope.png  %{http_code}`n" http://localhost:3000/brand/nope.png
+```
+
+**You should see:**
+
+- All 13 lines say `200`. Content types: `image/x-icon` for the .ico, `image/svg+xml` for the three SVGs,
+  `application/manifest+json` for the manifest, and `image/png` for the rest.
+- The manifest is one line of JSON: name and short name `Rumor Zero`, `"start_url":"/"`,
+  `"display":"standalone"`, `theme_color` and `background_color` both `#283044`, and three icons:
+  `192x192` (`any`), `512x512` (`any`) and `512x512` (`maskable`).
+- The last line says `404`: only generated files exist.
+
+#### Step 9: Look at the logo and icons in the browser
+
+**Where:** Browser, while `npm run dev` is running in window 1.
+
+**What this does:** Checks by eye that the logo renders correctly at each size and on each background, and that every generated image looks right.
+
+| URL | Expect |
+|---|---|
+| http://localhost:3000/ | Heading "Frontend foundation". The tab shows a dark rounded square with a cyan "0" as its icon (a hard refresh, Ctrl+F5, helps if the old icon is cached). |
+| http://localhost:3000/dev/ui#logo | The "Logo" section: three panels, "ON SURFACE" (pale lavender), "ON SURFACE-CONTAINER-LOWEST" (white) and "ON INVERSE-SURFACE" (dark navy). |
+
+In each of the three panels:
+
+- Row one: the wordmark "Rum0r" at **sm, md and lg**, three clearly different sizes (24, 36 and 48 px tall). The letters
+  are grey, the "0" and the underline are cyan.
+- Row two: the cyan "0" mark alone at sm, md and lg.
+- Last line: a small "0" followed by "Rumor Zero (decorative mark: the name is written next to it)".
+- On the dark panel the grey letters look dimmer but readable; the cyan stands out.
+- The labels under the logos are plain text, not part of the images.
+
+Check the sizes and names in the page itself: press F12, open the **Console** and paste
+
+```js
+[...document.querySelectorAll('#logo img')].map(i => [i.alt, i.width, i.height].join(' | ')).slice(0, 7)
+```
+
+- Expect `Rumor Zero | 79 | 24`, `Rumor Zero | 119 | 36`, `Rumor Zero | 158 | 48`, `Rumor Zero | 24 | 24`,
+  `Rumor Zero | 36 | 36`, `Rumor Zero | 48 | 48` and ` | 24 | 24` (the decorative one has an empty alt).
+
+Now open each generated image in the browser and check what you see:
+
+| URL | Expect |
+|---|---|
+| http://localhost:3000/brand/logo.svg | The full wordmark on a transparent background, tightly cropped |
+| http://localhost:3000/brand/mark.svg | The cyan "0" alone on a transparent background |
+| http://localhost:3000/brand/icon-512.png | A dark navy rounded square with a large cyan "0" in the middle; the four corners are transparent |
+| http://localhost:3000/brand/icon-maskable-512.png | A full-bleed navy square, the "0" smaller and well inside the middle, no rounded corners |
+| http://localhost:3000/apple-icon.png | A full-bleed navy square with the "0" (iOS rounds it itself) |
+| http://localhost:3000/opengraph-image.png | A wide navy picture with the whole wordmark centred, grey letters, cyan "0" and underline |
+| http://localhost:3000/brand/email-logo.png | A small navy banner with the wordmark |
+| http://localhost:3000/brand/google-oauth-logo.png | A small navy square with the wordmark across the middle |
+
+Last, the manifest as the browser reads it: F12 → **Application** → **Manifest**. It shows the name
+"Rumor Zero", theme and background colour `#283044`, and the three icons, including one marked
+"maskable".
+
+#### Step 10: Check the exact sizes of the generated files
+
+**Where:** Terminal window 2 (commands), in `frontend\`. Stop the dev server first (`Ctrl+C` in window 1), or just use this new window.
+
+**What this does:** A small PowerShell script reads each PNG's width and height and the icon sizes inside `favicon.ico`, and prints them with the file sizes.
+
+```powershell
+Add-Type -AssemblyName System.Drawing
+$pngs = 'src\app\apple-icon.png','public\brand\icon-192.png','public\brand\icon-512.png','public\brand\icon-maskable-512.png','src\app\opengraph-image.png','src\app\twitter-image.png','public\brand\google-oauth-logo.png','public\brand\email-logo.png','..\backend\apps\core\static\core\brand\logo-admin.png'
+foreach ($p in $pngs) { $img = [System.Drawing.Image]::FromFile((Resolve-Path $p)); "{0,-62} {1} x {2}  {3} bytes" -f $p, $img.Width, $img.Height, (Get-Item $p).Length; $img.Dispose() }
+$b = [System.IO.File]::ReadAllBytes((Resolve-Path src\app\favicon.ico))
+"ico: images=$([BitConverter]::ToUInt16($b,4)); sizes=" + (($b[6], $b[22], $b[38]) -join ',')
+```
+
+**You should see** (recorded output):
+
+```text
+src\app\apple-icon.png               180 x 180  2333 bytes
+public\brand\icon-192.png            192 x 192  3904 bytes
+public\brand\icon-512.png            512 x 512  12022 bytes
+public\brand\icon-maskable-512.png   512 x 512  6262 bytes
+src\app\opengraph-image.png          1200 x 630  12839 bytes
+src\app\twitter-image.png            1200 x 630  12839 bytes
+public\brand\google-oauth-logo.png   120 x 120  1605 bytes
+public\brand\email-logo.png          320 x 96  3541 bytes
+..\backend\apps\core\static\core\brand\logo-admin.png   158 x 64  1879 bytes
+ico: images=3; sizes=16,32,48
+```
+
+- The sizes are exact; the byte counts can differ a little on another machine.
+- The Google logo is far under 1 MB. The apple icon is also opaque (its PNG has no alpha channel);
+  the automated tests check that.
+
+#### Step 11: Repository checks
+
+**Where:** Terminal window 2 (commands).
+
+**What this does:** Confirms git does not ignore the generated files, marks the binary ones correctly, and that `design\` and `frontend\` have no unexpected changes or files.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+git check-ignore frontend\src\app\favicon.ico frontend\public\brand\logo.svg backend\apps\core\static\core\brand\logo-admin.png   # prints nothing: none of them is ignored
+git check-attr binary -- frontend/src/app/favicon.ico frontend/src/app/apple-icon.png     # both: binary: set
+git status --short design             # prints nothing: design\ is untouched
+Test-Path frontend\AGENTS.md, frontend\CLAUDE.md   # False, then False
+```
+
+**You should see:** nothing from the first `git` command, two lines saying `binary: set`, nothing from `git status`, then `False` and `False`.
+
+#### Step 12: Stop and clean up
+
+**Where:** Terminal window 1 for the server.
+
+- Stop the server: `Ctrl+C` in its window.
+- Nothing else is running for this part: no containers, no backend.
+- The generated files are meant to be committed; do not delete them. To change the logo later:
+  replace `design\logo.svg` yourself, check that `markSelector` in
+  `frontend\scripts\brand\brand.config.json` still picks the "0" (the build fails if it does not
+  match exactly one shape), run `npm run brand:build`, and compare the contrast table with
+  `docs\ARCHITECTURE.md` section 14.
+### Part 0C: App shell, API relay, API client, CI
+
+Needs Part 0A's containers and virtualenv, and your own `backend\.env` and `frontend\.env.local`.
+The relay reads `BACKEND_ORIGIN` and `PROXY_SHARED_SECRET` from `frontend\.env.local`. The secret
+must be the same as the one in `backend\.env` (ENV_GUIDE §1.2). Nobody can log in yet (Part 1), so
+the app pages show the logged-out shell; `/dev/shell` shows the logged-in one with a sample user.
+
+The blocks below use full `C:\...` paths, so each new PowerShell window can start in any folder.
+
+**Windows used in this part** (a "window" is one PowerShell window or tab):
+
+| Window | What it does | Busy? |
+|---|---|---|
+| Window 1 | Django server (`runserver`), later the stand-in backend (step 5) | Yes: leave it running |
+| Window 2 | Frontend dev server (`npm run dev`), or one-off commands when no server is needed | Yes while the dev server runs |
+| Window 3 | Extra window for `curl.exe` commands (steps 4 and 5) | No |
+| Browser | Steps 6 and 11 | n/a |
+
+A server started with `runserver` or `npm run dev` keeps its window busy until you press `Ctrl+C`.
+Open a new window whenever you need to type more commands.
+
+#### Step 1: Install the new tools
+
+**Where:** Any PowerShell window.
+
+**What this does:** Installs the frontend packages and downloads the browser (Chromium) that the
+end-to-end tests drive, then prints the tool versions so you know they are present.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm install                       # up to date, audited 735 packages ... found 0 vulnerabilities
+npx playwright install chromium   # first time: downloads Chromium for the E2E test; later: prints nothing
+npx wrangler --version            # 4.145.0
+npx playwright --version          # Version 1.63.0
+```
+
+**You should see:**
+
+- `npm install`: `up to date, audited 735 packages ... found 0 vulnerabilities`. It can take a
+  while the first time.
+- `npx playwright install chromium`: a download progress bar the first time (slow, be patient);
+  nothing on later runs.
+- `4.145.0` from wrangler (Cloudflare's tool) and `Version 1.63.0` from Playwright.
+
+- `npm install` also prints an `allow-scripts` warning: it did not run the install scripts of
+  `workerd`, `esbuild` and `unrs-resolver`. That is expected. Their programs come from separate
+  platform packages and work without those scripts.
+- Don't run `npm run preview`, `deploy` or `upload` on your own machine. They are for CI and
+  Cloudflare (which build on Linux), and they would copy your real `.env.local` into the Worker
+  bundle.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Same window as step 1 (you are in `frontend\`).
+
+**What this does:** Runs the linter, the design-token check, the type checker, the formatter check,
+the unit tests and a production build. All of them must pass.
+
+```powershell
+npm run lint             # no output after the command line
+npm run lint:tokens      # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
+npm run typecheck        # no output after the command line
+npm run format:check     # All matched files use Prettier code style!
+npm test                 # Test Files  51 passed (51) / Tests  412 passed (412)
+npm run build            # slow (up to a minute or more); ends with a route list
+```
+
+**You should see:** The comment on each line is the expected result. "No output" means success for
+`lint` and `typecheck`. The build ends with a route list. These lines matter:
+
+```text
+┌ ○ /
+├ ƒ /api/[...path]
+├ ○ /home
+├ ○ /login
+├ ○ /signup
+└ ƒ /u/[username]
+```
+
+- `○` means prerendered at build time; `ƒ` means it runs per request. The relay (`/api/[...path]`)
+  must be `ƒ`; the landing and auth pages must be `○`.
+
+#### Step 3: Start Django and the frontend
+
+**Where:** PowerShell window 1 (server), then PowerShell window 2.
+
+**What this does:** Starts the database containers and the Django backend (window 1), then the
+Next.js dev server (window 2), so the site is reachable at http://localhost:3000.
+
+Window 1:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py runserver        # leave this window running
+```
+
+Window 2:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run dev                       # ✓ Ready in about 0.5 s, then "✓ Running next.config.ts took" 1 to 5 s
+```
+
+**You should see:** In window 1 Django prints its "Starting development server at
+http://127.0.0.1:8000/" lines. In window 2 `✓ Ready in about 0.5 s`, then
+`✓ Running next.config.ts took` 1 to 5 s. Both windows stay busy; that is correct.
+
+- The extra seconds start `workerd`, Cloudflare's local runtime, for the OpenNext dev setup. If
+  Windows Firewall asks about it, local access is all it needs.
+
+#### Step 4: Check the relay
+
+**Where:** PowerShell window 3 (a new window).
+
+**What this does:** Sends requests to the frontend on port 3000 and checks that the relay passes
+them to Django on port 8000 and handles errors the right way.
+
+```powershell
+curl.exe -i http://localhost:3000/api/health/
+curl.exe -s -i http://localhost:3000/api/health | Select-String '^HTTP|^location'
+curl.exe -s -o NUL -w "%{http_code}`n" "http://localhost:3000/api/a%2Fb/"
+curl.exe -s -o NUL -w "%{http_code}`n" http://localhost:3000/api/nope/
+curl.exe -s -o NUL -w "%{http_code} %{redirect_url}`n" http://localhost:3000/home/
+```
+
+**You should see:** One result per command, in order:
+
+1. `HTTP/1.1 200 OK` and the body `{"status":"ok"}`. That is Django's answer, fetched through the
+   relay on port 3000, with no redirect.
+2. `HTTP/1.1 301 Moved Permanently` and `location: /api/health/`. That is Django adding the
+   missing slash; the relay keeps the target relative, so it stays on port 3000.
+3. `400` (an encoded `/` is refused).
+4. `404` (Django has no such path).
+5. `308 http://localhost:3000/home`. Page URLs drop a trailing slash; API URLs keep it.
+
+Now stop Django (`Ctrl+C` in window 1) and ask again from window 3:
+
+```powershell
+curl.exe -s -i http://localhost:3000/api/health/ | Select-String '^HTTP|^retry-after|^cache-control|code'
+```
+
+```text
+HTTP/1.1 503 Service Unavailable
+cache-control: no-store
+retry-after: 30
+{"detail":"The server is waking up. Try again in a minute.","code":"backend_waking"}
+```
+
+It answers at once, because nothing is listening on port 8000. Start `python manage.py runserver`
+again in window 1.
+
+#### Step 5: See what the backend receives (stand-in backend)
+
+**Where:** Windows 1, 2 and 3, as marked below.
+
+**What this does:** Django removes the `X-RZ-*` headers before any code can see them, so this check
+uses a small stand-in backend. It reports what arrived as true/false and names only. It uses the
+made-up value `echo-check-secret`, never your real secret.
+
+First stop `npm run dev` (`Ctrl+C` in window 2): Next runs only one dev server per folder. Then
+stop `runserver` in window 1 too; it isn't needed here.
+
+Window 1, the stand-in backend (it keeps the window busy):
 
 ```powershell
 @'
@@ -1007,18 +3135,11 @@ http.createServer((req, res) => {
 node $env:TEMP\rz-echo.cjs        # stand-in backend on http://127.0.0.1:8765
 ```
 
-Window 2, a dev server pointed at it. The environment values (`export` on Linux, `$env:` on
-Windows) last only for this window; `.env.local` is not changed:
+The first command writes the script file (no output); the second runs it and prints
+`stand-in backend on http://127.0.0.1:8765`.
 
-**Linux (bash):**
-
-```bash
-cd frontend                       # from the repo root
-export BACKEND_ORIGIN="http://127.0.0.1:8765" PROXY_SHARED_SECRET="echo-check-secret"
-npx next dev -p 3100
-```
-
-**Windows (PowerShell):**
+Window 2, a dev server pointed at it. The `$env:` values last only for this window;
+`.env.local` is not changed:
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
@@ -1026,19 +3147,7 @@ $env:BACKEND_ORIGIN = "http://127.0.0.1:8765"; $env:PROXY_SHARED_SECRET = "echo-
 npx next dev -p 3100
 ```
 
-Window 3:
-
-**Linux (bash):**
-
-```bash
-curl -s -H "X-RZ-Proxy-Secret: spoofed" -H "X-RZ-Client-IP: 6.6.6.6" -H "X-Forwarded-Host: evil.example" http://localhost:3100/api/echo/
-curl -s -H "Content-Type: text/plain" --data "hello relay" http://localhost:3100/api/echo/
-curl -s -i http://localhost:3100/api/cookies/ | grep -iE '^set-cookie'
-curl -s -i http://localhost:3100/api/etag/ | grep -iE '^HTTP|^etag|^cache-control'
-curl -s -i -H 'If-None-Match: "v1"' http://localhost:3100/api/etag/ | grep -iE '^HTTP|^etag|^cache-control'
-```
-
-**Windows (PowerShell):**
+Window 3, the checks:
 
 ```powershell
 curl.exe -s -H "X-RZ-Proxy-Secret: spoofed" -H "X-RZ-Client-IP: 6.6.6.6" -H "X-Forwarded-Host: evil.example" http://localhost:3100/api/echo/
@@ -1047,6 +3156,9 @@ curl.exe -s -i http://localhost:3100/api/cookies/ | Select-String '^set-cookie'
 curl.exe -s -i http://localhost:3100/api/etag/ | Select-String '^HTTP|^etag|^cache-control'
 curl.exe -s -i -H 'If-None-Match: \"v1\"' http://localhost:3100/api/etag/ | Select-String '^HTTP|^etag|^cache-control'
 ```
+
+**You should see:** One block of output per command, in order (lines 1 to 2 are the first two
+commands, then the cookies, then the two etag requests):
 
 ```text
 {"method":"GET","secretMatches":true,"clientIp":"::1","forwardedHost":null,"contentLength":null,"chunked":false,"bodyBytes":0}
@@ -1063,22 +3175,28 @@ etag: "v1"
 
 - **Spoofing:** the faked `X-RZ-Proxy-Secret`, `X-RZ-Client-IP` and `X-Forwarded-Host` never
   arrive. The backend gets the relay's own secret (`secretMatches: true`) and your real address
-  (`::1` is this machine; on Linux you may see `127.0.0.1` or `::ffff:127.0.0.1` instead, which is
-  also this machine).
+  (`::1` is this machine).
 - **Body:** it arrives with its length (`contentLength: "11"`), never chunked, which Django needs.
 - **Cookies and caching:** both cookies and the `304 Not Modified` come back with `etag` and
   `cache-control` unchanged.
-- In PowerShell, the quotes inside `If-None-Match` need the `\"` form shown above. In bash no
-  escaping is needed: the Linux command uses plain `"v1"` inside single quotes.
+- In PowerShell, the quotes inside `If-None-Match` need the `\"` form shown above.
 
-Stop both servers (`Ctrl+C` in windows 1 and 2), then close window 2 so its environment values are
-gone (on Linux you can instead run `unset BACKEND_ORIGIN PROXY_SHARED_SECRET` in that window).
-Delete the script: `rm /tmp/rz-echo.cjs` on Linux, `Remove-Item $env:TEMP\rz-echo.cjs` on Windows.
+**Clean up:** Stop both servers (`Ctrl+C` in windows 1 and 2), then close window 2 so its
+environment values are gone. Delete the script:
 
-### 6. Browser: the layouts
+```powershell
+Remove-Item $env:TEMP\rz-echo.cjs
+```
+
+#### Step 6: Look at the layouts in the browser
+
+**Where:** PowerShell windows 1 and 2, then the browser.
+
+**What this does:** Starts the normal servers again and lets you check by eye that every page and
+screen size looks right.
 
 Start the normal servers again: `python manage.py runserver` in window 1, and in a **new** window 2
-`npm run dev` (in `frontend/`; `frontend\` on Windows).
+`npm run dev` (in `frontend\`).
 
 | URL | Expect |
 |---|---|
@@ -1109,34 +3227,28 @@ width. The layout switches at 1280 and 768 px.
 | 390 | A top bar with the small logo and the "AL" avatar; a bottom bar with Home · Search · New post · Notifications · Profile. Tapping the avatar opens a sheet from the bottom with Bookmarks, Settings and Moderation; `Esc` or a tap outside closes it. No sideways scrolling. |
 
 Compare with Stitch: open
-`design/stitch/stitch_website_sitemap_grid_builder/b1_home_feed/code.html` in the repo root
-(on Windows:
-`C:\Users\Nafis\Downloads\Rumor-Zero\design\stitch\stitch_website_sitemap_grid_builder\b1_home_feed\code.html`)
+`C:\Users\Nafis\Downloads\Rumor-Zero\design\stitch\stitch_website_sitemap_grid_builder\b1_home_feed\code.html`
 in the browser (it needs internet for its Tailwind script), next to /dev/shell, both at 1280.
 - The rail width, item positions, blue Home item, top bar height and search box line up.
 - Expected differences: the logo image instead of the "Rumor Zero" text; Bookmarks added; "New
   post" instead of "Submit Claim"; Moderation instead of "Audit Queue"; no "Verification Ledger"
   pill; and sample cards instead of Stitch's feed.
 
-### 7. Terminal: the E2E smoke test
+#### Step 7: Run the E2E smoke test
 
-Needs the containers from step 3. Django and the dev server may be running or not: Playwright
-starts what is missing and reuses what is already running. A reused dev server keeps its own
-`BACKEND_ORIGIN`.
+**Where:** A PowerShell window (any free window, for example window 3).
 
-**Linux (bash):**
-
-```bash
-cd frontend                       # from the repo root
-npm run test:e2e
-```
-
-**Windows (PowerShell):**
+**What this does:** Playwright opens a real Chromium browser and clicks through the main pages
+automatically. It needs the containers from step 3. Django and the dev server may be running or
+not: Playwright starts what is missing and reuses what is already running. A reused dev server
+keeps its own `BACKEND_ORIGIN`.
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
-npm run test:e2e
+npm run test:e2e                  # takes about 10 s once started
 ```
+
+**You should see:** A list of 8 passing tests and `8 passed`:
 
 ```text
 Running 8 tests using 6 workers
@@ -1155,47 +3267,31 @@ Running 8 tests using 6 workers
 
 - The order and timings vary (six tests run in parallel). `[WebServer]` lines are Django's request
   log.
-- On Linux the paths read `e2e/smoke.spec.ts`, the passing mark is `✓` instead of `ok`, and the
-  number of workers depends on your CPU.
 
-### 8. Terminal: the same test the way CI runs it
+#### Step 8: Run the same test the way CI runs it
 
-CI tests the production build and starts its own servers. First stop `npm run dev` and `runserver`
-(`Ctrl+C`); in this mode Playwright won't reuse them.
+**Where:** A PowerShell window.
 
-**Linux (bash):**
-
-```bash
-cd frontend                       # from the repo root
-npm run build
-export CI=1
-npm run test:e2e         # 8 passed, this time against `next start`
-unset CI
-```
-
-**Windows (PowerShell):**
+**What this does:** CI tests the production build and starts its own servers. First stop
+`npm run dev` and `runserver` (`Ctrl+C`); in this mode Playwright won't reuse them.
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
-npm run build
+npm run build                     # slow, no need to watch it
 $env:CI = "1"
 npm run test:e2e         # 8 passed, this time against `next start`
 Remove-Item Env:CI
 ```
 
-### 9. Terminal: the backend is unchanged and still passes
+**You should see:** `8 passed`. `$env:CI = "1"` only lasts for this window; `Remove-Item Env:CI`
+removes it again.
 
-**Linux (bash):**
+#### Step 9: Check the backend is unchanged and still passes
 
-```bash
-cd backend                                          # from the repo root
-source .venv/bin/activate
-python -m pytest                                    # 200 passed
-ruff check . ; ruff format --check .                # All checks passed! / 43 files already formatted
-python manage.py makemigrations --check --dry-run   # No changes detected
-```
+**Where:** Any PowerShell window; this one needs the virtualenv.
 
-**Windows (PowerShell):**
+**What this does:** Part 0C touched only the frontend, so the backend tests and lint must still
+pass exactly as before.
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\backend
@@ -1205,19 +3301,15 @@ ruff check . ; ruff format --check .                # All checks passed! / 43 fi
 python manage.py makemigrations --check --dry-run   # No changes detected
 ```
 
-### 10. Terminal: repository checks
+**You should see:** `200 passed`, then `All checks passed!` and `43 files already formatted`, then
+`No changes detected` (no new database changes are pending).
 
-**Linux (bash):**
+#### Step 10: Repository checks
 
-```bash
-# run from the repo root
-git status --short design                          # prints nothing: design/ is untouched
-for f in frontend/AGENTS.md frontend/CLAUDE.md; do [ -e "$f" ] && echo True || echo False; done   # False, then False
-git check-ignore frontend/playwright-report frontend/test-results   # prints both: test reports are never committed
-git check-ignore .github/workflows/ci.yml frontend/wrangler.jsonc frontend/playwright.config.ts   # prints nothing: all three are committed
-```
+**Where:** Any PowerShell window.
 
-**Windows (PowerShell):**
+**What this does:** Confirms that `design\` was not modified, that no unwanted agent files appeared
+in `frontend\`, and that git ignores the test reports but not the config files.
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero
@@ -1227,9 +3319,14 @@ git check-ignore frontend/playwright-report frontend/test-results   # prints bot
 git check-ignore .github/workflows/ci.yml frontend/wrangler.jsonc frontend/playwright.config.ts   # prints nothing: all three are committed
 ```
 
-### 11. Browser: CI on GitHub (after you push)
+**You should see:** Nothing for the first command; `False` and `False`; the two report paths; then
+nothing for the last command.
 
-This is the one check the agent could not run, because only you push.
+#### Step 11: CI on GitHub (after you push)
+
+**Where:** Browser.
+
+**What this does:** This is the one check the agent could not run, because only you push.
 
 | URL | Expect |
 |---|---|
@@ -1240,29 +3337,29 @@ This is the one check the agent could not run, because only you push.
   why.
 - Seen on 2026-10-01: the first run failed at "OpenNext build" (`Cannot find package 'esbuild'`).
   The run on `60cfffc` ("Fix: add missing esbuild dependency") had all three jobs green.
-- Optional, only if you install the GitHub CLI (`gh`, not installed on the Windows machine yet;
-  on Linux it has to be installed too):
+- Optional, only if you install the GitHub CLI (`gh`, not installed on the Windows machine yet):
   `gh run list --workflow ci.yml --limit 1` shows `completed` and `success`.
 
-### 12. Stop and clean up
+#### Step 12: Stop and clean up
+
+**Where:** Every PowerShell window you still have open.
+
+**What this does:** Shuts everything down.
 
 - Stop the servers: `Ctrl+C` in each window.
 - If `npm run dev` later says "Another next dev server is already running" with a PID, the old
-  server is still alive. On Linux, end it with `kill <that PID>` (`pgrep -af 'next|workerd'` lists
-  leftover dev servers, and `ss -ltnp | grep -E ':(3000|8000)\b'` shows what holds the ports). On
-  Windows, end it with `taskkill /PID <that PID> /T /F` (Windows only).
+  server is still alive. End it with `taskkill /PID <that PID> /T /F`.
 - Stop the containers and keep the data: `docker compose down` (repo root).
-- `frontend/playwright-report` and `frontend/test-results` (`frontend\playwright-report` and
-  `frontend\test-results` on Windows) are git-ignored; delete them whenever
+- `frontend\playwright-report` and `frontend\test-results` are git-ignored; delete them whenever
   you like.
 
 ---
 
-## Part 1: Auth core (sign up, log in, tokens, log out)
+### Part 1: Auth core (sign up, log in, tokens, log out)
 
-Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
-`frontend/.env.local` (`backend\.env` and `frontend\.env.local` on Windows). Both keep Cloudflare's
-Turnstile **test** keys (ENV_GUIDE §1.5). Two things to know first:
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
+`frontend\.env.local`. Both keep Cloudflare's Turnstile **test** keys (ENV_GUIDE §1.5). Two things
+to know first:
 
 - Sign-up calls Cloudflare even with the test keys (the widget in the browser, siteverify from
   Django), so it needs internet.
@@ -1270,24 +3367,23 @@ Turnstile **test** keys (ENV_GUIDE §1.5). Two things to know first:
   `Origin` in `FRONTEND_ORIGIN` (`http://localhost:3000`); `http://127.0.0.1:3000` gets 403
   `csrf_failed`.
 
-### 1. Terminal: migrate and check the settings
+**Windows used in this part:**
 
-**Linux (bash):**
+| Window | What it does | Busy? |
+|---|---|---|
+| Window 1 | Django server (`runserver`, venv active, in `backend\`) | Yes: leave it running |
+| Window 2 | Commands: `curl.exe` checks in steps 3 to 5 (variables like `$h` and `$access` live here; do not close it between steps 3 and 4) | No |
+| Window 3 | Frontend dev server (`npm run dev`, in `frontend\`), needed from step 5 | Yes |
+| Browser | Steps 6, 7 and 11 | n/a |
 
-```bash
-# start in the repo root
-docker compose up -d
-cd backend
-source .venv/bin/activate
-python manage.py migrate
-python manage.py check                # System check identified no issues (0 silenced).
-v=$(grep -m1 '^JWT_SIGNING_KEY=' .env | cut -d= -f2- | tr -d '\r')
-printf %s "$v" | wc -c
-unset v
-python manage.py shell -c "from apps.accounts.models import User; print([(u.is_email_verified, list(u.emailaddress_set.values_list('verified', 'primary'))) for u in User.objects.filter(is_superuser=True)])"
-```
+A server started with `runserver` or `npm run dev` keeps its window busy until you press `Ctrl+C`.
 
-**Windows (PowerShell):**
+#### Step 1: Migrate and check the settings
+
+**Where:** PowerShell window 1 (it will become the server window in step 3).
+
+**What this does:** Starts the database, applies the new Part 1 database changes, runs Django's
+self-check, and checks your JWT signing key length without showing the key.
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero
@@ -1300,9 +3396,12 @@ python manage.py check                # System check identified no issues (0 sil
 python manage.py shell -c "from apps.accounts.models import User; print([(u.is_email_verified, list(u.emailaddress_set.values_list('verified', 'primary'))) for u in User.objects.filter(is_superuser=True)])"
 ```
 
+**You should see:**
+
 - `migrate`, the first time after Part 1: `Applying account.0001_initial... OK` through
   `Applying account.0009_emailaddress_unique_primary_email... OK`, then
   `Applying accounts.0002_verify_superuser_emails... OK`. Later runs: `No migrations to apply.`
+- `check`: `System check identified no issues (0 silenced).`
 - The length line prints only a number (`67` here). Under 32, Django refuses to start with
   `JWT_SIGNING_KEY must be at least 32 characters`; make a new key with ENV_GUIDE §1.2. Only the
   length is shown, never the key.
@@ -1310,13 +3409,13 @@ python manage.py shell -c "from apps.accounts.models import User; print([(u.is_e
   superuser from 0A now counts as verified and has a verified, primary email address (the backfill
   migration).
 
-### 2. Terminal: automated backend checks
+#### Step 2: Run the automated backend checks
 
-Same window.
+**Where:** Same window as step 1 (`backend\`, venv active).
 
-**Linux and Windows (same commands):**
+**What this does:** Runs the whole backend test suite plus lint and the migration check.
 
-```bash
+```powershell
 python -m pytest                                    # 440 passed
 python -m pytest apps/accounts                      # 327 passed (the auth tests)
 ruff check . ; ruff format --check .                # All checks passed! / 66 files already formatted
@@ -1324,34 +3423,26 @@ python manage.py makemigrations --check --dry-run   # No changes detected
 python -m pytest apps/accounts/tests/test_permissions.py -v   # 4 passed
 ```
 
+**You should see:** The count in each comment. The full test run takes a while.
+
 - Four of the auth tests run refreshes and logouts in two threads at once. One of them is a control
   run: allauth's stock token strategy loses a tab's token, ours doesn't.
 - Verified-only endpoints arrive with posts in Part 4, so the last command checks the permission on
   a test-only view: unverified → 403 `email_unverified`, verified → 201, anonymous → 401.
 
-### 3. Terminal: sign up against Django
+#### Step 3: Sign up against Django
 
-Window 1: `python manage.py runserver` (in `backend/`, or `backend\` on Windows, venv active). Leave
-it running.
+**Where:** PowerShell window 1 (server), then PowerShell window 2 (commands).
 
-Window 2 (no venv needed; on Linux it needs `jq`, which the Linux setup guide installs):
+**What this does:** Creates a real account by calling Django's sign-up endpoint with `curl.exe`,
+shows the cookies Django sets (the refresh token is hidden), and reads your profile with the access
+token.
 
-**Linux (bash):**
+Window 1: `python manage.py runserver` (in `backend\`, venv active). Leave it running.
 
-```bash
-cd backend                            # from the repo root
-id=$(date +%H%M%S)
-h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')
-json=$(jq -nc --arg id "$id" '{email: "part1-\($id)@example.test", username: "part1_\($id)", password: "correct-horse-battery-42", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX"}')
-out=$(curl -s -i -c /tmp/rz-jar.txt "${h[@]}" -H "Content-Type: application/json" --data-binary "$json" http://localhost:8000/api/auth/app/v1/auth/signup | tr -d '\r')
-printf '%s\n' "$out" | grep -iE '^(HTTP|Set-Cookie|Cache-Control)' | sed -E 's/rz_refresh=[^;]+/rz_refresh=<token>/'
-body=$(printf '%s\n' "$out" | sed -n '$p')
-access=$(printf '%s' "$body" | jq -r .meta.access_token)
-printf '%s' "$body" | jq -r '"user: \(.data.user.username); meta fields: \(.meta | keys_unsorted | join(", ")); access token: \(.meta.access_token | length) characters"'
-curl -s -H "Authorization: Bearer $access" http://localhost:8000/api/v1/me/; echo
-```
-
-**Windows (PowerShell):**
+Window 2 (no venv needed). **Keep this window open until the end of step 4**: it sets the
+variables `$id`, `$h`, `$out`, `$body` and `$access` that step 4 reuses, and the helper files
+`rz-signup.json` and `rz-jar.txt` in `$env:TEMP`:
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero\backend
@@ -1368,6 +3459,10 @@ $access = $body.meta.access_token
 curl.exe -s -H "Authorization: Bearer $access" http://localhost:8000/api/v1/me/
 ```
 
+**You should see:** The first four lines are the HTTP status and headers (from the `Select-String`
+line), the fifth is the summary (the line that starts with `"user:`), and the last is your profile
+(from the final `curl.exe`):
+
 ```text
 HTTP/1.1 200 OK
 Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
@@ -1377,15 +3472,16 @@ user: part1_014515; meta fields: is_authenticated, access_token; access token: 3
 {"id":"…","username":"part1_014515","display_name":"","email":"part1-014515@example.test","is_email_verified":false,"role":"user","has_usable_password":true,"google_connected":false,"avatar_url":null}
 ```
 
-- The number in the name is the time you ran it. On Windows, PowerShell 5.1 strips the quotes from
-  JSON typed on the curl line, so the body goes through a file. bash keeps the quotes, so the Linux
-  command builds the JSON with `jq` and passes it to curl directly (no file).
+Sanity check that `$access` is set: `$access.Length` should print a number near `373`. If it prints
+nothing or `0`, redo this step (usually Django is not running in window 1, or you are offline).
+
+- The number in the name is the time you ran it. PowerShell 5.1 strips the quotes from JSON typed
+  on the curl line, so the body goes through a file.
 - `meta` has only `is_authenticated` and `access_token`: no `refresh_token` and no
   `session_token`. The refresh token lives only in the HttpOnly cookie (no `Domain`,
   `Path=/api/auth/`). `Secure` is missing because `AUTH_COOKIE_SECURE=False` locally.
 - `rz_session=1` is the readable hint that tells the frontend there is a session to restore.
-- The `-replace` (on Linux, `sed`) hides the cookie value. The access token stays in `$access` and
-  is never printed.
+- The `-replace` hides the cookie value. The access token stays in `$access` and is never printed.
 - `XXXX.DUMMY.TOKEN.XXXX` is the token Cloudflare's test widget produces. Django checked it with
   siteverify, using the test secret.
 
@@ -1403,15 +3499,7 @@ To confirm this is correct, go to http://localhost:3000/verify-email/<key>
 - The text still says "Hello from localhost:8000!": allauth's default wording, which Part 2's
   branded templates replace.
 
-Still in window 2, the live username check:
-
-**Linux (bash):**
-
-```bash
-for u in Ada_Lovelace ADMIN ab "part1_$id"; do curl -s "http://localhost:8000/api/v1/auth/username-available/?u=$u"; echo; done
-```
-
-**Windows (PowerShell):**
+Still in window 2, the live username check (it uses `$id` from above):
 
 ```powershell
 foreach ($u in 'Ada_Lovelace', 'ADMIN', 'ab', "part1_$id") { curl.exe -s "http://localhost:8000/api/v1/auth/username-available/?u=$u"; "" }
@@ -1424,30 +3512,21 @@ foreach ($u in 'Ada_Lovelace', 'ADMIN', 'ab', "part1_$id") { curl.exe -s "http:/
 {"username":"part1_014515","available":false,"reason":"taken","message":"That username is taken."}
 ```
 
+Four lines, one per name: free, reserved, invalid format, taken (your own new account).
+
 - An older Windows console may show the dash in `3–30` as other characters; that is only the
-  console's code page. A Linux terminal in UTF-8 (the default) shows it correctly.
+  console's code page.
 
-### 4. Terminal: refresh, rotation, the CSRF guard and log out
+#### Step 4: Refresh, rotation, the CSRF guard and log out
 
-Same window 2 (it still has `$h`, `$access` and the cookie jar).
+**Where:** Same window as step 3 (window 2).
 
-**Linux (bash):**
+**What this does:** Shows how the refresh cookie rotates, that the old cookie works for 60 seconds,
+that requests without the right headers are refused, and what log out does.
 
-```bash
-refresh=http://localhost:8000/api/auth/app/v1/tokens/refresh
-get_refresh_cookie() { grep rz_refresh /tmp/rz-jar.txt | cut -f7 | sed -n '$p'; }
-first=$(get_refresh_cookie)
-curl -s -w '\n' -b /tmp/rz-jar.txt -c /tmp/rz-jar.txt "${h[@]}" -X POST "$refresh" | sed -E 's/"access_token": "[^"]+"/"access_token": "<token>"/'
-echo
-[ "$first" != "$(get_refresh_cookie)" ] && rotated=True || rotated=False
-echo "cookie rotated: $rotated"
-curl -s -o /dev/null -w 'old cookie at once: %{http_code}\n' "${h[@]}" -X POST -b "rz_refresh=$first" "$refresh"
-sleep 61
-curl -s -w ' %{http_code}\n' "${h[@]}" -X POST -b "rz_refresh=$first" "$refresh"
-curl -s -o /dev/null -w 'current cookie: %{http_code}\n' -b /tmp/rz-jar.txt -c /tmp/rz-jar.txt "${h[@]}" -X POST "$refresh"
-```
-
-**Windows (PowerShell):**
+This window must still have `$h`, `$access`, `$id` and the cookie jar `$env:TEMP\rz-jar.txt` from
+step 3. Sanity check: `$h` prints the two headers and `Test-Path $env:TEMP\rz-jar.txt` prints
+`True`. If not, redo step 3.
 
 ```powershell
 $refresh = 'http://localhost:8000/api/auth/app/v1/tokens/refresh'
@@ -1457,10 +3536,12 @@ curl.exe -s -b $env:TEMP\rz-jar.txt -c $env:TEMP\rz-jar.txt @h -X POST $refresh 
 ""
 "cookie rotated: $($first -ne (Get-RefreshCookie))"
 curl.exe -s -o NUL -w "old cookie at once: %{http_code}`n" @h -X POST -b "rz_refresh=$first" $refresh
-Start-Sleep -Seconds 61
+Start-Sleep -Seconds 61              # nothing prints for 61 seconds: this wait is on purpose
 curl.exe -s -w " %{http_code}`n" @h -X POST -b "rz_refresh=$first" $refresh
 curl.exe -s -o NUL -w "current cookie: %{http_code}`n" -b $env:TEMP\rz-jar.txt -c $env:TEMP\rz-jar.txt @h -X POST $refresh
 ```
+
+**You should see:**
 
 ```text
 {"status": 200, "data": {"access_token": "<token>"}}
@@ -1471,22 +3552,15 @@ old cookie at once: 200
 current cookie: 200
 ```
 
+- Line 1: the first refresh succeeded. `cookie rotated: True`: the cookie in the jar changed.
+- `old cookie at once: 200`: the old cookie still works right away.
+- After the 61 s wait, `{"status": 400} 400`: the old cookie is dead. `current cookie: 200`: the new
+  one works.
 - Every refresh replaces the cookie. The old one keeps working for 60 seconds, so two tabs
   refreshing together, or a reply lost on a bad connection, never log you out. After that minute it
   is dead (400).
-- The command waits 61 seconds on purpose.
 
 Without the `Origin` or the `X-Requested-With` header:
-
-**Linux (bash):**
-
-```bash
-curl -s -w ' %{http_code}\n' -b /tmp/rz-jar.txt -H 'X-Requested-With: rumor-zero' -X POST "$refresh"
-curl -s -w ' %{http_code}\n' -b /tmp/rz-jar.txt -H 'Origin: http://localhost:3000' -X POST "$refresh"
-curl -s -w ' %{http_code}\n' -b /tmp/rz-jar.txt -H 'Origin: http://localhost:3000' -X POST http://localhost:8000/api/auth/logout/
-```
-
-**Windows (PowerShell):**
 
 ```powershell
 curl.exe -s -w " %{http_code}`n" -b $env:TEMP\rz-jar.txt -H "X-Requested-With: rumor-zero" -X POST $refresh
@@ -1499,20 +3573,6 @@ curl.exe -s -w " %{http_code}`n" -b $env:TEMP\rz-jar.txt -H "Origin: http://loca
 - Login and signup are guarded the same way.
 
 Log out:
-
-**Linux (bash):**
-
-```bash
-last=$(get_refresh_cookie)
-curl -s -i -b /tmp/rz-jar.txt -c /tmp/rz-jar.txt "${h[@]}" -X POST http://localhost:8000/api/auth/logout/ | tr -d '\r' | grep -iE '^(HTTP|Set-Cookie)'
-curl -s -w ' %{http_code}\n' "${h[@]}" -X POST -b "rz_refresh=$last" "$refresh"
-curl -s -w ' %{http_code}\n' "${h[@]}" -X POST "$refresh"
-curl -s -o /dev/null -w 'logout again: %{http_code}\n' "${h[@]}" -X POST http://localhost:8000/api/auth/logout/
-curl -s -o /dev/null -w 'access token after logout: %{http_code}\n' -H "Authorization: Bearer $access" http://localhost:8000/api/v1/me/
-curl -s -w ' %{http_code}\n' "${h[@]}" -X POST http://localhost:8000/api/auth/app/v1/auth/session
-```
-
-**Windows (PowerShell):**
 
 ```powershell
 $last = Get-RefreshCookie
@@ -1535,31 +3595,24 @@ access token after logout: 200
 {"status": 404, "errors": [{"code": "not_found", "message": "Not found."}]} 404
 ```
 
-- Logout deletes both cookies and ends the session, so the last refresh cookie now fails (400).
-  Without any cookie it is a 401. Logging out twice is fine.
-- The access token keeps working until it expires (at most 15 minutes after step 3; after that the
-  line says 401). That's by design: access tokens are checked by signature and expiry only, and
-  the browser forgets its copy at once.
+- The first three lines come from the logout call itself (204 and both cookies cleared).
+- `400`: the last refresh cookie now fails. `401`: with no cookie at all. `logout again: 204`:
+  logging out twice is fine.
+- `access token after logout: 200`: the access token keeps working until it expires (at most 15
+  minutes after step 3; after that the line says 401). That's by design: access tokens are checked
+  by signature and expiry only, and the browser forgets its copy at once.
 - Only login, signup, refresh and logout exist under `/api/auth/`. allauth's other endpoints, like
   `auth/session` here, answer 404.
 
-### 5. Terminal: failed logins are limited per real client IP, through the relay
+#### Step 5: Failed logins are limited per real client IP, through the relay
 
-Window 3: `npm run dev` (in `frontend/`, or `frontend\` on Windows). Back in window 2:
+**Where:** PowerShell window 3 (frontend), then window 2 (commands).
 
-**Linux (bash):**
+**What this does:** Sends 11 wrong logins through the frontend relay to show that Django limits
+them by your real address, and that a different address is not blocked.
 
-```bash
-for i in $(seq 1 11); do
-  login=$(printf '{"email": "nobody%s@example.test", "password": "wrong-password"}' "$i")
-  r=$(curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary "$login" http://localhost:3000/api/auth/app/v1/auth/login)
-  printf '%2d  ' "$i"
-  printf '%s' "$r" | jq -r '"\(.status)  \(.errors[0].code)"'
-done
-curl -s --interface 127.0.0.2 "${h[@]}" -H "Content-Type: application/json" --data-binary "$login" http://127.0.0.1:8000/api/auth/app/v1/auth/login; echo
-```
-
-**Windows (PowerShell):**
+Window 3: `npm run dev` (in `frontend\`). It keeps the window busy. Back in window 2 (it uses `$h`
+from step 3; sanity check: `$h` prints the two headers):
 
 ```powershell
 1..11 | ForEach-Object {
@@ -1569,6 +3622,8 @@ curl -s --interface 127.0.0.2 "${h[@]}" -H "Content-Type: application/json" --da
 }
 curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-login.json" http://127.0.0.1:8000/api/auth/app/v1/auth/login; ""
 ```
+
+**You should see:** Eleven numbered lines, then Django's answer to the last request:
 
 ```text
  1  400  email_password_mismatch
@@ -1586,18 +3641,20 @@ curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-
 ```
 
 - The first eleven go through the relay on port 3000. Each uses another email, so only the
-  per-address limit (10 failures a minute) is hit; the per-account limit is 5 failures in 5 minutes.
-- The relay passed your real address to Django with the shared secret: `::1` on the Windows PC this
-  guide was written on; on Linux `localhost` may resolve to `127.0.0.1` instead. The last request
-  goes straight to Django from a different address, so it isn't blocked: `127.0.0.1` on Windows.
-  On Linux the command adds `--interface 127.0.0.2` (another loopback address), because plain
-  `127.0.0.1` could be the very address the relay reported.
+  per-address limit (10 failures a minute) is hit (line 11); the per-account limit is 5 failures in
+  5 minutes.
+- The relay passed your real address (`::1` on the Windows PC this guide was written on) to Django
+  with the shared secret. The last request goes straight to Django from a different address
+  (`127.0.0.1`), so it isn't blocked (it gets the normal "not correct" answer).
 - Within that minute, logging in at http://localhost:3000/login, even with a right password, shows
   the red banner "Too many attempts. Try again in a few minutes."
 
-### 6. Browser: sign up, stay logged in, log out
+#### Step 6: Browser: sign up, stay logged in, log out
 
-Window 3's `npm run dev` and window 1's `runserver` are running. Wait a minute after step 5.
+**Where:** Browser. Window 3's `npm run dev` and window 1's `runserver` must be running.
+
+**What this does:** Walks through the real sign-up screens. Wait a minute after step 5 so the
+login limit has cleared.
 
 | Do this | Expect |
 |---|---|
@@ -1614,9 +3671,11 @@ Window 3's `npm run dev` and window 1's `runserver` are running. Wait a minute a
 | Open http://localhost:3000/settings | It redirects to `/login?next=%2Fsettings`. Log in with the same email and password: you are back on /settings. |
 | Phone width (F12 → device toolbar, 390 px): tap the avatar at the top right | The account sheet ends with Log out |
 
-### 7. Browser: the error states
+#### Step 7: Browser: the error states
 
-Still on http://localhost:3000.
+**Where:** Browser, still on http://localhost:3000; one part needs window 1.
+
+**What this does:** Triggers each sign-up and login error on purpose to see the messages.
 
 | Do this | Expect |
 |---|---|
@@ -1627,15 +3686,7 @@ Still on http://localhost:3000.
 | /login with a wrong password | A red banner "That email and password don't match." with an × that closes it |
 
 A failed bot check needs Cloudflare's always-fail **test** secret on the backend. Stop `runserver`
-in window 1 (`Ctrl+C`), then:
-
-**Linux (bash):**
-
-```bash
-TURNSTILE_SECRET_KEY="2x0000000000000000000000000000000AA" python manage.py runserver
-```
-
-**Windows (PowerShell):**
+in window 1 (`Ctrl+C`), then in window 1 (in `backend\`, venv active):
 
 ```powershell
 $env:TURNSTILE_SECRET_KEY = "2x0000000000000000000000000000000AA"; python manage.py runserver
@@ -1643,27 +3694,29 @@ $env:TURNSTILE_SECRET_KEY = "2x0000000000000000000000000000000AA"; python manage
 
 - Sign up with a new email and username: under the widget, "The bot check didn't pass. Try it
   again.", and the widget starts over.
-- The `$env:` value (on Linux, the `TURNSTILE_SECRET_KEY=…` in front of the command) lasts only for
-  this window (on Linux, only for that one command), and `backend/.env` (`backend\.env` on Windows)
-  is not changed. Stop the server, **close the window** (on Windows; on Linux you can keep it), and
-  start `python manage.py runserver` normally in a new one (venv active).
+- The `$env:` value lasts only for this window, and `backend\.env` is not changed. Stop the
+  server (`Ctrl+C`), **close the window**, and start `python manage.py runserver` normally in a new
+  one (venv active).
 
-### 8. Terminal: automated frontend checks
+#### Step 8: Run the automated frontend checks
 
-Stop `npm run dev` first (`Ctrl+C` in window 3), then in `frontend/` (`frontend\` on Windows):
+**Where:** A PowerShell window in `frontend\`. Stop `npm run dev` first (`Ctrl+C` in window 3),
+then you can reuse window 3.
 
-**Linux and Windows (same commands):**
+**What this does:** The same lint, type, format and unit-test checks as Part 0C, now with the auth
+tests included, plus a production build.
 
-```bash
+```powershell
 npm run lint             # no output after the command line
 npm run lint:tokens      # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
 npm run typecheck        # no output after the command line
 npm run format:check     # All matched files use Prettier code style!
 npm test                 # Test Files  59 passed (59) / Tests  562 passed (562)
-npm run build
+npm run build            # slow; ends with the route list below
 ```
 
-The build's route list still has these lines:
+**You should see:** The comment on each line is the expected result. The build's route list still
+has these lines:
 
 ```text
 ├ ƒ /api/[...path]
@@ -1673,16 +3726,20 @@ The build's route list still has these lines:
 
 - The auth pages stay prerendered (`○`); the relay runs per request (`ƒ`).
 
-### 9. Terminal: the E2E tests, dev mode and CI mode
+#### Step 9: The E2E tests, dev mode and CI mode
+
+**Where:** A PowerShell window in `frontend\` (window 3).
+
+**What this does:** Playwright drives a real browser through sign-up, reload and log out.
 
 Stop `runserver` too (`Ctrl+C` in window 1): Playwright then starts its own Django with an
 in-memory cache, so step 5's rate limit can't get in the way.
 
-**Linux and Windows (same commands):**
-
-```bash
+```powershell
 npm run test:e2e
 ```
+
+**You should see:** 11 passed:
 
 ```text
 Running 11 tests using 6 workers
@@ -1696,8 +3753,7 @@ Running 11 tests using 6 workers
   11 passed (14.5s)
 ```
 
-- On Linux Playwright prints the spec paths with `/` (`e2e/smoke.spec.ts`); the `\` is Windows. The
-  timings and the worker count vary from machine to machine.
+- The timings and the worker count vary from machine to machine.
 - The eight 0C smoke tests are unchanged. The three new ones sign up with the test widget, check
   the cookie flags and that storage is empty, reload, log out, try the dead cookie (400) and a
   refresh without the header (403), and use `/settings` → `/login?next=` → back.
@@ -1706,15 +3762,6 @@ Running 11 tests using 6 workers
 
 Then the way CI runs it:
 
-**Linux (bash):**
-
-```bash
-npm run build
-CI=1 npm run test:e2e    # 11 passed, this time against `next start`
-```
-
-**Windows (PowerShell):**
-
 ```powershell
 npm run build
 $env:CI = "1"
@@ -1722,18 +3769,12 @@ npm run test:e2e         # 11 passed, this time against `next start`
 Remove-Item Env:CI
 ```
 
-### 10. Terminal: repository checks
+#### Step 10: Repository checks
 
-**Linux (bash):**
+**Where:** Any PowerShell window.
 
-```bash
-cd "$(git rev-parse --show-toplevel)"              # the repo root, from any folder inside it
-git status --short design                          # prints nothing: design/ is untouched
-for f in frontend/AGENTS.md frontend/CLAUDE.md; do [ -e "$f" ] && echo True || echo False; done   # False, then False
-git check-ignore backend/tmp/mail/example.eml      # prints the path: emails written by EMAIL_PROVIDER=file are never committed
-```
-
-**Windows (PowerShell):**
+**What this does:** Confirms `design\` is untouched, no unwanted agent files appeared, and that
+saved test emails are git-ignored.
 
 ```powershell
 cd C:\Users\Nafis\Downloads\Rumor-Zero
@@ -1742,7 +3783,13 @@ Test-Path frontend\AGENTS.md, frontend\CLAUDE.md   # False, then False
 git check-ignore backend/tmp/mail/example.eml      # prints the path: emails written by EMAIL_PROVIDER=file are never committed
 ```
 
-### 11. Browser: CI on GitHub (after you push)
+**You should see:** Nothing; `False` and `False`; then `backend/tmp/mail/example.eml`.
+
+#### Step 11: CI on GitHub (after you push)
+
+**Where:** Browser.
+
+**What this does:** Checks that GitHub's automatic build passes after you push.
 
 | URL | Expect |
 |---|---|
@@ -1753,21 +3800,709 @@ git check-ignore backend/tmp/mail/example.eml      # prints the path: emails wri
   the widget, the run's "playwright-report" artifact shows the page.
 - The agent couldn't run CI: only you push.
 
-### 12. Stop and clean up
+#### Step 12: Stop and clean up
+
+**Where:** Every PowerShell window you still have open.
+
+**What this does:** Shuts everything down and removes helper files.
 
 - Stop the servers: `Ctrl+C` in each window. If `npm run dev` later says "Another next dev server is
-  already running" with a PID, end it with `kill <that PID>` on Linux (`pgrep -af 'next|workerd'`
-  lists leftover dev servers, and `ss -ltnp | grep -E ':(3000|8000)\b'` shows what holds the ports)
-  or with `taskkill /PID <that PID> /T /F` on Windows (Windows only).
-- Delete the helper files. On Linux the commands above create only the cookie jar:
-  `rm -f /tmp/rz-jar.txt`. On Windows: `Remove-Item $env:TEMP\rz-signup.json, $env:TEMP\rz-jar.txt, $env:TEMP\rz-login.json`.
+  already running" with a PID, end it with `taskkill /PID <that PID> /T /F`.
+- Delete the helper files:
+  `Remove-Item $env:TEMP\rz-signup.json, $env:TEMP\rz-jar.txt, $env:TEMP\rz-login.json`.
 - The test accounts stay in your local database: `part1_…` from step 3, the E2E's `e2e_…`,
   `tabs_…` and `expiry_…`, and the agent's own checks (`manual_check`, `visual_…`, `tf_…`,
   `phone_…`). Delete them in Django Admin → Users if you like.
   `docker compose down -v` (repo root) wipes the whole local database, which is destructive.
 - Stop the containers and keep the data: `docker compose down` (repo root).
+### Part 2: Email verification & password reset
 
----
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
+`frontend\.env.local`. `EMAIL_PROVIDER=console` (the default) prints every email in the `runserver`
+terminal. Part 2 adds no migration, no dependency and no env variable.
 
-<!-- Add the next part below in the same shape: "## Part <ID>: <title>", then numbered steps,
-     each saying Terminal or Browser, each with the exact command and the expected result. -->
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Every email the app "sends" is printed here. | 3 to 9 (step 9 restarts it) |
+| Window 2 (commands) | All the `curl.exe` commands. **Use the same window for steps 3 to 7**: the variables you set in step 3 (`$id`, `$h`, `$access`, `$resend`) and later (`$raw`, `$key`, `$verify`, `$rp`, `$login`, `$refresh`, `$rk`, `$reset`) only live in that one PowerShell window. If you close it, or open a new one, redo step 3. | 1 to 7, 9, 12 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 8 (stopped before step 10) |
+
+Things to know first:
+
+- Sign-up still calls Cloudflare (Turnstile test keys), so it needs internet.
+- Open the site as **http://localhost:3000**, as in Part 1.
+- The outputs below were recorded on Linux on 2026-10-07. Numbers in names and times differ per run.
+  On Windows the shape is the same.
+- A link in an email carries a key: the verification key has two `:` that arrive as `%3A`, and the
+  commands below turn them back (`[uri]::UnescapeDataString`). A browser does this for you.
+- The limits count per address and per IP, and your local Redis remembers them for up to a day.
+  Every command here uses a new address, so repeated runs are fine; if you test the per-IP limit of
+  50 reset requests a day by hand, wait a day or restart Redis (`docker compose restart redis`).
+- Use `curl.exe` (with `.exe`), never plain `curl`: in PowerShell 5.1 plain `curl` is a different
+  command. The commands already say `curl.exe`.
+
+#### Step 1: Check that nothing needs migrating and the email templates are in place
+
+**Where:** Terminal window 2 (commands), PowerShell.
+
+**What this does:** Starts the database containers, activates the Python environment and confirms
+Django has nothing to migrate (Part 2 adds no tables) and that the new email templates exist.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                          # No migrations to apply.
+python manage.py check                            # System check identified no issues (0 silenced).
+python manage.py makemigrations --check --dry-run # No changes detected
+dir templates\account\email
+```
+
+**You should see:** the three comments above are the expected messages of the three `python` lines
+(nothing to apply, no problems, no model changes). `dir` prints a table (Mode, LastWriteTime, Length,
+Name) with these names:
+
+```text
+base_message.html
+base_message.txt
+email_confirmation_message.html
+email_confirmation_message.txt
+email_confirmation_signup_message.html
+email_confirmation_signup_message.txt
+email_confirmation_signup_subject.txt
+email_confirmation_subject.txt
+password_reset_key_message.html
+password_reset_key_message.txt
+password_reset_key_subject.txt
+```
+
+- The templates live in `backend\templates\`, not inside the app: `allauth` comes before
+  `apps.accounts` in `INSTALLED_APPS`, so its own templates would win.
+
+#### Step 2: Run the automated backend checks
+
+**Where:** Same terminal as step 1 (window 2, in `backend\`, venv active).
+
+**What this does:** Runs the whole backend test suite, then only the new Part 2 test files, then the
+linter and formatter check.
+
+```powershell
+python -m pytest                                    # 577 passed
+python -m pytest apps/accounts/tests/test_email_verification.py apps/accounts/tests/test_resend_verification.py apps/accounts/tests/test_password_reset.py apps/accounts/tests/test_emails.py apps/accounts/tests/test_startup.py -q   # 101 passed
+ruff check . ; ruff format --check .                # All checks passed! / 73 files already formatted
+```
+
+**You should see:** the full run takes a while and ends with `577 passed`; the second command ends
+with `101 passed`; the last prints `All checks passed!` and `73 files already formatted`. (Counts may
+grow later; what matters is that nothing fails.)
+
+- The new files cover the verification link (including the `%3A` key and the exact 24-hour expiry),
+  the resend cooldown and daily cap, the reset flow (identical answers and bytes for existing,
+  unknown and inactive addresses, the limits, expiry, other browsers' refresh tokens), the emails
+  themselves (subject, `From`, every link and the logo on the frontend origin, the Brevo payload) and
+  the startup preload of allauth's deferred libraries.
+- `test_middleware.py` and the settings tests changed too: the verify and password endpoints are now
+  on the allow-list, and the new limits are pinned.
+
+#### Step 3: Sign up a test account, and try the resend limits
+
+**Where:** First window 1 (start the server), then window 2 (the commands). **Keep using window 2
+for steps 4 to 7.**
+
+**What this does:** Window 1 runs the Django server. In window 2 you create a brand-new account
+through the API (which makes the server print the sign-up email in window 1), then check the account
+is not verified yet.
+
+Window 1: `python manage.py runserver` (in `backend\`, venv active). Leave it running; it prints
+nothing more until a request or an email arrives.
+
+Window 2 (no venv needed):
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\backend
+$id = Get-Date -Format "HHmmss"                                          # a unique suffix so the address is new each run
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every API call needs
+@"
+{"email": "part2-$id@example.test", "username": "part2_$id", "password": "correct-horse-battery-42", "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-signup.json
+$access = (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-signup.json" http://localhost:8000/api/auth/app/v1/auth/signup | ConvertFrom-Json).meta.access_token   # $access = your login token
+curl.exe -s -H "Authorization: Bearer $access" http://localhost:8000/api/v1/me/ | ConvertFrom-Json | Select-Object username, is_email_verified | ConvertTo-Json -Compress
+```
+
+Sanity check (this step sets `$id`, `$h` and `$access`; `$access` must not be empty):
+
+```powershell
+$access.Substring(0,10)               # prints the first 10 characters of the token, not an error
+```
+
+**You should see** in window 2 (the number in the name is your `$id`, so it differs):
+
+```text
+{"username":"part2_010027","is_email_verified":false}
+```
+
+That means the account exists and its email is not verified yet.
+
+**If it differs:** if `$access` is empty (the sanity check errors), the sign-up failed
+(`runserver` is probably not running). Fix that and run this step again from
+`$id = Get-Date -Format "HHmmss"`.
+
+Window 1 now shows the sign-up email:
+
+```text
+Subject: [Rumor Zero] Welcome to Rumor Zero: verify your email
+From: Rumor Zero <no-reply@example.com>
+To: part2-010027@example.test
+...
+Content-Type: text/plain; charset="utf-8"
+
+Welcome to Rumor Zero
+
+You can already read everything. Confirm your email address to post, comment and report.
+
+Verify your email:
+http://localhost:3000/verify-email/NzU%3A1xEAOb%3AbiPbvPBWC_1KxA5hYCK9XQPDSoulXssAgTKbBUd_AKE
+
+This link expires 24 hours after it was sent. If you didn't create this account, you can ignore this email.
+
+Rumor Zero
+...
+Content-Type: text/html; charset="utf-8"
+
+<!DOCTYPE html>
+...
+<img src="http://localhost:3000/brand/email-logo.png" alt="Rumor Zero" width="160" ...>
+```
+
+- Two parts: the plain text (no image), then the HTML with the logo. No "Hello from localhost:8000!"
+  any more. Every link, and the logo, points at `http://localhost:3000`; `From` is
+  `DEFAULT_FROM_EMAIL`.
+
+**Now the resend limits.** Run this in **window 2, the same PowerShell window that signed up** (it
+uses `$access` from the block above). Three requests to the "send me a verification email again"
+address:
+
+- line 1: asks for a new link with your token, right after sign-up;
+- line 2: asks again without any token;
+- line 3: after waiting 61 seconds, asks again with your token.
+
+```powershell
+$resend = 'http://localhost:8000/api/v1/me/verification-email/'
+curl.exe -s -w " %{http_code}`n" -X POST -H "Authorization: Bearer $access" $resend     # 1: with token, too soon
+curl.exe -s -w " %{http_code}`n" -X POST $resend                                        # 2: no token
+Start-Sleep -Seconds 61                                                                 # 3: nothing prints for 61 seconds: normal, just wait
+curl.exe -s -o NUL -w "after 61 s: %{http_code}`n" -X POST -H "Authorization: Bearer $access" $resend
+```
+
+**You should see** three output lines, one per curl (the `Start-Sleep` prints nothing):
+
+```text
+{"detail":"We sent one recently. Wait a little before asking again.","code":"verification_email_throttled"} 429
+{"detail":"Authentication credentials were not provided.","code":"not_authenticated"} 401
+after 61 s: 204
+```
+
+1. `429`: cooldown refused. The sign-up email counts for the 60-second cooldown, so the first resend
+   is refused.
+2. `401`: no token, so the server doesn't know who you are.
+3. `204`: sent. After a minute it works, and window 1 prints a second email, now called "Verify your
+   email" (no "Welcome").
+
+- The answer to the throttled call has no `Retry-After`: the full bucket may be the minute one or
+  the daily one (10 resends a day per address; the sign-up email doesn't count).
+- The command waits 61 seconds on purpose.
+
+**If it differs:** if line 1 says `401` instead of `429`, `$access` is empty: redo the sign-up part
+of this step. If it says `204` instead of `429`, more than a minute passed since sign-up (that is
+fine, the limit just wasn't tested).
+
+#### Step 4: Verify the account with the link from the email
+
+**Where:** Same terminal as step 3 (window 2). Needs `$h`, `$access` and `$resend` from step 3.
+
+**What this does:** Pretends to be the browser opening the link from the email: it sends the key to
+the verify endpoint, then checks the account is now verified, then tries several things that must
+fail (reusing the link, a forged key, no headers, resending once verified).
+
+Copy the part of the **last** link in window 1 after `/verify-email/` into `$raw` (the `%3A` stays
+as it is). Replace the placeholder text:
+
+```powershell
+$raw = 'PASTE_THE_PART_AFTER_/verify-email/'
+$key = [uri]::UnescapeDataString($raw)       # turn %3A back into :
+$verify = 'http://localhost:8000/api/auth/app/v1/auth/email/verify'
+"{""key"": ""$key""}" | Set-Content -Encoding ascii $env:TEMP\rz-verify.json
+curl.exe -s -i @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-verify.json" $verify | Select-String '^HTTP|^Cache-Control|^Set-Cookie|^\{'   # 1: verify (prints 3 lines)
+curl.exe -s -H "Authorization: Bearer $access" http://localhost:8000/api/v1/me/ | ConvertFrom-Json | Select-Object username, is_email_verified | ConvertTo-Json -Compress   # 2: am I verified now?
+curl.exe -s -w " %{http_code}`n" @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-verify.json" $verify   # 3: same link again
+'{"key": "forged"}' | Set-Content -Encoding ascii $env:TEMP\rz-forged.json
+curl.exe -s -w " %{http_code}`n" @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-forged.json" $verify   # 4: made-up key
+curl.exe -s -w " %{http_code}`n" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-verify.json" $verify     # 5: without Origin / X-Requested-With headers
+curl.exe -s -w " %{http_code}`n" -X POST -H "Authorization: Bearer $access" $resend                                          # 6: resend when already verified
+curl.exe -s -w " %{http_code}`n" @h -X POST http://localhost:8000/api/auth/app/v1/auth/email/verify/resend                   # 7: allauth's own resend address
+```
+
+**You should see** (7 `curl.exe` commands, 9 lines; command 1 prints 3 lines):
+
+```text
+HTTP/1.1 200 OK
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+{"status": 200}
+{"username":"part2_010027","is_email_verified":true}
+{"status": 400, "errors": [{"message": "Invalid or expired key.", "code": "invalid_or_expired_key", "param": "key"}]} 400
+{"status": 400, "errors": [{"message": "Invalid or expired key.", "code": "invalid_or_expired_key", "param": "key"}]} 400
+{"status": 403, "errors": [{"code": "csrf_failed", "message": "Reload the page and try again."}]} 403
+{"detail":"Your email is already verified.","code":"already_verified"} 409
+{"status": 404, "errors": [{"code": "not_found", "message": "Not found."}]} 404
+```
+
+1. Lines 1 to 3: the verification worked (`200`), with no cookie line.
+2. Line 4: `is_email_verified` is now `true`.
+3. Line 5: `400`, the same link used a second time is refused.
+4. Line 6: `400`, a forged key is refused with the same message.
+5. Line 7: `403`, refused because the `Origin` and `X-Requested-With` headers were missing.
+6. Line 8: `409`, already verified, so nothing is sent.
+7. Line 9: `404`, allauth's own resend address stays closed.
+
+- The verification answered 200 with no cookies: a link never logs anyone in. allauth itself says
+  401 here ("verified, but nobody is logged in"); the middleware turns that into 200.
+- The same link again, and a forged one, both say `invalid_or_expired_key`: an expired link says
+  the same. The call without `Origin` and `X-Requested-With` is refused like every other unsafe
+  `/api/auth/` call.
+- Once verified, the resend is a 409 and sends nothing. allauth's own `auth/email/verify/resend` is
+  the code-flow view and stays closed (404).
+
+**If it differs:** if command 1 prints a 400 and no `200`, the pasted key is from an older email or
+still has a stray character; copy the **last** link in window 1 again. If commands 2 and later fail
+with 401, `$access` is empty: redo step 3.
+
+#### Step 5: Forgot password gives the same answer for every address
+
+**Where:** Same terminal as step 3 (window 2). Needs `$h` and `$id` from step 3.
+
+**What this does:** Asks for a password reset for a real address and for an address that does not
+exist, and checks the server answers byte for byte the same, so nobody can find out who has an
+account.
+
+```powershell
+$rp = 'http://localhost:8000/api/auth/app/v1/auth/password/request'
+function Ask($email) {
+  "{""email"": ""$email""}" | Set-Content -Encoding ascii $env:TEMP\rz-ask.json
+  curl.exe -s -i @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-ask.json" $rp | Where-Object { $_ -notmatch '^(Date|Expires|Set-Cookie):' }
+}
+Ask "part2-$id@example.test" | Set-Content $env:TEMP\rz-known.txt      # real account: answer saved to a file
+Ask "nobody-$id@example.test" | Set-Content $env:TEMP\rz-unknown.txt   # unknown address: answer saved to a file
+Get-Content $env:TEMP\rz-known.txt
+if ((Get-Content $env:TEMP\rz-known.txt -Raw) -eq (Get-Content $env:TEMP\rz-unknown.txt -Raw)) { "identical: status, headers and body" } else { "DIFFERENT" }
+```
+
+**You should see:** the `function Ask` block and the two `Ask ...` lines print nothing (their output
+goes to files). `Get-Content` shows the saved answer, then the last line compares the two files:
+
+```text
+HTTP/1.1 200 OK
+Server: WSGIServer/0.2 CPython/3.13.16
+Content-Type: application/json
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+X-Frame-Options: DENY
+Content-Length: 15
+X-Content-Type-Options: nosniff
+Referrer-Policy: same-origin
+Cross-Origin-Opener-Policy: same-origin
+
+{"status": 200}
+identical: status, headers and body
+```
+
+- Window 1 shows **one** new email, "Reset your password", addressed to the real account. Nothing is
+  printed for the unknown address. The time-dependent headers (`Date`, `Expires`) are left out of the
+  comparison on purpose.
+- The link in that email is `http://localhost:3000/reset-password/<key>`: 32 hex digits, a time and
+  a hash, valid for 24 hours and for one use.
+
+**If it differs:** if the last line prints `DIFFERENT`, that is a real bug in the server; note it
+down. If the answer is `403`, `$h` is empty: redo step 3.
+
+**The limits** (each uses a new address, and an address that doesn't exist is limited the same way,
+so the limit leaks nothing). Same window 2. The loop sends 6 requests for one address in a row, then
+one request with a malformed address:
+
+```powershell
+1..6 | ForEach-Object {
+  "{""email"": ""busy-$id@example.test""}" | Set-Content -Encoding ascii $env:TEMP\rz-ask.json
+  $r = curl.exe -s -w " %{http_code}" @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-ask.json" $rp
+  "{0}  {1}" -f $_, $r
+}
+'{"email": "not-an-email"}' | Set-Content -Encoding ascii $env:TEMP\rz-ask.json
+curl.exe -s -w " %{http_code}`n" @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-ask.json" $rp
+```
+
+**You should see:**
+
+```text
+1  {"status": 200} 200
+2  {"status": 200} 200
+3  {"status": 200} 200
+4  {"status": 200} 200
+5  {"status": 200} 200
+6  {"status": 429} 429
+{"status": 400, "errors": [{"message": "Enter a valid email address.", "code": "invalid", "param": "email"}]} 400
+```
+
+Requests 1 to 5 are accepted (`200`), request 6 is refused (`429`, too many), and the malformed
+address is a `400`.
+
+- Five a minute per address. There are also 10 a day per address and 50 a day per IP (the
+  automated tests walk through both with a moved clock). A malformed address is a 400 and never
+  counts.
+
+#### Step 6: The reset logs you in and ends the other sessions
+
+**Where:** Same terminal as step 3 (window 2), with window 1 open to read the email. Needs `$h`,
+`$id` and `$rp` from steps 3 and 5.
+
+**What this does:** Logs in "in another browser" with the old password (its own cookie file), then
+resets the password with the emailed key. Afterwards the other browser must be logged out, the new
+session must work, and only the new password must log in.
+
+First, log in "in another browser" with the old password. The `-c` option saves that browser's
+cookies to `rz-other.txt` in your temp folder:
+
+```powershell
+$login = 'http://localhost:8000/api/auth/app/v1/auth/login'
+$refresh = 'http://localhost:8000/api/auth/app/v1/tokens/refresh'
+"{""email"": ""part2-$id@example.test"", ""password"": ""correct-horse-battery-42""}" | Set-Content -Encoding ascii $env:TEMP\rz-login.json
+curl.exe -s -c $env:TEMP\rz-other.txt @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-login.json" $login | ConvertFrom-Json | Select-Object status | ConvertTo-Json -Compress
+curl.exe -s -o NUL -w "other browser refresh before the reset: %{http_code}`n" -b $env:TEMP\rz-other.txt -c $env:TEMP\rz-other.txt @h -X POST $refresh
+```
+
+**You should see:**
+
+```text
+{"status":200}
+other browser refresh before the reset: 200
+```
+
+The login worked and the other browser can refresh its session.
+
+Next, ask for a link for the real address once more, wait for it in window 1, and copy the part
+after `/reset-password/` into `$rk` (replace the placeholder):
+
+```powershell
+"{""email"": ""part2-$id@example.test""}" | Set-Content -Encoding ascii $env:TEMP\rz-ask.json
+curl.exe -s -o NUL -w "request: %{http_code}`n" @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-ask.json" $rp
+$rk = 'PASTE_THE_PART_AFTER_/reset-password/'
+$reset = 'http://localhost:8000/api/auth/app/v1/auth/password/reset'
+curl.exe -s -o NUL -w "key check: %{http_code}`n" -H "X-Password-Reset-Key: $rk" $reset
+curl.exe -s -w " %{http_code}`n" -H "X-Password-Reset-Key: nonsense" $reset
+"{""key"": ""$rk"", ""password"": ""short""}" | Set-Content -Encoding ascii $env:TEMP\rz-reset.json
+curl.exe -s -w " %{http_code}`n" @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-reset.json" $reset
+"{""key"": ""$rk"", ""password"": ""a-brand-new-passphrase-77""}" | Set-Content -Encoding ascii $env:TEMP\rz-reset.json
+$out = curl.exe -s -i -c $env:TEMP\rz-new.txt @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-reset.json" $reset
+$out | Select-String '^HTTP|^Set-Cookie|^Cache-Control' | ForEach-Object { $_.Line -replace 'rz_refresh=[^;]+', 'rz_refresh=<token>' }
+$body = $out[-1] | ConvertFrom-Json
+"user: $($body.data.user.username); meta fields: $(($body.meta.PSObject.Properties.Name) -join ', '); access token: $($body.meta.access_token.Length) characters"
+curl.exe -s -w " %{http_code}`n" -b $env:TEMP\rz-other.txt @h -X POST $refresh
+curl.exe -s -o NUL -w "the new session refreshes: %{http_code}`n" -b $env:TEMP\rz-new.txt -c $env:TEMP\rz-new.txt @h -X POST $refresh
+"{""key"": ""$rk"", ""password"": ""yet-another-passphrase-55""}" | Set-Content -Encoding ascii $env:TEMP\rz-reset.json
+curl.exe -s -w " %{http_code}`n" @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-reset.json" $reset
+"{""email"": ""part2-$id@example.test"", ""password"": ""correct-horse-battery-42""}" | Set-Content -Encoding ascii $env:TEMP\rz-login.json
+curl.exe -s -o NUL -w "old password: %{http_code}`n" @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-login.json" $login
+"{""email"": ""part2-$id@example.test"", ""password"": ""a-brand-new-passphrase-77""}" | Set-Content -Encoding ascii $env:TEMP\rz-login.json
+curl.exe -s -o NUL -w "new password: %{http_code}`n" @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-login.json" $login
+```
+
+**You should see** (the lines that write JSON files, and the `$rk`, `$reset`, `$out`, `$body` lines,
+print nothing):
+
+```text
+request: 200
+key check: 200
+{"status": 400, "errors": [{"message": "The password reset token was invalid.", "code": "invalid_password_reset", "param": "key"}]} 400
+{"status": 400, "errors": [{"message": "This password is too short. It must contain at least 8 characters.", "code": "password_too_short", "param": "password"}]} 400
+HTTP/1.1 200 OK
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+Set-Cookie:  rz_refresh=<token>; expires=…; HttpOnly; Max-Age=1209600; Path=/api/auth/; SameSite=Lax
+Set-Cookie:  rz_session=1; expires=…; Max-Age=1209600; Path=/; SameSite=Lax
+user: part2_010027; meta fields: is_authenticated, access_token; access token: 373 characters
+{"status": 400} 400
+the new session refreshes: 200
+{"status": 400, "errors": [{"message": "The password reset token was invalid.", "code": "invalid_password_reset", "param": "key"}]} 400
+old password: 400
+new password: 200
+```
+
+What each line means, in order:
+
+1. `request: 200`: the reset email was requested (it appears in window 1).
+2. `key check: 200`: the emailed key is valid.
+3. `... 400` with "token was invalid": the made-up key `nonsense` is refused.
+4. `... 400` with "too short": a weak password is refused (and does not use the key up).
+5. Lines `HTTP/1.1 200 OK` to the two `Set-Cookie` lines, then `user: ...`: the real reset worked and
+   logged this session in (an access token and two cookies, like a login).
+6. `{"status": 400} 400`: **the other browser's refresh now fails**.
+7. `the new session refreshes: 200`: the session created by the reset still works.
+8. `... 400` with "token was invalid": the same link a second time is refused.
+9. `old password: 400`: the old password no longer logs in.
+10. `new password: 200`: the new password does.
+
+- The key check is the page's pre-check: `GET` with the key in `X-Password-Reset-Key` (it answers
+  with the account's details, which the page ignores). A refused weak password doesn't use the key up.
+- The reset answers like a login: an access token in `meta` and the same two cookies, and the
+  browser that did it is logged in.
+- **The other browser's refresh now fails (400):** the password changed, so every other session
+  ends the next time it refreshes. Its access token still works for up to 15 minutes, like after a
+  logout. The same link again is refused.
+
+**If it differs:** if `key check` is not `200`, `$rk` is wrong or empty: copy the part after
+`/reset-password/` from the **last** reset email in window 1 and set `$rk` again.
+
+#### Step 7: An expired verification link
+
+**Where:** A PowerShell window in `backend\` with the venv active (window 2 after
+`.\.venv\Scripts\Activate.ps1`, or a spare window). It only reads the database, so `runserver` can
+keep running.
+
+**What this does:** Builds the key a verification link would have had 25 hours ago, so you can see
+the "expired" screen in step 8.
+
+Needs an account whose address is still unverified: sign up another one the way step 3 does (a new
+`$id`), then forge the key a link would have had 25 hours ago:
+
+```powershell
+# in backend/ with the venv active; replace ID with the id of the unverified account
+python manage.py shell -c "import time; from unittest import mock; from allauth.account.models import EmailAddress, EmailConfirmationHMAC; a = EmailAddress.objects.get(email='part2-ID@example.test'); real = time.time; mock.patch('time.time', lambda: real() - 25 * 3600).start(); print(EmailConfirmationHMAC(a).key)"
+```
+
+**You should see:** a key with two `:` (after Django's "objects imported" line).
+
+- Open `http://localhost:3000/verify-email/<that key>` in the browser (step 8) and you get the
+  expired state, with a working "Send a new link" once you are logged in as that account.
+- The automated tests do the same with an exact 86 399 s / 86 401 s boundary.
+
+**If it differs:** if you get `EmailAddress matching query does not exist`, the `ID` is wrong; use
+the `$id` of the account you signed up (its email is `part2-<id>@example.test`).
+
+#### Step 8: Look at the pages in the browser
+
+**Where:** Browser (http://localhost:3000), with window 1 (`runserver`) and window 3 (`npm run dev`)
+running.
+
+**What this does:** Walks through every new screen by hand: verify email, forgot password and reset
+password.
+
+Window 1's `runserver` and a third window's `npm run dev` (in `frontend\`) are running. Use
+http://localhost:3000, a new email address each time, and compare with the Stitch screens
+`a4_verify_email`, `a5_forgot_password` and `a6_reset_password` in
+`design/stitch/stitch_website_sitemap_grid_builder/` (the logo replaces their emblem tiles, and
+their state switcher, "Simulate instant link click" and jargon footers are gone).
+
+**You should see**, for each row, what is in the "Expect" column:
+
+| Do this | Expect |
+|---|---|
+| Sign up at /signup with a new email, username and `correct-horse-battery-42` | You land on **/verify-email** (not /home): "Verify your email", "We sent a verification link to **your address**", a blue "Read-only for now" callout, a tinted "Resend email (58s)" counting down, the spam hint, "Continue browsing read-only →" and "Links expire 24 hours after they're sent." |
+| Wait for the countdown to reach 0 | The button turns blue: "Resend email". Click it: the text "We sent a new verification link. Check your inbox." appears under it, the countdown starts again at 60, and window 1 prints a second email. |
+| Click "Continue browsing read-only →" | /home with the amber banner "Verify your email to post, comment and report." and a **Resend link** button. The rail's **New post** button is faded. |
+| Click **New post** (rail, or the bottom tab at 390 px) | Nothing opens; a dark toast says "Verify your email to post. Check your inbox, or resend the link from the banner." Tab to the button: it takes focus, and a screen reader reads "Verify your email to post." |
+| Click **Resend link** twice in a row | The first click is refused if you signed up less than a minute ago (toast: "We sent one recently. Wait a little before asking again.") and the button shows "Resend link (60s)"; after a minute it works (toast: "We sent a new verification link. Check your inbox."). |
+| Copy the link from the **last** email in window 1 and open it in a second tab | "Your email is verified" with **Start posting →**. The first tab's banner disappears by itself within a moment (the tabs tell each other), and New post is no longer faded. |
+| Reload the link's tab | "Your email is already verified": the link was used. |
+| Log out, then open the same link again | "This link has expired" with "Log in to send a new link" (it points at `/login?next=%2Fverify-email`). |
+| Open `/verify-email/Mg%3A1vABcd%3Aabc-DEF_123` | The same expired state (a made-up key). |
+| Open /login and click **Forgot password?** (right under the password field) | /forgot-password: "Reset your password", an email field, "Send reset link →", "Back to log in". |
+| Submit an empty field, then `not-an-email` | "Enter your email address.", then "Enter a valid email address." under the field. |
+| Submit the real address, then repeat with an address that doesn't exist | The same "Check your inbox" message both times: "If an account exists for **that address**, we've sent a link to reset your password. It expires in 24 hours." Window 1 printed an email only for the real one. "Use a different email" goes back to the form. |
+| Open the link from the reset email | A short skeleton, then "Create new password": New password with the strength bar, Confirm new password, show/hide toggles, "Use at least 8 characters.", and the callout "This also signs you out on your other devices." |
+| Type `abc` and `abd`, submit | "Use at least 8 characters." under New password; nothing is sent. |
+| Type a good password and a different confirmation | "The passwords don't match." under Confirm; nothing is sent. |
+| Type `password1234` in both | Django refuses it: "This password is too common." under New password. |
+| Type a good password in both and submit | The toast "Password changed. You're logged in." and /home with your @username in the rail. |
+| Open the same reset link again | "This link has expired" with **Request a new link** (→ /forgot-password), before any password field is shown. |
+| Log out and log in with the new password | /home. The old password says "That email and password don't match." |
+| Phone width (F12 → device toolbar, 390 px) on every page above | No sideways scrolling; the Resend button, the callouts and the form fit the card. |
+
+#### Step 9: The emails on disk, and where every link points
+
+**Where:** First window 1 (restart the server), then window 2 (from the repo root).
+
+**What this does:** Restarts the server so emails are written to files instead of the terminal, then
+inspects the newest email file to prove every link points at the frontend (`localhost:3000`) and never
+at the backend.
+
+Stop `runserver` in window 1 (`Ctrl+C`) and start it so that emails go to files (in `backend\`, venv
+active):
+
+```powershell
+$env:EMAIL_PROVIDER = "file"; python manage.py runserver
+```
+
+Sign up or request a reset in the browser (so an email is written), then in window 2 (repo root):
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+$f = Get-ChildItem backend\tmp\mail\*.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1   # the newest email file
+Select-String -Path $f.FullName -Pattern '^(From|To|Subject):' | ForEach-Object { $_.Line }                  # who, to whom, subject
+Select-String -Path $f.FullName -Pattern '(href|src)="[^"]+"' -AllMatches | ForEach-Object { $_.Matches.Value -replace '(="https?://[^/"]+).*', '$1…' } | Sort-Object -Unique   # every link and the logo, shortened to the origin
+Select-String -Path $f.FullName -Pattern 'https?://[^ "<]+' -AllMatches | ForEach-Object { $_.Matches.Value -replace '^(https?://[^/]+).*', '$1' } | Sort-Object -Unique           # every URL in the file, shortened to the origin
+git check-ignore "backend/tmp/mail/$($f.Name)"                                                                # prints the path if git ignores it
+```
+
+**You should see** (the subject depends on which email you triggered; the address and file name
+differ, and the order of the `href`/`src` lines may differ):
+
+```text
+Subject: [Rumor Zero] Reset your password
+From: Rumor Zero <no-reply@example.com>
+To: part2-012510@example.test
+href="http://localhost:3000…
+src="http://localhost:3000…
+http://localhost:3000
+backend/tmp/mail/20261006-192649-135804298251632.log
+```
+
+- `From` is your `DEFAULT_FROM_EMAIL`. Every `href`, the logo `src` and every URL in the file start
+  with `http://localhost:3000` (your `FRONTEND_ORIGIN`): there is no backend address in any email.
+- `git check-ignore` prints the path: emails written by `EMAIL_PROVIDER=file` are never committed.
+  This is the folder the E2E tests read.
+- Stop this server and start a normal `python manage.py runserver` again if you want the console
+  emails back (in PowerShell: `Remove-Item Env:EMAIL_PROVIDER` first, or open a new window).
+
+**If it differs:** if `Get-ChildItem` says it cannot find the path, the server was not started with
+`$env:EMAIL_PROVIDER = "file"`, or no email was triggered yet; start it as above and sign up again.
+
+#### Step 10: Automated frontend checks
+
+**Where:** A PowerShell window in `frontend\` (stop `npm run dev` in window 3 first with `Ctrl+C`,
+then reuse window 3).
+
+**What this does:** Runs the frontend linters, type check, unit tests and a production build.
+
+```powershell
+npm run lint             # no output after the command line
+npm run lint:tokens      # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
+npm run typecheck        # no output after the command line
+npm run format:check     # All matched files use Prettier code style!
+npm test                 # Test Files  65 passed (65) / Tests  708 passed (708)
+npm run build
+```
+
+**You should see:** the messages in the comments (`npm run lint` and `npm run typecheck` print
+nothing after the command line; that means success). `npm run build` takes a minute and ends with a
+route list that gains these lines (the two key pages are dynamic, because the key is a route
+parameter):
+
+```text
+├ ○ /forgot-password
+├ ƒ /reset-password/[key]
+├ ○ /verify-email
+└ ƒ /verify-email/[key]
+```
+
+- The new screens have tests for every state: verifying, verified, already verified, expired and
+  failed; the idle and sent forms; the expired, checking, mismatch and weak-password states; the
+  resend countdown; New post gating (both copies, with their own hint ids); the banner's Resend; the
+  sign-up redirect with and without `?next=`; the two-tab "user-changed" message.
+
+#### Step 11: The E2E tests, dev mode and CI mode
+
+**Where:** The same PowerShell window in `frontend\` (window 3). Stop `runserver` in window 1 first.
+
+**What this does:** Playwright drives a real browser through the whole flow. It starts its own
+servers, so window 1 must be stopped to free the ports.
+
+Stop `runserver` too: Playwright then starts its own Django with an in-memory cache, and with
+`EMAIL_PROVIDER=file`.
+
+```powershell
+npm run test:e2e
+```
+
+**You should see** (takes about half a minute; the order of the tests and the timings differ):
+
+```text
+Running 15 tests using 6 workers
+
+  ok   4 [chromium] › e2e/email-flows.spec.ts:101:5 › an unknown address gets the same page and no email (6.0s)
+  ...
+  ok   6 [chromium] › e2e/email-flows.spec.ts:53:5 › forgot password → read the email → reset → logged in → log in with the new password (18.3s)
+
+  15 passed (29.2s)
+```
+
+- Eleven tests are Parts 0C and 1 (`auth.spec.ts` now continues from `/verify-email` to `/home`). The
+  four new ones are in `email-flows.spec.ts`:
+  1. sign up → New post is `aria-disabled` → read the email from `backend/tmp/mail` → open the link
+     → verified → "Start posting" → the banner is gone and New post is enabled → the used link says
+     "already verified";
+  2. forgot password → read the email → a mismatch error → reset → logged in → log out → the old
+     password fails and the new one works, and the used link is expired;
+  3. an unknown address gets the same page and no email;
+  4. dead reset and verification links show their expired states.
+- The first request of a cold Django used to fail now and then with a 500 when several sign-ups
+  arrived together; that is fixed (MEMORY, 2026-10-07).
+
+Then the way CI runs it (a production build, tested with `next start`):
+
+```powershell
+npm run build
+$env:CI = "1"
+npm run test:e2e         # 15 passed, this time against `next start`
+Remove-Item Env:CI
+```
+
+**You should see:** `15 passed` again. (`Remove-Item Env:CI` switches CI mode off again.)
+
+#### Step 12: Repository checks
+
+**Where:** Terminal window 2 (any PowerShell window; the first command moves to the repo root).
+
+**What this does:** Confirms nothing you should not commit (design files, env files, mail logs) is
+pending in git. These are read-only git commands.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+git status --short design                          # prints nothing: design\ is untouched
+git status --short | Select-String '\.env|tmp/'    # prints nothing: no env file and no mail file is a candidate for a commit
+git status --short backend/templates               # ?? backend/templates/ (new, until you commit it)
+```
+
+**You should see:** nothing from the second and third lines of output (the comments explain), and
+`?? backend/templates/` from the last command until you commit it.
+
+#### Step 13: CI on GitHub (after you push)
+
+**Where:** Browser.
+
+**What this does:** Checks that the automatic tests also pass on GitHub once you have pushed.
+
+| URL | Expect |
+|---|---|
+| Your repository's **Actions** tab on github.com | A "CI" run for your push with three green jobs |
+
+- No workflow change was needed: Playwright sets `EMAIL_PROVIDER=file` for the Django it starts, and
+  the process environment wins over the `backend/.env` the job copies from `.env.example`.
+- The agent couldn't run CI: only you push.
+
+#### Step 14: Stop and clean up
+
+**Where:** Every terminal window, plus the repo root for the last commands.
+
+**What this does:** Stops the servers and removes the temporary files these steps created.
+
+- Stop the servers: `Ctrl+C` in each window (leftover `next dev`: step 12 of Part 1).
+- Delete the helper files:
+
+  ```powershell
+  Remove-Item $env:TEMP\rz-signup.json, $env:TEMP\rz-verify.json, $env:TEMP\rz-forged.json, $env:TEMP\rz-ask.json, $env:TEMP\rz-known.txt, $env:TEMP\rz-unknown.txt, $env:TEMP\rz-login.json, $env:TEMP\rz-reset.json, $env:TEMP\rz-other.txt, $env:TEMP\rz-new.txt
+  ```
+
+- `backend\tmp\mail\` fills up with `.log` files from `EMAIL_PROVIDER=file` and the E2E runs. It is
+  git-ignored; delete the folder whenever you like.
+- The test accounts stay in your local database: `part2_…` from these steps, the E2E's `verify_…`
+  and `reset_…`, and the agent's `shot_…`/`p_shot_…`. Delete them in Django Admin → Users if you
+  like. `docker compose down -v` (repo root) wipes the whole local database, which is destructive.
+- Stop the containers and keep the data: `docker compose down` (repo root).

@@ -86,7 +86,7 @@ not let the review expand the part's scope without user approval.
 | 0D | Brand assets & Logo component | 0B | [x] Done (2026-10-01) |
 | 0C | App shell, API relay, API client, CI | 0A, 0B, 0D | [x] Done (2026-10-01) |
 | 1 | Auth core: sign up, log in, tokens, log out | 0C | [x] Done (2026-10-03) |
-| 2 | Email verification & password reset | 1 | [ ] |
+| 2 | Email verification & password reset | 1 | [x] Done (2026-10-07) |
 | 3 | Continue with Google | 1 | [ ] |
 | 4 | Posts: composer + Recent feed | 1 | [ ] |
 | 5 | Post detail, sharing, deletion, status polling | 4 | [ ] |
@@ -489,7 +489,7 @@ All three jobs run on test values only; no secrets.
 ---
 
 ## Part 2: Email verification & password reset
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-07)
 **Goal:** the complete email flows from guide §4.3: verification (24-hour links), resend, and forgot/reset password with no account enumeration.
 **Depends on:** 1.
 **Stitch files to convert:** `a4_verify_email`, `a5_forgot_password`, `a6_reset_password`.
@@ -510,14 +510,30 @@ All three jobs run on test values only; no secrets.
 - `/reset-password/[key]`: form; mismatch, weak and expired states; success leads to a logged-in session.
 - Resend action in the UnverifiedBanner.
 
-**API endpoints:** allauth `…/auth/email/verify`, `…/auth/email/verify/resend`, `…/auth/password/request`, `…/auth/password/reset`.
+**API endpoints:** allauth `…/auth/email/verify` (POST), `…/auth/password/request` (POST), `…/auth/password/reset` (GET key check, POST) · ours: `POST /api/v1/me/verification-email/` (allauth's `…/auth/email/verify/resend` is the code-flow view and stays closed).
 
 **Acceptance criteria**
-- [ ] The console link verifies the account; the banner disappears; verified-only actions work
-- [ ] A link older than 24 h, or one already used, shows the expired state with a working resend
-- [ ] Forgot-password responses are identical for existing and non-existing emails (status and body)
-- [ ] Reset logs you in, and previously issued refresh tokens stop working
-- [ ] Emails come from `DEFAULT_FROM_EMAIL` and link to `FRONTEND_ORIGIN` only (including the logo image URL)
+- [x] The console link verifies the account; the banner disappears; verified-only actions work
+- [x] A link older than 24 h, or one already used, shows the expired state with a working resend
+- [x] Forgot-password responses are identical for existing and non-existing emails (status and body)
+- [x] Reset logs you in, and previously issued refresh tokens stop working
+- [x] Emails come from `DEFAULT_FROM_EMAIL` and link to `FRONTEND_ORIGIN` only (including the logo image URL)
+
+**Deviations and decisions (plan approved 2026-10-07; built 2026-10-07; recorded in ARCHITECTURE §3/§7/§9/§10/§12/§14):**
+- **User decisions (2026-10-06):**
+  - Sign-up lands on `/verify-email` (a4), not `/home`; "Continue browsing read-only" goes on to `safeNextPath(?next=) ?? /home`.
+  - New post is `aria-disabled` for unverified users (rail and bottom tab), and a click shows a toast.
+  - Verification emails: 1 per 60 s per address plus 10 resends a day; reset requests: allauth's per-minute limits plus 10 a day per address and 50 a day per IP.
+  - An unknown address gets no email (`ACCOUNT_EMAIL_UNKNOWN_ACCOUNTS=False`); the answer is identical.
+- **Resend is our own endpoint** (`POST /api/v1/me/verification-email/`: 204 · 409 `already_verified` · 429 `verification_email_throttled`), not the task's `auth/email/verify/resend`, which is allauth's code-mode view.
+- **Daily caps are separate allauth actions** (`confirm_email_daily`, `reset_password_daily`): allauth keys a rate's history by action and "per" type only, so a combined rate pruned the entries the day rate needs. Rule: never repeat a "per" type inside one action.
+- **Verify is always anonymous** and its success (allauth: 401 with nobody logged in) is normalised to 200; the link never logs anyone in. The reset key has a header-based pre-check (`GET auth/password/reset` + `X-Password-Reset-Key`, forwarded by the relay and denied in Sentry), so a dead link shows the expired state before anyone types a password.
+- **Reset links last 24 h** (`PASSWORD_RESET_TIMEOUT`, Django's default is 3 days). A reset deletes this browser's old session; other sessions die on their next refresh (changed auth hash).
+- **Emails:** templates in `backend/templates/account/email/` (the `allauth` app precedes ours, so app templates would be shadowed); text + HTML, logo from `FRONTEND_ORIGIN/brand/email-logo.png`, no backend host, hex values copied from the Stitch tokens. `AccountAdapter.add_message()` is a no-op (it would set a `messages` cookie).
+- **Found while testing:** allauth defers `jwt` and `cryptography`; two simultaneous first sign-ins on a cold server raced inside the import and answered 500. `AccountsConfig.ready()` now imports them (`test_startup.py`). The bug is older than this part (Part 1's E2E got lucky with fewer parallel sign-ups).
+- **Frontend:** `signInWithToken` and a `user-changed` broadcast (the other tabs reload `/me` once, with no echo); `next-path` blocks `/reset-password` and `/verify-email/…`; key pages set `noindex` and `no-referrer`. The a4/a5/a6 emblem tiles, state switcher, "Simulate instant link click", "Secured Node", "Protocol standard", audit IDs and fabricated emails are dropped (ANALYSIS b-5); a6's "12 characters" is 8. "Forgot password?" sits in a3's options row under the password field (Stitch's place for it), not in the label row. The waiting Resend button is a4's tinted state.
+- **Admin:** no "mark email verified" action (Part 10 follow-up). Out of scope: marking the email verified on a reset, a password-changed email (Part 14), `clearsessions` (Part 9/17). A provider failure on resend still answers 204 (the adapter swallows send errors, as at sign-up).
+- **Verified:** see HANDOFF (backend 577 tests, frontend 708, E2E 15 in dev and CI mode, curl and browser checks recorded in `docs/test-command.md` Part 2). CI itself runs when you push.
 
 **Required tests:** verify flow; expiry with time control; resend throttle; reset flow, token revocation and enumeration-safe responses; email subject, from and link host; frontend state components; E2E: sign up → read the email file → open the link → verified → post button enabled.
 

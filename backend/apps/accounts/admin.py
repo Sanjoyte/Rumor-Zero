@@ -63,7 +63,8 @@ class UserAdmin(BaseUserAdmin):
     )
     # is_staff and groups are derived from role/is_superuser on save. If the form edited them,
     # the admin's save_related would overwrite that sync. The remaining state fields get their own
-    # logged actions in Parts 2, 10, 11C and 14B.
+    # logged actions in Parts 10, 11C and 14B (a "mark email verified" action joins them in 10;
+    # Part 2 adds none, since allauth's email_confirmed signal sets is_email_verified).
     readonly_fields = (
         "is_staff",
         "groups",

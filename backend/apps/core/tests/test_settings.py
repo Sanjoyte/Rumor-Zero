@@ -369,3 +369,29 @@ def test_email_config_for_each_provider(tmp_path):
         email_config("brevo", base_dir=tmp_path, brevo_api_key=" ")
     with pytest.raises(ImproperlyConfigured, match="EMAIL_PROVIDER must be one of"):
         email_config("smtp", base_dir=tmp_path, brevo_api_key="")
+
+
+def test_email_limits_and_enumeration_settings():
+    from allauth.account import app_settings as account_settings
+    from allauth.core.internal.ratelimit import Rate, parse_rates
+
+    limits = account_settings.RATE_LIMITS
+    day, minute = 86400, 60
+    assert parse_rates(limits["confirm_email"]) == [Rate(1, 60, "key")]
+    assert parse_rates(limits["confirm_email_daily"]) == [Rate(10, day, "key")]
+    assert parse_rates(limits["reset_password"]) == [Rate(20, minute, "ip"), Rate(5, minute, "key")]
+    assert parse_rates(limits["reset_password_daily"]) == [
+        Rate(50, day, "ip"),
+        Rate(10, day, "key"),
+    ]
+    assert parse_rates(limits["reset_password_from_key"]) == [Rate(20, minute, "ip")]
+    # allauth keeps one history per action and "per" type, so a repeated type would let the
+    # short rate prune what the long one needs.
+    for action, rates in limits.items():
+        pers = [rate.per for rate in parse_rates(rates)]
+        assert len(pers) == len(set(pers)), action
+
+    assert project_settings.ACCOUNT_EMAIL_UNKNOWN_ACCOUNTS is False
+    assert project_settings.ACCOUNT_PREVENT_ENUMERATION is True
+    assert project_settings.PASSWORD_RESET_TIMEOUT == 24 * 3600
+    assert project_settings.ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS == 1

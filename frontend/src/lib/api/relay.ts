@@ -19,6 +19,8 @@ export const REQUEST_HEADER_ALLOWLIST = [
   "cookie",
   "origin",
   "x-requested-with",
+  // The reset page's pre-check sends the key from the link in this header (Part 2).
+  "x-password-reset-key",
   "if-none-match",
   "if-modified-since",
   "user-agent",

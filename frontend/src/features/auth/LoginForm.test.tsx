@@ -51,6 +51,15 @@ describe("LoginForm", () => {
     expect(api.login).not.toHaveBeenCalled();
   });
 
+  it("links to the forgot-password page", () => {
+    const { session } = testSession();
+    renderWithSession(<LoginForm />, session);
+    expect(screen.getByRole("link", { name: "Forgot password?" })).toHaveAttribute(
+      "href",
+      "/forgot-password",
+    );
+  });
+
   it("logs in and goes to /home", async () => {
     const { session, api } = testSession();
     renderWithSession(<LoginForm />, session);

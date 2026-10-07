@@ -33,6 +33,9 @@ export const LOG_IN: NavItem = { label: "Log in", icon: "login", href: "/login" 
 export const NEW_POST = { label: "New post", icon: "edit_note" } as const;
 export const LOG_OUT = { label: "Log out", icon: "logout" } as const;
 
+/** Read out with the New post button while the email is unverified (the button is aria-disabled). */
+export const NEW_POST_BLOCKED_HINT = "Verify your email to post.";
+
 export function profileItem(user: ShellUser): NavItem {
   return { label: "Profile", icon: "person", href: `/u/${user.username}` };
 }

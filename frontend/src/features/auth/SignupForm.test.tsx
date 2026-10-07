@@ -124,7 +124,7 @@ describe("SignupForm", () => {
     expect(screen.getByText("Strong")).toBeInTheDocument();
   });
 
-  it("signs up with the normalised username and the token, then goes to /home", async () => {
+  it("signs up with the normalised username and the token, then goes to /verify-email", async () => {
     const { session, api } = testSession();
     renderWithSession(<SignupForm siteKey={SITE_KEY} />, session);
     await waitFor(() => expect(widget).not.toBeNull());
@@ -137,7 +137,48 @@ describe("SignupForm", () => {
       password: "correct-horse-battery-42",
       turnstileToken: "token-1",
     });
-    await waitFor(() => expect(replace).toHaveBeenCalledWith("/home"));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/verify-email"));
+    expect(replace).toHaveBeenCalledTimes(1); // the redirect hook stayed out of the way
+  });
+
+  it.each([
+    ["/signup?next=%2Fsettings%3Ftab%3Demail", "/verify-email?next=%2Fsettings%3Ftab%3Demail"],
+    ["/signup?next=%2F%2Fevil.com", "/verify-email"],
+    ["/signup?next=%2Freset-password%2Fabc", "/verify-email"],
+  ])("carries a safe ?next= to /verify-email (%s)", async (address, expected) => {
+    window.history.pushState({}, "", address);
+    const { session } = testSession();
+    renderWithSession(<SignupForm siteKey={SITE_KEY} />, session);
+    await waitFor(() => expect(widget).not.toBeNull());
+    solveTurnstile();
+    const user = await fill();
+    await user.click(submitButton());
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(expected));
+    expect(replace).toHaveBeenCalledTimes(1);
+    window.history.pushState({}, "", "/");
+  });
+
+  it("sends a visitor who is already logged in to ?next= or /home, not /verify-email", async () => {
+    window.history.pushState({}, "", "/signup?next=%2Fsettings");
+    const { session } = testSession({}, { loggedIn: true });
+    renderWithSession(<SignupForm siteKey={SITE_KEY} />, session);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/settings"));
+    window.history.pushState({}, "", "/");
+  });
+
+  it("goes back to normal after a failed attempt", async () => {
+    const { session } = testSession({
+      signup: vi.fn(async () => {
+        throw allauthError(400, [{ code: "x", message: "Nope.", param: "email" }]);
+      }),
+    });
+    renderWithSession(<SignupForm siteKey={SITE_KEY} />, session);
+    await waitFor(() => expect(widget).not.toBeNull());
+    solveTurnstile();
+    const user = await fill();
+    await user.click(submitButton());
+    expect(await screen.findByText("Nope.")).toBeInTheDocument();
+    expect(replace).not.toHaveBeenCalled();
   });
 
   it("shows the loading state while signing up", async () => {

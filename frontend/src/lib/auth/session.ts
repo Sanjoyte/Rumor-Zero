@@ -13,7 +13,8 @@
  * - A refresh answered 400/401/403/410 means the session is gone (anonymous). A network error or
  *   5xx is transient: the state stays and the refresh is retried after 2 s, 5 s, 15 s, then every
  *   30 s while the tab is visible.
- * - Login and logout are broadcast to the other tabs.
+ * - Login and logout are broadcast to the other tabs, and so is "the user changed" (the email got
+ *   verified), which makes the other authenticated tabs reload `/me` (and nothing else).
  */
 import { ApiError } from "@/lib/api/client";
 import type { Me } from "@/lib/api/types";
@@ -40,7 +41,7 @@ export interface TokenStore {
   set(token: string | null): void;
 }
 
-export type AuthMessage = { type: "login" } | { type: "logout" };
+export type AuthMessage = { type: "login" } | { type: "logout" } | { type: "user-changed" };
 
 export interface AuthChannel {
   post(message: AuthMessage): void;
@@ -158,13 +159,14 @@ export class AuthSession {
     this.deps.channel?.post({ type: "logout" });
   }
 
-  /** Load `/me` again, e.g. after the profile changed. */
+  /** Sign in with an access token that another call returned (the password reset logs in). */
+  async signInWithToken(token: string): Promise<void> {
+    await this.signIn(token);
+  }
+
+  /** Load `/me` again, e.g. after the profile changed, and tell the other tabs to do the same. */
   async reloadMe(): Promise<void> {
-    const token = this.deps.store.get();
-    if (!token) return;
-    const generation = this.generation;
-    const user = await this.deps.api.fetchMe(token);
-    if (generation === this.generation) this.setState({ status: "authenticated", user });
+    if (await this.loadMe()) this.deps.channel?.post({ type: "user-changed" });
   }
 
   dispose(): void {
@@ -174,6 +176,17 @@ export class AuthSession {
   }
 
   // ---------- internals ----------
+
+  /** Load `/me` with the current token. Never posts, so a tab reacting to a message can't echo. */
+  private async loadMe(): Promise<boolean> {
+    const token = this.deps.store.get();
+    if (!token) return false;
+    const generation = this.generation;
+    const user = await this.deps.api.fetchMe(token);
+    if (generation !== this.generation) return false;
+    this.setState({ status: "authenticated", user });
+    return true;
+  }
 
   private async start(): Promise<void> {
     if (!this.deps.hasHint()) {
@@ -283,11 +296,19 @@ export class AuthSession {
   }
 
   private onMessage(message: AuthMessage): void {
-    if (message.type === "logout") {
-      this.becomeAnonymous();
-    } else if (this.state.status !== "authenticated") {
-      // Another tab logged in, so the cookie (and the hint) now exist.
-      void this.refresh();
+    switch (message.type) {
+      case "logout":
+        this.becomeAnonymous();
+        break;
+      case "login":
+        // Another tab logged in, so the cookie (and the hint) now exist.
+        if (this.state.status !== "authenticated") void this.refresh();
+        break;
+      case "user-changed":
+        // Only a signed-in tab has anything to reload; an anonymous one must not treat this as a
+        // login. A failure is harmless: the state stays and the next refresh catches up.
+        if (this.state.status === "authenticated") this.loadMe().catch(() => {});
+        break;
     }
   }
 

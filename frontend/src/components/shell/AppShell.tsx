@@ -16,6 +16,12 @@ export interface AppShellProps {
   children: ReactNode;
   /** Opens the composer (Part 4). */
   onNewPost?: () => void;
+  /** New post was pressed while the email is unverified: explain why nothing opens. */
+  onNewPostBlocked?: () => void;
+  /** Resend in the unverified banner (the layout owns the request and the countdown). */
+  onResend?: () => void;
+  resendSecondsLeft?: number;
+  resending?: boolean;
   /** Adds Log out to the user menu and the phone account sheet. */
   onLogout?: () => void;
   /** Overrides the current path for the active item (the `/dev/shell` preview). */
@@ -31,6 +37,10 @@ export function AppShell({
   status,
   children,
   onNewPost,
+  onNewPostBlocked,
+  onResend,
+  resendSecondsLeft,
+  resending,
   onLogout,
   activePath,
 }: AppShellProps) {
@@ -56,6 +66,7 @@ export function AppShell({
         loading={loading}
         pathname={pathname}
         onNewPost={onNewPost}
+        onNewPostBlocked={onNewPostBlocked}
         actions={actions}
       />
       <TopBar user={shownUser} loading={loading} />
@@ -64,10 +75,13 @@ export function AppShell({
         loading={loading}
         pathname={pathname}
         onNewPost={onNewPost}
+        onNewPostBlocked={onNewPostBlocked}
         actions={actions}
       />
       <main id="main" className="pt-16 pb-16 md:pb-0 md:pl-16 xl:pl-64">
-        {shownUser && !shownUser.is_email_verified && <UnverifiedBanner />}
+        {shownUser && !shownUser.is_email_verified && (
+          <UnverifiedBanner onResend={onResend} secondsLeft={resendSecondsLeft} busy={resending} />
+        )}
         {children}
       </main>
     </div>

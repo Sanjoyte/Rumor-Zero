@@ -22,6 +22,10 @@ function renderShell(props: {
   user: ShellUser | null;
   status?: "loading" | "anonymous" | "authenticated";
   onNewPost?: () => void;
+  onNewPostBlocked?: () => void;
+  onResend?: () => void;
+  resendSecondsLeft?: number;
+  resending?: boolean;
   onLogout?: () => void;
 }) {
   render(
@@ -153,6 +157,101 @@ describe("AppShell, logged in", () => {
     document.body.innerHTML = "";
     renderShell({ user });
     expect(screen.queryByText(/Verify your email/)).toBeNull();
+  });
+
+  describe("while the email is unverified", () => {
+    const unverified: ShellUser = { ...user, is_email_verified: false };
+
+    it("keeps New post focusable but aria-disabled, with a hint for each copy", () => {
+      const { sidebar, bottomNav } = renderShell({ user: unverified });
+      const rail = within(sidebar).getByRole("button", { name: "New post" });
+      const tab = within(bottomNav).getByRole("button", { name: "New post" });
+      for (const button of [rail, tab]) {
+        expect(button).toHaveAttribute("aria-disabled", "true");
+        expect(button).not.toBeDisabled();
+        expect(button).toHaveClass("aria-disabled:cursor-not-allowed", "aria-disabled:opacity-60");
+        expect(button.className).not.toMatch(/(^|\s)hover:/);
+        button.focus();
+        expect(button).toHaveFocus();
+      }
+      // Both copies are in the DOM, so each needs its own hint id.
+      const hints = [rail, tab].map((button) => button.getAttribute("aria-describedby"));
+      expect(hints[0]).toBeTruthy();
+      expect(hints[1]).toBeTruthy();
+      expect(hints[0]).not.toBe(hints[1]);
+      expect(rail).toHaveAccessibleDescription("Verify your email to post.");
+      expect(tab).toHaveAccessibleDescription("Verify your email to post.");
+    });
+
+    it("calls onNewPostBlocked, not onNewPost, from both copies", async () => {
+      const onNewPost = vi.fn();
+      const onNewPostBlocked = vi.fn();
+      const { sidebar, bottomNav } = renderShell({ user: unverified, onNewPost, onNewPostBlocked });
+      await userEvent.click(within(sidebar).getByRole("button", { name: "New post" }));
+      await userEvent.click(within(bottomNav).getByRole("button", { name: "New post" }));
+      expect(onNewPostBlocked).toHaveBeenCalledTimes(2);
+      expect(onNewPost).not.toHaveBeenCalled();
+    });
+
+    it("works with the keyboard", async () => {
+      const onNewPostBlocked = vi.fn();
+      const { sidebar } = renderShell({ user: unverified, onNewPostBlocked });
+      within(sidebar).getByRole("button", { name: "New post" }).focus();
+      await userEvent.keyboard("{Enter}");
+      expect(onNewPostBlocked).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not crash without a blocked handler", async () => {
+      const { sidebar } = renderShell({ user: unverified });
+      await userEvent.click(within(sidebar).getByRole("button", { name: "New post" }));
+    });
+
+    it("becomes a normal button once the user is verified", async () => {
+      const onNewPost = vi.fn();
+      const onNewPostBlocked = vi.fn();
+      const { sidebar, bottomNav } = renderShell({ user, onNewPost, onNewPostBlocked });
+      for (const nav of [sidebar, bottomNav]) {
+        const button = within(nav).getByRole("button", { name: "New post" });
+        expect(button).not.toHaveAttribute("aria-disabled");
+        expect(button).not.toHaveAttribute("aria-describedby");
+        await userEvent.click(button);
+      }
+      expect(onNewPost).toHaveBeenCalledTimes(2);
+      expect(onNewPostBlocked).not.toHaveBeenCalled();
+      expect(screen.queryByText("Verify your email to post.")).toBeNull();
+    });
+
+    it("has no Resend in the banner unless the layout provides one", () => {
+      renderShell({ user: unverified });
+      expect(screen.queryByRole("button", { name: /Resend/ })).toBeNull();
+    });
+
+    it("shows Resend in the banner and calls it", async () => {
+      const onResend = vi.fn();
+      renderShell({ user: unverified, onResend, resendSecondsLeft: 0 });
+      const button = within(screen.getByRole("main")).getByRole("button", { name: "Resend link" });
+      expect(button).toBeEnabled();
+      await userEvent.click(button);
+      expect(onResend).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows the countdown and disables Resend while it runs", async () => {
+      const onResend = vi.fn();
+      renderShell({ user: unverified, onResend, resendSecondsLeft: 42 });
+      const button = within(screen.getByRole("main")).getByRole("button", {
+        name: "Resend link (42s)",
+      });
+      expect(button).toBeDisabled();
+      await userEvent.click(button);
+      expect(onResend).not.toHaveBeenCalled();
+    });
+
+    it("shows the busy state while a resend is running", () => {
+      renderShell({ user: unverified, onResend: vi.fn(), resending: true });
+      expect(
+        within(screen.getByRole("main")).getByRole("button", { name: "Resend link" }),
+      ).toHaveAttribute("aria-busy", "true");
+    });
   });
 
   it("links the top-bar avatar to the profile", () => {

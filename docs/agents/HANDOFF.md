@@ -6,21 +6,58 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **2 (email verification & password reset)**, planned and approved, **not implemented**.
-  Parts 0A, 0B, 0D, 0C and 1 are done; Part 1 CI green (user-reported 2026-10-06).
-- **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash) from 2026-10-06. `backend/.venv` and
-  `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after saving the plan; implementation starts in a new session)
-- **Phase:** plan approved; no code written, no setup commands run, `task.md` untouched.
+- **Part:** none. **Part 2 (email verification & password reset) is done** (2026-10-07; implemented
+  from the approved plan, all required tests and checks green, `task.md` updated). Parts 0A, 0B, 0D,
+  0C, 1 and 2 are done. Part 1 CI is green (user-reported 2026-10-06); **Part 2 CI has not run yet**.
+- **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and `frontend/node_modules`
+  exist there.
+- **Owner:** none (Claude stopped after finishing Part 2; Part 3 is not started).
+- **Phase:** done, uncommitted. The user reviews and commits.
 - **Approved plan:**
   [`docs/agents/plans/part-2-email-verification-reset.md`](plans/part-2-email-verification-reset.md)
-  (approved by the user 2026-10-07)
+  (status line now says IMPLEMENTED)
 - **Previous plans:** [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md) (done
   2026-10-06), [`part-1-auth-core.md`](plans/part-1-auth-core.md) (done 2026-10-03)
-- **Last updated:** 2026-10-07 by Claude (Opus 5.5), Part 2 planning
+- **Last updated:** 2026-10-07 by Claude (Sonnet 5.5), Part 2 implementation
 
 ## Completed checkpoints
 
+- 2026-10-07 (Claude, Sonnet 5.5): **Part 2 implemented** (uncommitted). Started from HEAD `26ded31`
+  ("Part 2 plan", committed by the user), a clean tree that matched this file.
+  - **Backend:** `rumor_zero/settings.py` (limits `confirm_email` 1/60s, `confirm_email_daily`,
+    `reset_password` pinned, `reset_password_daily`, `reset_password_from_key`;
+    `ACCOUNT_EMAIL_UNKNOWN_ACCOUNTS=False`, `ACCOUNT_PREVENT_ENUMERATION=True`,
+    `PASSWORD_RESET_TIMEOUT=86400`), `rumor_zero/sentry.py` (+`x-password-reset-key`);
+    `apps/accounts/`: `middleware.py` (verify/request/reset on the allow-list, always-anonymous set,
+    verify 401→200, reset daily cap), `adapter.py` (`add_message` no-op, email context), new
+    `services.py` (`mark_email_verified`, `resend_verification_email`), `signals.py`, `apps.py`
+    (receiver + preload of allauth's deferred `jwt`/`cryptography`), `views.py`+`urls.py`
+    (`POST /api/v1/me/verification-email/`), `admin.py` (comment); `backend/templates/account/email/`
+    (11 files: text + HTML, base layout, sign-up and verification variants, reset); 5 new test files
+    (`test_email_verification`, `test_resend_verification`, `test_password_reset`, `test_emails`,
+    `test_startup`) plus updated `test_middleware`, `test_tokens` (the `clock` fixture moved to
+    `tests/conftest.py`), `test_settings`, `test_sentry`.
+  - **Frontend:** `lib/auth/{auth-api,session,AuthProvider,next-path,email-key}.ts(x)`,
+    `lib/api/relay.ts` (+`x-password-reset-key`), `features/auth/{useResendVerification,
+    VerifyEmailPending,VerifyEmailStatus,ForgotPasswordForm,ResetPasswordForm}`, `LoginForm`
+    ("Forgot password?"), `SignupForm` + `useRedirectWhenLoggedIn` (`/verify-email`), `messages.ts`,
+    `components/shell/{AppShell,Sidebar,MobileNav,UnverifiedBanner,nav-items}` (New post gating,
+    banner Resend), `app/(app)/layout.tsx`, the four route files under `app/(auth)/`, tests next to
+    each; `e2e/{email-flows.spec.ts,helpers.ts,mailbox.ts}`, `e2e/auth.spec.ts`,
+    `playwright.config.ts` (`EMAIL_PROVIDER=file`).
+  - **Docs:** ARCHITECTURE §3/§7/§9/§10/§12/§14, `task.md` (criteria ticked, deviations, both status
+    spots), STRUCTURE, ENV_GUIDE (one sentence), MEMORY (three entries), the plan's status line and
+    `docs/test-command.md` (new "Part 2" section, 661 added lines, nothing else touched).
+  - No new dependency and no new env variable. No real env file was edited or read for its values.
+  - **Found and fixed on the way:** allauth defers `jwt` and `cryptography`; several simultaneous first
+    sign-ins on a cold server raced inside the import and answered 500 (3 of 4 cold-start E2E runs
+    failed before the fix, 5 of 5 passed after). `AccountsConfig.ready()` imports them; `test_startup.py`
+    pins it. The bug predates Part 2.
+  - **Deviations from the plan (all recorded in `task.md`):** "Forgot password?" sits in a3's options
+    row, not the label row; the waiting Resend button is a plain tinted `<button>` (the `Button` variants
+    can't be tinted without conflicting classes, and `cn` has no tailwind-merge); shared E2E helpers
+    in `e2e/helpers.ts` (auth.spec imports them); `test_startup.py` and the `ready()` preload were not
+    in the plan.
 - 2026-10-07 (Claude, Opus 5.5): **Part 2 planned and approved** (plan linked above). Started from
   HEAD `353ee19` (the Linux chore, committed by the user), a clean tree in sync with `origin/main`.
   Read-only research only: allauth 65.19.5, Django 5.2 and Next 16.3.8 source, plus a review pass
@@ -94,10 +131,56 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `353ee19` (Linux chore), in sync with `origin/main`, tree clean at the start of planning.
-  **Uncommitted** after planning: modified `docs/agents/HANDOFF.md` (this file); new
-  `docs/agents/plans/part-2-email-verification-reset.md`. Nothing else.
-- No code, config, env file or `task.md` changed. Nothing was started (no servers, no containers).
+- HEAD is `26ded31` ("Part 2 plan"). **Uncommitted:** the whole Part 2 implementation: 47 modified
+  files and 26 new paths (`git status --short`; new files are listed in the checkpoint above). Nothing else.
+- Docker (Postgres 18 + Redis) is up; no dev server is running; ports 3000/8000 are free.
+- Ignored artifacts from the checks: `backend/tmp/mail/*.log` (about 100 E2E and manual emails),
+  `frontend/test-results/`, `frontend/playwright-report/`.
+- The machine rebooted twice during the session (kernel changed to 7.0.0-38; the scratchpad and the
+  containers were wiped once). Nothing in the repo was lost; `docker compose up -d` brought the
+  database back.
+
+## Validation of Part 2 (2026-10-07)
+
+- **Backend** (`backend/`, venv, Postgres + Redis up), each exit 0:
+  - `python -m pytest` → **577 passed** (was 440); `pytest apps/accounts` → 463 passed; the five new
+    files 17 + 15 + 36 + 32 + 1.
+  - `ruff check .` → "All checks passed!"; `ruff format --check .` → "73 files already formatted".
+  - `makemigrations --check --dry-run` → "No changes detected" (no migration); `manage.py check` → no
+    issues.
+- **Frontend** (`frontend/`), each exit 0: `npm run lint`, `lint:tokens`, `typecheck`, `format:check`;
+  `npm test` → **65 files, 708 tests passed** (was 59 / 562); `npm run build` (the route list has
+  `○ /forgot-password`, `○ /verify-email`, `ƒ /reset-password/[key]`, `ƒ /verify-email/[key]`).
+- **E2E:** `npm run test:e2e` → **15 passed** (11 old + 4 in `email-flows.spec.ts`), dev mode, including
+  five cold-start runs in a row after the preload fix, and `CI=1` after `npm run build` (against
+  `next start`) → 15 passed.
+- **Manual, recorded in `docs/test-command.md` Part 2** (the Linux blocks of steps 3 to 7 and 9 were
+  extracted from the doc by script and run verbatim against live Django; the output matched the doc):
+  - curl against `runserver`: sign-up email (text + HTML, logo on `http://localhost:3000`, no backend
+    host); resend 429 → (61 s) 204; verification 200 with no cookies, `/me` verified, the same link
+    again and a forged key 400 `invalid_or_expired_key`, 403 without `Origin`/header, resend 409 once
+    verified, allauth's own `auth/email/verify/resend` 404; forgot-password answers for an existing and
+    an unknown address **identical** (status, headers, body; `diff`), one email only; 6th request a
+    minute → 429; malformed → 400; key check GET 200/400; weak password 400 and the key survives; reset
+    200 with both cookies and no refresh/session token in the body; **another browser's refresh → 400**,
+    this one's → 200; the same link again 400; old password 400, new 200; a forged 25-hour-old
+    verification key → 400.
+  - `EMAIL_PROVIDER=file`: `From`, every `href`/`src` and every URL start with `http://localhost:3000`;
+    the mail file is git-ignored.
+  - Browser (headless Chromium via Playwright scripts, screenshots next to Stitch a4/a5/a6 at 1280 and
+    390 px): sign-up → `/verify-email` with the countdown, banner + Resend, New post `aria-disabled`
+    with the toast (rail and phone tab), the verified/already-verified/expired states, forgot
+    idle/sent, reset weak/mismatch/expired; **0 px horizontal overflow** on every page at both widths.
+    Two visual fixes came out of it (long emails broke mid-word with `break-all`; the waiting Resend
+    button is now a4's tinted state).
+- **Not run on this machine:** the **Windows (PowerShell) blocks** of the new test-command section
+  (written from the Part 1 patterns: JSON through files, `curl.exe`, no `&&`), and CI on GitHub (the
+  user pushes). The `ruff`/`pytest` checks used the venv's own tools.
+- **One unexplained failure:** once, `pytest apps/accounts` printed `1 failed, 462 passed` while both
+  dev servers and Redis were running and Docker was about to be wiped by the reboot. The same command
+  then passed 17 times in a row (including 3 on a single CPU kept busy by a spinning loop), and the full
+  suite passed right before and after. The failing test's name was not captured. If it ever recurs,
+  run `pytest apps/accounts -q -x` and note the test.
 
 ## Validation of Part 1 (2026-10-03)
 
@@ -180,11 +263,11 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-1. **User:** review and commit the plan and this file.
-2. **Implement Part 2 from the approved plan**
-   ([`part-2-email-verification-reset.md`](plans/part-2-email-verification-reset.md)), starting at its
-   "Ordered steps" step 2 (step 1, saving the plan, is done). Fresh session, task.md's implement
-   model (Sonnet 5.5 · high); first `git status` and `docker compose up -d`.
+1. **User:** review the diff and the Part 2 section of `docs/test-command.md`, run what you like of it
+   (the Linux blocks are verified; the PowerShell ones are untested here), then commit, and push so CI
+   runs. Report the CI result (Part 2's E2E job reads emails from `backend/tmp/mail`).
+2. **Next part:** Part 3 (Continue with Google) or Part 4 (posts), from `task.md`. Fresh session
+   (`/clear`), first `git status` and `docker compose up -d`.
 
 ## Blockers or user decisions
 
@@ -194,18 +277,29 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 - User decisions for 0C (2026-10-01), in ARCHITECTURE §10: the reduced logged-out shell; phones get a
   top bar plus five bottom tabs with an account sheet; marketing links only to existing pages.
 
+## Follow-ups noted during Part 2 (still open)
+
+- **Part 10:** an admin action "mark email verified" (logged); make the admin refuse sessions created by
+  headless login (already listed for Part 10).
+- **Part 14:** a password-changed notification email, with change password; marking the address verified
+  on a reset (it proves the inbox) was not asked for and is not done.
+- **Part 9/17:** `clearsessions` (already listed).
+- **Part 16:**
+  - `GET auth/password/reset` answers `data.user` (id, email, username) to anyone holding a valid key;
+    the page ignores it. Consider stripping it in `AuthApiMiddleware`.
+  - A provider failure on resend still answers 204 (the adapter swallows send errors, as at sign-up).
+  - The verification email cooldown counts the sign-up email, and the banner's Resend has no countdown
+    on first load, so a first click right after sign-up gets a 429 toast. Harmless; a signal from the
+    sign-up response could pre-start it.
+  - Brevo's free tier is 300 emails a day (§12): the per-address and per-IP caps bound a single
+    abuser, not a crowd.
+- **Any django-allauth upgrade:** re-check `send_verification_email_for_user`, `get_address_for_user`,
+  the deferred-import preload (`TOKEN_LIBRARIES`) and the rate-limit key rule (MEMORY, 2026-10-07).
+
 ## Follow-ups noted during Part 1 (not done, per the part's scope)
 
-- **Part 2:**
-  - Add `auth/email/verify`, `auth/password/request`, `auth/password/reset` and the chosen resend
-    endpoint to `ALLAUTH_ENDPOINTS` in `apps/accounts/middleware.py` (`auth/email/verify/resend` is
-    allauth's code-flow resend).
-  - Replace the email templates: allauth's default text says "Hello from <backend host>!" (the only
-    link already uses `FRONTEND_ORIGIN`). Add "Forgot password?" on `/login`; Resend in
-    `UnverifiedBanner`.
-  - `EMAIL_PROVIDER=file` writes to `backend/tmp/mail/` (git-ignored) for the E2E mailbox.
-  - A password reset must end other sessions; refresh already fails after a password change
-    (session auth hash, `test_refresh_fails_once_the_password_changes`).
+- (Part 2 items done: the allow-list, the branded templates, "Forgot password?" on `/login`, Resend in
+  `UnverifiedBanner`, the file mailbox, and reset ending other sessions.)
 - **Part 3:** add `allauth.socialaccount` and `auth/provider/token` to the allow-list; make
   `google_connected` real. A *pending* social signup needs `X-Session-Token`, which the middleware
   strips and the relay doesn't forward: auto-signup must never pend, or add a short-lived flow cookie.

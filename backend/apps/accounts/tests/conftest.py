@@ -1,6 +1,9 @@
 """Helpers for the auth API tests: a same-site client, a fake Turnstile and token helpers."""
 
 import json
+import re
+import time
+from urllib.parse import unquote
 
 import pytest
 from allauth.headless.tokens.strategies.jwt import internal
@@ -17,6 +20,10 @@ LOGIN_URL = middleware.LOGIN_PATH
 SIGNUP_URL = middleware.SIGNUP_PATH
 REFRESH_URL = middleware.REFRESH_PATH
 LOGOUT_URL = middleware.LOGOUT_PATH
+VERIFY_URL = middleware.VERIFY_EMAIL_PATH
+PASSWORD_REQUEST_URL = middleware.PASSWORD_REQUEST_PATH
+PASSWORD_RESET_URL = middleware.PASSWORD_RESET_PATH
+RESEND_URL = "/api/v1/me/verification-email/"
 SITE_HEADERS = {"Origin": TEST_FRONTEND_ORIGIN, "X-Requested-With": "rumor-zero"}
 DUMMY_TURNSTILE_TOKEN = "XXXX.DUMMY.TOKEN.XXXX"
 STRONG_PASSWORD = "correct-horse-battery-staple-42"
@@ -39,6 +46,19 @@ def turnstile(monkeypatch):
     fake = FakeTurnstile()
     monkeypatch.setattr("apps.accounts.middleware.verify_turnstile", fake)
     return fake
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """Moves time.time() forward (`clock["seconds"] = 61`).
+
+    allauth's rate limits and Django's signed keys read time.time(). PyJWT's own expiry check uses
+    datetime and is unaffected.
+    """
+    real = time.time
+    offset = {"seconds": 0}
+    monkeypatch.setattr(time, "time", lambda: real() + offset["seconds"])
+    return offset
 
 
 @pytest.fixture
@@ -107,3 +127,18 @@ def assert_no_secrets(response, *secrets):
     for secret in secrets:
         if secret:
             assert secret not in response.content.decode()
+
+
+def email_links(message):
+    """Every http(s) URL in an email's plain-text body, in order."""
+    return re.findall(r"https?://\S+", message.body)
+
+
+def key_from_email(message, route):
+    """The key in the first `<origin>/<route>/<key>` link of an email, decoded once like Next does.
+
+    allauth percent-encodes the ":" of a verification key as %3A, and the frontend page decodes the
+    route parameter before it sends the key to the API.
+    """
+    link = next(url for url in email_links(message) if f"/{route}/" in url)
+    return unquote(link.split(f"/{route}/", 1)[1])

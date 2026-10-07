@@ -2,7 +2,9 @@
  * Where to go after logging in: the `?next=` value, but only if it stays on this site. Anything
  * that could leave the origin, or loop back into the auth pages or the API, gives null.
  */
-const BLOCKED_PREFIXES = ["/api/", "/login", "/signup"];
+// "/reset-password" and "/verify-email/" carry a single-use key in the path, so they never become a
+// `next` target ("/verify-email" itself, the "check your inbox" page, is fine).
+const BLOCKED_PREFIXES = ["/api/", "/login", "/signup", "/reset-password", "/verify-email/"];
 
 /** A backslash (browsers read "/\evil.com" as "//evil.com") or a control character. */
 function hasUnsafeCharacter(value: string): boolean {

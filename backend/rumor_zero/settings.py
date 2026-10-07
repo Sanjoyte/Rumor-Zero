@@ -189,13 +189,27 @@ ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS = 1
 ACCOUNT_LOGIN_ON_PASSWORD_RESET = True
 ACCOUNT_PRESERVE_USERNAME_CASING = False
 ACCOUNT_EMAIL_SUBJECT_PREFIX = "[Rumor Zero] "
-# allauth's defaults, pinned because ARCHITECTURE §3 documents them. Keyed on REMOTE_ADDR, which
-# ClientIPMiddleware sets; login_failed's "key" is the email, so it is also per account.
+# Keyed on REMOTE_ADDR, which ClientIPMiddleware sets; a "key" is the email, so it is also per
+# account. allauth keeps one history per action and "per" type, so a rate list must never repeat a
+# "per" type: "1/60s/key,10/1d/key" would let the minute rate prune what the day rate needs. The
+# daily caps are therefore separate actions (`*_daily`) that our own code consumes.
 ACCOUNT_RATE_LIMITS = {
     "login": "30/m/ip",
     "login_failed": "10/m/ip,5/300s/key",
     "signup": "20/m/ip",
+    # Verification emails: 1 per 60 s per address, plus a daily cap (resend service).
+    "confirm_email": "1/60s/key",
+    "confirm_email_daily": "10/1d/key",
+    # Reset requests: allauth's own per-minute limits, plus daily caps (AuthApiMiddleware).
+    "reset_password": "20/m/ip,5/m/key",
+    "reset_password_daily": "50/1d/ip,10/1d/key",
+    "reset_password_from_key": "20/m/ip",
 }
+# No email to unknown addresses, and every answer stays identical (no account enumeration).
+ACCOUNT_EMAIL_UNKNOWN_ACCOUNTS = False
+ACCOUNT_PREVENT_ENUMERATION = True
+# Django's default is 3 days; the reset page says "Links expire in 24 hours".
+PASSWORD_RESET_TIMEOUT = 24 * 3600
 ALLAUTH_TRUSTED_PROXY_COUNT = 0
 
 HEADLESS_ONLY = True
@@ -208,7 +222,8 @@ HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = REFRESH_TOKEN_SECONDS
 HEADLESS_JWT_ROTATE_REFRESH_TOKEN = True
 # Access tokens are checked by signature and expiry only, so they outlive a logout by ≤ 15 min.
 HEADLESS_JWT_STATEFUL_VALIDATION_ENABLED = False
-# Headless-only mode refuses to send the verification email without these (Part 2 adds the pages).
+# Headless-only mode refuses to send the verification email without these. The pages are
+# /verify-email/<key>, /reset-password/<key> and /forgot-password (Part 2).
 HEADLESS_FRONTEND_URLS = {
     "account_confirm_email": f"{FRONTEND_ORIGIN}/verify-email/{{key}}",
     "account_reset_password_from_key": f"{FRONTEND_ORIGIN}/reset-password/{{key}}",

@@ -145,3 +145,35 @@ in `task.md`; transient continuation state belongs in `HANDOFF.md`.
 - **Fact:** in Windows PowerShell 5.1 (5.1.26100), `curl.exe --data '{"email": "x@example.test", "password": "pw"}'` reaches the server with its inner quotes stripped, so allauth answers a bare `{"status": 400}` (unparsable JSON). Writing the JSON to a file with `Set-Content -Encoding ascii` and sending `--data-binary "@$env:TEMP\rz-login.json"` gives the real answer (`email_password_mismatch`). Header pairs can be splatted: `$h = '-H', 'Origin: …'`, then `curl.exe @h …`.
 - **Consequence:** test-command steps use the file form. The Part 1 section's commands were run that way and their output recorded.
 - **Evidence:** Part 1 test-command run, 2026-10-03.
+
+### 2026-10-07 — django-allauth 65.19.5 in link mode: what the email flows depend on
+
+- **Applies to:** Parts 2, 3, 14, 16, and every django-allauth upgrade.
+- **Facts (read in the installed source, then pinned by `apps/accounts/tests/`):**
+  - `POST auth/email/verify` with nobody logged in answers **401** on success (and sends `email_confirmed`); `AuthApiMiddleware` turns it into 200 and always drops `Authorization`/`X-Session-Token`, so a stale Bearer can't become a 410 either. Expired, used and forged keys all give 400 `invalid_or_expired_key`.
+  - The verification key (`signing.dumps(EmailAddress.pk, salt="account")`) has two `:` and `activate_url` sends them as `%3A`. Next 16 re-encodes every route param, so the page decodes once (`email-key.ts`) and then matches a strict pattern. A non-Latin-1 character in a header value makes `fetch` throw, which reads as "network error".
+  - The documented `auth/email/verify/resend` is the **code-mode** view (always 409 with links), so resend is our own `POST /api/v1/me/verification-email/`. It calls `send_verification_email_for_user()`, an internal allauth function: re-check it on upgrades.
+  - **Rate limits are keyed by action and "per" type only** (`core/internal/ratelimit.py`, `get_cache_key`). `"1/60s/key,10/1d/key"` therefore shares one list and the minute rate prunes what the day rate needs (a simulation let 20 of 20 through). Daily caps are separate actions (`confirm_email_daily`, `reset_password_daily`), and `ACCOUNT_RATE_LIMITS` entries merge over allauth's defaults. `ACCOUNT_EMAIL_CONFIRMATION_COOLDOWN` (default 3 min) only feeds the default `confirm_email` rate, which our explicit entry overrides.
+  - `AccountAdapter.add_message()` returns early only for headless-marked requests. With `django.contrib.messages` installed it would set a `messages` cookie on the frontend origin, so our adapter makes it a no-op.
+  - `allauth` precedes `apps.accounts` in `INSTALLED_APPS`, so templates inside our app are shadowed: ours live in `backend/templates/account/email/`. allauth's `base_message.txt` prints the request host (`django.contrib.sites` isn't installed), hence "Hello from localhost:8000!" until we replaced it.
+  - A reset key is single use (its hash covers the password, `last_login` and the user's emails) and its expiry reads `PasswordResetTokenGenerator._now()` (a naive `datetime.now()`), not `time.time()`. A successful reset issues tokens like a login.
+  - `GET auth/password/reset` (key in `X-Password-Reset-Key`) answers `data.user` with the account's email and username to anyone holding a valid key. The frontend ignores it; the key is already a password-reset secret.
+- **Testing gotcha:** the shared `clock` fixture moves `time.time()` (allauth's rate limits, Django's signed keys), but PyJWT checks `iat` against the real clock. Mint access tokens **before** moving the clock, or the API answers 401 ("iat in the future").
+- **Evidence:** Part 2 plan and implementation; `test_email_verification.py`, `test_resend_verification.py`, `test_password_reset.py`, `test_emails.py`.
+
+### 2026-10-07 — allauth defers `jwt` and `cryptography`: two first sign-ins on a cold server could answer 500
+
+- **Applies to:** every part that runs the backend under concurrency (E2E, Render with threaded gunicorn), and any allauth upgrade.
+- **Fact:** allauth imports `jwt` and `cryptography` lazily (`core/internal/deferred.py`), on the first token it makes. Several simultaneous first sign-ins (Playwright's 6 workers against a freshly started `runserver`) imported them from different threads and one saw a half-built package: `AttributeError: cannot access submodule 'ciphers' of module 'cryptography.hazmat.primitives' (most likely due to a circular import)`, a 500 on `/auth/signup`. It looked like a flaky test: the failing run's own sign-up screen said "Something went wrong. Try again." and `[WebServer]` lines in the Playwright output held the traceback.
+- **Consequence:** `AccountsConfig.ready()` imports `TOKEN_LIBRARIES` at startup; `test_startup.py` checks it in a fresh interpreter. Five cold-start E2E runs in a row passed afterwards (3 of the 4 cold starts before the fix had failed). When an E2E sign-up shows a generic error, read the `[WebServer]` traceback before suspecting the test.
+- **Evidence:** `e2e-*.log` captured from three cold-start runs; `ready()` + `test_startup.py`.
+
+### 2026-10-07 — Tooling gotchas on this Linux PC (Claude Code)
+
+- **Applies to:** every part where Claude starts and stops servers or reads Stitch files.
+- **Facts:**
+  - `pkill -f "<pattern>"` inside a Bash call also matches the call's own shell (the pattern is in its command line) and ends it with exit 144. Find the PID with `ss -ltnp | grep -E ':(3000|8000)\b'` and `kill <pid>`, or use a pattern the command line doesn't contain.
+  - `sed` is denied by `.claude/settings.json`; read Stitch `code.html` files with the Read tool (offset and limit).
+  - Playwright treats an `aria-disabled="true"` button as "not enabled": use `click({ force: true })` when a test means a person's click on it.
+  - An `ApiError`/mock typing trap: spreading a `Partial<AuthApi>` into the mocks in `features/auth/test-helpers.tsx` widened them to plain functions; `testSession()` now returns `MockedAuthApi` so tests can call `api.fetchMe.mockResolvedValue`.
+- **Evidence:** Part 2 implementation session.

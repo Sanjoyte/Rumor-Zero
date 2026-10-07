@@ -10,9 +10,12 @@ from apps.accounts.tests.conftest import (
     DUMMY_TURNSTILE_TOKEN,
     LOGIN_URL,
     LOGOUT_URL,
+    PASSWORD_REQUEST_URL,
+    PASSWORD_RESET_URL,
     REFRESH_URL,
     SIGNUP_URL,
     SITE_HEADERS,
+    VERIFY_URL,
     access_token_for,
     assert_no_secrets,
     login,
@@ -25,7 +28,15 @@ from apps.accounts.turnstile import TurnstileResult
 
 pytestmark = pytest.mark.django_db
 
-UNSAFE_ENDPOINTS = [LOGIN_URL, SIGNUP_URL, REFRESH_URL, LOGOUT_URL]
+UNSAFE_ENDPOINTS = [
+    LOGIN_URL,
+    SIGNUP_URL,
+    REFRESH_URL,
+    LOGOUT_URL,
+    VERIFY_URL,
+    PASSWORD_REQUEST_URL,
+    PASSWORD_RESET_URL,
+]
 
 
 def body(response):
@@ -47,9 +58,15 @@ def first_error(response):
         ("get", "/api/auth/app/v1/auth/session"),
         ("delete", "/api/auth/app/v1/auth/session"),
         ("get", "/api/auth/app/v1/config"),
-        ("post", "/api/auth/app/v1/auth/password/request"),
-        ("post", "/api/auth/app/v1/auth/email/verify"),
+        # Part 2 listed the verify and password endpoints; allauth's other ones stay unlisted.
+        ("post", "/api/auth/app/v1/auth/email/verify/resend"),
+        ("get", "/api/auth/app/v1/auth/email/verify"),
+        ("get", "/api/auth/app/v1/auth/password/request"),
+        ("put", "/api/auth/app/v1/auth/password/reset"),
+        ("delete", "/api/auth/app/v1/auth/password/reset"),
+        ("post", "/api/auth/app/v1/auth/password/reset/"),
         ("post", "/api/auth/app/v1/account/password/change"),
+        ("post", "/api/auth/app/v1/auth/code/confirm"),
         ("get", LOGIN_URL),
         ("get", REFRESH_URL),
         ("post", LOGIN_URL + "/"),

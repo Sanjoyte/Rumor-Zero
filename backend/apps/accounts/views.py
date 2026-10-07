@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from apps.accounts import cookies
+from apps.accounts import cookies, services
 from apps.accounts.models import User
 from apps.accounts.serializers import MeSerializer
 from apps.accounts.validators import normalize_username, validate_username
@@ -38,6 +38,34 @@ class MeView(APIView):
 
     def get(self, request):
         return Response(MeSerializer(request.user, context={"request": request}).data)
+
+
+@method_decorator(never_cache, name="dispatch")
+class VerificationEmailView(APIView):
+    """`POST /api/v1/me/verification-email/`: send the signed-in user a new verification link.
+
+    204 sent, 409 `already_verified`, 429 `verification_email_throttled`. The 429 has no
+    Retry-After: the full bucket may be the 60 s one or the daily one.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        outcome = services.resend_verification_email(request._request, request.user)
+        if outcome == services.SENT:
+            return Response(status=204)
+        if outcome == services.ALREADY_VERIFIED:
+            return Response(
+                {"detail": "Your email is already verified.", "code": "already_verified"},
+                status=409,
+            )
+        return Response(
+            {
+                "detail": "We sent one recently. Wait a little before asking again.",
+                "code": "verification_email_throttled",
+            },
+            status=429,
+        )
 
 
 @method_decorator(never_cache, name="dispatch")

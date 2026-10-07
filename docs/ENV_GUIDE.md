@@ -105,7 +105,7 @@ Gotcha: don't wrap these values in quotes, and don't leave trailing spaces.
 | `FRONTEND_ORIGIN` | `http://localhost:3000` | `npm run dev` default. Every `/api/auth/` request must carry exactly this `Origin`, so open the site as `http://localhost:3000`, not `http://127.0.0.1:3000` (that gets 403 `csrf_failed`). A bare origin only (no path); https is required when `DJANGO_DEBUG` is False. |
 | `AUTH_COOKIE_SECURE` | `False` | Localhost is plain http. Must be `True` when `DJANGO_DEBUG` is False. |
 | `JWT_ACCESS_TOKEN_MINUTES` / `JWT_REFRESH_TOKEN_DAYS` | `15` / `14` | Guide §4.6 |
-| `EMAIL_PROVIDER` | `console` | Verification and reset emails are **printed in the `runserver` terminal**. Copy the link from there. `file` writes each email to `backend/tmp/mail/` instead (git-ignored; Part 2's E2E test reads it). With `DJANGO_DEBUG=False` only `brevo` is accepted. |
+| `EMAIL_PROVIDER` | `console` | Verification and reset emails are **printed in the `runserver` terminal**. Copy the link from there. `file` writes each email to `backend/tmp/mail/` instead (git-ignored). Playwright starts Django that way, and the Part 2 E2E tests read the links from there; a `runserver` you reuse for E2E must be started with `EMAIL_PROVIDER=file` too. With `DJANGO_DEBUG=False` only `brevo` is accepted. |
 | `DEFAULT_FROM_EMAIL` | `"Rumor Zero <no-reply@example.com>"` | Only shows in the printed email |
 | `BREVO_API_KEY` | *(empty)* | Not used locally |
 | `REPORT_THRESHOLD` … `FEED_CACHE_SECONDS` | defaults | Guide §6.2, §7.2, §9.2; ANALYSIS D7 |

@@ -62,6 +62,10 @@ describe("safeNextPath", () => {
     ["/./notifications", "/notifications"],
     ["/home/../bookmarks", "/bookmarks"],
     ["/loginx", "/loginx"],
+    // The "check your inbox" page may be a next target; the key-bearing pages never are.
+    ["/verify-email", "/verify-email"],
+    ["/verify-email?next=%2Fsettings", "/verify-email?next=%2Fsettings"],
+    ["/forgot-password", "/forgot-password"],
     // Encoded characters stay encoded in the path, so they can't leave the site.
     ["/%0a/evil", "/%0a/evil"],
     ["/%2F%2Fevil.com", "/%2F%2Fevil.com"],
@@ -90,6 +94,11 @@ describe("safeNextPath", () => {
     "/login?next=/settings",
     "/signup",
     "/signup/",
+    "/reset-password",
+    "/reset-password/0123abcd-1abc-0fed",
+    "/reset-password?x=1",
+    "/verify-email/abc%3Adef",
+    "/verify-email/",
   ])("rejects %j", (raw) => {
     expect(safeNextPath(raw, origin)).toBeNull();
   });

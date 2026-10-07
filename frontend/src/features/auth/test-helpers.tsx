@@ -1,7 +1,7 @@
 /** Shared test helpers for the auth forms (not shipped: only *.test.tsx files import it). */
 import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import type { Me } from "@/lib/api/types";
 import type { AuthApi } from "@/lib/auth/auth-api";
@@ -35,6 +35,8 @@ export function allauthError(
   });
 }
 
+export type MockedAuthApi = { [K in keyof AuthApi]: Mock<AuthApi[K]> };
+
 /** A session whose API calls are mocks, logged out unless `loggedIn`. */
 export function testSession(api: Partial<AuthApi> = {}, { loggedIn = false } = {}) {
   let token: string | null = null;
@@ -45,7 +47,7 @@ export function testSession(api: Partial<AuthApi> = {}, { loggedIn = false } = {
     logout: vi.fn(async () => undefined),
     fetchMe: vi.fn(async () => ME),
     ...api,
-  };
+  } as MockedAuthApi;
   const session = new AuthSession({
     api: mocks,
     lock: (task) => task(),

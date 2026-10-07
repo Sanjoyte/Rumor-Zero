@@ -58,7 +58,11 @@ rumor-zero/
 │   │   │                            (AuthApiMiddleware: allow-list, CSRF guard, Turnstile pre-check, cookie handling),
 │   │   │                            turnstile.py (siteverify, stdlib), authentication.py (JWTAuthentication), permissions.py
 │   │   │                            (IsEmailVerified), serializers.py + views.py + urls.py (logout, /me, username check),
-│   │   │                            migrations/0002_verify_superuser_emails.py; 2–3 email flows and Google
+│   │   │                            migrations/0002_verify_superuser_emails.py
+│   │   │                        ✅ 2 services.py (mark_email_verified, resend_verification_email), signals.py (email_confirmed),
+│   │   │                            apps.py (connects the receiver, preloads allauth's deferred jwt/cryptography), the
+│   │   │                            VerificationEmailView (`POST /api/v1/me/verification-email/`), middleware.py + adapter.py extended
+│   │   │                            (verify/reset endpoints, reset daily cap, no Django messages, email context); 3 Google
 │   │   │                        14B Avatar model, avatars.py (Pillow processing), avatar endpoints
 │   │   ├── posts/               4–5 Post model + status constraints, validators.py (sources/DOI), services (the only place
 │   │   │                            status changes), feeds, status polling; 11C emergency eligibility + pinned feeds;
@@ -75,7 +79,8 @@ rumor-zero/
 │   │   └── notifications/       13  Notification model + services + API
 │   │       (every app: models.py, services.py, serializers.py, views.py, urls.py, admin.py,
 │   │        migrations/, tests/ with test_models.py, test_services.py, test_api.py …)
-│   ├── templates/               🔨 2   account/email/* (branded emails with the logo image); 10 admin/base_site.html (logo header)
+│   ├── templates/               ✅ 2   account/email/* (base_message.{txt,html}, email_confirmation{,_signup}_*, password_reset_key_*:
+│   │                                branded text + HTML emails with the logo image); 🔨 10 admin/base_site.html (logo header)
 │   ├── conftest.py              🔨 0A  shared pytest fixtures (api_client, user factories); ✅ 1 fixed auth test values, no network
 │   ├── pyproject.toml           🔨 0A  ruff + pytest config (DJANGO_SETTINGS_MODULE=rumor_zero.settings)
 │   ├── requirements.txt         🔨 0A  pinned runtime deps (SETUP.md B1)
@@ -96,7 +101,7 @@ rumor-zero/
 │   ├── postcss.config.mjs       🅑
 │   ├── vitest.config.mts        ✅ 0B  jsdom, `@` alias, setup file
 │   ├── scripts/lint-tokens.mjs  ✅ 0B  `npm run lint:tokens`: fails on default-palette classes, raw hex, stray radius/shadow/text sizes, dangerouslySetInnerHTML (+ lint-tokens.test.ts)
-│   ├── playwright.config.ts     ✅ 0C  webServer starts Django (backend/.venv, `REDIS_URL=""` since 1) + Next (`next dev`, or `next start` in CI)
+│   ├── playwright.config.ts     ✅ 0C  webServer starts Django (backend/.venv, `REDIS_URL=""` since 1, `EMAIL_PROVIDER=file` since 2) + Next (`next dev`, or `next start` in CI)
 │   ├── wrangler.jsonc           ✅ 0C  name "rumor-zero", main .open-next/worker.js, nodejs_compat, assets binding
 │   ├── open-next.config.ts      ✅ 0C  defineCloudflareConfig() with the default cache (no R2)
 │   ├── scripts/brand/           ✅ 0D  build-brand-assets.mjs + brand.config.json (`npm run brand:build`): reads
@@ -105,7 +110,8 @@ rumor-zero/
 │   ├── public/
 │   │   └── brand/               ✅ 0D  generated: logo.svg, mark.svg, icon-192/512/maskable-512.png, email-logo.png,
 │   │                                google-oauth-logo.png (never hand-edited)
-│   ├── e2e/                     ✅ 0C  Playwright specs: smoke.spec.ts (0C), auth.spec.ts (1); one flow per later part
+│   ├── e2e/                     ✅ 0C  Playwright specs: smoke.spec.ts (0C), auth.spec.ts (1), email-flows.spec.ts (2);
+│   │                                helpers.ts (shared sign-up), mailbox.ts (reads backend/tmp/mail); one flow per later part
 │   └── src/
 │       ├── app/                 🅑 App Router (routes below)
 │       │   ├── layout.tsx       🔨 0B  fonts (next/font), <html lang="en">, providers
@@ -122,10 +128,10 @@ rumor-zero/
 │       │   ├── (auth)/          ✅ 0C AuthLayout (max-w-form card)
 │       │   │   ├── signup/                  ✅ 1 ← a2 (SignupForm)
 │       │   │   ├── login/                   ✅ 1 ← a3 (LoginForm)
-│       │   │   ├── verify-email/            ← a4 "check inbox" (2)
-│       │   │   ├── verify-email/[key]/      ← a4 link landing states (2)
-│       │   │   ├── forgot-password/         ← a5 (2)
-│       │   │   └── reset-password/[key]/    ← a6 (2)
+│       │   │   ├── verify-email/            ✅ 2 ← a4 "check inbox" (VerifyEmailPending)
+│       │   │   ├── verify-email/[key]/      ✅ 2 ← a4 link landing states (VerifyEmailStatus)
+│       │   │   ├── forgot-password/         ✅ 2 ← a5 (ForgotPasswordForm)
+│       │   │   └── reset-password/[key]/    ✅ 2 ← a6 (ResetPasswordForm)
 │       │   ├── (app)/           ✅ 0C AppShell (sidebar/top bar/mobile nav) + placeholders for every nav destination
 │       │   │   ├── layout.tsx           ✅ 1 route guard (PROTECTED_PREFIXES → /login?next=), loading skeleton, Log out
 │       │   │   ├── home/                    "/home" ← b1 (4, following tab 6, reposts 7B, pinned emergencies 11C)
@@ -149,10 +155,11 @@ rumor-zero/
 │       │   │                            11D charts/ MeterBar, StatTile, BarChart, RingGauge, Sparkline
 │       │   └── shell/           ✅ 0C  AppShell, Sidebar, TopBar, MobileNav, AccountMenu, ShellLink, nav-items.ts, AuthLayout,
 │       │                                MarketingNav, MarketingFooter, Placeholder (all using <Logo/>); ✅ 1 UnverifiedBanner,
-│       │                                loading skeletons, Log out in AccountMenu
+│       │                                loading skeletons, Log out in AccountMenu; ✅ 2 banner Resend, New post gating
 │       ├── features/            🔨 screen-specific pieces, one folder per domain:
 │       │   ├── auth/            ✅ 1 SignupForm, LoginForm, Turnstile, useUsernameAvailability, useRedirectWhenLoggedIn,
-│       │   │                        messages.ts (+ test-helpers.tsx for their tests); 2–3 GoogleButton, VerifyEmailStatus, ResetForms
+│       │   │                        messages.ts (+ test-helpers.tsx for their tests); ✅ 2 useResendVerification, VerifyEmailPending,
+│       │   │                        VerifyEmailStatus, ForgotPasswordForm, ResetPasswordForm; 3 GoogleButton
 │       │   ├── posts/           ✅ 0B PostCard (props only); 4–5, 9  SourceLink, Composer(Modal), FeedList, PostDetail, useStatusPolling;
 │       │   │                        11C EmergencyChip, PinnedEmergencies; 11D PostStats
 │       │   ├── social/          6–7  FollowButton, UserRow, ProfileHeader, LikeButton, CommentList, CommentComposer;
@@ -171,6 +178,7 @@ rumor-zero/
 │       │   ├── auth/            ✅ 0C token-store.ts (memory only), refresh-lock.ts (Web Locks API); ✅ 1 session.ts (framework-free
 │       │   │                            session: bootstrap, schedule, backoff, broadcasts), AuthProvider.tsx (React binding),
 │       │   │                            auth-api.ts, jwt.ts, session-hint.ts, next-path.ts (safeNextPath), route-guard.ts
+│       │   │                            ✅ 2 email-key.ts (decodes and validates the key route params); auth-api.ts gains the verify/reset/resend calls
 │       │   ├── turnstile.ts     ✅ 1  loads Cloudflare's Turnstile script (explicit render) once
 │       │   ├── brand-assets.json ✅ 0D  generated list of logo assets (read by Logo and manifest.ts); brand-guard.test.ts guards the rule
 │       │   └── cn.ts, format.ts, password-strength.ts, post-display.ts  ✅ 0B  className joiner, relative time / number formatting,

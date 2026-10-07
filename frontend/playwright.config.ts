@@ -30,8 +30,10 @@ export default defineConfig({
     {
       command: `"${python}" manage.py migrate --noinput && "${python}" manage.py runserver 127.0.0.1:8000 --noreload`,
       cwd: backendDir,
-      // In-memory cache, so every run starts with empty allauth rate-limit counters.
-      env: { REDIS_URL: "" },
+      // In-memory cache, so every run starts with empty allauth rate-limit counters. Emails go to
+      // backend/tmp/mail/ (git-ignored), where e2e/mailbox.ts reads them. The process env wins over
+      // backend/.env, so this holds in CI and locally. A reused `runserver` must also use "file".
+      env: { REDIS_URL: "", EMAIL_PROVIDER: "file" },
       url: `${BACKEND_ORIGIN}/api/health/`,
       reuseExistingServer: !CI,
       timeout: 120_000,

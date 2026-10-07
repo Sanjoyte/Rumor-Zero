@@ -11,6 +11,7 @@ import {
   isActive,
   LOG_IN,
   NEW_POST,
+  NEW_POST_BLOCKED_HINT,
   nameOf,
   primaryItems,
   userMenuItems,
@@ -20,6 +21,7 @@ import {
 import { ShellLink } from "./ShellLink";
 
 export const USER_MENU_ID = "rz-user-menu";
+export const NEW_POST_HINT_ID = "rz-new-post-hint-rail";
 
 export interface SidebarProps {
   user: ShellUser | null;
@@ -28,6 +30,8 @@ export interface SidebarProps {
   pathname: string;
   /** Opens the composer (Part 4). Until then the button does nothing. */
   onNewPost?: () => void;
+  /** Called instead when the email is unverified: the button is `aria-disabled`, not `disabled`. */
+  onNewPostBlocked?: () => void;
   /** Log out, the last entry of the user menu. */
   actions?: MenuAction[];
 }
@@ -68,8 +72,16 @@ function SidebarLink({
  * The left rail (Stitch b1 L13–44): the full `w-64` rail at ≥1280px, a `w-16` icon dock at
  * 768–1279px, hidden on phones (MobileNav takes over).
  */
-export function Sidebar({ user, loading, pathname, onNewPost, actions }: SidebarProps) {
+export function Sidebar({
+  user,
+  loading,
+  pathname,
+  onNewPost,
+  onNewPostBlocked,
+  actions,
+}: SidebarProps) {
   const footer = footerItems(user);
+  const blocked = Boolean(user && !user.is_email_verified);
 
   return (
     <aside className="fixed top-0 left-0 z-50 hidden h-full w-16 flex-col justify-between border-r border-outline-variant/30 bg-surface-container-lowest md:flex xl:w-64">
@@ -92,15 +104,26 @@ export function Sidebar({ user, loading, pathname, onNewPost, actions }: Sidebar
           </nav>
           {user && (
             <div className="pt-space-sm">
+              {/* aria-disabled keeps the button focusable, so a click can explain itself. */}
               <button
                 type="button"
                 title={NEW_POST.label}
-                onClick={onNewPost}
-                className="flex w-full items-center justify-center gap-space-xs rounded-lg bg-secondary px-space-md py-space-sm font-body-md text-body-md font-semibold text-on-secondary shadow-sm transition-colors hover:bg-on-secondary-container focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/30"
+                aria-disabled={blocked || undefined}
+                aria-describedby={blocked ? NEW_POST_HINT_ID : undefined}
+                onClick={blocked ? onNewPostBlocked : onNewPost}
+                className={cn(
+                  "flex w-full items-center justify-center gap-space-xs rounded-lg bg-secondary px-space-md py-space-sm font-body-md text-body-md font-semibold text-on-secondary shadow-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/30 aria-disabled:cursor-not-allowed aria-disabled:opacity-60",
+                  !blocked && "hover:bg-on-secondary-container",
+                )}
               >
                 <Icon name={NEW_POST.icon} size="lg" />
                 <span className="sr-only xl:not-sr-only">{NEW_POST.label}</span>
               </button>
+              {blocked && (
+                <span id={NEW_POST_HINT_ID} className="sr-only">
+                  {NEW_POST_BLOCKED_HINT}
+                </span>
+              )}
             </div>
           )}
         </div>

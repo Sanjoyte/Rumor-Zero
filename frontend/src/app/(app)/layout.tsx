@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { AppShell } from "@/components/shell/AppShell";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
+import { MESSAGES } from "@/features/auth/messages";
+import { useResendVerification } from "@/features/auth/useResendVerification";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { isProtectedPath, loginRedirectFor } from "@/lib/auth/route-guard";
 
@@ -20,6 +22,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const toast = useToast();
   const loggingOut = useRef(false);
+  // The banner's Resend answers with a toast; the shell itself stays presentational.
+  const resend = useResendVerification({
+    onResult: ({ tone, message }) =>
+      toast.show(message, { tone: tone === "info" ? "neutral" : tone }),
+  });
+  const onNewPostBlocked = useCallback(() => toast.show(MESSAGES.newPostBlocked), [toast]);
   const guarded = isProtectedPath(pathname);
 
   useEffect(() => {
@@ -40,7 +48,15 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   }, [logout, router, toast]);
 
   return (
-    <AppShell user={user} status={status} onLogout={onLogout}>
+    <AppShell
+      user={user}
+      status={status}
+      onLogout={onLogout}
+      onNewPostBlocked={onNewPostBlocked}
+      onResend={() => void resend.resend()}
+      resendSecondsLeft={resend.secondsLeft}
+      resending={resend.busy}
+    >
       {guarded && status !== "authenticated" ? <PageSkeleton /> : children}
     </AppShell>
   );

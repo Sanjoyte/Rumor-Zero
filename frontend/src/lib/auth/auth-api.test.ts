@@ -1,6 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setAccessTokenGetter } from "@/lib/api/client";
-import { AUTH_PATHS, fetchMe, login, logout, refresh, signup } from "./auth-api";
+import {
+  AUTH_PATHS,
+  checkResetKey,
+  fetchMe,
+  login,
+  logout,
+  refresh,
+  requestPasswordReset,
+  resendVerificationEmail,
+  resetPassword,
+  signup,
+  verifyEmail,
+} from "./auth-api";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -101,5 +113,113 @@ describe("auth API", () => {
   it("treats a 200 without an access token as an error", async () => {
     fetchMock.mockResolvedValue(Response.json({ status: 200, data: {} }));
     await expect(refresh()).rejects.toMatchObject({ code: "no_access_token" });
+  });
+});
+
+describe("email flows", () => {
+  it("verifies with the key in the body, anonymously", async () => {
+    fetchMock.mockResolvedValue(Response.json({ status: 200 }));
+    await expect(verifyEmail("Mg:1abc:sig-_")).resolves.toBeUndefined();
+    const request = sent();
+    expect(request.url).toBe("/api/auth/app/v1/auth/email/verify");
+    expect(request.method).toBe("POST");
+    expect(JSON.parse(String(request.body))).toEqual({ key: "Mg:1abc:sig-_" });
+    expect(request.headers.has("authorization")).toBe(false);
+    expect(request.headers.get("x-requested-with")).toBe("rumor-zero");
+  });
+
+  it("throws the key error when a link is dead", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        {
+          status: 400,
+          errors: [{ code: "invalid_or_expired_key", param: "key", message: "Expired." }],
+        },
+        { status: 400 },
+      ),
+    );
+    await expect(verifyEmail("k")).rejects.toMatchObject({
+      status: 400,
+      code: "invalid_or_expired_key",
+    });
+  });
+
+  it("requests a reset link with the email, anonymously", async () => {
+    fetchMock.mockResolvedValue(Response.json({ status: 200 }));
+    await expect(requestPasswordReset("ada@example.test")).resolves.toBeUndefined();
+    expect(sent().url).toBe("/api/auth/app/v1/auth/password/request");
+    expect(sent().method).toBe("POST");
+    expect(JSON.parse(String(sent().body))).toEqual({ email: "ada@example.test" });
+    expect(sent().headers.has("authorization")).toBe(false);
+  });
+
+  it("checks a reset key with a GET and the key in a header, no body, no token", async () => {
+    fetchMock.mockResolvedValue(Response.json({ status: 200, data: { user: {} } }));
+    await expect(checkResetKey("0123abcd-1abc-0fed")).resolves.toBeUndefined();
+    const request = sent();
+    expect(request.url).toBe("/api/auth/app/v1/auth/password/reset");
+    expect(request.method).toBe("GET");
+    expect(request.body).toBeUndefined();
+    expect(request.headers.get("x-password-reset-key")).toBe("0123abcd-1abc-0fed");
+    expect(request.headers.has("authorization")).toBe(false);
+  });
+
+  it("resets the password and reads meta.access_token", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json({ status: 200, meta: { is_authenticated: true, access_token: "access-4" } }),
+    );
+    await expect(resetPassword("0123abcd-1abc-0fed", "a-new-passphrase")).resolves.toBe("access-4");
+    expect(sent().url).toBe("/api/auth/app/v1/auth/password/reset");
+    expect(sent().method).toBe("POST");
+    expect(JSON.parse(String(sent().body))).toEqual({
+      key: "0123abcd-1abc-0fed",
+      password: "a-new-passphrase",
+    });
+    expect(sent().headers.has("authorization")).toBe(false);
+  });
+
+  it("throws the password errors with their param", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        {
+          status: 400,
+          errors: [{ code: "password_too_common", param: "password", message: "Too common." }],
+        },
+        { status: 400 },
+      ),
+    );
+    await expect(resetPassword("k", "password")).rejects.toMatchObject({
+      fieldErrors: { password: ["Too common."] },
+    });
+  });
+
+  it("treats a reset answer without an access token as an error", async () => {
+    fetchMock.mockResolvedValue(Response.json({ status: 200 }));
+    await expect(resetPassword("k", "pw")).rejects.toMatchObject({ code: "no_access_token" });
+  });
+
+  it("resends with the managed access token (an ordinary app call)", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    await expect(resendVerificationEmail()).resolves.toBeUndefined();
+    expect(sent().url).toBe("/api/v1/me/verification-email/");
+    expect(sent().method).toBe("POST");
+    expect(sent().headers.get("authorization")).toBe("Bearer managed-token");
+  });
+
+  it("reports the resend limits by code", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ detail: "Wait.", code: "verification_email_throttled" }, { status: 429 }),
+    );
+    await expect(resendVerificationEmail()).rejects.toMatchObject({
+      status: 429,
+      code: "verification_email_throttled",
+    });
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ detail: "Done.", code: "already_verified" }, { status: 409 }),
+    );
+    await expect(resendVerificationEmail()).rejects.toMatchObject({
+      status: 409,
+      code: "already_verified",
+    });
   });
 });
