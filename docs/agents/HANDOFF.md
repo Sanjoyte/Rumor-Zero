@@ -6,21 +6,42 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none. **Part 2 (email verification & password reset) is done** (2026-10-07; implemented
-  from the approved plan, all required tests and checks green, `task.md` updated). Parts 0A, 0B, 0D,
-  0C, 1 and 2 are done. Part 1 CI is green (user-reported 2026-10-06); **Part 2 CI has not run yet**.
-- **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and `frontend/node_modules`
-  exist there.
-- **Owner:** none (Claude stopped after finishing Part 2; Part 3 is not started).
-- **Phase:** done, uncommitted. The user reviews and commits.
+- **Part:** **Part 3 (Continue with Google)**: planned and approved (2026-10-08), not started.
+  - Parts 0A, 0B, 0D, 0C, 1 and 2 are done; Part 2 is committed as `36fdb66`.
+  - Part 1 CI is green (user-reported 2026-10-06). The **Part 2 CI result has not been reported
+    yet.**
+- **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
+  `frontend/node_modules` exist there.
+- **Owner:** none. Claude stopped after saving the plan; no Part 3 code exists.
+- **Phase:** plan approved; implementation not started.
 - **Approved plan:**
-  [`docs/agents/plans/part-2-email-verification-reset.md`](plans/part-2-email-verification-reset.md)
-  (status line now says IMPLEMENTED)
-- **Previous plans:** [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md) (done
-  2026-10-06), [`part-1-auth-core.md`](plans/part-1-auth-core.md) (done 2026-10-03)
-- **Last updated:** 2026-10-07 by Claude (Sonnet 5.5), Part 2 implementation
+  [`docs/agents/plans/part-3-continue-with-google.md`](plans/part-3-continue-with-google.md)
+- **Previous plans:**
+  - [`part-2-email-verification-reset.md`](plans/part-2-email-verification-reset.md), implemented
+    2026-10-07;
+  - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
+  - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
+- **Last updated:** 2026-10-08 by Claude (Opus 5.5), Part 3 planning.
 
 ## Completed checkpoints
+
+- 2026-10-08 (Claude, Opus 5.5): **Part 3 planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `36fdb66` ("Part 2: email verification and password reset", committed by
+    the user), a clean tree.
+  - **Research:** read-only only. allauth 65.19.5 and PyJWT 2.15.1 source, Google's GIS and ID-token
+    docs, and a review pass against the code.
+  - **Changed this session:** only the new plan file and this file. No code, no setup command, no
+    `task.md` edit.
+  - **User decisions (2026-10-07):**
+    - Google links to an account whose email is unverified. The password is wiped, the email is
+      marked verified, and other sessions end at their next refresh.
+    - Only `@gmail.com` and `hd` (Workspace) addresses link to an existing account.
+    - No linking by email to staff accounts.
+    - The username comes from Google's first name, which changes ANALYSIS c-29.
+    - The display name stays blank.
+  - **Env files:** two research subagents touched the real env files without explicit authorisation.
+    One reported only the lengths of the client IDs (both files hold one). The other ran a grep that
+    matched `frontend/.env.local`, with values redacted. No value was printed or recorded.
 
 - 2026-10-07 (Claude, Sonnet 5.5): **Part 2 implemented** (uncommitted). Started from HEAD `26ded31`
   ("Part 2 plan", committed by the user), a clean tree that matched this file.
@@ -131,9 +152,10 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `26ded31` ("Part 2 plan"). **Uncommitted:** the whole Part 2 implementation: 47 modified
-  files and 26 new paths (`git status --short`; new files are listed in the checkpoint above). Nothing else.
-- Docker (Postgres 18 + Redis) is up; no dev server is running; ports 3000/8000 are free.
+- HEAD is `36fdb66` (Part 2, committed by the user).
+- **Uncommitted:** `docs/agents/plans/part-3-continue-with-google.md` (new) and this file. Nothing
+  else.
+- Docker state was not checked this session. No dev server was started.
 - Ignored artifacts from the checks: `backend/tmp/mail/*.log` (about 100 E2E and manual emails),
   `frontend/test-results/`, `frontend/playwright-report/`.
 - The machine rebooted twice during the session (kernel changed to 7.0.0-38; the scratchpad and the
@@ -263,11 +285,15 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-1. **User:** review the diff and the Part 2 section of `docs/test-command.md`, run what you like of it
-   (the Linux blocks are verified; the PowerShell ones are untested here), then commit, and push so CI
-   runs. Report the CI result (Part 2's E2E job reads emails from `backend/tmp/mail`).
-2. **Next part:** Part 3 (Continue with Google) or Part 4 (posts), from `task.md`. Fresh session
-   (`/clear`), first `git status` and `docker compose up -d`.
+**Implement Part 3 from the approved plan**
+([`plans/part-3-continue-with-google.md`](plans/part-3-continue-with-google.md)):
+
+1. **User:** commit the plan and this file. Report Part 2's CI result when you have it.
+2. **Agent** (fresh session, Sonnet 5.5 · medium per `task.md`):
+   1. Run `git status`, then `docker compose up -d`.
+   2. Set this file to "Part 3 in progress".
+   3. Follow the plan's ordered steps 2–9, starting with the backend settings and `INSTALLED_APPS`.
+      Then run `python manage.py migrate`.
 
 ## Blockers or user decisions
 
