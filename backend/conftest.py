@@ -1,4 +1,5 @@
 import pytest
+from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from django.core.cache import cache
 from rest_framework.test import APIClient
 
@@ -9,10 +10,16 @@ TEST_FRONTEND_ORIGIN = "http://localhost:3000"
 TEST_JWT_SIGNING_KEY = "test-only-jwt-signing-key-0123456789abcdef"
 # Cloudflare's official "always passes" test secret (the backend/.env.example value).
 TEST_TURNSTILE_SECRET = "1x0000000000000000000000000000000AA"
+# A made-up Google client ID: tests never use the developer's real one.
+TEST_GOOGLE_CLIENT_ID = "rz-test-client.apps.googleusercontent.com"
 
 
 def _no_network(*args, **kwargs):
     raise AssertionError("Tests must not call Cloudflare: mock verify_turnstile or urlopen")
+
+
+def _no_google_network(self, *args, **kwargs):
+    raise AssertionError("Tests must not call Google: use the `google` fixture")
 
 
 @pytest.fixture(autouse=True)
@@ -45,6 +52,16 @@ def _hermetic(settings, monkeypatch):
     settings.HEADLESS_JWT_REFRESH_TOKEN_EXPIRES_IN = 14 * 86400
     settings.TURNSTILE_SECRET_KEY = TEST_TURNSTILE_SECRET
     monkeypatch.setattr("apps.accounts.turnstile.urlopen", _no_network)
+    # Google sign-in is on with a test client ID, whatever backend/.env says; the signing
+    # certificates come from the `google` fixture, never the network.
+    settings.GOOGLE_OAUTH_CLIENT_ID = TEST_GOOGLE_CLIENT_ID
+    settings.SOCIALACCOUNT_PROVIDERS = {
+        "google": {
+            "APPS": [{"client_id": TEST_GOOGLE_CLIENT_ID, "secret": "", "key": ""}],
+            "VERIFIED_EMAIL": False,
+        }
+    }
+    monkeypatch.setattr(DefaultSocialAccountAdapter, "get_requests_session", _no_google_network)
     cache.clear()
 
 

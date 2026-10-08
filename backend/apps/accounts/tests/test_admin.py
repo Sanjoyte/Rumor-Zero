@@ -1,4 +1,6 @@
 import pytest
+from allauth.socialaccount.models import SocialAccount, SocialApp, SocialToken
+from django.contrib import admin
 from django.contrib.auth.models import Group
 from django.core.management import call_command
 from django.urls import reverse
@@ -72,3 +74,11 @@ def test_admin_form_cannot_override_derived_access_fields(client):
     target.refresh_from_db()
     assert target.is_staff is False
     assert group_names(target) == set()
+
+
+def test_only_the_social_account_is_in_the_admin():
+    # The Google app lives in settings (a database row would make two apps match: a 500) and
+    # tokens are never stored. SocialAccount shows who linked Google.
+    assert admin.site.is_registered(SocialAccount)
+    assert not admin.site.is_registered(SocialApp)
+    assert not admin.site.is_registered(SocialToken)

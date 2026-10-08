@@ -41,6 +41,32 @@ def int_in_range(env, name, default, minimum, maximum):
     return value
 
 
+GOOGLE_CLIENT_ID_SUFFIX = ".apps.googleusercontent.com"
+MAX_GOOGLE_CLIENT_ID_LENGTH = 200
+
+
+def google_client_id(env, name="GOOGLE_OAUTH_CLIENT_ID"):
+    """The Google OAuth web client ID, or "" when Google sign-in is disabled.
+
+    A client ID is public, but a malformed one is a typo that would make every sign-in fail, so it
+    is refused at startup. The error names the variable and never quotes the value.
+    """
+    value = env.str(name, default="").strip()
+    if not value:
+        return ""
+    if (
+        len(value) > MAX_GOOGLE_CLIENT_ID_LENGTH
+        or not value.endswith(GOOGLE_CLIENT_ID_SUFFIX)
+        or len(value) == len(GOOGLE_CLIENT_ID_SUFFIX)
+        or any(ch.isspace() for ch in value)
+    ):
+        raise ImproperlyConfigured(
+            f"{name} must be a Google OAuth client ID ending in {GOOGLE_CLIENT_ID_SUFFIX} "
+            "(see docs/ENV_GUIDE.md §1.6), or empty to disable Google sign-in"
+        )
+    return value
+
+
 def bare_origin(name, value, *, https_only):
     """`scheme://host[:port]`, lowercased, without a trailing slash. Anything else fails by name."""
     error = ImproperlyConfigured(

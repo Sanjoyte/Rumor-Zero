@@ -4,6 +4,7 @@ import {
   AUTH_PATHS,
   checkResetKey,
   fetchMe,
+  googleLogin,
   login,
   logout,
   refresh,
@@ -69,6 +70,43 @@ describe("auth API", () => {
       password: "pw",
       turnstile_token: "XXXX.DUMMY.TOKEN.XXXX",
     });
+  });
+
+  it("signs in with Google's ID token, anonymously, and reads meta.access_token", async () => {
+    fetchMock.mockResolvedValue(Response.json({ status: 200, meta: { access_token: "access-g" } }));
+    expect(await googleLogin("the-id-token", "client-1.apps.googleusercontent.com")).toBe(
+      "access-g",
+    );
+    const request = sent();
+    expect(request.url).toBe("/api/auth/app/v1/auth/provider/token");
+    expect(request.url).toBe(`/api${AUTH_PATHS.providerToken}`);
+    expect(request.method).toBe("POST");
+    expect(JSON.parse(String(request.body))).toEqual({
+      provider: "google",
+      process: "login",
+      token: { client_id: "client-1.apps.googleusercontent.com", id_token: "the-id-token" },
+    });
+    expect(request.headers.has("authorization")).toBe(false);
+    expect(request.headers.get("x-requested-with")).toBe("rumor-zero");
+  });
+
+  it("throws the Google sign-in error codes", async () => {
+    fetchMock.mockResolvedValue(
+      Response.json(
+        { status: 400, errors: [{ code: "google_link_requires_password", message: "No." }] },
+        { status: 400 },
+      ),
+    );
+    await expect(googleLogin("t", "c")).rejects.toMatchObject({
+      status: 400,
+      code: "google_link_requires_password",
+    });
+  });
+
+  it("treats a Google 200 without an access token as an error", async () => {
+    // A pending allauth flow would answer 401, but a 200 with no token must never sign in.
+    fetchMock.mockResolvedValue(Response.json({ status: 200, meta: {} }));
+    await expect(googleLogin("t", "c")).rejects.toMatchObject({ code: "no_access_token" });
   });
 
   it("refreshes with an empty body and reads data.access_token", async () => {

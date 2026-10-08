@@ -33,7 +33,8 @@ export default defineConfig({
       // In-memory cache, so every run starts with empty allauth rate-limit counters. Emails go to
       // backend/tmp/mail/ (git-ignored), where e2e/mailbox.ts reads them. The process env wins over
       // backend/.env, so this holds in CI and locally. A reused `runserver` must also use "file".
-      env: { REDIS_URL: "", EMAIL_PROVIDER: "file" },
+      // No Google client ID: "Continue with Google" is a 404 here, and the tests never reach Google.
+      env: { REDIS_URL: "", EMAIL_PROVIDER: "file", GOOGLE_OAUTH_CLIENT_ID: "" },
       url: `${BACKEND_ORIGIN}/api/health/`,
       reuseExistingServer: !CI,
       timeout: 120_000,
@@ -44,7 +45,8 @@ export default defineConfig({
       // Ready only when the relay reaches Django.
       url: "http://localhost:3000/api/health/",
       // The process env wins over .env.local, so the relay always targets this Django.
-      env: { BACKEND_ORIGIN },
+      // The Google button is hidden too (a local .env.local may hold a real client ID).
+      env: { BACKEND_ORIGIN, NEXT_PUBLIC_GOOGLE_CLIENT_ID: "" },
       reuseExistingServer: !CI,
       timeout: 180_000,
     },

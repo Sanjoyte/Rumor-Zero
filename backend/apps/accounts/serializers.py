@@ -1,3 +1,4 @@
+from allauth.socialaccount.models import SocialAccount
 from django.conf import settings
 from rest_framework import serializers
 
@@ -37,7 +38,7 @@ class MeSerializer(serializers.ModelSerializer):
         return user.has_usable_password()
 
     def get_google_connected(self, user):
-        return False  # Part 3 connects Google accounts.
+        return SocialAccount.objects.filter(user=user, provider="google").exists()
 
     def get_avatar_url(self, user):
         return avatar_url(user)

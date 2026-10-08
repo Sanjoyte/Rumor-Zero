@@ -2,13 +2,20 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
+import { resetGoogleIdentityForTests } from "@/lib/google-identity";
 import {
   resetTurnstileLoaderForTests,
   type TurnstileApi,
   type TurnstileRenderOptions,
 } from "@/lib/turnstile";
 import { SignupForm } from "./SignupForm";
-import { allauthError, renderWithSession, testSession } from "./test-helpers";
+import {
+  allauthError,
+  fakeGoogleIdentity,
+  GOOGLE_CLIENT_ID,
+  renderWithSession,
+  testSession,
+} from "./test-helpers";
 
 const replace = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -23,6 +30,7 @@ const fetchMock = vi.fn<typeof fetch>();
 
 beforeEach(() => {
   replace.mockClear();
+  resetGoogleIdentityForTests();
   resetTurnstileLoaderForTests();
   widget = null;
   turnstile = {
@@ -45,6 +53,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete window.turnstile;
+  delete window.google;
   vi.unstubAllGlobals();
 });
 
@@ -87,7 +96,9 @@ describe("SignupForm", () => {
     expect(screen.getByRole("link", { name: "Log in" })).toHaveAttribute("href", "/login");
     expect(screen.queryByText(/Turnstile bot defense/)).toBeNull();
     expect(screen.queryByText(/Complexity metric/)).toBeNull();
+    // No client ID in the environment: "Continue with Google" is hidden, and so is its rule.
     expect(screen.queryByText(/Google/)).toBeNull();
+    expect(screen.queryByRole("separator")).toBeNull();
   });
 
   it("keeps Create account disabled until Turnstile has a token", async () => {
@@ -271,5 +282,94 @@ describe("SignupForm", () => {
     expect(screen.getByText("Sign-up is unavailable right now.")).toBeInTheDocument();
     expect(screen.queryByTestId("turnstile")).toBeNull();
     expect(submitButton()).toBeDisabled();
+  });
+
+  describe("Continue with Google", () => {
+    it("shows Google's button above the form, with a2's rule, beside the Turnstile widget", async () => {
+      const google = fakeGoogleIdentity();
+      const { session } = testSession();
+      renderWithSession(
+        <SignupForm siteKey={SITE_KEY} googleClientId={GOOGLE_CLIENT_ID} />,
+        session,
+      );
+      await waitFor(() => expect(google.api.renderButton).toHaveBeenCalledTimes(1));
+      const rule = screen.getByRole("separator", { name: "or continue with email" });
+      expect(
+        rule.compareDocumentPosition(screen.getByLabelText("Email address")) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      await waitFor(() => expect(widget?.sitekey).toBe(SITE_KEY));
+    });
+
+    it("signs up through Google without Turnstile and skips /verify-email", async () => {
+      const google = fakeGoogleIdentity();
+      fetchMock.mockResolvedValue(
+        Response.json({ status: 200, meta: { access_token: "access-google" } }),
+      );
+      const { session, api } = testSession();
+      renderWithSession(
+        <SignupForm siteKey={SITE_KEY} googleClientId={GOOGLE_CLIENT_ID} />,
+        session,
+      );
+      await waitFor(() => expect(google.api.initialize).toHaveBeenCalled());
+      await act(async () => {
+        google.credential();
+      });
+      await waitFor(() => expect(api.fetchMe).toHaveBeenCalledWith("access-google"));
+      // The Google account is already verified: straight on, like a login.
+      await waitFor(() => expect(replace).toHaveBeenCalledWith("/home"));
+      expect(replace).not.toHaveBeenCalledWith(expect.stringContaining("/verify-email"));
+      expect(api.signup).not.toHaveBeenCalled();
+    });
+
+    it("works even when email sign-up is switched off", async () => {
+      const google = fakeGoogleIdentity();
+      const { session } = testSession();
+      renderWithSession(<SignupForm siteKey="" googleClientId={GOOGLE_CLIENT_ID} />, session);
+      await waitFor(() => expect(google.api.renderButton).toHaveBeenCalled());
+      expect(screen.getByText("Sign-up is unavailable right now.")).toBeInTheDocument();
+    });
+
+    it("shows a Google failure in the banner", async () => {
+      const google = fakeGoogleIdentity();
+      fetchMock.mockResolvedValue(
+        Response.json(
+          { status: 400, errors: [{ code: "google_email_unverified", message: "x" }] },
+          { status: 400 },
+        ),
+      );
+      const { session } = testSession();
+      renderWithSession(
+        <SignupForm siteKey={SITE_KEY} googleClientId={GOOGLE_CLIENT_ID} />,
+        session,
+      );
+      await waitFor(() => expect(google.api.initialize).toHaveBeenCalled());
+      await act(async () => {
+        google.credential();
+      });
+      expect(await screen.findByText(/email address isn't verified/)).toBeInTheDocument();
+      expect(replace).not.toHaveBeenCalled();
+    });
+
+    it("ignores a Google credential while the email form is submitting", async () => {
+      const google = fakeGoogleIdentity();
+      const { session } = testSession({
+        signup: vi.fn(() => new Promise<string>(() => undefined)),
+      });
+      renderWithSession(
+        <SignupForm siteKey={SITE_KEY} googleClientId={GOOGLE_CLIENT_ID} />,
+        session,
+      );
+      await waitFor(() => expect(widget).not.toBeNull());
+      solveTurnstile();
+      const user = await fill();
+      await user.click(submitButton());
+      await act(async () => {
+        google.credential();
+      });
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("provider/token"))).toBe(
+        false,
+      );
+    });
   });
 });

@@ -20,6 +20,7 @@ from rumor_zero.env_helpers import (
     cache_config,
     check_jwt_signing_key,
     email_config,
+    google_client_id,
     int_in_range,
 )
 
@@ -58,6 +59,7 @@ def production_env(**overrides):
             "JWT_ACCESS_TOKEN_MINUTES": "15",
             "JWT_REFRESH_TOKEN_DAYS": "14",
             "TURNSTILE_SECRET_KEY": secrets.token_urlsafe(24),
+            "GOOGLE_OAUTH_CLIENT_ID": "",
             "EMAIL_PROVIDER": "brevo",
             "BREVO_API_KEY": "xkeysib-" + secrets.token_hex(16),
             "DEFAULT_FROM_EMAIL": "Rumor Zero <no-reply@example.test>",
@@ -219,6 +221,91 @@ def test_production_auth_settings_come_from_the_environment():
     assert probe["refresh_seconds"] == probe["cookie_seconds"] == 14 * 86400
     assert probe["cookie_secure"] is True
     assert_no_secret_in(result.stdout + result.stderr, env)
+
+
+GOOGLE_CLIENT_ID = "123456789012-abcdefghijklmnop.apps.googleusercontent.com"
+GOOGLE_PROBE = """
+import json
+from django.conf import settings
+print(json.dumps({
+    "client_id": settings.GOOGLE_OAUTH_CLIENT_ID,
+    "apps": settings.SOCIALACCOUNT_PROVIDERS["google"]["APPS"],
+    "installed": [a for a in settings.INSTALLED_APPS if "socialaccount" in a],
+}))
+"""
+
+
+def google_probe(**overrides):
+    env = production_env(**overrides)
+    env["DJANGO_SETTINGS_MODULE"] = "rumor_zero.settings"
+    result = run_python(["-c", "import django; django.setup()\n" + GOOGLE_PROBE], env)
+    return result, env
+
+
+def test_google_sign_in_is_configured_from_the_client_id_alone():
+    result, env = google_probe(GOOGLE_OAUTH_CLIENT_ID=f"  {GOOGLE_CLIENT_ID} ")
+    assert result.returncode == 0, result.stderr
+    probe = json.loads(result.stdout.strip().splitlines()[-1])
+    assert probe["client_id"] == GOOGLE_CLIENT_ID
+    # No client secret: the ID-token flow doesn't use one.
+    assert probe["apps"] == [{"client_id": GOOGLE_CLIENT_ID, "secret": "", "key": ""}]
+    assert probe["installed"] == [
+        "allauth.socialaccount",
+        "allauth.socialaccount.providers.google",
+    ]
+    assert_no_secret_in(result.stdout + result.stderr, env)
+
+
+def test_a_blank_client_id_disables_google_and_is_not_an_error():
+    result, _ = google_probe(GOOGLE_OAUTH_CLIENT_ID="")
+    assert result.returncode == 0, result.stderr
+    probe = json.loads(result.stdout.strip().splitlines()[-1])
+    assert probe["client_id"] == ""
+    assert probe["apps"] == []
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "not-a-client-id",
+        "123.apps.googleusercontent.com.evil.example",
+        "123 456.apps.googleusercontent.com",
+        "1" * 200 + ".apps.googleusercontent.com",
+    ],
+)
+def test_a_malformed_client_id_fails_by_name_without_quoting_the_value(value):
+    result, env = google_probe(GOOGLE_OAUTH_CLIENT_ID=value)
+    assert result.returncode != 0
+    assert "GOOGLE_OAUTH_CLIENT_ID must be a Google OAuth client ID" in result.stderr
+    assert value not in result.stdout + result.stderr
+    assert_no_secret_in(result.stdout + result.stderr, env)
+
+
+def test_google_client_id_helper(monkeypatch):
+    env = environ.Env()
+    monkeypatch.delenv("GOOGLE_OAUTH_CLIENT_ID", raising=False)
+    assert google_client_id(env) == ""
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", "   ")
+    assert google_client_id(env) == ""
+    monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", GOOGLE_CLIENT_ID)
+    assert google_client_id(env) == GOOGLE_CLIENT_ID
+    for bad in ("x", ".apps.googleusercontent.com"):  # the suffix alone is not an ID
+        monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_ID", bad)
+        with pytest.raises(ImproperlyConfigured, match="GOOGLE_OAUTH_CLIENT_ID"):
+            google_client_id(env)
+
+
+def test_the_social_account_settings_are_pinned():
+    assert project_settings.SOCIALACCOUNT_ADAPTER == "apps.accounts.adapter.SocialAccountAdapter"
+    assert project_settings.SOCIALACCOUNT_EMAIL_AUTHENTICATION is True
+    assert project_settings.SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT is True
+    # A pending social sign-up can't be finished (the middleware strips X-Session-Token).
+    assert project_settings.SOCIALACCOUNT_AUTO_SIGNUP is True
+    assert project_settings.SOCIALACCOUNT_STORE_TOKENS is False
+    assert project_settings.SOCIALACCOUNT_REQUESTS_TIMEOUT == 5
+    assert project_settings.SOCIALACCOUNT_PROVIDERS["google"]["VERIFIED_EMAIL"] is False
+    # No "account connected" email until Part 14.
+    assert getattr(project_settings, "ACCOUNT_EMAIL_NOTIFICATIONS", False) is False
 
 
 @pytest.mark.parametrize("path", ["/admin/", "admin", ""])

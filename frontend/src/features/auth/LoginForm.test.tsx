@@ -1,9 +1,16 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
+import { resetGoogleIdentityForTests } from "@/lib/google-identity";
 import { LoginForm } from "./LoginForm";
-import { allauthError, renderWithSession, testSession } from "./test-helpers";
+import {
+  allauthError,
+  fakeGoogleIdentity,
+  GOOGLE_CLIENT_ID,
+  renderWithSession,
+  testSession,
+} from "./test-helpers";
 
 const replace = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -13,11 +20,15 @@ vi.mock("next/navigation", () => ({
 
 beforeEach(() => {
   replace.mockClear();
+  resetGoogleIdentityForTests();
   window.history.pushState({}, "", "/login");
 });
 
 afterEach(() => {
   window.history.pushState({}, "", "/");
+  delete window.google;
+  vi.unstubAllGlobals();
+  document.head.querySelectorAll("script").forEach((script) => script.remove());
 });
 
 async function fillAndSubmit(email = "ada@example.test", password = "correct-horse") {
@@ -38,7 +49,9 @@ describe("LoginForm", () => {
     expect(screen.getByRole("link", { name: "Sign up" })).toHaveAttribute("href", "/signup");
     expect(screen.queryByText(/Remember me/)).toBeNull();
     expect(screen.queryByText(/Attempt/)).toBeNull();
+    // No client ID in the environment: "Continue with Google" is hidden, and so is its rule.
     expect(screen.queryByText(/Google/)).toBeNull();
+    expect(screen.queryByRole("separator")).toBeNull();
   });
 
   it("validates before sending anything", async () => {
@@ -151,5 +164,75 @@ describe("LoginForm", () => {
     await fillAndSubmit("ada@localhost", "pw-123456");
     expect(await screen.findByText("Enter a valid email address.")).toBeInTheDocument();
     expect(screen.getByLabelText("Email address")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  describe("Continue with Google", () => {
+    const fetchMock = vi.fn<typeof fetch>();
+
+    beforeEach(() => {
+      fetchMock.mockReset();
+      vi.stubGlobal("fetch", fetchMock);
+    });
+
+    it("shows Google's button above the form, with a3's rule", async () => {
+      const google = fakeGoogleIdentity();
+      const { session } = testSession();
+      renderWithSession(<LoginForm googleClientId={GOOGLE_CLIENT_ID} />, session);
+      await waitFor(() => expect(google.api.renderButton).toHaveBeenCalledTimes(1));
+      const rule = screen.getByRole("separator", { name: "or log in with email" });
+      const email = screen.getByLabelText("Email address");
+      expect(rule.compareDocumentPosition(email) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getByTestId("google-iframe")).toBeInTheDocument();
+    });
+
+    it("signs in with Google and goes to ?next= or /home", async () => {
+      window.history.pushState({}, "", "/login?next=%2Fsettings");
+      const google = fakeGoogleIdentity();
+      fetchMock.mockResolvedValue(
+        Response.json({ status: 200, meta: { access_token: "access-google" } }),
+      );
+      const { session, api } = testSession();
+      renderWithSession(<LoginForm googleClientId={GOOGLE_CLIENT_ID} />, session);
+      await waitFor(() => expect(google.api.initialize).toHaveBeenCalled());
+      await act(async () => {
+        google.credential();
+      });
+      await waitFor(() => expect(api.fetchMe).toHaveBeenCalledWith("access-google"));
+      await waitFor(() => expect(replace).toHaveBeenCalledWith("/settings"));
+    });
+
+    it("shows a Google failure in the banner and clears it when Google's button is clicked", async () => {
+      const google = fakeGoogleIdentity();
+      fetchMock.mockResolvedValue(
+        Response.json(
+          { status: 400, errors: [{ code: "staff_password_login", message: "x" }] },
+          { status: 400 },
+        ),
+      );
+      const { session } = testSession();
+      renderWithSession(<LoginForm googleClientId={GOOGLE_CLIENT_ID} />, session);
+      await waitFor(() => expect(google.api.initialize).toHaveBeenCalled());
+      await act(async () => {
+        google.credential();
+      });
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Staff accounts log in with their password.",
+      );
+      act(() => google.click());
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(replace).not.toHaveBeenCalled();
+    });
+
+    it("ignores a Google credential while the password form is submitting", async () => {
+      const google = fakeGoogleIdentity();
+      const { session } = testSession({ login: vi.fn(() => new Promise<string>(() => undefined)) });
+      renderWithSession(<LoginForm googleClientId={GOOGLE_CLIENT_ID} />, session);
+      await waitFor(() => expect(google.api.initialize).toHaveBeenCalled());
+      await fillAndSubmit();
+      await act(async () => {
+        google.credential();
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 });

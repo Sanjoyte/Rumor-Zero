@@ -11,6 +11,7 @@ from rumor_zero.env_helpers import (
     cache_config,
     check_jwt_signing_key,
     email_config,
+    google_client_id,
     int_in_range,
     load_env_file,
     require,
@@ -72,6 +73,8 @@ INSTALLED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.headless",
+    "allauth.socialaccount",
+    "allauth.socialaccount.providers.google",
     "anymail",
     "apps.core",
     "apps.accounts",
@@ -230,6 +233,32 @@ HEADLESS_FRONTEND_URLS = {
     "account_reset_password": f"{FRONTEND_ORIGIN}/forgot-password",
     "account_signup": f"{FRONTEND_ORIGIN}/signup",
 }
+# ---------- Continue with Google (ARCHITECTURE §7; Part 3) ----------
+# Blank disables it: the provider-token endpoint answers 404 and the frontend hides the button.
+# A client ID is public, and the ID-token flow needs no secret, so none is configured.
+GOOGLE_OAUTH_CLIENT_ID = google_client_id(env)
+SOCIALACCOUNT_ADAPTER = "apps.accounts.adapter.SocialAccountAdapter"
+SOCIALACCOUNT_PROVIDERS = {
+    "google": {
+        "APPS": (
+            [{"client_id": GOOGLE_OAUTH_CLIENT_ID, "secret": "", "key": ""}]
+            if GOOGLE_OAUTH_CLIENT_ID
+            else []
+        ),
+        # Use Google's own `email_verified` claim; never force it on.
+        "VERIFIED_EMAIL": False,
+    }
+}
+# A Google sign-in with an address that matches an existing account links to it, after our
+# SocialAccountAdapter.pre_social_login refuses staff, inactive and non-authoritative matches.
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+# A pending social sign-up needs X-Session-Token, which AuthApiMiddleware strips: never pend.
+SOCIALACCOUNT_AUTO_SIGNUP = True
+SOCIALACCOUNT_STORE_TOKENS = False
+# Each sign-in fetches Google's signing certificates (allauth has no cache for them).
+SOCIALACCOUNT_REQUESTS_TIMEOUT = 5
+
 # The database session engine (Django's default) stays: refresh locks the session row, and logout
 # deletes it.
 SESSION_ENGINE = "django.contrib.sessions.backends.db"

@@ -13,6 +13,7 @@ import { ApiError } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { safeNextPath } from "@/lib/auth/next-path";
 import { scorePassword } from "@/lib/password-strength";
+import { GoogleButton } from "./GoogleButton";
 import { bannerMessage } from "./messages";
 import { Turnstile } from "./Turnstile";
 import { useRedirectWhenLoggedIn } from "./useRedirectWhenLoggedIn";
@@ -46,13 +47,17 @@ function validate(email: string, username: string, password: string): FieldError
 export interface SignupFormProps {
   /** Defaults to NEXT_PUBLIC_TURNSTILE_SITE_KEY. Without one, sign-up is switched off. */
   siteKey?: string;
+  /** Defaults to NEXT_PUBLIC_GOOGLE_CLIENT_ID. Without one, "Continue with Google" is hidden. */
+  googleClientId?: string;
 }
 
 /**
  * `/signup` (Stitch a2, without its jargon: ANALYSIS b-5). The Turnstile widget replaces a2's
- * "Protected by Turnstile" callout, and the Google button waits for Part 3.
+ * "Protected by Turnstile" callout. "Continue with Google" (Part 3) is Google's own button above
+ * the form: it skips Turnstile (Google already vetted the account) and, being verified, a Google
+ * sign-up goes on to `?next=` or /home rather than /verify-email.
  */
-export function SignupForm({ siteKey: siteKeyProp }: SignupFormProps) {
+export function SignupForm({ siteKey: siteKeyProp, googleClientId }: SignupFormProps) {
   const siteKey = siteKeyProp ?? process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
   const { signup } = useAuth();
   const router = useRouter();
@@ -134,6 +139,14 @@ export function SignupForm({ siteKey: siteKeyProp }: SignupFormProps) {
           <p className="font-medium">{banner}</p>
         </Alert>
       )}
+
+      <GoogleButton
+        dividerLabel="or continue with email"
+        clientId={googleClientId}
+        disabled={submitting}
+        onAttempt={() => setBanner(null)}
+        onError={setBanner}
+      />
 
       <form className="space-y-space-md" noValidate onSubmit={onSubmit}>
         <TextField

@@ -1,7 +1,8 @@
 # Plan: Part 3, Continue with Google
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-08, together with the decisions
-  below. Not implemented yet.
+  below. **IMPLEMENTED 2026-10-08** (Claude, Sonnet 5.5). Deviations: see `task.md` Part 3 and
+  `docs/agents/HANDOFF.md` (no `context` prop on `GoogleButton`, a `googleClientId` prop on the forms).
 - **Drafted:** 2026-10-07/08 by Claude (Opus 5.5). A separate review pass checked it against the
   code, and its findings are folded in. **Implement with:** Sonnet 5.5 · medium (task.md).
 - **Evidence:**

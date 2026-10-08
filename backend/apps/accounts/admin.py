@@ -1,9 +1,16 @@
+from allauth.socialaccount.models import SocialApp, SocialToken
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.forms import BaseUserCreationForm
 from django.contrib.auth.forms import UserChangeForm as BaseUserChangeForm
 
 from apps.accounts.models import User
+
+# allauth registers all three social models. The Google app lives in settings (a database row would
+# make two apps match: a 500), and tokens are never stored. SocialAccount stays: it shows who linked
+# Google.
+admin.site.unregister(SocialApp)
+admin.site.unregister(SocialToken)
 
 
 class UserCreationForm(BaseUserCreationForm):

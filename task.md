@@ -87,7 +87,7 @@ not let the review expand the part's scope without user approval.
 | 0C | App shell, API relay, API client, CI | 0A, 0B, 0D | [x] Done (2026-10-01) |
 | 1 | Auth core: sign up, log in, tokens, log out | 0C | [x] Done (2026-10-03) |
 | 2 | Email verification & password reset | 1 | [x] Done (2026-10-07) |
-| 3 | Continue with Google | 1 | [ ] |
+| 3 | Continue with Google | 1 | [x] Done (2026-10-08) |
 | 4 | Posts: composer + Recent feed | 1 | [ ] |
 | 5 | Post detail, sharing, deletion, status polling | 4 | [ ] |
 | 6 | Profiles, follows, Following feed | 4 | [ ] |
@@ -544,7 +544,7 @@ All three jobs run on test values only; no secrets.
 ---
 
 ## Part 3: Continue with Google
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-08). Acceptance criterion 4 (the real-Google check) is pending your manual check: `docs/test-command.md` Part 3, steps 6 to 8.
 **Goal:** one-click Google sign-in and sign-up (guide §4.4) via Google Identity Services ID tokens, verified by allauth.
 **Depends on:** 1. You need a Google OAuth client ID (ENV_GUIDE §1.6).
 **Stitch files to convert:** the Google button and "or" divider in `a2_sign_up` and `a3_log_in`.
@@ -561,10 +561,27 @@ All three jobs run on test values only; no secrets.
 **API endpoints:** allauth `…/auth/provider/token`.
 
 **Acceptance criteria**
-- [ ] A new Google user is created with a generated username, verified, and logged in (refresh cookie set)
-- [ ] An existing email/password user signing in with the same Google email ends up in the **same** account
-- [ ] Wrong-audience, expired or forged ID tokens are rejected with 400
-- [ ] It works end to end on `http://localhost:3000` with your client ID (manual check)
+- [x] A new Google user is created with a generated username, verified, and logged in (refresh cookie set)
+- [x] An existing email/password user signing in with the same Google email ends up in the **same** account (a Gmail or Workspace address; see the deviations)
+- [x] Wrong-audience, expired or forged ID tokens are rejected with 400
+- [ ] It works end to end on `http://localhost:3000` with your client ID (manual check). **Pending you:** needs a real Google account, so the agent could not run it. The real button renders (410×44 px, 0 px overflow at 1280 and 390 px), a click opens Google's own sign-in window, and closing it changes nothing; the sign-in itself is `docs/test-command.md` Part 3, steps 7 and 8.
+
+**Deviations and decisions (plan approved 2026-10-08; built 2026-10-08; recorded in ARCHITECTURE §2/§3/§7/§9/§10/§12 and ANALYSIS b-2, c-29 and the GoogleButton row):**
+- **User decisions (2026-10-07):**
+  - An **unverified** local account that matches the Google email is linked: its password becomes unusable (whoever signed up with someone else's address is locked out), the address is marked verified, and other sessions end at their next refresh. A verified one keeps its password.
+  - Only addresses Google itself hosts link to an existing account: `@gmail.com`, or a token with an `hd` (Workspace) claim. Any other matching address answers 400 `google_link_requires_password`. A *new* person with any verified address can sign up. This narrows "auto-connect by verified email" above, following Google's ID-token guide.
+  - Staff accounts (moderators, superusers) are never linked by email (400 `staff_password_login`); one that linked Google earlier still signs in.
+  - The username comes from Google's **first name**, not the email local part (ANALYSIS c-29, b-2): `ada`, `ada_4821`, or `member_xxxxxx` for non-Latin or reserved names. The display name stays **blank**.
+- **Google's own button** (an iframe), not Stitch's custom button with the inline "G": Google returns an ID token only from its own button. `design/` is untouched. a3's uppercase code-font "or" rule is the shared `Divider` (a2's style).
+- **No close event:** Google gives its button no callback for a closed popup, so "errors for a closed popup" became "nothing happens".
+- **Our shape check before allauth** (`apps/accounts/google.py`): allauth 65.19.5 answers 500 for a header without `kid` and for HS256 against the RSA key; both are 400 now. `process: "connect"` is refused (Part 14's).
+- **The `login` rate bucket** (30/min per IP, shared with password logins) covers every Google attempt, valid or not: 429.
+- **`/me` is two queries** (`google_connected` is a real `exists()`); two tests were renamed or changed from one query. ARCHITECTURE §9 says so.
+- **`SocialAccount.extra_data`** keeps only `sub`, `email`, `email_verified` and `hd`. `SocialApp` and `SocialToken` are unregistered from the admin.
+- **Built differently from the plan:** `GoogleButton` has no `context` prop (Google's `context` option only changes One Tap's text, which isn't used); the forms take an optional `googleClientId` prop for tests, like `siteKey`.
+- **Found while testing:** with a made-up client ID the real Google script loads and logs "The given client ID is not found" with a 0×0 iframe, so the button is invisible until the ID is right (the guide's step 6 says so). `allauth` fetches Google's certificates on every sign-in (no cache; Part 16).
+- **Not done (Part 14/16):** Settings "Signed in with Google", username rename, the "account connected" email, CSP and COOP for Google (ARCHITECTURE §12), caching Google's certificates, and a retry on a username or email race (an `IntegrityError` is still a 500).
+- **Verified:** see HANDOFF (backend 704 tests, frontend 747, E2E 15 in dev and CI mode, curl and browser checks recorded in `docs/test-command.md` Part 3). The PowerShell blocks of that section were not run on Windows. CI itself runs when you push.
 
 **Required tests:** backend with Google token verification mocked (new user, link, wrong `aud`, `email_verified=false`, expired); username generation uniqueness; frontend button visibility and callback. E2E isn't feasible for real Google, so use the manual checklist above.
 

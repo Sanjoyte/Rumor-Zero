@@ -16,10 +16,13 @@ def get_me(client, token, scheme="Bearer"):
     return client.get(URL, HTTP_AUTHORIZATION=f"{scheme} {token}")
 
 
-def test_a_valid_token_is_one_query(api_client, django_assert_num_queries):
+def test_a_valid_token_costs_the_user_load_and_the_google_check(
+    api_client, django_assert_num_queries
+):
+    # Loading the user, plus `google_connected` (a SocialAccount exists() in the /me serializer).
     user = UserFactory()
     token = access_token_for(user)
-    with django_assert_num_queries(1):
+    with django_assert_num_queries(2):
         assert get_me(api_client, token).status_code == 200
 
 

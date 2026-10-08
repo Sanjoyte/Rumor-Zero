@@ -6,25 +6,70 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 3 (Continue with Google)**: planned and approved (2026-10-08), not started.
-  - Parts 0A, 0B, 0D, 0C, 1 and 2 are done; Part 2 is committed as `36fdb66`.
-  - Part 1 CI is green (user-reported 2026-10-06). The **Part 2 CI result has not been reported
-    yet.**
+- **Part:** none. **Part 3 (Continue with Google) is done** (2026-10-08; implemented from the approved
+  plan, all required tests and checks green, `task.md` updated). Parts 0A, 0B, 0D, 0C, 1, 2 and 3 are
+  done. Part 1 CI is green (user-reported 2026-10-06); **Part 2 and Part 3 CI have not run yet.**
+  - **Acceptance criterion 4 is pending you:** the real-Google sign-in check (`docs/test-command.md`
+    Part 3, steps 7 and 8). The agent has no Google account, so it could not run it.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none. Claude stopped after saving the plan; no Part 3 code exists.
-- **Phase:** plan approved; implementation not started.
+- **Owner:** none (Claude stopped after finishing Part 3; Part 4 is not started).
+- **Phase:** done, uncommitted. The user reviews and commits.
 - **Approved plan:**
   [`docs/agents/plans/part-3-continue-with-google.md`](plans/part-3-continue-with-google.md)
+  (status line now says IMPLEMENTED)
 - **Previous plans:**
   - [`part-2-email-verification-reset.md`](plans/part-2-email-verification-reset.md), implemented
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-08 by Claude (Opus 5.5), Part 3 planning.
+- **Last updated:** 2026-10-08 by Claude (Sonnet 5.5), Part 3 implementation.
 
 ## Completed checkpoints
 
+- 2026-10-08 (Claude, Sonnet 5.5): **Part 3 implemented** (uncommitted). Started from HEAD `5339e04`
+  ("Plan Part 3", committed by the user), a clean tree that matched this file.
+  - **Backend:**
+    - `rumor_zero/settings.py` + `env_helpers.py`: `GOOGLE_OAUTH_CLIENT_ID` via `google_client_id(env)`
+      (blank = disabled), `allauth.socialaccount` and the Google provider in `INSTALLED_APPS`, the
+      `SOCIALACCOUNT_*` settings.
+    - New `apps/accounts/google.py` (request pre-check), `usernames.py` (`generate_username`).
+    - `middleware.py`: `PROVIDER_TOKEN_PATH` on the allow-list and the issuing set, 404 when
+      disabled, the `login` rate bucket, the pre-check.
+    - `adapter.py`: `SocialAccountAdapter` (`populate_user`, `pre_social_login`, `save_user`).
+    - `signals.py` + `services.py`: `social_account_added` receiver and
+      `mark_email_verified_by_google`.
+    - `serializers.py`: real `google_connected`. `apps.py`: `TOKEN_LIBRARIES` += `cryptography.x509`,
+      `cryptography.hazmat.backends`. `admin.py`: `SocialApp` and `SocialToken` unregistered.
+    - Tests: new `test_google_login.py` (60), `test_usernames.py` (38); changed `conftest.py` (root:
+      pinned test client ID, no Google network; `tests/`: the `google` fixture), `test_middleware`,
+      `test_me`, `test_authentication`, `test_startup`, `test_admin`, `apps/core/tests/test_settings.py`.
+    - allauth's six `socialaccount` migrations were applied to the local database; none of ours.
+  - **Frontend:**
+    - New `src/lib/google-identity.ts` and `src/features/auth/GoogleButton.tsx` (+ tests).
+    - `lib/auth/auth-api.ts`: `googleLogin`, `AUTH_PATHS.providerToken`.
+    - `features/auth/`: `messages.ts` (`googleErrorMessage`), `LoginForm` and `SignupForm` (the button
+      and the "or" rule; optional `googleClientId` prop), `test-helpers.tsx` (`fakeGoogleIdentity`).
+    - `playwright.config.ts`: both servers pinned to an empty Google client ID.
+  - **Docs:**
+    - ARCHITECTURE §2/§3/§7/§9/§10/§12, ANALYSIS (c-29, the b-2 row, the GoogleButton row), STRUCTURE,
+      ENV_GUIDE §1.6 (a check step), both `.env.example` comments, MEMORY (a new allauth-social entry),
+      `task.md` (criteria, deviations, both status spots), the plan's status line.
+    - `docs/test-command.md`: new "Part 3" section in **both** guides (9 steps each) and one word in its
+      intro list; nothing else touched.
+  - No new dependency and no new env variable. No real env file was edited. `frontend/.env.local` was
+    **used, not read**: the dev server read its Google client ID itself for the browser checks, and
+    nothing was printed.
+  - **Deviations from the plan (all in `task.md`):** `GoogleButton` has no `context` prop (Google's
+    `context` only affects One Tap); the forms take a `googleClientId` prop for tests; a closed popup
+    is "nothing happens" (Google gives no event).
+  - **Test-command notes:**
+    - The section is `### Part 3` inside each guide, as the file's other parts are (not `## Part 3`).
+    - The file has **no comment marker** at its bottom: it ends with the last cleanup bullet of the
+      Windows Part 2 section; the new section follows it.
+    - The Linux blocks of steps 4 and 5 were extracted from the doc and run verbatim against live
+      Django; the shell one-liners of steps 7 and 8 were run verbatim against a throwaway record in a
+      transaction that rolled back.
 - 2026-10-08 (Claude, Opus 5.5): **Part 3 planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `36fdb66` ("Part 2: email verification and password reset", committed by
     the user), a clean tree.
@@ -152,15 +197,51 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `36fdb66` (Part 2, committed by the user).
-- **Uncommitted:** `docs/agents/plans/part-3-continue-with-google.md` (new) and this file. Nothing
-  else.
-- Docker state was not checked this session. No dev server was started.
-- Ignored artifacts from the checks: `backend/tmp/mail/*.log` (about 100 E2E and manual emails),
-  `frontend/test-results/`, `frontend/playwright-report/`.
-- The machine rebooted twice during the session (kernel changed to 7.0.0-38; the scratchpad and the
-  containers were wiped once). Nothing in the repo was lost; `docker compose up -d` brought the
-  database back.
+- HEAD is `5339e04` ("Plan Part 3", committed by the user). **Uncommitted:** the whole Part 3
+  implementation: 37 modified files and 8 new files (`git status --short`; the new ones are listed in
+  the checkpoint above). Nothing else.
+- Docker (Postgres 18 + Redis) is up; no dev server is running; ports 3000/8000 are free.
+- The local database got allauth's `socialaccount.0001`–`0006` and holds no Google account.
+- Ignored artifacts from the checks: `backend/tmp/mail/*.log`, `frontend/test-results/`,
+  `frontend/playwright-report/`, and a production build in `frontend/.next/` made with an empty Google
+  client ID (the last `npm run build` before the CI-mode E2E run).
+
+## Validation of Part 3 (2026-10-08)
+
+- **Backend** (`backend/`, venv, Postgres + Redis up), each exit 0:
+  - `python -m pytest` → **704 passed** (was 577); the new files 60 + 38.
+  - `ruff check .` → "All checks passed!"; `ruff format --check .` → "77 files already formatted".
+  - `makemigrations --check --dry-run` → "No changes detected"; `manage.py check` → no issues;
+    `manage.py migrate` applied `socialaccount.0001`–`0006`.
+  - Mutation checks (rule removed by hand, the Google tests must fail): the Gmail/Workspace rule, the
+    staff rule, the inactive rule, the unverified-email rule, the `alg` check, the `kid` length limit
+    (after a test was added for it), the verify-on-link receiver and the new user's verified flag all
+    made a test fail. The frontend loader and button were mutated the same way (busy guard, handler
+    release, initialize-once, hidden without a client ID, clearing before render).
+- **Frontend** (`frontend/`), each exit 0: `npm run lint`, `lint:tokens`, `typecheck`, `format:check`;
+  `npm test` → **67 files, 747 tests passed** (was 65 / 708); `npm run build` (routes unchanged).
+- **E2E:** `npm run test:e2e` → **15 passed** (dev mode), and `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run
+  build` then `CI=1 npm run test:e2e` → 15 passed (against `next start`).
+- **Manual, recorded in `docs/test-command.md` Part 3:**
+  - curl against `runserver` with `GOOGLE_OAUTH_CLIENT_ID=` set empty: the endpoint and allauth's
+    other social paths answer 404.
+  - With a made-up client ID: 403 without `Origin`/the header, 400 for a garbage token, an HS256
+    token, a token with no `kid`, a wrong `client_id` and `process: "connect"`, 404 for a GET, 400
+    for a forged RS256 token (really sent to Google for its certificates; the internet was
+    reachable), the log warning names the variables and never the values, and 30 attempts then 429
+    (another source address unaffected).
+  - Browser (headless Chromium, Playwright): with the project's own client ID, Google's real button
+    renders on `/login` and `/signup` (iframe 410×44 at 1280 px, 316×44 at 390 px), the "or" rule
+    follows it, **0 px horizontal overflow**; with a made-up ID the script logs "The given client ID
+    is not found"; clicking opens `accounts.google.com/v3/signin/identifier`, and after closing it the
+    page, typed text and state are unchanged and no sign-in request was sent; with an empty ID the
+    server-rendered pages have no "or" rule.
+- **Not run:**
+  - **A real Google sign-in** (criterion 4): needs a Google account. The new-user and linking paths
+    are covered only by the automated tests with real RS256 tokens and a fake certificate.
+  - **The Windows (PowerShell) blocks** of the new section, and CI on GitHub (the user pushes).
+  - A pixel comparison with Stitch a2/a3: Google's iframe button replaces Stitch's custom one, so only
+    the layout (button, rule, form) was compared.
 
 ## Validation of Part 2 (2026-10-07)
 
@@ -285,15 +366,12 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-**Implement Part 3 from the approved plan**
-([`plans/part-3-continue-with-google.md`](plans/part-3-continue-with-google.md)):
-
-1. **User:** commit the plan and this file. Report Part 2's CI result when you have it.
-2. **Agent** (fresh session, Sonnet 5.5 · medium per `task.md`):
-   1. Run `git status`, then `docker compose up -d`.
-   2. Set this file to "Part 3 in progress".
-   3. Follow the plan's ordered steps 2–9, starting with the backend settings and `INSTALLED_APPS`.
-      Then run `python manage.py migrate`.
+1. **User:** review the diff and the Part 3 section of `docs/test-command.md`. Then **run steps 7 and 8
+   of that section with your real Google account** (acceptance criterion 4) and tell the agent the
+   result, so `task.md` can tick it. Then commit, and push so CI runs; report the CI result (Part 2's
+   and Part 3's E2E jobs).
+2. **Next part:** Part 4 (posts: composer + Recent feed), from `task.md`. Fresh session (`/clear`),
+   first `git status` and `docker compose up -d`.
 
 ## Blockers or user decisions
 
@@ -302,6 +380,25 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
   (createsuperuser + backfill migration); Turnstile fails closed; the `rz_session=1` hint cookie.
 - User decisions for 0C (2026-10-01), in ARCHITECTURE §10: the reduced logged-out shell; phones get a
   top bar plus five bottom tabs with an account sheet; marketing links only to existing pages.
+
+## Follow-ups noted during Part 3 (still open)
+
+- **Part 14:**
+  - Settings "Signed in with Google" and `process: "connect"` / disconnect.
+  - Username rename (a Google user starts with `ada`, `ada_4821` or `member_xxxxxx`).
+  - A "Google connected" email (`ACCOUNT_EMAIL_NOTIFICATIONS` is False) and a password-changed email.
+  - Google-only users have no usable password: they set one with "Forgot password?".
+  - Deleting an account must delete its `SocialAccount`.
+- **Part 16:**
+  - CSP and COOP for Google Identity Services (ARCHITECTURE §12): `https://accounts.google.com/gsi/`
+    for script, style, frame and connect; COOP unset or `same-origin-allow-popups`.
+  - Cache Google's certificates (allauth fetches them on every sign-in, 5 s timeout).
+  - Two sign-ups racing for the same new username or email hit an `IntegrityError` (500): retry or 409.
+  - `jti` replay protection uses the shared cache (per process when `REDIS_URL` is blank).
+- **Part 10:** `SocialAccount` is registered in the admin; make it read-only for moderators.
+- **Any django-allauth upgrade:** re-read the MEMORY entry "django-allauth 65.19.5 social login"
+  (the `provider/token` view, `jwtkit`, `wipe_password`, the signal order) and run
+  `apps/accounts/tests/test_google_login.py`.
 
 ## Follow-ups noted during Part 2 (still open)
 
@@ -326,7 +423,7 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 - (Part 2 items done: the allow-list, the branded templates, "Forgot password?" on `/login`, Resend in
   `UnverifiedBanner`, the file mailbox, and reset ending other sessions.)
-- **Part 3:** add `allauth.socialaccount` and `auth/provider/token` to the allow-list; make
+- (Done in Part 3: the allow-list, `google_connected`, and a social sign-up that never pends.) Original note: add `allauth.socialaccount` and `auth/provider/token` to the allow-list; make
   `google_connected` real. A *pending* social signup needs `X-Session-Token`, which the middleware
   strips and the relay doesn't forward: auto-signup must never pend, or add a short-lived flow cookie.
 - **Part 4:** the first real users of `IsEmailVerified` (posts). `RequestOptions.token: false` must

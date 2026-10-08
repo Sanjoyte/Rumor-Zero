@@ -23,3 +23,9 @@ def test_the_token_libraries_are_loaded_by_django_setup_not_on_the_first_sign_in
     assert result.returncode == 0, result.stderr
     loaded = json.loads(result.stdout.strip().splitlines()[-1])
     assert loaded == dict.fromkeys(TOKEN_LIBRARIES, True)
+
+
+def test_googles_certificate_libraries_are_preloaded_too():
+    # allauth's jwtkit imports these lazily on the first Google sign-in (the same cold-start race).
+    assert "cryptography.x509" in TOKEN_LIBRARIES
+    assert "cryptography.hazmat.backends" in TOKEN_LIBRARIES

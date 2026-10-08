@@ -24,6 +24,28 @@ def mark_email_verified(email_address):
     )
 
 
+def mark_email_verified_by_google(user, email):
+    """Mark `email` verified for `user`, who just linked a Google account that proved it.
+
+    Runs inside allauth's `connect()`, after `wipe_password`: an address that was unverified has
+    already cost its password. Creates the `EmailAddress` row when the user has none (accounts made
+    by `create_user` or in the admin have none).
+    """
+    email = email.strip().lower()
+    address = EmailAddress.objects.filter(user_id=user.pk, email__iexact=email).first()
+    if address is None:
+        has_primary = EmailAddress.objects.filter(user_id=user.pk, primary=True).exists()
+        address = EmailAddress.objects.create(
+            user=user, email=email, verified=True, primary=not has_primary
+        )
+    elif not address.verified:
+        address.verified = True
+        address.save(update_fields=["verified"])
+    if mark_email_verified(address):
+        user.is_email_verified = True  # so a later full save in this request can't undo it
+    return address
+
+
 def resend_verification_email(request, user):
     """Send the user a new verification link. `request` is Django's own request object.
 

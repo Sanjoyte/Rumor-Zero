@@ -192,6 +192,7 @@ Free. No billing account is needed; if Google offers to set one up, choose skip 
    The **secret is not needed** by this flow. Don't save it anywhere. Client IDs are public by design, so the `NEXT_PUBLIC_` one is safe.
 7. **Testing mode.** The app starts in "Testing". With only the basic scopes, sign-in works for any Google account, but if Google blocks an account, add it under **Audience → Test users** (up to 100).
    - Gotcha: new or changed origins can take from a few minutes to a few hours to start working.
+8. **Check it (Part 3).** `docs/test-command.md` Part 3, steps 6 to 8, shows the button and signs in. Both variables must hold the **same** ID: leave them empty and the button is hidden (and the backend answers 404); a mismatch makes every sign-in fail with "Google sign-in didn't work", and the server log warns that the IDs differ (naming the variables, not their values). Google refuses an ID token that looks like it was issued in the future, so the computer's clock must be in sync (`timedatectl` says `System clock synchronized: yes`).
 
 ### 1.7 Finished local files: checklist
 

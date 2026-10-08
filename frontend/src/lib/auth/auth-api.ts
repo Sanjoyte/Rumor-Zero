@@ -21,6 +21,7 @@ export const AUTH_PATHS = {
   verifyEmail: "/auth/app/v1/auth/email/verify",
   passwordRequest: "/auth/app/v1/auth/password/request",
   passwordReset: "/auth/app/v1/auth/password/reset",
+  providerToken: "/auth/app/v1/auth/provider/token",
   me: "/v1/me/",
   verificationEmail: "/v1/me/verification-email/",
   usernameAvailable: "/v1/auth/username-available/",
@@ -67,6 +68,21 @@ export async function signup(input: SignupInput): Promise<string> {
       password: input.password,
       turnstile_token: input.turnstileToken,
     },
+    { token: false },
+  );
+  return accessTokenFrom(body?.meta?.access_token);
+}
+
+/**
+ * "Continue with Google" (Part 3): Google's ID token in, our access token out (the refresh cookie is
+ * set too). Anonymous on purpose, like login. Answers 400 `invalid_token`,
+ * `google_email_unverified`, `account_inactive`, `staff_password_login` or
+ * `google_link_requires_password`; 404 while the backend has no client ID.
+ */
+export async function googleLogin(idToken: string, clientId: string): Promise<string> {
+  const body = await api.post<AllauthTokenBody>(
+    AUTH_PATHS.providerToken,
+    { provider: "google", process: "login", token: { client_id: clientId, id_token: idToken } },
     { token: false },
   );
   return accessTokenFrom(body?.meta?.access_token);

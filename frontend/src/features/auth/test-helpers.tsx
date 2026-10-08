@@ -7,6 +7,11 @@ import type { Me } from "@/lib/api/types";
 import type { AuthApi } from "@/lib/auth/auth-api";
 import { AuthProvider } from "@/lib/auth/AuthProvider";
 import { AuthSession } from "@/lib/auth/session";
+import type {
+  GoogleButtonOptions,
+  GoogleCredentialResponse,
+  GoogleIdentityApi,
+} from "@/lib/google-identity";
 
 export const ME: Me = {
   id: "u-1",
@@ -59,4 +64,34 @@ export function testSession(api: Partial<AuthApi> = {}, { loggedIn = false } = {
 
 export function renderWithSession(ui: ReactNode, session: AuthSession) {
   return render(<AuthProvider session={session}>{ui}</AuthProvider>);
+}
+
+export const GOOGLE_CLIENT_ID = "123456789012-abc.apps.googleusercontent.com";
+
+/**
+ * Installs a fake `window.google` (what Google's script defines). `credential()` plays the part
+ * of the callback Google fires when a person finishes the popup. Remove it with
+ * `delete window.google`.
+ */
+export function fakeGoogleIdentity() {
+  const buttons: GoogleButtonOptions[] = [];
+  let callback: ((response: GoogleCredentialResponse) => void) | null = null;
+  const api = {
+    initialize: vi.fn((config: Parameters<GoogleIdentityApi["initialize"]>[0]) => {
+      callback = config.callback;
+    }),
+    renderButton: vi.fn((parent: HTMLElement, options: GoogleButtonOptions) => {
+      buttons.push(options);
+      const frame = document.createElement("div");
+      frame.dataset.testid = "google-iframe";
+      parent.appendChild(frame);
+    }),
+  } satisfies GoogleIdentityApi;
+  window.google = { accounts: { id: api } };
+  return {
+    api,
+    buttons,
+    credential: (value = "google-id-token") => callback?.({ credential: value }),
+    click: () => buttons[buttons.length - 1]?.click_listener?.(),
+  };
 }

@@ -97,7 +97,7 @@ Each decision has a default. The rest of the docs (ARCHITECTURE, task.md) alread
 | `Button` (primary / secondary / ghost / destructive / icon) | everywhere | Primary = `bg-secondary`. There's one radius (`rounded-lg` = 4px) and one shadow (`shadow-sm`). |
 | `TextField`, `PasswordField` (visibility toggle), `Textarea` (+ counter), `Checkbox`, `RadioCard` list, `Select` | a2, a3, a5, a6, b2, b3, c2, d1, d2 | Bind labels to inputs (`htmlFor`). c2 lacks this. |
 | `PasswordStrengthMeter` (4 segments) | a2, a6 | Stitch is inconsistent: 3/4 means "Strong" in a2 but "Fair" in a6. Decided in Part 0B: one scale, Weak / Fair / Good / Strong (advisory). |
-| `GoogleButton` + "or" `Divider` | a2, a3 | Keep the inline Google "G" SVG (`data-rz-keep`) |
+| `GoogleButton` + "or" `Divider` | a2, a3 | **Changed in Part 3:** Google's own rendered button (a Google Identity Services iframe) above the form, then the shared `Divider`; the inline "G" SVG and `data-rz-keep` are not used, because Google returns an ID token only from its own button. a3's uppercase code-font rule becomes a2's plain one. Hidden when `NEXT_PUBLIC_GOOGLE_CLIENT_ID` is empty. `design/` is untouched. |
 | `Alert` / `Callout` (info, success, warning, error) | a3, a4, a5, a6, c1, c2, d1 | Tints from verdict families: `secondary/10` info, `error/10` error, `verdict-review/10` warning |
 | `PostCard` with 4px `VerdictStripe` | root, a1, b1, b3, b4, c1, d2 | Core component. Variants: opinion, pending, verified, false, under review, removed (tombstone) |
 | `StatusBadge` (glyph + label + optional %) | root, a1, b1, b3, b4, c1, c4, d2 | See the status table in b-2 |
@@ -229,7 +229,7 @@ Target stack: Next.js (App Router, TypeScript, `src/`), Tailwind CSS v4, React c
 | Sign-up states | Only happy path + "username available" | Field errors (email taken, username taken/invalid, weak password), Turnstile failure, submit loading/disabled |
 | Log-in states | Error banner | Keep the banner. Drop "Attempt 1 of 5" (the rate limiter answers generically). Add a rate-limited message and a loading state. Drop "Remember me": refresh tokens already last 14 days. |
 | Email verification | a4 "check inbox" only | Add `/verify-email/[key]` landing states: verifying…, **verified** (CTA "Start posting"), **expired/invalid** (CTA "Send a new link"). Add an app-shell banner for unverified users: "Verify your email to post, comment and report" + Resend. |
-| Google sign-in, new user | — | No extra step. The username is auto-generated from the email local part and can be changed in Settings. |
+| Google sign-in, new user | — | No extra step. **Changed 2026-10-07 (Part 3):** the username is generated from Google's **first name** (`ada`, `ada_4821`, or `member_xxxxxx`), never from the email address, because the handle is public and emails never are; it can be changed in Settings (Part 14). The display name stays blank: nothing from the Google profile becomes public until the user chooses it. |
 | Password reset | a5/a6 | a5 split into idle and sent states. Add a6 states: mismatch, weak, expired link, success (→ logged in). |
 | Like | Counts only | Toggle button with an outline glyph; liked = filled `favorite` glyph in `secondary`. Count next to it. |
 | Comments | b3 list + composer | Flat list, newest last, 500-char limit, delete own. Drop Reply, comment IDs, comment likes and comment reports (not in the guide). Moderators can hide comments in the admin. |
@@ -405,7 +405,7 @@ The original default was "drop all". Since 2026-09-29 the seven features you nam
 26. §9.2 caches the feed for 20–60 s, while §5.1 wants pending badges to update live. → Status polling uses the uncached `posts/status` endpoint. The feed cache TTL is 30 s.
 27. §3.2 `confidence_score numeric(5,2)` vs the pipeline's "numeric 0–100". → The contract validates the range 0–100 and quantizes to 2 decimals.
 28. §4.1 "username checked for uniqueness as the user types": allauth has no such endpoint. → Add `GET /api/v1/auth/username-available/` (throttled).
-29. §4.4 Google sign-up collects no username, but usernames are required. → Auto-generate one (b-2).
+29. §4.4 Google sign-up collects no username, but usernames are required. → Auto-generate one (b-2), **from Google's first name, not the email local part** (user decision 2026-10-07, Part 3: a public handle must not reveal the inbox).
 30. §12 lists DOMPurify: we never render user HTML (plain text only, React escapes it). → Not needed. Add it only if Markdown is ever supported.
 31. §3.5 GIN index on `to_tsvector('english', content)`: Django's `SearchVector` wraps the column in `COALESCE`, so a query won't use that exact index. → A stored generated `search_vector` column (Django `GeneratedField`) with a GIN index on it.
 32. §15.1 "If it passes, Render redeploys": Render deploys on every push unless told otherwise. → Set Render Auto-Deploy to **"After CI Checks Pass"**. Cloudflare Workers Builds deploys on push (acceptable; CI still runs on the PR).

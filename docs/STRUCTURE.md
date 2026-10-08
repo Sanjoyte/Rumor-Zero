@@ -62,7 +62,8 @@ rumor-zero/
 │   │   │                        ✅ 2 services.py (mark_email_verified, resend_verification_email), signals.py (email_confirmed),
 │   │   │                            apps.py (connects the receiver, preloads allauth's deferred jwt/cryptography), the
 │   │   │                            VerificationEmailView (`POST /api/v1/me/verification-email/`), middleware.py + adapter.py extended
-│   │   │                            (verify/reset endpoints, reset daily cap, no Django messages, email context); 3 Google
+│   │   │                            (verify/reset endpoints, reset daily cap, no Django messages, email context); ✅ 3 Google: google.py (request pre-check),
+│   │   │                            usernames.py, SocialAccountAdapter + the `social_account_added` receiver + `mark_email_verified_by_google`
 │   │   │                        14B Avatar model, avatars.py (Pillow processing), avatar endpoints
 │   │   ├── posts/               4–5 Post model + status constraints, validators.py (sources/DOI), services (the only place
 │   │   │                            status changes), feeds, status polling; 11C emergency eligibility + pinned feeds;
@@ -159,7 +160,7 @@ rumor-zero/
 │       ├── features/            🔨 screen-specific pieces, one folder per domain:
 │       │   ├── auth/            ✅ 1 SignupForm, LoginForm, Turnstile, useUsernameAvailability, useRedirectWhenLoggedIn,
 │       │   │                        messages.ts (+ test-helpers.tsx for their tests); ✅ 2 useResendVerification, VerifyEmailPending,
-│       │   │                        VerifyEmailStatus, ForgotPasswordForm, ResetPasswordForm; 3 GoogleButton
+│       │   │                        VerifyEmailStatus, ForgotPasswordForm, ResetPasswordForm; ✅ 3 GoogleButton (+ src/lib/google-identity.ts)
 │       │   ├── posts/           ✅ 0B PostCard (props only); 4–5, 9  SourceLink, Composer(Modal), FeedList, PostDetail, useStatusPolling;
 │       │   │                        11C EmergencyChip, PinnedEmergencies; 11D PostStats
 │       │   ├── social/          6–7  FollowButton, UserRow, ProfileHeader, LikeButton, CommentList, CommentComposer;

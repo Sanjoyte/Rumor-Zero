@@ -12,6 +12,7 @@ from apps.accounts.tests.conftest import (
     LOGOUT_URL,
     PASSWORD_REQUEST_URL,
     PASSWORD_RESET_URL,
+    PROVIDER_TOKEN_URL,
     REFRESH_URL,
     SIGNUP_URL,
     SITE_HEADERS,
@@ -36,6 +37,7 @@ UNSAFE_ENDPOINTS = [
     VERIFY_URL,
     PASSWORD_REQUEST_URL,
     PASSWORD_RESET_URL,
+    PROVIDER_TOKEN_URL,
 ]
 
 
@@ -67,6 +69,15 @@ def first_error(response):
         ("post", "/api/auth/app/v1/auth/password/reset/"),
         ("post", "/api/auth/app/v1/account/password/change"),
         ("post", "/api/auth/app/v1/auth/code/confirm"),
+        # Part 3 lists only `auth/provider/token` (POST); allauth's other social endpoints stay 404.
+        ("get", PROVIDER_TOKEN_URL),
+        ("put", PROVIDER_TOKEN_URL),
+        ("post", PROVIDER_TOKEN_URL + "/"),
+        ("get", "/api/auth/app/v1/auth/provider/signup"),
+        ("post", "/api/auth/app/v1/auth/provider/signup"),
+        ("post", "/api/auth/app/v1/auth/provider/redirect"),
+        ("get", "/api/auth/app/v1/account/providers"),
+        ("delete", "/api/auth/app/v1/account/providers"),
         ("get", LOGIN_URL),
         ("get", REFRESH_URL),
         ("post", LOGIN_URL + "/"),

@@ -8,6 +8,7 @@ import { PasswordField } from "@/components/ui/PasswordField";
 import { TextField } from "@/components/ui/TextField";
 import { ApiError } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { GoogleButton } from "./GoogleButton";
 import { bannerMessage } from "./messages";
 import { useRedirectWhenLoggedIn } from "./useRedirectWhenLoggedIn";
 
@@ -24,12 +25,18 @@ function validate(email: string, password: string): FieldErrors {
   return errors;
 }
 
+export interface LoginFormProps {
+  /** Defaults to NEXT_PUBLIC_GOOGLE_CLIENT_ID. Without one, "Continue with Google" is hidden. */
+  googleClientId?: string;
+}
+
 /**
- * `/login` (Stitch a3). One dismissible banner for failures; no "Remember me" and no attempt
- * counter (ANALYSIS b-2). "Forgot password?" sits in a3's options row (Part 2); Google waits for
- * Part 3.
+ * `/login` (Stitch a3). One dismissible banner for failures (Google's too); no "Remember me" and
+ * no attempt counter (ANALYSIS b-2). "Forgot password?" sits in a3's options row (Part 2).
+ * "Continue with Google" (Part 3) is Google's own button above the form; a3's uppercase code-font
+ * "or" rule is the shared `Divider`.
  */
-export function LoginForm() {
+export function LoginForm({ googleClientId }: LoginFormProps = {}) {
   const { login } = useAuth();
   useRedirectWhenLoggedIn();
   const [email, setEmail] = useState("");
@@ -74,6 +81,14 @@ export function LoginForm() {
           <p className="font-medium">{banner}</p>
         </Alert>
       )}
+
+      <GoogleButton
+        dividerLabel="or log in with email"
+        clientId={googleClientId}
+        disabled={submitting}
+        onAttempt={() => setBanner(null)}
+        onError={setBanner}
+      />
 
       <form className="space-y-space-md" noValidate onSubmit={onSubmit}>
         <TextField

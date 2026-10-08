@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -2259,6 +2259,425 @@ git status --short backend/templates               # ?? backend/templates/ (new,
   like. `docker compose down -v` (repo root) wipes the whole local database, which is destructive.
 - Stop the containers and keep the data: `docker compose down` (repo root).
 
+### Part 3: Continue with Google
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
+`frontend/.env.local`. Part 3 adds no dependency and no env variable (both Google client-ID variables
+have been in the example files since Part 0A). It does add allauth's own `socialaccount` tables:
+`migrate` applies six migrations of theirs, and we add none.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend/`, venv active. Leave it running; it is restarted in steps 5 and 6. | 4 to 8 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. | 1 to 8 |
+| Window 3 (frontend) | `npm run dev` in `frontend/`. Leave it running; it is restarted in step 6. | 6 to 8 |
+| Browser | Steps 6 to 8 | 6 to 8 |
+
+Things to know first:
+
+- **Steps 1 to 6 need no Google account.** Steps 7 and 8 do: they are the manual check from
+  `task.md` ("works end to end on `http://localhost:3000` with your client ID"), because a real
+  Google sign-in can't be automated. The agent that built this part could not run steps 7 and 8; the
+  rest was run on Linux on 2026-10-08, and the outputs below are what it printed.
+- Steps 4 and 5 use **no real client ID**: step 4 leaves it blank, step 5 uses a made-up one
+  (`rz-manual-test.apps.googleusercontent.com`) that is set only for that `runserver`. Neither step
+  edits `backend/.env`, and neither needs your real client ID.
+- The new-user and linking rules (staff, inactive, Gmail or Workspace only, password wipe, verified
+  address) are covered by 98 automated tests that sign real RS256 tokens against a fake Google
+  certificate (step 2). Step 5 only checks what is visible from outside.
+- Google's script and certificates need internet. Step 5's last request asks Google for its
+  certificates, so it needs internet too.
+- Your Google client's **Authorized JavaScript origins** must contain `http://localhost:3000` (and
+  `http://localhost`): ENV_GUIDE §1.6. New origins can take minutes (rarely hours) to start working.
+
+#### Step 1: Apply allauth's Google tables and check nothing else changed
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies
+allauth's `socialaccount` migrations and confirms we have no model changes of our own.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                           # first time: six "Applying socialaccount.… OK" lines
+python manage.py check                             # System check identified no issues (0 silenced).
+python manage.py makemigrations --check --dry-run  # No changes detected
+python manage.py showmigrations socialaccount
+```
+
+**You should see:** the first run of `migrate` after pulling Part 3 lists these lines (a database
+that already has them says `No migrations to apply.`):
+
+```text
+  Applying socialaccount.0001_initial... OK
+  Applying socialaccount.0002_token_max_lengths... OK
+  Applying socialaccount.0003_extra_data_default_dict... OK
+  Applying socialaccount.0004_app_provider_id_settings... OK
+  Applying socialaccount.0005_socialtoken_nullable_app... OK
+  Applying socialaccount.0006_alter_socialaccount_extra_data... OK
+```
+
+Then the two checks print their messages (in the comments above), and `showmigrations` ends with:
+
+```text
+socialaccount
+ [X] 0001_initial
+ [X] 0002_token_max_lengths
+ [X] 0003_extra_data_default_dict
+ [X] 0004_app_provider_id_settings
+ [X] 0005_socialtoken_nullable_app
+ [X] 0006_alter_socialaccount_extra_data
+```
+
+#### Step 2: Run the automated backend checks
+
+**Where:** Same terminal as step 1 (window 2, in `backend/`, venv active).
+
+**What this does:** Runs the whole backend test suite, then only the new Part 3 test files, then the
+linter and formatter check.
+
+```bash
+python -m pytest                                    # 704 passed
+python -m pytest apps/accounts/tests/test_google_login.py apps/accounts/tests/test_usernames.py -q   # 98 passed
+ruff check . ; ruff format --check .                # All checks passed! / 77 files already formatted
+```
+
+**You should see:** the full run ends with `704 passed` (it takes about 25 seconds), the second
+command with `98 passed` (60 in `test_google_login.py`, 38 in `test_usernames.py`), and the last prints
+`All checks passed!` and `77 files already formatted`. (Counts may grow later; what matters is that
+nothing fails.)
+
+- `test_google_login.py` signs real RS256 ID tokens with a test key and serves the matching
+  certificate in place of Google's, so allauth's own checks (`aud`, `iss`, `exp`, `iat`, signature and
+  replay) run unpatched. It covers: a new user (verified, generated username, no display name, no
+  password), linking a verified or unverified account, Gmail and Workspace only, no staff linking,
+  inactive accounts, every kind of bad token and request, the 404 when disabled, the session rules
+  and the rate limit.
+- `test_usernames.py` covers the username rules ("Ada", "José", "Mary-Jane", "李", reserved words,
+  collisions).
+
+#### Step 3: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last command) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and
+the end-to-end tests.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 67 files, 747 tests passed
+npm run build
+npm run test:e2e                                    # 15 passed
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  67 passed (67)` and `Tests  747 passed (747)`. `npm run build` lists the routes (as in
+Part 2). `npm run test:e2e` ends with `15 passed`.
+
+- The new component tests are `GoogleButton.test.tsx` (20) and `google-identity.test.ts` (7); the login
+  and sign-up form tests and `auth-api.test.ts` grew too.
+- The E2E run pins an empty Google client ID for both servers, so it never contacts Google: the button
+  is hidden there.
+- To run the E2E in CI mode (against the production build, with no client ID baked in):
+  `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build && CI=1 npm run test:e2e` ends with `15 passed` too.
+
+#### Step 4: With no client ID, Google sign-in is switched off
+
+**Where:** First window 1 (start the server), then window 2 (the commands).
+
+**What this does:** An empty `GOOGLE_OAUTH_CLIENT_ID` disables the feature "cleanly": the endpoint
+answers 404, exactly like a path that doesn't exist. The variable is emptied for this one `runserver`
+only (the process environment beats `backend/.env`).
+
+Window 1 (in `backend/`, venv active; stop any other `runserver` first with `Ctrl+C`):
+
+```bash
+GOOGLE_OAUTH_CLIENT_ID= python manage.py runserver
+```
+
+Window 2:
+
+```bash
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')    # headers every API call needs
+url=http://localhost:8000/api/auth/app/v1/auth/provider/token
+body='{"provider":"google","process":"login","token":{"client_id":"x.apps.googleusercontent.com","id_token":"a.b.c"}}'
+curl -s -w ' %{http_code}\n' "${h[@]}" -H "Content-Type: application/json" --data-binary "$body" $url   # 1: the sign-in
+curl -s -w ' %{http_code}\n' "${h[@]}" $url                                                              # 2: a GET
+curl -s -o /dev/null -w '%{http_code}\n' "${h[@]}" -X POST -H "Content-Type: application/json" --data-binary '{}' http://localhost:8000/api/auth/app/v1/auth/provider/signup   # 3: allauth's other social paths
+curl -s -o /dev/null -w '%{http_code}\n' "${h[@]}" http://localhost:8000/api/auth/app/v1/account/providers                                                                    # 4
+```
+
+**You should see** (four commands, four answers):
+
+```text
+{"status": 404, "errors": [{"code": "not_found", "message": "Not found."}]} 404
+{"status": 404, "errors": [{"code": "not_found", "message": "Not found."}]} 404
+404
+404
+```
+
+- Commands 3 and 4 show that allauth's other social endpoints (`auth/provider/signup`,
+  `account/providers`, and `auth/provider/redirect`) are never reachable, with or without a client ID.
+
+#### Step 5: With a client ID, check what an outsider can and can't do
+
+**Where:** Window 1 (restart the server), then window 2. Window 2 must be the same terminal for the
+whole step (the variables only live there).
+
+**What this does:** Restarts the server with a made-up client ID, so the endpoint is on. Then it sends
+requests that are not a real Google sign-in. Each must be refused, and none may crash the server. (A
+real, signed token can only come from Google, so the success cases are in step 2's tests and steps 7
+and 8.)
+
+Window 1 (`Ctrl+C` the server of step 4, then, in `backend/` with the venv active):
+
+```bash
+GOOGLE_OAUTH_CLIENT_ID=rz-manual-test.apps.googleusercontent.com python manage.py runserver
+```
+
+Window 2:
+
+```bash
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')
+url=http://localhost:8000/api/auth/app/v1/auth/provider/token
+cid=rz-manual-test.apps.googleusercontent.com
+b64() { printf '%s' "$1" | base64 -w0 | tr '+/' '-_' | tr -d '='; }                       # base64url, as JWTs use
+payload=$(b64 '{"iss":"https://accounts.google.com","aud":"'$cid'","sub":"1","email":"x@gmail.com","email_verified":true,"exp":4000000000}')
+rs=$(b64 '{"alg":"RS256","kid":"forged-kid","typ":"JWT"}').$payload.$(b64 'not-a-real-signature')     # looks like Google's, is not
+hs=$(b64 '{"alg":"HS256","kid":"k","typ":"JWT"}').$payload.$(b64 'sig')                                # the wrong algorithm
+nokid=$(b64 '{"alg":"RS256","typ":"JWT"}').$payload.$(b64 'sig')                                      # no key id
+mk() { printf '{"provider":"google","process":"login","token":{"client_id":"%s","id_token":"%s"}}' "$1" "$2"; }
+post() { curl -s -w ' %{http_code}\n' "${h[@]}" -H "Content-Type: application/json" --data-binary "$1" $url; }
+echo "1 no headers:";     curl -s -w ' %{http_code}\n' -H "Content-Type: application/json" --data-binary "$(mk $cid $rs)" $url
+echo "2 garbage token:";  post "$(mk $cid not-a-jwt)"
+echo "3 HS256:";          post "$(mk $cid $hs)"
+echo "4 no kid:";         post "$(mk $cid $nokid)"
+echo "5 wrong client_id:"; post "$(mk other.apps.googleusercontent.com $rs)"
+echo "6 connect:";        post '{"provider":"google","process":"connect","token":{"client_id":"'$cid'","id_token":"'$rs'"}}'
+echo "7 GET:";            curl -s -w ' %{http_code}\n' "${h[@]}" $url
+echo "8 forged RS256 (asks Google for its certificates; needs internet):"; post "$(mk $cid $rs)"
+```
+
+**You should see** (eight labels, each followed by one answer):
+
+```text
+1 no headers:
+{"status": 403, "errors": [{"code": "csrf_failed", "message": "Reload the page and try again."}]} 403
+2 garbage token:
+{"status": 400, "errors": [{"code": "invalid_token", "message": "Invalid token.", "param": "token"}]} 400
+3 HS256:
+{"status": 400, "errors": [{"code": "invalid_token", "message": "Invalid token.", "param": "token"}]} 400
+4 no kid:
+{"status": 400, "errors": [{"code": "invalid_token", "message": "Invalid token.", "param": "token"}]} 400
+5 wrong client_id:
+{"status": 400, "errors": [{"code": "invalid_token", "message": "Invalid token.", "param": "token"}]} 400
+6 connect:
+{"status": 400, "errors": [{"code": "invalid_token", "message": "Invalid token.", "param": "token"}]} 400
+7 GET:
+{"status": 404, "errors": [{"code": "not_found", "message": "Not found."}]} 404
+8 forged RS256 (asks Google for its certificates; needs internet):
+{"status": 400, "errors": [{"message": "Invalid token.", "code": "invalid_token", "param": "token"}]} 400
+```
+
+- 1: no `Origin` / `X-Requested-With`, so refused before anything else (the same guard as login).
+- 2 to 6: refused by our own shape check (`apps/accounts/google.py`) without calling Google. Without
+  it, 3 and 4 would crash allauth with a 500. A real token has an `RS256` header with a key id, a
+  client ID equal to the server's, and `process` "login".
+- 8: passes our check, so allauth asks Google for its certificates, finds no key called
+  `forged-kid` and refuses. (The key order in this body is allauth's own, so it differs from 2 to 6.)
+- Window 1 printed one line for command 5, naming the variables and never the values:
+  `WARNING apps.accounts.google: A Google sign-in used a client_id that differs from GOOGLE_OAUTH_CLIENT_ID; check that NEXT_PUBLIC_GOOGLE_CLIENT_ID holds the same value`.
+
+**Now the rate limit.** A Google sign-in shares allauth's `login` limit: 30 a minute per IP. Every
+attempt counts, valid or not. The loop below uses its own source address (`127.0.0.3`), so it starts
+with an empty bucket whatever you did before. Run it in the same terminal as the block above (it
+uses `$h`, `$url`, `$cid` and `mk` from there):
+
+```bash
+body=$(mk $cid not-a-jwt)
+for i in $(seq 1 31); do curl -s -o /dev/null -w '%{http_code}\n' --interface 127.0.0.3 "${h[@]}" -H "Content-Type: application/json" --data-binary "$body" $url; done | sort | uniq -c
+curl -s -w ' %{http_code}\n' --interface 127.0.0.3 "${h[@]}" -H "Content-Type: application/json" --data-binary "$body" $url
+curl -s -o /dev/null -w 'another address: %{http_code}\n' --interface 127.0.0.4 "${h[@]}" -H "Content-Type: application/json" --data-binary "$body" $url
+```
+
+**You should see:**
+
+```text
+     30 400
+      1 429
+{"status": 429} 429
+another address: 400
+```
+
+That is 30 refusals, then the 31st and every later request refused for the minute (`429`), while
+another address is not affected.
+
+**If it differs:** `Connection refused` means window 1 isn't running `runserver`; `404` on command 2
+means the server still runs with no client ID (restart it as above); `curl: Bind failed` on the
+`--interface` lines means your system doesn't accept `127.0.0.3` as a source address: leave the option
+out and wait a minute since your last attempts.
+
+#### Step 6: Look at the Google button in the browser
+
+**Where:** Window 1 (restart the server **without** the override), window 3 (frontend), then the
+Browser.
+
+**What this does:** Starts both servers the normal way, so they read **your own** `backend/.env` and
+`frontend/.env.local` (the same client ID in both; this step never prints it), then shows what the two
+pages look like with and without a client ID.
+
+Window 1 (`Ctrl+C` the server of step 5, then in `backend/` with the venv active):
+
+```bash
+python manage.py runserver
+```
+
+Window 3 (in `frontend/`):
+
+```bash
+npm run dev
+```
+
+In the Browser:
+
+| URL | You should see |
+|---|---|
+| http://localhost:3000/login | Under the "Welcome back" text: a white button, **Continue with Google** (Google's own button, with its colourful "G"), then a thin line with **or log in with email**, then the email and password form |
+| http://localhost:3000/signup | The same button under "Create your account", then **or continue with email** and the form with the Turnstile box |
+
+- At phone width (shrink the window to about 390 px, or use the browser's device toolbar) the button
+  stays inside the card and the page doesn't scroll sideways.
+- The button is Google's, not ours: its width follows the card (up to 400 px) and its text is always
+  English.
+- **Close the popup.** Type something in the email and password boxes, then click the Google button.
+  A Google window opens ("Sign in with Google"). Close it without choosing an account. Nothing
+  changes on the page: your typed text is still there, there is no error and nothing says "Signing in".
+  Google gives a page no signal for a closed popup, so "nothing happens" is the correct behaviour.
+- **Without a client ID the button is hidden.** Stop window 3 (`Ctrl+C`) and run
+  `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run dev`, then reload both pages: no Google button and no "or"
+  line, just the form. (The value is read when the dev server starts.) Stop it and run `npm run dev`
+  again before step 7.
+
+**If it differs:** if the button area stays empty, open the browser console: "The given client ID is
+not found" means the ID in `frontend/.env.local` is wrong; "Not a valid origin for the client" means
+`http://localhost:3000` isn't in the client's Authorized JavaScript origins yet (ENV_GUIDE §1.6; wait a
+few minutes after adding it). If a red box says "Google sign-in couldn't load. Check your connection,
+or use email.", the script `https://accounts.google.com/gsi/client` is blocked (ad blocker, offline).
+
+#### Step 7: Sign up with Google (manual, needs a Google account)
+
+**Where:** Browser, then window 2.
+
+**What this does:** A brand-new person signs up with one click. The agent could not run this step.
+
+1. Open http://localhost:3000/signup and click **Continue with Google**. In the popup choose a Google
+   account whose address has **no account here yet**.
+2. You should land on **/home** (or the page named in `?next=`), logged in. There is **no** yellow
+   "Verify your email" banner, and the New post button is enabled: a Google address is already verified.
+3. The side menu shows your handle, **`@` plus your Google first name in lowercase**: `@ada`, or `@ada_`
+   and four digits when that name is taken, or `@member_` and six characters when the first name has
+   no Latin letters. It is never made from your email address. The display name stays empty.
+4. Reload the page: you stay logged in. Log out from the account menu.
+
+Then, in window 2 (in `backend/`, venv active), look at what was created. (Django may first print
+`12 objects imported automatically …`; that is not part of the answer.)
+
+```bash
+python manage.py shell -c "from allauth.socialaccount.models import SocialAccount; a = SocialAccount.objects.filter(provider='google').select_related('user').order_by('-date_joined').first(); print(a.user.username, a.user.is_email_verified, a.user.has_usable_password(), repr(a.user.display_name), sorted(a.extra_data))"
+```
+
+**You should see** one line shaped like this (your own handle):
+
+```text
+ada True False '' ['email', 'email_verified', 'sub']
+```
+
+That reads: the generated handle, email verified, **no usable password** (a Google-only account; it can
+still set one with "Forgot password?"), a blank display name, and only these Google claims kept
+(`hd` appears too for a Workspace address). Your name and picture are not stored.
+
+Finally, log in again: open http://localhost:3000/login, click **Continue with Google** and choose the
+same account. You land on /home again, and no second account was made:
+
+```bash
+python manage.py shell -c "from allauth.socialaccount.models import SocialAccount; from apps.accounts.models import User; print(SocialAccount.objects.count(), User.objects.count())"
+```
+
+The two numbers are the same as before the second login.
+
+**If it differs:** a red banner under the heading says what happened:
+"Google sign-in didn't work. Try again." (the server refused the token: see below),
+"Your Google account's email address isn't verified…", or "Too many attempts…" (the 30-a-minute limit).
+For "didn't work", `runserver` only logs a `Bad Request: …/provider/token` line, so check, in order: that
+`GOOGLE_OAUTH_CLIENT_ID` in `backend/.env` and `NEXT_PUBLIC_GOOGLE_CLIENT_ID` in `frontend/.env.local`
+are the **same** value (a mismatch makes window 1 print the WARNING from step 5); that the computer's
+clock is right (`timedatectl` should say `System clock synchronized: yes`: a clock that is even a
+little behind Google's makes the token "issued in the future" and is refused); that `runserver` was
+restarted after you edited `backend/.env`; and that the dev server was restarted after you edited
+`frontend/.env.local`.
+
+#### Step 8: Google with an address that already has an account (manual, needs a Gmail address)
+
+**Where:** Browser, then window 2.
+
+**What this does:** Checks that a Google sign-in lands in the **same** account as an email and
+password sign-up with the same Gmail address, and that the password is locked, which is how someone who
+signed up with *your* address without owning it is locked out. The agent could not run this step.
+
+Use a Gmail (`@gmail.com`) address that has no account here yet. If you already used yours in step 7,
+use a second Google account, or first delete that user in Django Admin
+(http://localhost:8000/admin/accounts/user/, which also deletes its Google link).
+
+1. Open http://localhost:3000/signup and make an **email and password** account with that Gmail
+   address (any username and password; Turnstile uses the test key). You land on /verify-email. **Do
+   not open the email link**: the account must stay unverified.
+2. Log out, open http://localhost:3000/login and click **Continue with Google**, choosing that Gmail
+   account.
+3. You land on /home logged in, as the **username you chose in step 1** (not a generated one), and the
+   "Verify your email" banner is gone.
+4. Log out and try the **password** you chose in step 1 on /login: it says "That email and password
+   don't match." Google proved you own the address, so the unverified account's password was wiped. To
+   get a password back use **Forgot password?** (the link goes to your real inbox).
+
+Check it in window 2:
+
+```bash
+python manage.py shell -c "from allauth.socialaccount.models import SocialAccount; a = SocialAccount.objects.filter(provider='google').select_related('user').order_by('-date_joined').first(); print(a.user.username, a.user.is_email_verified, a.user.has_usable_password())"
+```
+
+**You should see** the username from step 1, then `True False`.
+
+- Two more rules (`docs/ARCHITECTURE.md` §7; both covered by step 2's tests):
+  - Only addresses Google itself hosts link to an existing account: `@gmail.com`, or a Google
+    Workspace domain. Any other address (say `you@example.org`) that matches an existing account gets
+    "An account with this email already exists. Log in with your password.", because Google can't
+    vouch for who owns such an address today. A *new* person with that address can still sign up.
+  - **Staff accounts** (moderators and superusers) are never linked by email: "Staff accounts log in
+    with their password." If your own superuser has a Gmail address you can see this: click
+    Continue with Google with it and expect the red banner.
+
+#### Step 9: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (leftover `next dev`: step 12 of Part 1).
+- The accounts from steps 7 and 8, and any `part…`/E2E ones, stay in your local database. Delete the
+  Google ones in Django Admin → **Users** (their Google links go with them; **Social accounts** lists
+  them). Nothing else was created: Part 3 stores no tokens and no Google profile data.
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- Real Google data never goes into git: the client ID stays in your own `.env` files (it is public by
+  design), and there is no client secret anywhere.
+
 ---
 
 ## Guide 2: Windows (PowerShell)
@@ -4506,3 +4925,436 @@ git status --short backend/templates               # ?? backend/templates/ (new,
   and `reset_…`, and the agent's `shot_…`/`p_shot_…`. Delete them in Django Admin → Users if you
   like. `docker compose down -v` (repo root) wipes the whole local database, which is destructive.
 - Stop the containers and keep the data: `docker compose down` (repo root).
+
+### Part 3: Continue with Google
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
+`frontend\.env.local`. Part 3 adds no dependency and no env variable (both Google client-ID variables
+have been in the example files since Part 0A). It does add allauth's own `socialaccount` tables:
+`migrate` applies six migrations of theirs, and we add none.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running; it is restarted in steps 5 and 6. | 4 to 8 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for step 5**: the variables and functions you set there only live in that one PowerShell window. | 1 to 8 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running; it is restarted in step 6. | 6 to 8 |
+| Browser | Steps 6 to 8 | 6 to 8 |
+
+Things to know first:
+
+- **Steps 1 to 6 need no Google account.** Steps 7 and 8 do: they are the manual check from
+  `task.md` ("works end to end on `http://localhost:3000` with your client ID"), because a real
+  Google sign-in can't be automated. The agent that built this part could not run steps 7 and 8.
+- **The PowerShell blocks below were not run on Windows.** The agent works on the Linux PC; it ran
+  the bash twin of every command in the Linux guide on 2026-10-08, and the outputs below are those.
+  The PowerShell commands follow the patterns Parts 1 and 2 proved on Windows (JSON written to a file
+  and sent with `--data-binary "@file"`, `curl.exe`, no `&&`). If one behaves differently, tell the
+  agent which.
+- Steps 4 and 5 use **no real client ID**: step 4 leaves it blank, step 5 uses a made-up one
+  (`rz-manual-test.apps.googleusercontent.com`) that is set only for that `runserver`. Neither step
+  edits `backend\.env`, and neither needs your real client ID.
+- The new-user and linking rules (staff, inactive, Gmail or Workspace only, password wipe, verified
+  address) are covered by 98 automated tests that sign real RS256 tokens against a fake Google
+  certificate (step 2). Step 5 only checks what is visible from outside.
+- Google's script and certificates need internet. Step 5's last request asks Google for its
+  certificates, so it needs internet too.
+- Your Google client's **Authorized JavaScript origins** must contain `http://localhost:3000` (and
+  `http://localhost`): ENV_GUIDE §1.6. New origins can take minutes (rarely hours) to start working.
+- **PowerShell can't set an empty environment variable:** `$env:NAME = ""` *deletes* the variable, and
+  the server would then read the real value from `backend\.env`. Steps 4 and 6 therefore start the
+  program from a tiny `python -c` / `node -e` line that passes the variable as an empty string.
+
+#### Step 1: Apply allauth's Google tables and check nothing else changed
+
+**Where:** Terminal window 2 (commands), PowerShell.
+
+**What this does:** Starts the database containers, activates the Python environment, applies
+allauth's `socialaccount` migrations and confirms we have no model changes of our own.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                           # first time: six "Applying socialaccount.… OK" lines
+python manage.py check                             # System check identified no issues (0 silenced).
+python manage.py makemigrations --check --dry-run  # No changes detected
+python manage.py showmigrations socialaccount
+```
+
+**You should see:** the first run of `migrate` after pulling Part 3 lists these lines (a database
+that already has them says `No migrations to apply.`):
+
+```text
+  Applying socialaccount.0001_initial... OK
+  Applying socialaccount.0002_token_max_lengths... OK
+  Applying socialaccount.0003_extra_data_default_dict... OK
+  Applying socialaccount.0004_app_provider_id_settings... OK
+  Applying socialaccount.0005_socialtoken_nullable_app... OK
+  Applying socialaccount.0006_alter_socialaccount_extra_data... OK
+```
+
+Then the two checks print their messages (in the comments above), and `showmigrations` ends with:
+
+```text
+socialaccount
+ [X] 0001_initial
+ [X] 0002_token_max_lengths
+ [X] 0003_extra_data_default_dict
+ [X] 0004_app_provider_id_settings
+ [X] 0005_socialtoken_nullable_app
+ [X] 0006_alter_socialaccount_extra_data
+```
+
+#### Step 2: Run the automated backend checks
+
+**Where:** Same terminal as step 1 (window 2, in `backend\`, venv active).
+
+**What this does:** Runs the whole backend test suite, then only the new Part 3 test files, then the
+linter and formatter check.
+
+```powershell
+python -m pytest                                    # 704 passed
+python -m pytest apps/accounts/tests/test_google_login.py apps/accounts/tests/test_usernames.py -q   # 98 passed
+ruff check . ; ruff format --check .                # All checks passed! / 77 files already formatted
+```
+
+**You should see:** the full run ends with `704 passed`, the second command with `98 passed` (60 in
+`test_google_login.py`, 38 in `test_usernames.py`), and the last prints `All checks passed!` and
+`77 files already formatted`. (Counts may grow later; what matters is that nothing fails.)
+
+- `test_google_login.py` signs real RS256 ID tokens with a test key and serves the matching
+  certificate in place of Google's, so allauth's own checks (`aud`, `iss`, `exp`, `iat`, signature and
+  replay) run unpatched. It covers: a new user (verified, generated username, no display name, no
+  password), linking a verified or unverified account, Gmail and Workspace only, no staff linking,
+  inactive accounts, every kind of bad token and request, the 404 when disabled, the session rules
+  and the rate limit.
+- `test_usernames.py` covers the username rules ("Ada", "José", "Mary-Jane", "李", reserved words,
+  collisions).
+
+#### Step 3: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last command) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and
+the end-to-end tests.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 67 files, 747 tests passed
+npm run build
+npm run test:e2e                                    # 15 passed
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  67 passed (67)` and `Tests  747 passed (747)`. `npm run build` lists the routes (as in
+Part 2). `npm run test:e2e` ends with `15 passed`.
+
+- The new component tests are `GoogleButton.test.tsx` (20) and `google-identity.test.ts` (7); the login
+  and sign-up form tests and `auth-api.test.ts` grew too.
+- The E2E run pins an empty Google client ID for both servers, so it never contacts Google: the button
+  is hidden there. (The Linux guide also runs the E2E in CI mode against a build with no client ID
+  baked in; on Windows `$env:CI = "1"` after `npm run build` works as in Part 1, but it can't blank the
+  client ID, so a `frontend\.env.local` with your real ID makes that run less representative.)
+
+#### Step 4: With no client ID, Google sign-in is switched off
+
+**Where:** First window 1 (start the server), then window 2 (the commands).
+
+**What this does:** An empty `GOOGLE_OAUTH_CLIENT_ID` disables the feature "cleanly": the endpoint
+answers 404, exactly like a path that doesn't exist. The variable is emptied for this one `runserver`
+only (the process environment beats `backend\.env`).
+
+Window 1 (in `backend\`, venv active; stop any other `runserver` first with `Ctrl+C`). It starts
+`manage.py` from Python, because that can pass an *empty* value (see the note above):
+
+```powershell
+python -c "import os, subprocess, sys; subprocess.run([sys.executable, 'manage.py', 'runserver'], env={**os.environ, 'GOOGLE_OAUTH_CLIENT_ID': ''})"
+```
+
+Window 2:
+
+```powershell
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'    # headers every API call needs
+$url = 'http://localhost:8000/api/auth/app/v1/auth/provider/token'
+'{"provider":"google","process":"login","token":{"client_id":"x.apps.googleusercontent.com","id_token":"a.b.c"}}' | Set-Content -Encoding ascii $env:TEMP\rz-google.json
+curl.exe -s -w ' %{http_code}\n' @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-google.json" $url   # 1: the sign-in
+curl.exe -s -w ' %{http_code}\n' @h $url                                                                                  # 2: a GET
+curl.exe -s -o NUL -w '%{http_code}\n' @h -X POST -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-google.json" http://localhost:8000/api/auth/app/v1/auth/provider/signup   # 3: allauth's other social paths
+curl.exe -s -o NUL -w '%{http_code}\n' @h http://localhost:8000/api/auth/app/v1/account/providers                                                                                      # 4
+```
+
+**You should see** (four commands, four answers):
+
+```text
+{"status": 404, "errors": [{"code": "not_found", "message": "Not found."}]} 404
+{"status": 404, "errors": [{"code": "not_found", "message": "Not found."}]} 404
+404
+404
+```
+
+- Commands 3 and 4 show that allauth's other social endpoints (`auth/provider/signup`,
+  `account/providers`, and `auth/provider/redirect`) are never reachable, with or without a client ID.
+
+#### Step 5: With a client ID, check what an outsider can and can't do
+
+**Where:** Window 1 (restart the server), then window 2. Window 2 must be the same PowerShell window
+for the whole step (the variables and functions only live there).
+
+**What this does:** Restarts the server with a made-up client ID, so the endpoint is on. Then it sends
+requests that are not a real Google sign-in. Each must be refused, and none may crash the server. (A
+real, signed token can only come from Google, so the success cases are in step 2's tests and steps 7
+and 8.)
+
+Window 1 (`Ctrl+C` the server of step 4, then, in `backend\` with the venv active):
+
+```powershell
+$env:GOOGLE_OAUTH_CLIENT_ID = "rz-manual-test.apps.googleusercontent.com"; python manage.py runserver
+```
+
+(That variable only lives in window 1. Before step 6, in window 1 after `Ctrl+C`:
+`Remove-Item Env:GOOGLE_OAUTH_CLIENT_ID`.)
+
+Window 2:
+
+```powershell
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'
+$url = 'http://localhost:8000/api/auth/app/v1/auth/provider/token'
+$cid = 'rz-manual-test.apps.googleusercontent.com'
+function b64($s) { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($s)).TrimEnd('=').Replace('+','-').Replace('/','_') }    # base64url, as JWTs use
+$payload = b64 ('{"iss":"https://accounts.google.com","aud":"' + $cid + '","sub":"1","email":"x@gmail.com","email_verified":true,"exp":4000000000}')
+$rs    = (b64 '{"alg":"RS256","kid":"forged-kid","typ":"JWT"}') + '.' + $payload + '.' + (b64 'not-a-real-signature')   # looks like Google's, is not
+$hs    = (b64 '{"alg":"HS256","kid":"k","typ":"JWT"}') + '.' + $payload + '.' + (b64 'sig')                             # the wrong algorithm
+$nokid = (b64 '{"alg":"RS256","typ":"JWT"}') + '.' + $payload + '.' + (b64 'sig')                                      # no key id
+function mk($client, $token) { '{"provider":"google","process":"login","token":{"client_id":"' + $client + '","id_token":"' + $token + '"}}' }
+function post($json) { $json | Set-Content -Encoding ascii $env:TEMP\rz-google.json; curl.exe -s -w ' %{http_code}\n' @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-google.json" $url }
+"1 no headers:";      mk $cid $rs | Set-Content -Encoding ascii $env:TEMP\rz-google.json; curl.exe -s -w ' %{http_code}\n' -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-google.json" $url
+"2 garbage token:";   post (mk $cid 'not-a-jwt')
+"3 HS256:";           post (mk $cid $hs)
+"4 no kid:";          post (mk $cid $nokid)
+"5 wrong client_id:"; post (mk 'other.apps.googleusercontent.com' $rs)
+"6 connect:";         post ('{"provider":"google","process":"connect","token":{"client_id":"' + $cid + '","id_token":"' + $rs + '"}}')
+"7 GET:";             curl.exe -s -w ' %{http_code}\n' @h $url
+"8 forged RS256 (asks Google for its certificates; needs internet):"; post (mk $cid $rs)
+```
+
+**You should see** (eight labels, each followed by one answer):
+
+```text
+1 no headers:
+{"status": 403, "errors": [{"code": "csrf_failed", "message": "Reload the page and try again."}]} 403
+2 garbage token:
+{"status": 400, "errors": [{"code": "invalid_token", "message": "Invalid token.", "param": "token"}]} 400
+3 HS256:
+{"status": 400, "errors": [{"code": "invalid_token", "message": "Invalid token.", "param": "token"}]} 400
+4 no kid:
+{"status": 400, "errors": [{"code": "invalid_token", "message": "Invalid token.", "param": "token"}]} 400
+5 wrong client_id:
+{"status": 400, "errors": [{"code": "invalid_token", "message": "Invalid token.", "param": "token"}]} 400
+6 connect:
+{"status": 400, "errors": [{"code": "invalid_token", "message": "Invalid token.", "param": "token"}]} 400
+7 GET:
+{"status": 404, "errors": [{"code": "not_found", "message": "Not found."}]} 404
+8 forged RS256 (asks Google for its certificates; needs internet):
+{"status": 400, "errors": [{"message": "Invalid token.", "code": "invalid_token", "param": "token"}]} 400
+```
+
+- 1: no `Origin` / `X-Requested-With`, so refused before anything else (the same guard as login).
+- 2 to 6: refused by our own shape check (`apps/accounts/google.py`) without calling Google. Without
+  it, 3 and 4 would crash allauth with a 500. A real token has an `RS256` header with a key id, a
+  client ID equal to the server's, and `process` "login".
+- 8: passes our check, so allauth asks Google for its certificates, finds no key called
+  `forged-kid` and refuses. (The key order in this body is allauth's own, so it differs from 2 to 6.)
+- Window 1 printed one line for command 5, naming the variables and never the values:
+  `WARNING apps.accounts.google: A Google sign-in used a client_id that differs from GOOGLE_OAUTH_CLIENT_ID; check that NEXT_PUBLIC_GOOGLE_CLIENT_ID holds the same value`.
+
+**Now the rate limit.** A Google sign-in shares allauth's `login` limit: 30 a minute per IP. Every
+attempt counts, valid or not, and it is the same bucket as your password logins, so start it with a
+quiet minute (nothing else logging in). Run it in the same window as the block above (it uses `$h`,
+`$url`, `$cid` and `mk` from there):
+
+```powershell
+mk $cid 'not-a-jwt' | Set-Content -Encoding ascii $env:TEMP\rz-google.json
+1..31 | ForEach-Object { curl.exe -s -o NUL -w '%{http_code}\n' @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-google.json" $url } | Group-Object | ForEach-Object { '{0,7} {1}' -f $_.Count, $_.Name }
+curl.exe -s -w ' %{http_code}\n' @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-google.json" $url
+```
+
+**You should see:**
+
+```text
+     30 400
+      1 429
+{"status": 429} 429
+```
+
+That is 30 refusals, then the 31st and every later request refused for the minute (`429`). (If you
+logged in or tried Google in the last minute, fewer than 30 come back `400` before the first `429`.)
+
+**If it differs:** `curl: (7) Failed to connect` means window 1 isn't running `runserver`; `404` on
+command 2 means the server still runs with no client ID (restart it as above).
+
+#### Step 6: Look at the Google button in the browser
+
+**Where:** Window 1 (restart the server **without** the override), window 3 (frontend), then the
+Browser.
+
+**What this does:** Starts both servers the normal way, so they read **your own** `backend\.env` and
+`frontend\.env.local` (the same client ID in both; this step never prints it), then shows what the two
+pages look like with and without a client ID.
+
+Window 1 (`Ctrl+C` the server of step 5, then `Remove-Item Env:GOOGLE_OAUTH_CLIENT_ID`, then in
+`backend\` with the venv active):
+
+```powershell
+python manage.py runserver
+```
+
+Window 3 (in `frontend\`):
+
+```powershell
+npm run dev
+```
+
+In the Browser:
+
+| URL | You should see |
+|---|---|
+| http://localhost:3000/login | Under the "Welcome back" text: a white button, **Continue with Google** (Google's own button, with its colourful "G"), then a thin line with **or log in with email**, then the email and password form |
+| http://localhost:3000/signup | The same button under "Create your account", then **or continue with email** and the form with the Turnstile box |
+
+- At phone width (shrink the window to about 390 px, or use the browser's device toolbar) the button
+  stays inside the card and the page doesn't scroll sideways.
+- The button is Google's, not ours: its width follows the card (up to 400 px) and its text is always
+  English.
+- **Close the popup.** Type something in the email and password boxes, then click the Google button.
+  A Google window opens ("Sign in with Google"). Close it without choosing an account. Nothing
+  changes on the page: your typed text is still there, there is no error and nothing says "Signing in".
+  Google gives a page no signal for a closed popup, so "nothing happens" is the correct behaviour.
+- **Without a client ID the button is hidden.** Stop window 3 (`Ctrl+C`) and start the dev server from
+  Node, which can pass an empty value:
+  `node -e "require('child_process').spawnSync('npm', ['run', 'dev'], { stdio: 'inherit', shell: true, env: { ...process.env, NEXT_PUBLIC_GOOGLE_CLIENT_ID: '' } })"`.
+  Reload both pages: no Google button and no "or" line, just the form. (The value is read when the dev
+  server starts.) Stop it and run `npm run dev` again before step 7.
+
+**If it differs:** if the button area stays empty, open the browser console: "The given client ID is
+not found" means the ID in `frontend\.env.local` is wrong; "Not a valid origin for the client" means
+`http://localhost:3000` isn't in the client's Authorized JavaScript origins yet (ENV_GUIDE §1.6; wait a
+few minutes after adding it). If a red box says "Google sign-in couldn't load. Check your connection,
+or use email.", the script `https://accounts.google.com/gsi/client` is blocked (ad blocker, offline).
+
+#### Step 7: Sign up with Google (manual, needs a Google account)
+
+**Where:** Browser, then window 2.
+
+**What this does:** A brand-new person signs up with one click. The agent could not run this step.
+
+1. Open http://localhost:3000/signup and click **Continue with Google**. In the popup choose a Google
+   account whose address has **no account here yet**.
+2. You should land on **/home** (or the page named in `?next=`), logged in. There is **no** yellow
+   "Verify your email" banner, and the New post button is enabled: a Google address is already verified.
+3. The side menu shows your handle, **`@` plus your Google first name in lowercase**: `@ada`, or `@ada_`
+   and four digits when that name is taken, or `@member_` and six characters when the first name has
+   no Latin letters. It is never made from your email address. The display name stays empty.
+4. Reload the page: you stay logged in. Log out from the account menu.
+
+Then, in window 2 (in `backend\`, venv active), look at what was created. (Django may first print
+`12 objects imported automatically …`; that is not part of the answer.)
+
+```powershell
+python manage.py shell -c "from allauth.socialaccount.models import SocialAccount; a = SocialAccount.objects.filter(provider='google').select_related('user').order_by('-date_joined').first(); print(a.user.username, a.user.is_email_verified, a.user.has_usable_password(), repr(a.user.display_name), sorted(a.extra_data))"
+```
+
+**You should see** one line shaped like this (your own handle):
+
+```text
+ada True False '' ['email', 'email_verified', 'sub']
+```
+
+That reads: the generated handle, email verified, **no usable password** (a Google-only account; it can
+still set one with "Forgot password?"), a blank display name, and only these Google claims kept
+(`hd` appears too for a Workspace address). Your name and picture are not stored.
+
+Finally, log in again: open http://localhost:3000/login, click **Continue with Google** and choose the
+same account. You land on /home again, and no second account was made:
+
+```powershell
+python manage.py shell -c "from allauth.socialaccount.models import SocialAccount; from apps.accounts.models import User; print(SocialAccount.objects.count(), User.objects.count())"
+```
+
+The two numbers are the same as before the second login.
+
+**If it differs:** a red banner under the heading says what happened:
+"Google sign-in didn't work. Try again." (the server refused the token: see below),
+"Your Google account's email address isn't verified…", or "Too many attempts…" (the 30-a-minute limit).
+For "didn't work", `runserver` only logs a `Bad Request: …/provider/token` line, so check, in order:
+that `GOOGLE_OAUTH_CLIENT_ID` in `backend\.env` and `NEXT_PUBLIC_GOOGLE_CLIENT_ID` in
+`frontend\.env.local` are the **same** value (a mismatch makes window 1 print the WARNING from
+step 5); that the computer's clock is right (Settings → Time & language → Date & time → "Sync now": a
+clock that is even a little behind Google's makes the token "issued in the future" and is refused);
+that `runserver` was restarted after you edited `backend\.env`; and that the dev server was restarted
+after you edited `frontend\.env.local`.
+
+#### Step 8: Google with an address that already has an account (manual, needs a Gmail address)
+
+**Where:** Browser, then window 2.
+
+**What this does:** Checks that a Google sign-in lands in the **same** account as an email and
+password sign-up with the same Gmail address, and that the password is locked, which is how someone who
+signed up with *your* address without owning it is locked out. The agent could not run this step.
+
+Use a Gmail (`@gmail.com`) address that has no account here yet. If you already used yours in step 7,
+use a second Google account, or first delete that user in Django Admin
+(http://localhost:8000/admin/accounts/user/, which also deletes its Google link).
+
+1. Open http://localhost:3000/signup and make an **email and password** account with that Gmail
+   address (any username and password; Turnstile uses the test key). You land on /verify-email. **Do
+   not open the email link**: the account must stay unverified.
+2. Log out, open http://localhost:3000/login and click **Continue with Google**, choosing that Gmail
+   account.
+3. You land on /home logged in, as the **username you chose in step 1** (not a generated one), and the
+   "Verify your email" banner is gone.
+4. Log out and try the **password** you chose in step 1 on /login: it says "That email and password
+   don't match." Google proved you own the address, so the unverified account's password was wiped. To
+   get a password back use **Forgot password?** (the link goes to your real inbox).
+
+Check it in window 2:
+
+```powershell
+python manage.py shell -c "from allauth.socialaccount.models import SocialAccount; a = SocialAccount.objects.filter(provider='google').select_related('user').order_by('-date_joined').first(); print(a.user.username, a.user.is_email_verified, a.user.has_usable_password())"
+```
+
+**You should see** the username from step 1, then `True False`.
+
+- Two more rules (`docs/ARCHITECTURE.md` §7; both covered by step 2's tests):
+  - Only addresses Google itself hosts link to an existing account: `@gmail.com`, or a Google
+    Workspace domain. Any other address (say `you@example.org`) that matches an existing account gets
+    "An account with this email already exists. Log in with your password.", because Google can't
+    vouch for who owns such an address today. A *new* person with that address can still sign up.
+  - **Staff accounts** (moderators and superusers) are never linked by email: "Staff accounts log in
+    with their password." If your own superuser has a Gmail address you can see this: click
+    Continue with Google with it and expect the red banner.
+
+#### Step 9: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (leftover `next dev`: step 12 of Part 1).
+- Delete the helper file:
+
+  ```powershell
+  Remove-Item $env:TEMP\rz-google.json
+  ```
+
+- The accounts from steps 7 and 8, and any `part…`/E2E ones, stay in your local database. Delete the
+  Google ones in Django Admin → **Users** (their Google links go with them; **Social accounts** lists
+  them). Nothing else was created: Part 3 stores no tokens and no Google profile data.
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- Real Google data never goes into git: the client ID stays in your own `.env` files (it is public by
+  design), and there is no client secret anywhere.

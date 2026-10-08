@@ -7,6 +7,8 @@ refresh token and the raw session key. So, before allauth runs:
 3. login, signup, refresh, verify and the password-reset calls ignore any Authorization /
    X-Session-Token header;
 4. sign-up must pass Turnstile first, so a bot learns nothing (not even "email taken");
+   a Google sign-in is rate limited and checked for shape first (`google.py`), and is a 404 while
+   `GOOGLE_OAUTH_CLIENT_ID` is blank;
 5. refresh takes its token from the `rz_refresh` cookie only;
 6. a password-reset request is also capped per day per address and per IP (a separate allauth
    action, because allauth keeps one history per action and "per" type).
@@ -27,7 +29,7 @@ from django.core.exceptions import RequestDataTooBig
 from django.http import JsonResponse
 from django.utils.cache import add_never_cache_headers
 
-from apps.accounts import cookies
+from apps.accounts import cookies, google
 from apps.accounts.turnstile import MAX_TOKEN_LENGTH, TurnstileResult, verify_turnstile
 
 AUTH_PREFIX = "/api/auth/"
@@ -38,9 +40,11 @@ REFRESH_PATH = _APP + "tokens/refresh"
 VERIFY_EMAIL_PATH = _APP + "auth/email/verify"
 PASSWORD_REQUEST_PATH = _APP + "auth/password/request"
 PASSWORD_RESET_PATH = _APP + "auth/password/reset"
+PROVIDER_TOKEN_PATH = _APP + "auth/provider/token"
 LOGOUT_PATH = "/api/auth/logout/"
 
-# path → allowed methods. The only allauth endpoints that answer; Part 3 adds its own.
+# path → allowed methods. The only allauth endpoints that answer. (allauth also mounts
+# `auth/provider/signup`, `auth/provider/redirect` and `account/providers`: they stay 404.)
 # (Resend is ours: POST /api/v1/me/verification-email/. allauth's `auth/email/verify/resend` is the
 # code-flow view and stays unlisted.)
 ALLAUTH_ENDPOINTS = {
@@ -50,12 +54,13 @@ ALLAUTH_ENDPOINTS = {
     VERIFY_EMAIL_PATH: {"POST"},
     PASSWORD_REQUEST_PATH: {"POST"},
     PASSWORD_RESET_PATH: {"GET", "POST"},
+    PROVIDER_TOKEN_PATH: {"POST"},
 }
 # These never run "as" a token the request carries: login, signup, refresh and reset issue fresh
 # tokens, and a verification link or reset key works for whoever holds it, so a stale Bearer must
 # not turn into allauth's 410.
 _ANONYMOUS_ENDPOINTS = set(ALLAUTH_ENDPOINTS)
-_ISSUING_ENDPOINTS = {LOGIN_PATH, SIGNUP_PATH, PASSWORD_RESET_PATH}
+_ISSUING_ENDPOINTS = {LOGIN_PATH, SIGNUP_PATH, PASSWORD_RESET_PATH, PROVIDER_TOKEN_PATH}
 _COOKIE_ENDPOINTS = {REFRESH_PATH, LOGOUT_PATH}
 
 CSRF_HEADER_VALUE = "rumor-zero"
@@ -66,6 +71,8 @@ TURNSTILE_PARAM = "turnstile_token"
 TURNSTILE_FAILED = "The bot check didn't pass. Try it again."
 TURNSTILE_UNAVAILABLE = "We couldn't run the bot check. Try again in a minute."
 RESET_DAILY_ACTION = "reset_password_daily"
+# A Google sign-in is a login: it shares allauth's `login` bucket (30/min per IP).
+GOOGLE_RATE_ACTION = "login"
 
 
 def error_response(status, code=None, message=None, param=None):
@@ -123,6 +130,8 @@ class AuthApiMiddleware:
     def _before(self, request, path):
         if path != LOGOUT_PATH and request.method not in ALLAUTH_ENDPOINTS.get(path, ()):
             return error_response(404, "not_found", "Not found.")
+        if path == PROVIDER_TOKEN_PATH and not settings.GOOGLE_OAUTH_CLIENT_ID:
+            return error_response(404, "not_found", "Not found.")
         # Before the safe-method return: a GET carrying a stale Bearer would get allauth's 410.
         if path in _ANONYMOUS_ENDPOINTS:
             request.META.pop("HTTP_AUTHORIZATION", None)
@@ -143,6 +152,8 @@ class AuthApiMiddleware:
             return self._check_reset_daily_cap(request)
         if path == REFRESH_PATH:
             return self._inject_refresh_token(request)
+        if path == PROVIDER_TOKEN_PATH:
+            return self._check_google(request)
         return None
 
     @staticmethod
@@ -180,6 +191,15 @@ class AuthApiMiddleware:
                 400, "turnstile_unavailable", TURNSTILE_UNAVAILABLE, TURNSTILE_PARAM
             )
         return error_response(400, "turnstile_failed", TURNSTILE_FAILED, TURNSTILE_PARAM)
+
+    @staticmethod
+    def _check_google(request):
+        # allauth puts no limit on this endpoint, and every call fetches Google's certificates.
+        if not ratelimit.consume(request, action=GOOGLE_RATE_ACTION):
+            return error_response(429)
+        if not google.check_provider_token_request(request):
+            return error_response(400, "invalid_token", google.INVALID_TOKEN_MESSAGE, "token")
+        return None
 
     @staticmethod
     def _reset_request_key(request):

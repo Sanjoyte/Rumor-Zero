@@ -1,12 +1,21 @@
 """Helpers for the auth API tests: a same-site client, a fake Turnstile and token helpers."""
 
+import datetime
 import json
 import re
 import time
+import uuid
 from urllib.parse import unquote
 
+import jwt
 import pytest
+import requests
 from allauth.headless.tokens.strategies.jwt import internal
+from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 from django.contrib.sessions.backends.db import SessionStore
 from django.test import Client
 
@@ -16,6 +25,8 @@ from apps.accounts.turnstile import TurnstileResult
 
 # The root conftest fixes settings.FRONTEND_ORIGIN to this value.
 TEST_FRONTEND_ORIGIN = "http://localhost:3000"
+# Likewise the Google client ID the root conftest configures.
+TEST_GOOGLE_CLIENT_ID = "rz-test-client.apps.googleusercontent.com"
 LOGIN_URL = middleware.LOGIN_PATH
 SIGNUP_URL = middleware.SIGNUP_PATH
 REFRESH_URL = middleware.REFRESH_PATH
@@ -23,6 +34,7 @@ LOGOUT_URL = middleware.LOGOUT_PATH
 VERIFY_URL = middleware.VERIFY_EMAIL_PATH
 PASSWORD_REQUEST_URL = middleware.PASSWORD_REQUEST_PATH
 PASSWORD_RESET_URL = middleware.PASSWORD_RESET_PATH
+PROVIDER_TOKEN_URL = middleware.PROVIDER_TOKEN_PATH
 RESEND_URL = "/api/v1/me/verification-email/"
 SITE_HEADERS = {"Origin": TEST_FRONTEND_ORIGIN, "X-Requested-With": "rumor-zero"}
 DUMMY_TURNSTILE_TOKEN = "XXXX.DUMMY.TOKEN.XXXX"
@@ -142,3 +154,118 @@ def key_from_email(message, route):
     """
     link = next(url for url in email_links(message) if f"/{route}/" in url)
     return unquote(link.split(f"/{route}/", 1)[1])
+
+
+# ---------- Google ----------
+
+
+def _make_google_key():
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "rz-test-google")])
+    now = datetime.datetime.now(datetime.UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(days=1))
+        .not_valid_after(now + datetime.timedelta(days=30))
+        .sign(key, hashes.SHA256())
+    )
+    return key, cert.public_bytes(serialization.Encoding.PEM).decode()
+
+
+_KEYS = {}
+
+
+def google_key(name="real"):
+    """RSA keys and certificates are slow to make, so each is made once per test run."""
+    if name not in _KEYS:
+        _KEYS[name] = _make_google_key()
+    return _KEYS[name]
+
+
+class FakeCertsSession:
+    """Stands in for allauth's requests session: serves Google's `{kid: certificate}` document."""
+
+    def __init__(self, fake):
+        self.fake = fake
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def get(self, url, **kwargs):
+        self.fake.fetches += 1
+        if self.fake.fetch_error:
+            raise requests.ConnectionError("no network in tests")
+        return self
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {self.fake.kid: google_key()[1]}
+
+
+class FakeGoogle:
+    """Mints real RS256 ID tokens that allauth verifies unpatched (`aud`, `iss`, `exp`, `iat`,
+    signature, `jti` replay); only the fetch of Google's certificates is faked."""
+
+    kid = "rz-test-kid"
+
+    def __init__(self):
+        self.fetch_error = False
+        self.fetches = 0
+        self.counter = 0
+
+    def claims(self, **overrides):
+        self.counter += 1
+        now = int(time.time())
+        claims = {
+            "iss": "https://accounts.google.com",
+            "aud": TEST_GOOGLE_CLIENT_ID,
+            "sub": f"google-sub-{self.counter}",
+            "email": f"person{self.counter}@gmail.com",
+            "email_verified": True,
+            "given_name": "Ada",
+            "family_name": "Lovelace",
+            "name": "Ada Lovelace",
+            "picture": "https://example.test/ada.png",
+            "iat": now,
+            "exp": now + 3600,
+            "jti": uuid.uuid4().hex,
+        }
+        claims.update(overrides)
+        return {key: value for key, value in claims.items() if value is not None}
+
+    def token(self, *, key="real", algorithm="RS256", kid=kid, **claims):
+        """A signed ID token. `key="other"` forges one; `kid=None` leaves the header's kid out."""
+        headers = {"kid": kid} if kid else {}
+        secret = google_key(key)[0] if algorithm == "RS256" else "x" * 40
+        if algorithm == "none":
+            secret = None
+        return jwt.encode(self.claims(**claims), secret, algorithm=algorithm, headers=headers)
+
+    def login(self, client, id_token=None, *, client_id=TEST_GOOGLE_CLIENT_ID, **claims):
+        """POST the sign-in the way the frontend does."""
+        if id_token is None:
+            id_token = self.token(**claims)
+        body = {
+            "provider": "google",
+            "process": "login",
+            "token": {"client_id": client_id, "id_token": id_token},
+        }
+        return post_json(client, PROVIDER_TOKEN_URL, body)
+
+
+@pytest.fixture
+def google(monkeypatch):
+    fake = FakeGoogle()
+    monkeypatch.setattr(
+        DefaultSocialAccountAdapter, "get_requests_session", lambda self: FakeCertsSession(fake)
+    )
+    return fake
