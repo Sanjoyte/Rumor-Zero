@@ -6,26 +6,57 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none. **Part 3 (Continue with Google) is done** (2026-10-08; implemented from the approved
-  plan, all required tests and checks green, `task.md` updated). Parts 0A, 0B, 0D, 0C, 1, 2 and 3 are
-  done. Part 1 CI is green (user-reported 2026-10-06); **Part 2 and Part 3 CI have not run yet.**
-  - **Acceptance criterion 4 is pending you:** the real-Google sign-in check (`docs/test-command.md`
-    Part 3, steps 7 and 8). The agent has no Google account, so it could not run it.
+- **Part:** **Part 4 (Posts: composer + Recent feed) is planned and approved, not implemented.**
+  Parts 0A, 0B, 0D, 0C, 1, 2 and 3 are done (Part 3 committed as `6cd67d0`). Part 1 CI is green
+  (user-reported 2026-10-06); **Part 2 and Part 3 CI results have not been reported yet.**
+  - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
+    (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block Part 4.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after finishing Part 3; Part 4 is not started).
-- **Phase:** done, uncommitted. The user reviews and commits.
+- **Owner:** none (Claude stopped after planning Part 4).
+- **Phase:** planned and approved; implementation not started.
 - **Approved plan:**
-  [`docs/agents/plans/part-3-continue-with-google.md`](plans/part-3-continue-with-google.md)
-  (status line now says IMPLEMENTED)
+  [`docs/agents/plans/part-4-posts-composer-recent-feed.md`](plans/part-4-posts-composer-recent-feed.md)
+  (approved 2026-10-08)
 - **Previous plans:**
+  - [`part-3-continue-with-google.md`](plans/part-3-continue-with-google.md), implemented
+    2026-10-08;
   - [`part-2-email-verification-reset.md`](plans/part-2-email-verification-reset.md), implemented
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-08 by Claude (Sonnet 5.5), Part 3 implementation.
+- **Last updated:** 2026-10-08 by Claude (Opus 5.5), Part 4 planning.
 
 ## Completed checkpoints
+
+- 2026-10-08 (Claude, Opus 5.5): **Part 4 planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `6cd67d0` ("Part 3: Continue with Google", committed by the user), a
+    clean tree.
+  - **Research:** read-only only. Django 5.2.17, DRF 3.18.1 and idna 3.20 read in the installed
+    source; browser URL parsing checked with Node 24's `URL`. A separate design-review pass is
+    folded into the plan.
+  - **Changed this session:** only the new plan file and this file. No code, no setup command, no
+    `task.md` edit, no env file read.
+  - **User decisions (2026-10-08):**
+    - The fact quota is a **rolling 24 h** window that counts deleted and removed fact posts.
+    - **Pin `idna==3.20`** (already installed through requests/anymail) for UTS #46 host encoding.
+    - "Optimistic insert" means **insert on success**: the composer waits for the 201, then the
+      returned post goes to the top of Recent with no refetch.
+    - Posting away from `/home`: **stay and show a toast**.
+  - **Defaults approved with the plan:**
+    - 429 `fact_quota_exceeded` + `Retry-After`; 403 `fact_posts_paused` at limit 0.
+    - An extra partial index for Recent.
+    - Code-point character counting.
+    - A read-only posts admin until Part 10.
+    - The composer keeps its draft when closed.
+    - The other defaults listed in the plan's Context section.
+  - **Found during planning** (all handled in the plan):
+    - A crafted cursor position reaches the queryset filter and gives a 500.
+    - DRF throttles also run on GET.
+    - `idna` 3.20 ignores `transitional` and rejects `_` and `ab--cd` in ASCII labels.
+    - The browser's `URL` parser turns `\` into `/` and decodes `%xx` in hosts.
+    - The platform-settings seed comes from the developer's `.env`, so tests must pin
+      `fact_posts_per_day`.
 
 - 2026-10-08 (Claude, Sonnet 5.5): **Part 3 implemented** (uncommitted). Started from HEAD `5339e04`
   ("Plan Part 3", committed by the user), a clean tree that matched this file.
@@ -197,14 +228,14 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `5339e04` ("Plan Part 3", committed by the user). **Uncommitted:** the whole Part 3
-  implementation: 37 modified files and 8 new files (`git status --short`; the new ones are listed in
-  the checkpoint above). Nothing else.
-- Docker (Postgres 18 + Redis) is up; no dev server is running; ports 3000/8000 are free.
-- The local database got allauth's `socialaccount.0001`–`0006` and holds no Google account.
-- Ignored artifacts from the checks: `backend/tmp/mail/*.log`, `frontend/test-results/`,
-  `frontend/playwright-report/`, and a production build in `frontend/.next/` made with an empty Google
-  client ID (the last `npm run build` before the CI-mode E2E run).
+- HEAD is `6cd67d0` ("Part 3: Continue with Google", committed by the user). **Uncommitted:** the new
+  plan `docs/agents/plans/part-4-posts-composer-recent-feed.md` and this file. Nothing else.
+- Docker and the dev servers were not started or checked this session (planning only). Start with
+  `docker compose ps` / `docker compose up -d`.
+- The local database got allauth's `socialaccount.0001`–`0006` in Part 3; Part 4's `posts`
+  migration doesn't exist yet.
+- Ignored artifacts from earlier checks may remain: `backend/tmp/mail/*.log`,
+  `frontend/test-results/`, `frontend/playwright-report/`, `frontend/.next/`.
 
 ## Validation of Part 3 (2026-10-08)
 
@@ -366,16 +397,20 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-1. **User:** review the diff and the Part 3 section of `docs/test-command.md`. Then **run steps 7 and 8
-   of that section with your real Google account** (acceptance criterion 4) and tell the agent the
-   result, so `task.md` can tick it. Then commit, and push so CI runs; report the CI result (Part 2's
-   and Part 3's E2E jobs).
-2. **Next part:** Part 4 (posts: composer + Recent feed), from `task.md`. Fresh session (`/clear`),
-   first `git status` and `docker compose up -d`.
+**Implement Part 4 from the approved plan**
+([`plans/part-4-posts-composer-recent-feed.md`](plans/part-4-posts-composer-recent-feed.md)), starting
+at its "Ordered steps" step 1. Model: Sonnet 5.5 · high (task.md). Fresh session (`/clear`); first
+`git status`, `git diff` and `docker compose up -d`.
+
+Still open from Part 3 (not blocking Part 4): run `docs/test-command.md` Part 3 steps 7 and 8 with a
+real Google account (acceptance criterion 4), and report the Part 2 and Part 3 CI results.
 
 ## Blockers or user decisions
 
 - None open.
+- User decisions for Part 4 (2026-10-08) are in the approved plan's Context section and the
+  checkpoint above. They go into ARCHITECTURE §2/§3/§4/§4c/§9/§10 and ANALYSIS D7 **during
+  implementation**; they are not there yet.
 - User decisions for Part 1 (2026-10-02), now in ARCHITECTURE §2/§7: superusers are verified
   (createsuperuser + backfill migration); Turnstile fails closed; the `rz_session=1` hint cookie.
 - User decisions for 0C (2026-10-01), in ARCHITECTURE §10: the reduced logged-out shell; phones get a
