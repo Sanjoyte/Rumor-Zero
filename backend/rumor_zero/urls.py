@@ -11,6 +11,7 @@ urlpatterns = [
     path("api/auth/logout/", logout_view, name="auth-logout"),
     path("api/auth/", include("allauth.headless.urls")),
     path("api/", include("apps.accounts.urls")),
+    path("api/", include("apps.posts.urls")),
     path("api/", include("apps.core.urls")),
     path(settings.ADMIN_URL_PATH, admin.site.urls),
 ]

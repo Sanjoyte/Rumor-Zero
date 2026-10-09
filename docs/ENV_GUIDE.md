@@ -208,7 +208,7 @@ Free. No billing account is needed; if Google offers to set one up, choose skip 
 | Variable | Default | Meaning |
 |---|---|---|
 | `EMERGENCY_DURATION_HOURS` | `24` | how long an emergency fact post stays pinned |
-| `EMERGENCY_POSTS_PER_DAY` | `1` | emergency posts per user per rolling 24 h (they also count toward `FACT_POSTS_PER_DAY`) |
+| `EMERGENCY_POSTS_PER_DAY` | `1` | emergency posts per user per rolling 24 h (they also count toward `FACT_POSTS_PER_DAY`, itself a rolling 24 h window since Part 4: deleted and removed fact posts still count, and 0 pauses fact posts) |
 | `EMERGENCY_MIN_ACCOUNT_AGE_DAYS` | `7` | account age needed to post one |
 | `EMERGENCY_MIN_REPUTATION` | `40` | credibility score needed (every account starts at 50) |
 | `EMERGENCY_REPORT_THRESHOLD` | `2` | counting reports that send an **active** emergency to review (instead of `REPORT_THRESHOLD`) |

@@ -6,7 +6,9 @@ import { AppealPendingBadge, EmergencyBadge, StatusBadge } from "@/components/ui
 import { VerdictStripe } from "@/components/ui/VerdictStripe";
 import { cn } from "@/lib/cn";
 import { formatRelativeTime } from "@/lib/format";
+import type { PostSource } from "@/lib/api/types";
 import { type PostStatus, type PostType, type VerdictSource, stripeTone } from "@/lib/post-display";
+import { SourceLink } from "./SourceLink";
 
 export interface PostCardProps {
   author: { displayName: string; username: string; avatarUrl?: string | null };
@@ -20,6 +22,8 @@ export interface PostCardProps {
   emergencyActive?: boolean;
   /** Shown to the author while an appeal is open. */
   appealPending?: boolean;
+  /** A fact post's sources (§4c): the card shows the first one and "+N more". */
+  sources?: PostSource[];
   createdAt: string | Date;
   /** Clock for the relative timestamp; tests and the gallery pass a fixed one. */
   now?: Date;
@@ -27,8 +31,8 @@ export interface PostCardProps {
 }
 
 /**
- * Presentational post card (Stitch b1). Part 4 feeds it real data and adds the source line;
- * Parts 7 and 7B add the action bar.
+ * Presentational post card (Stitch b1), with the one-line source row under a fact claim (Part 4).
+ * Parts 7 and 7B add the action bar. A blank display name shows `@username` once, in bold.
  */
 export function PostCard({
   author,
@@ -39,6 +43,7 @@ export function PostCard({
   verdictSource,
   emergencyActive = false,
   appealPending = false,
+  sources = [],
   createdAt,
   now,
   className,
@@ -63,30 +68,37 @@ export function PostCard({
   }
 
   const tone = stripeTone({ status, emergencyActive });
+  const hasName = author.displayName.trim() !== "";
+  const name = hasName ? author.displayName : `@${author.username}`;
 
   return (
     <Card as="article" interactive className={className}>
       {tone && <VerdictStripe tone={tone} />}
       <div className="flex flex-col gap-space-md p-space-lg">
-        <div className="flex items-start justify-between gap-space-md">
+        <div className="flex flex-col gap-space-sm sm:flex-row sm:items-start sm:justify-between sm:gap-space-md">
           <div className="flex min-w-0 items-center gap-space-md">
-            <Avatar name={author.displayName} src={author.avatarUrl} size={10} decorative />
-            <div className="flex min-w-0 flex-wrap items-center gap-space-xs">
-              <span className="font-body-md text-body-md font-bold text-on-surface">
-                {author.displayName}
+            <Avatar name={name} src={author.avatarUrl} size={10} decorative />
+            <div className="flex min-w-0 items-center gap-space-xs">
+              <span className="min-w-0 truncate font-body-md text-body-md font-bold text-on-surface">
+                {name}
               </span>
-              <span className="font-label-code text-label-code text-outline">
-                @{author.username}
-              </span>
-              <span aria-hidden="true" className="text-outline-variant">
+              {hasName && (
+                <span className="min-w-0 truncate font-label-code text-label-code text-outline">
+                  @{author.username}
+                </span>
+              )}
+              <span aria-hidden="true" className="shrink-0 text-outline-variant">
                 ·
               </span>
-              <time dateTime={iso} className="font-label-code text-label-code text-outline">
+              <time
+                dateTime={iso}
+                className="shrink-0 font-label-code text-label-code text-outline"
+              >
                 {time}
               </time>
             </div>
           </div>
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-space-sm">
+          <div className="flex shrink-0 flex-wrap items-center gap-space-sm sm:justify-end">
             <CategoryChip type={postType} />
             <StatusBadge
               status={status}
@@ -109,6 +121,7 @@ export function PostCard({
           {content}
           {"\u201D"}
         </blockquote>
+        {postType === "fact" && <SourceLink sources={sources} />}
       </div>
     </Card>
   );

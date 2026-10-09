@@ -6,18 +6,19 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 4 (Posts: composer + Recent feed) is planned and approved, not implemented.**
-  Parts 0A, 0B, 0D, 0C, 1, 2 and 3 are done (Part 3 committed as `6cd67d0`). Part 1 CI is green
-  (user-reported 2026-10-06); **Part 2 and Part 3 CI results have not been reported yet.**
+- **Part:** none. **Part 4 (Posts: composer + Recent feed) is done** (2026-10-09; built 2026-10-08 to
+  2026-10-09 from the approved plan; every required test and check green; `task.md` updated).
+  Parts 0A, 0B, 0D, 0C, 1, 2, 3 and 4 are done. Part 1 CI is green (user-reported 2026-10-06);
+  **Part 2, Part 3 and Part 4 CI have not run yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
-    (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block Part 4.
+    (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after planning Part 4).
-- **Phase:** planned and approved; implementation not started.
+- **Owner:** none (Claude stopped after finishing Part 4; Part 5 is not started).
+- **Phase:** done, uncommitted. The user reviews and commits.
 - **Approved plan:**
   [`docs/agents/plans/part-4-posts-composer-recent-feed.md`](plans/part-4-posts-composer-recent-feed.md)
-  (approved 2026-10-08)
+  (status line now says IMPLEMENTED)
 - **Previous plans:**
   - [`part-3-continue-with-google.md`](plans/part-3-continue-with-google.md), implemented
     2026-10-08;
@@ -25,10 +26,56 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-08 by Claude (Opus 5.5), Part 4 planning.
+- **Last updated:** 2026-10-09 by Claude (Sonnet 5.5), Part 4 implementation.
 
 ## Completed checkpoints
 
+- 2026-10-09 (Claude, Sonnet 5.5): **Part 4 implemented** (uncommitted). Started from HEAD `b5fb841`
+  ("Plan Part 4", committed by the user), a clean tree. (HANDOFF had said the plan was uncommitted; the
+  user committed it in between. Nothing else differed.)
+  - **Backend** (`backend/`):
+    - New app `apps/posts/`: `models.py` (`Post` with every §2 column but `search_vector`, 17 named
+      CheckConstraints, 6 indexes, `PostQuerySet.visible()/for_list()`), `validators.py`
+      (`normalize_source`, `validate_sources`, `source_kind`), `emergency.py` (`is_active_emergency`),
+      `services.py` (`create_post`, `fact_quota`, the three domain errors), `exceptions.py`,
+      `serializers.py` (`SourcesField`, `PostCreateSerializer`, `PostSerializer`), `pagination.py`
+      (`FeedPagination`), `views.py`, `urls.py`, `admin.py` (read-only), `migrations/0001_initial.py`,
+      and `tests/` (9 files plus `source_vectors.json`).
+    - Changed: `rumor_zero/settings.py` (+`django.contrib.postgres`, +`apps.posts`), `urls.py`,
+      `requirements.txt` (+`idna==3.20`), `.env.example` (a comment), `apps/accounts/serializers.py`
+      (+`user_summary`, `UserSummarySerializer`), `apps/accounts/tests/conftest.py` and `test_tokens.py`
+      (`run_together` moved).
+  - **Frontend** (`frontend/`):
+    - New `src/features/posts/`: `sources.ts` (client mirror of the validator), `SourceLink`,
+      `PostCardSkeleton`, `post-card-props.ts`, `posts-api.ts`, `useCursorFeed`, `FeedList`, `draft.ts`,
+      `quota.ts`, `messages.ts`, `SourceFields`, `ComposerModal`, `ComposerProvider`, `ComposerTrigger`,
+      `HomeFeed`, `test-helpers.tsx` and a test per piece; `e2e/posts.spec.ts`.
+    - Changed: `PostCard.tsx` (sources row, blank-name rule, 390 px header), `Textarea.tsx` and
+      `lib/format.ts` (`countCharacters`: code points), `lib/api/types.ts` (`FactQuota`, `CreatePostBody`),
+      `app/(app)/layout.tsx` (the provider, `onNewPost`), `app/(app)/home/page.tsx` (`HomeFeed`),
+      `e2e/helpers.ts` (`signUpVerified`, `marker`), `layout.test.tsx`, `PostCard.test.tsx`.
+  - **Docs:**
+    - ARCHITECTURE §2/§3/§4/§4c/§9/§10, ANALYSIS (D7 and the b-3 quota row), SETUP B1 (`idna`), STRUCTURE,
+      ENV_GUIDE (one sentence), `backend/.env.example` (a comment), MEMORY (3 entries), `task.md`
+      (criteria, deviations, both status spots), the plan's status line.
+    - `docs/test-command.md`: a "Part 4" section in **both** guides (15 steps each) and one word in the
+      intro list; nothing else touched.
+  - No new service, no new env variable, no env file read or edited, `design/` untouched.
+  - **Deviations from the plan** (all in `task.md`): 23 keys in the post object (not 24); the "too many
+    sources" check lives in `validate_sources`; rows are focused by `id` (`TextField` has no `ref`); the
+    submit button reads "Post" until a type is chosen; the footer wraps on a phone.
+  - **Found and fixed on the way:** `varchar(500)[]` truncates a long source silently through Django's
+    cast (the validator is the only guard); `sourceLabel()` rendered a blank row for a non-http value;
+    two composer bugs a test caught (a server field error never showed the "fix the fields" notice; a
+    "paused" banner wasn't announced); React 19 lint rules (`react-hooks/refs`) and a `cn()` class-order
+    trap (MEMORY).
+  - **Test-command notes:**
+    - The section is `### Part 4` inside each guide.
+    - The file has **no comment marker** at its bottom (Part 3's note said the same): it ends with the
+      last cleanup bullet of the Windows Part 4 section.
+    - The Linux bash blocks of steps 1, 2, 4 to 11 and 15 were **extracted from the doc by script and
+      run verbatim** against live Django; steps 3, 12 to 14 are covered by the E2E and screenshot runs
+      below. Step 15's output was recorded from a clean run (`(19, {...})`).
 - 2026-10-08 (Claude, Opus 5.5): **Part 4 planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `6cd67d0` ("Part 3: Continue with Google", committed by the user), a
     clean tree.
@@ -228,14 +275,63 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `6cd67d0` ("Part 3: Continue with Google", committed by the user). **Uncommitted:** the new
-  plan `docs/agents/plans/part-4-posts-composer-recent-feed.md` and this file. Nothing else.
-- Docker and the dev servers were not started or checked this session (planning only). Start with
-  `docker compose ps` / `docker compose up -d`.
-- The local database got allauth's `socialaccount.0001`–`0006` in Part 3; Part 4's `posts`
-  migration doesn't exist yet.
-- Ignored artifacts from earlier checks may remain: `backend/tmp/mail/*.log`,
-  `frontend/test-results/`, `frontend/playwright-report/`, `frontend/.next/`.
+- HEAD is `b5fb841` ("Plan Part 4", committed by the user). **Uncommitted:** the whole Part 4
+  implementation: 28 modified files (this file included), the new `backend/apps/posts/` folder (27
+  files), 29 new files in `frontend/src/features/posts/` and `frontend/e2e/posts.spec.ts`
+  (`git status --short -uall`).
+- Docker (Postgres 18 + Redis) is up; no dev server is running; ports 3000/8000 are free.
+- The local database has `posts.0001_initial` applied. The guide's `part4-*` test accounts and their
+  posts were deleted at the end; accounts from the E2E and screenshot runs (`post_*`, `opinion_*`, `invalid_*`,
+  `unverified_*`, `phone_*`, `shot_*`, …) and their posts remain (Django Admin → Users deletes them).
+- Ignored artifacts from the checks: `backend/tmp/mail/*.log`, `frontend/test-results/`,
+  `frontend/playwright-report/`, and a production build in `frontend/.next/` made with an empty Google
+  client ID (the last `npm run build` before the CI-mode E2E run).
+
+## Validation of Part 4 (2026-10-09)
+
+- **Backend** (`backend/`, venv, Postgres + Redis up), each exit 0:
+  - `python -m pytest` → **1087 passed** (was 704); `pytest apps/posts` → **383 passed**: `test_models`
+    69, `test_validators` 195, `test_services` 24, `test_api_create` 41, `test_api_feed` 25,
+    `test_api_quota` 7, `test_emergency` 14, `test_no_network` 4, `test_admin` 4.
+  - `ruff check .` → "All checks passed!"; `ruff format --check .` → "103 files already formatted".
+  - `makemigrations --check --dry-run` → "No changes detected"; `manage.py check` → no issues;
+    `sqlmigrate posts 0001` reviewed (every constraint compiles as planned).
+  - **Mutation checks** (a rule removed by hand, a test must fail), all caught: backend: the
+    backslash, numeric-last-label, localhost, default-port, DOI-case, count, scheme and authority rules
+    in the validator (two vectors were added after the first pass showed the `ſ` scheme and fake
+    `xn--` labels surviving), throttle on GET, the verified-email permission, removed posts in the feed,
+    the cursor guard, the quota boundary, `next_slot_at`, the row lock, emergency refusal, the paused
+    limit, deleted posts in the quota, confidence shown for moderators. Frontend: the in-flight guard,
+    de-duplication, stale responses, `enabled`, draft clearing (user change and success), the
+    closed-during-send toast, sources sent for opinions, the server-row mapping, the verified lock,
+    duplicate flagging, the backslash rule, the blank-name rule, the link `rel`, the code-point counter.
+  - The race test has a **control run**: with the lock switched off both simultaneous fact posts get
+    through (11 of 10), so it proves the lock.
+- **Frontend** (`frontend/`), each exit 0: `npm run lint`, `lint:tokens`, `typecheck`, `format:check`;
+  `npm test` → **80 files, 1089 tests passed** (was 67 / 747); `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run
+  build` (routes unchanged; `/home` still `○`).
+- **E2E:** `npm run test:e2e` → **20 passed** (dev mode; 15 old + 5 new), and `CI=1 npm run test:e2e`
+  after the build → 20 passed (against `next start`).
+- **Manual, recorded in `docs/test-command.md` Part 4:**
+  - curl against `runserver` (the doc's own blocks, run verbatim): unverified → 403, anonymous → 401,
+    opinion and fact 201 with the normalised sources (punycode, port, case, `doi:` stripped), client
+    `status`/`confidence_score` ignored, eight 400s with per-index source errors, the allowance
+    (7 left, 10 used, 429 `fact_quota_exceeded` with `Retry-After`, `next_slot_at`), the feed and its
+    cursor (404 for a hand-made one), six database rules named by constraint, the no-network test.
+  - Browser (headless Chromium via a Playwright script, screenshots next to Stitch b1/b2 at 1280 and
+    390 px): the Recent tab with its underline, the trigger card, a fact card with `doi.org/… ↗ +1 more`,
+    an opinion card in italic, the composer empty, with errors, and with a bad source; **0 px
+    horizontal overflow** on `/home` and with the composer open at 390 px. Polish that came out of it:
+    the trigger's "New post" pill is hidden on phones (it truncated the placeholder), "Post type" stays on
+    one line, the footer wraps (allowance above, buttons below), and the submit button reads "Post" until
+    a type is chosen.
+- **Not run:**
+  - **The Windows (PowerShell) blocks** of the new section (written from the Part 1 to 3 patterns), and
+    CI on GitHub (the user pushes).
+  - A person at a keyboard: the browser steps were driven by scripts, not by hand.
+  - A pixel comparison with Stitch: the layout, classes and states were compared by eye.
+  - The admin pages in a real browser (covered by Django-client tests: changelist, search, add/change/
+    delete refused, a view-only detail page).
 
 ## Validation of Part 3 (2026-10-08)
 
@@ -397,24 +493,54 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-**Implement Part 4 from the approved plan**
-([`plans/part-4-posts-composer-recent-feed.md`](plans/part-4-posts-composer-recent-feed.md)), starting
-at its "Ordered steps" step 1. Model: Sonnet 5.5 · high (task.md). Fresh session (`/clear`); first
-`git status`, `git diff` and `docker compose up -d`.
-
-Still open from Part 3 (not blocking Part 4): run `docs/test-command.md` Part 3 steps 7 and 8 with a
-real Google account (acceptance criterion 4), and report the Part 2 and Part 3 CI results.
+1. **User:** review the diff and the Part 4 section of `docs/test-command.md` (its Linux steps 4 to 11
+   take about five minutes; the browser steps 12 to 14 need a Next dev server). Then commit, and push so
+   CI runs; report the CI result (Part 2's, Part 3's and Part 4's jobs). Still open from Part 3: the
+   real-Google check (`docs/test-command.md` Part 3, steps 7 and 8).
+2. **Next part:** Part 5 (post detail, sharing, deletion, status polling), from `task.md`. Fresh session
+   (`/clear`), first `git status` and `docker compose up -d`.
 
 ## Blockers or user decisions
 
 - None open.
-- User decisions for Part 4 (2026-10-08) are in the approved plan's Context section and the
-  checkpoint above. They go into ARCHITECTURE §2/§3/§4/§4c/§9/§10 and ANALYSIS D7 **during
-  implementation**; they are not there yet.
+- User decisions for Part 4 (2026-10-08), now in ARCHITECTURE §3/§4c/§10 and ANALYSIS D7: the fact
+  quota is a rolling 24 h window (deleted and removed posts count); `idna==3.20` is pinned; "optimistic
+  insert" means insert on success; posting away from `/home` toasts.
 - User decisions for Part 1 (2026-10-02), now in ARCHITECTURE §2/§7: superusers are verified
   (createsuperuser + backfill migration); Turnstile fails closed; the `rz_session=1` hint cookie.
 - User decisions for 0C (2026-10-01), in ARCHITECTURE §10: the reduced logged-out shell; phones get a
   top bar plus five bottom tabs with an account sheet; marketing links only to existing pages.
+
+## Follow-ups noted during Part 4 (still open)
+
+- **Part 5:**
+  - `/p/[id]` and the detail endpoints; "+N more" on a card becomes a link; a `SourceList` for every
+    source (the helpers `sourceLabel`/`sourceHref` and `SourceLink` exist).
+  - Author soft-delete sets `deleted_at`: the quota still counts that post (by design); the feed already
+    leaves it out (`PostQuerySet.visible()`).
+  - Status polling for pending cards (`useStatusPolling`) is not started: a fact stays "CHECKING FACTS…"
+    until the page reloads.
+- **Part 6/7B:** `useCursorFeed`, `FeedList` and `FeedPagination` are written to be reused (a second tab,
+  profile lists); reposts are skipped in `FeedList` for now (`item.kind === "post"` only).
+- **Part 9:** `routing.py` imports `is_active_emergency` from `apps/posts/emergency.py`; a fact post
+  stays `pending` because nothing processes it yet. `create_post` has no inline kick.
+- **Part 10:** the posts admin is read-only; the moderator actions go through `moderation.services`.
+- **Part 11C:** the composer's emergency toggle (hidden), the `emergency` block of `fact-quota`, the
+  `pinned` list (`FeedPagination` already answers `pinned: []`).
+- **Part 12:** `search_vector` (a `GeneratedField` + GIN index) is the one `Post` column still missing.
+- **Part 16:**
+  - An **idempotency key** for `POST /api/v1/posts/`: a relay timeout (503 `backend_waking`) after Django
+    saved the post makes a retry a duplicate. The composer's message says "If it doesn't show up in
+    Recent in a minute, try again."
+  - The core `CursorPagination` lets any crafted position reach a queryset filter (500); `FeedPagination`
+    guards it, other lists that use the core class need the same.
+  - CSP: nothing new (source links are plain `<a>`; the server never fetches them).
+  - Toasts still render below an open `<dialog>` (0B follow-up); the composer shows its errors inline.
+  - A source check that the page can't do: an `xn--` label that isn't a real A-label gets the server's 400
+    on its row (accepted trade-off; a punycode library would close it).
+- **Any django-allauth / DRF / `idna` upgrade:** re-read MEMORY "DRF and Django facts that Part 4's posts
+  API depends on" and "Source links…", and run `apps/posts/tests/` and `sources.test.ts` (the shared
+  vectors).
 
 ## Follow-ups noted during Part 3 (still open)
 
@@ -461,8 +587,8 @@ real Google account (acceptance criterion 4), and report the Part 2 and Part 3 C
 - (Done in Part 3: the allow-list, `google_connected`, and a social sign-up that never pends.) Original note: add `allauth.socialaccount` and `auth/provider/token` to the allow-list; make
   `google_connected` real. A *pending* social signup needs `X-Session-Token`, which the middleware
   strips and the relay doesn't forward: auto-signup must never pend, or add a short-lived flow cookie.
-- **Part 4:** the first real users of `IsEmailVerified` (posts). `RequestOptions.token: false` must
-  not be used for app calls that should refresh on 401.
+- (Part 4: `IsEmailVerified` is now used by `POST /api/v1/posts/`, and the posts calls never use
+  `token: false`.)
 - **Part 6/14:** sign-up sets no display name, so the rail's user card shows `@username` twice (name
   fallback + handle). Consider showing the handle once when the display name is blank.
 - **Part 9/17:** run `clearsessions` periodically (expired token sessions pile up in Neon).
@@ -485,8 +611,8 @@ real Google account (acceptance criterion 4), and report the Part 2 and Part 3 C
 
 - (Part 1 items done: CSRF for refresh/logout and allauth views, `avatar_url` in `/me`, the 401
   refresh hook, `loading`, Log out.)
-- **Part 4:** wire `onNewPost` (the AppShell prop, used by the rail button and the bottom tab) to the
-  composer modal. At 390 px, `PostCard`'s header wraps the author name onto two lines.
+- (Part 4 items done: `onNewPost` is wired to the composer; `PostCard`'s header no longer wraps the
+  author name at 390 px.)
 - **Part 14B:** photo uploads rely on the relay's 6 MB body cap (`MAX_BODY_BYTES` in `relay.ts`).
 - **Part 15:** polish `not-found`/`error`/`global-error` and the placeholder pages; `/how-it-works`,
   `/privacy` and `/terms` are placeholders.

@@ -1,6 +1,5 @@
 """RumorZeroJWTTokenStrategy: locked, graceful rotation (ARCHITECTURE §7)."""
 
-import threading
 import time
 
 import jwt
@@ -15,7 +14,13 @@ from django.test import Client
 from django.test.utils import CaptureQueriesContext
 
 from apps.accounts.cookies import revoke_refresh_token_session
-from apps.accounts.tests.conftest import SITE_HEADERS, access_token_for, login, refresh_cookie
+from apps.accounts.tests.conftest import (
+    SITE_HEADERS,
+    access_token_for,
+    login,
+    refresh_cookie,
+    run_together,
+)
 from apps.accounts.tests.factories import UserFactory
 from apps.accounts.tokens import ROTATION_GRACE_SECONDS, RumorZeroJWTTokenStrategy
 
@@ -119,29 +124,6 @@ def slow_rotation(monkeypatch):
 
     monkeypatch.setattr(internal, "create_refresh_token", slow)
     return monkeypatch
-
-
-def run_together(*tasks):
-    barrier = threading.Barrier(len(tasks))
-    results = [None] * len(tasks)
-    errors = []
-
-    def runner(index, task):
-        try:
-            barrier.wait()
-            results[index] = task()
-        except Exception as exc:  # collected and asserted on below
-            errors.append(exc)
-        finally:
-            connection.close()
-
-    threads = [threading.Thread(target=runner, args=item) for item in enumerate(tasks)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=30)
-    assert errors == []
-    return results
 
 
 @pytest.mark.django_db(transaction=True)

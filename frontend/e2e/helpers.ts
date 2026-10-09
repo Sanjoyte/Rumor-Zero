@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { waitForEmailLink } from "./mailbox";
 
 /** Shared by the auth specs: every test signs up its own account. */
 export const PASSWORD = "correct-horse-battery-42";
@@ -31,6 +32,25 @@ export async function signUp(page: Page, prefix = "e2e", { stay = false } = {}) 
     await expect(page.getByText(BANNER)).toBeVisible();
   }
   return account;
+}
+
+/**
+ * Sign up, then follow the verification email's link (read from the file mailbox) so the account
+ * can post. Ends on /home, signed in and verified.
+ */
+export async function signUpVerified(page: Page, prefix = "e2e") {
+  const account = await signUp(page, prefix, { stay: true });
+  const link = await waitForEmailLink(account.email, "verify-email");
+  await page.goto(link);
+  await expect(page.getByRole("heading", { name: "Your email is verified" })).toBeVisible();
+  await page.goto("/home");
+  await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeAttached();
+  return account;
+}
+
+/** A string that appears in one post only, so a test finds its own card in the shared feed. */
+export function marker(prefix = "m") {
+  return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
 export async function expectLoggedIn(page: Page, username: string) {

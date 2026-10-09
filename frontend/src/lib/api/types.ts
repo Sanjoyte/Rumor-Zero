@@ -85,6 +85,23 @@ export interface FeedResponse extends CursorPage<FeedItem> {
   pinned_total: number;
 }
 
+/** `GET /api/v1/me/fact-quota/`: the rolling 24-hour fact-post allowance (§3). */
+export interface FactQuota {
+  limit: number;
+  used: number;
+  remaining: number;
+  window_hours: number;
+  /** When a slot frees up: set only when nothing is left and posting isn't paused (limit 0). */
+  next_slot_at: string | null;
+}
+
+/** `POST /api/v1/posts/` (§9). `sources` is for fact posts only (0 to 5, §4c). */
+export interface CreatePostBody {
+  content: string;
+  post_type: PostType;
+  sources?: string[];
+}
+
 export type Role = "user" | "moderator" | "senior_moderator";
 
 /** `GET /api/v1/me/` (Part 1). */

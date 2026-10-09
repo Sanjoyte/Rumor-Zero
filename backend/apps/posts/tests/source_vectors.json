@@ -1,0 +1,398 @@
+{
+ "about": "Shared by apps/posts/tests/test_validators.py and frontend/src/features/posts/sources.test.ts. Keep both implementations in step.",
+ "accept": [
+  {
+   "input": "https://example.org/report",
+   "value": "https://example.org/report",
+   "kind": "url"
+  },
+  {
+   "input": "HTTPS://Example.ORG/Report",
+   "value": "https://example.org/Report",
+   "kind": "url"
+  },
+  {
+   "input": "  https://example.org/x \n",
+   "value": "https://example.org/x",
+   "kind": "url"
+  },
+  {
+   "input": "https://example.org",
+   "value": "https://example.org/",
+   "kind": "url"
+  },
+  {
+   "input": "https://example.org?x=1",
+   "value": "https://example.org/?x=1",
+   "kind": "url"
+  },
+  {
+   "input": "https://example.org/a?b=1&c=2#frag",
+   "value": "https://example.org/a?b=1&c=2#frag",
+   "kind": "url"
+  },
+  {
+   "input": "https://sub.domain.example.co.uk/path/to/file.pdf",
+   "value": "https://sub.domain.example.co.uk/path/to/file.pdf",
+   "kind": "url"
+  },
+  {
+   "input": "http://example.org/",
+   "value": "http://example.org/",
+   "kind": "url"
+  },
+  {
+   "input": "https://example.org:443/x",
+   "value": "https://example.org/x",
+   "kind": "url"
+  },
+  {
+   "input": "http://example.org:80/x",
+   "value": "http://example.org/x",
+   "kind": "url"
+  },
+  {
+   "input": "https://example.org:8080/x",
+   "value": "https://example.org:8080/x",
+   "kind": "url"
+  },
+  {
+   "input": "http://example.org:443/x",
+   "value": "http://example.org:443/x",
+   "kind": "url"
+  },
+  {
+   "input": "https://example.org:0443/x",
+   "value": "https://example.org/x",
+   "kind": "url"
+  },
+  {
+   "input": "https://example.org/caf\u00e9",
+   "value": "https://example.org/caf%C3%A9",
+   "kind": "url"
+  },
+  {
+   "input": "https://example.org/a#\u00fc",
+   "value": "https://example.org/a#%C3%BC",
+   "kind": "url"
+  },
+  {
+   "input": "https://example.org/\ud83d\ude00",
+   "value": "https://example.org/%F0%9F%98%80",
+   "kind": "url"
+  },
+  {
+   "input": "https://example.org/%e2%9c%93",
+   "value": "https://example.org/%e2%9c%93",
+   "kind": "url"
+  },
+  {
+   "input": "https://b\u00fccher.example/x",
+   "value": "https://xn--bcher-kva.example/x",
+   "kind": "url"
+  },
+  {
+   "input": "https://fa\u00df.de/",
+   "value": "https://xn--fa-hia.de/",
+   "kind": "url"
+  },
+  {
+   "input": "https://\uff45\uff58\uff41\uff4d\uff50\uff4c\uff45.com/",
+   "value": "https://example.com/",
+   "kind": "url"
+  },
+  {
+   "input": "https://\u4f8b\u3048\u3002jp/",
+   "value": "https://xn--r8jz45g.jp/",
+   "kind": "url"
+  },
+  {
+   "input": "https://XN--BCHER-KVA.example/",
+   "value": "https://xn--bcher-kva.example/",
+   "kind": "url"
+  },
+  {
+   "input": "https://my_site.example.com/",
+   "value": "https://my_site.example.com/",
+   "kind": "url"
+  },
+  {
+   "input": "https://r3---sn-x.googlevideo.com/x",
+   "value": "https://r3---sn-x.googlevideo.com/x",
+   "kind": "url"
+  },
+  {
+   "input": "https://a-b.example/",
+   "value": "https://a-b.example/",
+   "kind": "url"
+  },
+  {
+   "input": "10.1000/xyz",
+   "value": "10.1000/xyz",
+   "kind": "doi"
+  },
+  {
+   "input": "10.1000/xyz\n",
+   "value": "10.1000/xyz",
+   "kind": "doi"
+  },
+  {
+   "input": "doi:10.1000/xyz",
+   "value": "10.1000/xyz",
+   "kind": "doi"
+  },
+  {
+   "input": "DOI: 10.1000/xyz",
+   "value": "10.1000/xyz",
+   "kind": "doi"
+  },
+  {
+   "input": "Doi:\t10.1000/xyz",
+   "value": "10.1000/xyz",
+   "kind": "doi"
+  },
+  {
+   "input": "https://doi.org/10.1000/xyz",
+   "value": "10.1000/xyz",
+   "kind": "doi"
+  },
+  {
+   "input": "http://dx.doi.org/10.1000/xyz",
+   "value": "10.1000/xyz",
+   "kind": "doi"
+  },
+  {
+   "input": "HTTPS://DOI.ORG/10.1038/s41558-024-02102",
+   "value": "10.1038/s41558-024-02102",
+   "kind": "doi"
+  },
+  {
+   "input": "10.1038/S41558-024-02102",
+   "value": "10.1038/S41558-024-02102",
+   "kind": "doi"
+  },
+  {
+   "input": "10.1002/(SICI)1097-4571(199806)49:8",
+   "value": "10.1002/(SICI)1097-4571(199806)49:8",
+   "kind": "doi"
+  },
+  {
+   "input": "https://doi.org/10.1000/xyz?utm=1",
+   "value": "https://doi.org/10.1000/xyz?utm=1",
+   "kind": "url"
+  },
+  {
+   "input": "https://doi.org/10.12/x",
+   "value": "https://doi.org/10.12/x",
+   "kind": "url"
+  },
+  {
+   "input": "https://doi.org/not-a-doi",
+   "value": "https://doi.org/not-a-doi",
+   "kind": "url"
+  }
+ ],
+ "reject": [
+  "",
+  "   ",
+  "\n",
+  "javascript:alert(1)",
+  "JaVaScRiPt:alert(1)",
+  "data:text/html,hi",
+  "ftp://example.org/x",
+  "example.org",
+  "www.example.org/x",
+  "//example.org/x",
+  "https:example.org",
+  "https:///example.org",
+  "https://",
+  "http://:80/",
+  "mailto:a@example.org",
+  "https://user:pw@example.org/",
+  "https://user@example.org/",
+  "https://example.org@evil.com/",
+  "http\u017f://doi.org/10.1000/xyz",
+  "http\u017f://example.org/",
+  "http://127.0.0.1/",
+  "http://127.1/",
+  "http://0x7f.1/",
+  "http://2130706433/",
+  "http://1.2.3.4/",
+  "http://[::1]/",
+  "http://[2001:db8::1]:8080/",
+  "http://localhost/",
+  "https://localhost:3000/",
+  "https://a.localhost/",
+  "https://LOCALHOST/",
+  "https://localhost./",
+  "https://\uff4c\uff4f\uff43\uff41\uff4c\uff48\uff4f\uff53\uff54/",
+  "https://\uff11\uff12\uff17.0.0.1/",
+  "https://intranet/",
+  "https://a..b/",
+  "https://example.com./x",
+  "https://-a.example/",
+  "https://a-.example/",
+  "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example/",
+  "https://xn--invalid-.example/",
+  "https://xn--/",
+  "https://exa%6dple.com/",
+  "https://exa mple.org/",
+  "https://example.org\\evil.com/",
+  "https://example.org/a\\b",
+  "https://example.org/a b",
+  "https://example.org/\u0000",
+  "https://example.org/\u202e",
+  "https://example.org/\ud800",
+  "https://example.org/\u00a0x",
+  "https://example.org/\u200bx",
+  "https://example.org/\u2028x",
+  "https://example.org:99999/",
+  "https://example.org:0/",
+  "https://example.org:80a/",
+  "https://example.org:/",
+  "https://example.org:-1/",
+  "https://example.org/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "10.12/x",
+  "10.12345678901/x",
+  "10.1000/",
+  "10.1000",
+  "doi:abc",
+  "doi:",
+  "doi: ",
+  "10.1000/xyz abc",
+  "10.\u0661\u0662\u0663\u0664/x",
+  "10.1000/xy\u212a",
+  "10.1000/xyz\u200b",
+  "doi:10.1000/xyz?x=1",
+  "10.1000/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ ],
+ "server_only_reject": [
+  "https://xn--zzzz.example/",
+  "https://xn--abc.example/",
+  "https://xn--a.example/"
+ ],
+ "lists": [
+  {
+   "inputs": [],
+   "ok": []
+  },
+  {
+   "inputs": [
+    "10.1000/a"
+   ],
+   "ok": [
+    "10.1000/a"
+   ]
+  },
+  {
+   "inputs": [
+    "https://b.example/",
+    "10.1000/a",
+    "https://a.example/x"
+   ],
+   "ok": [
+    "https://b.example/",
+    "10.1000/a",
+    "https://a.example/x"
+   ]
+  },
+  {
+   "inputs": [
+    "10.1000/s0",
+    "10.1000/s1",
+    "10.1000/s2",
+    "10.1000/s3",
+    "10.1000/s4"
+   ],
+   "ok": [
+    "10.1000/s0",
+    "10.1000/s1",
+    "10.1000/s2",
+    "10.1000/s3",
+    "10.1000/s4"
+   ]
+  },
+  {
+   "inputs": [
+    "10.1000/s0",
+    "10.1000/s1",
+    "10.1000/s2",
+    "10.1000/s3",
+    "10.1000/s4",
+    "10.1000/s5"
+   ],
+   "too_many": true
+  },
+  {
+   "inputs": [
+    "javascript:x",
+    "10.1000/s0",
+    "10.1000/s1",
+    "10.1000/s2",
+    "10.1000/s3",
+    "10.1000/s4"
+   ],
+   "too_many": true
+  },
+  {
+   "inputs": [
+    "doi:10.1000/xyz",
+    "https://doi.org/10.1000/xyz"
+   ],
+   "bad": {
+    "1": "Same as source 1."
+   }
+  },
+  {
+   "inputs": [
+    "10.1000/ABC",
+    "10.1000/abc"
+   ],
+   "bad": {
+    "1": "Same as source 1."
+   }
+  },
+  {
+   "inputs": [
+    "HTTPS://Example.com",
+    "https://example.com/"
+   ],
+   "bad": {
+    "1": "Same as source 1."
+   }
+  },
+  {
+   "inputs": [
+    "https://a.example/",
+    "https://b.example/",
+    "https://a.example/"
+   ],
+   "bad": {
+    "2": "Same as source 1."
+   }
+  },
+  {
+   "inputs": [
+    "https://example.org/A",
+    "https://example.org/a"
+   ],
+   "ok": [
+    "https://example.org/A",
+    "https://example.org/a"
+   ]
+  },
+  {
+   "inputs": [
+    "javascript:x",
+    "https://a.example/",
+    "http://127.0.0.1/",
+    "https://a.example/"
+   ],
+   "bad": {
+    "0": "invalid",
+    "2": "invalid",
+    "3": "Same as source 2."
+   }
+  }
+ ]
+}

@@ -33,3 +33,11 @@ export function formatConfidence(score: string | number | null | undefined): str
   const n = typeof score === "number" ? score : Number(score);
   return Number.isFinite(n) ? `${Math.round(n)}%` : "";
 }
+
+/**
+ * Characters as the server counts them: code points, so an emoji is 1 (Python's `len` and
+ * Postgres's `char_length`), not the 2 UTF-16 units `string.length` reports.
+ */
+export function countCharacters(text: string): number {
+  return Array.from(text).length;
+}

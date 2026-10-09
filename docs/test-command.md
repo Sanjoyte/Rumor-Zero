@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -2677,6 +2677,537 @@ python manage.py shell -c "from allauth.socialaccount.models import SocialAccoun
   wipes the whole local database, which is destructive.
 - Real Google data never goes into git: the client ID stays in your own `.env` files (it is public by
   design), and there is no client secret anywhere.
+
+### Part 4: Posts (composer + Recent feed)
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
+`frontend/.env.local`. Part 4 adds one migration (`posts.0001_initial`), one pinned dependency
+(`idna==3.20`, which was already installed through `requests`, so `pip install` says "Requirement
+already satisfied") and no env variable.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend/`, venv active. Leave it running. Start it in step 4, **after** step 3 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 4 to 14 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 4 to 9**: the variables and functions you set in step 4 (`id`, `h`, `ada`, `bo`, `api`, `post`) only live in that one terminal. If you close it, redo step 4. | 1 to 11, 15 |
+| Window 3 (frontend) | `npm run dev` in `frontend/`. Leave it running. | 13 and 14 |
+| Browser | Steps 12 to 14 | 12 to 14 |
+
+Things to know first:
+
+- Steps 4 to 10 talk to the API directly with `curl` (they need `jq`: `sudo apt install jq`). Steps 12
+  to 14 use the browser. Step 4 makes three accounts: `ada` for the API steps (step 8 uses up her whole fact
+  allowance), `bo` (unverified) and `cy`, who stays untouched for the browser steps.
+- The API outputs below were recorded on Linux on 2026-10-08. The browser steps were checked the same
+  day with headless Chromium (screenshots at 1280 and 390 px), not by a person at a keyboard. Numbers in
+  names, times and token prefixes differ on every run.
+- **The fact allowance comes from your own settings.** `FACT_POSTS_PER_DAY` in `backend/.env` (the
+  example file says 10) seeds it, and Django Admin → Platform settings changes it. Step 8 reads the
+  number from the server, so it works with any value of 1 or more; the sample output uses 10. It is a
+  **rolling 24 hours**, not a calendar day.
+- A post is limited to 30 per hour per account (`post_create`). Steps 5 to 9 use about 25 of them
+  (refused attempts count). If you repeat steps 6 to 8 within an hour, make new accounts (step 4 again)
+  or you will see `429 throttled` instead.
+- Nothing here sends an email: step 4 marks one account verified with a shell command, which stands in
+  for clicking the link (Part 2 shows the real flow).
+
+#### Step 1: Apply the migration and check the schema
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, installs what
+`requirements.txt` pins, creates the `posts` table and counts its database rules.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+pip install -r requirements-dev.txt 2>&1 | grep idna       # Requirement already satisfied: idna==3.20 …
+python manage.py migrate                                   # first time: "Applying posts.0001_initial... OK"
+python manage.py check                                     # System check identified no issues (0 silenced).
+python manage.py makemigrations --check --dry-run          # No changes detected
+python manage.py showmigrations posts
+python manage.py shell -c "from django.db import connection as c; cur = c.cursor(); k = c.introspection.get_constraints(cur, 'posts_post'); print(len([n for n, v in k.items() if v['check']]), 'checks;', sorted(n for n in k if n.endswith('_idx')))" | tail -1
+```
+
+**You should see:** the first `migrate` after pulling Part 4 prints `Applying posts.0001_initial... OK`
+(a database that already has it says `No migrations to apply.`). The two checks print their messages,
+`showmigrations` prints `[X] 0001_initial`, and the last line is:
+
+```text
+19 checks; ['posts_author_created_idx', 'posts_pending_queue_idx', 'posts_pinned_emerg_idx', 'posts_recent_idx', 'posts_review_queue_idx', 'posts_status_created_idx']
+```
+
+- The 19 checks are our 17 rules (content length, every status and type, "an opinion can't carry a
+  fact status", "a fact can't be `published`", at most 5 sources, no sources on an opinion, no empty or
+  NULL source, no emergency opinion, the emergency expiry, the confidence range) plus Django's own two
+  "not negative" checks on the two counters.
+- `posts_recent_idx` is the one index that is not in the original data model: Recent lists every status
+  except `removed`, which `(status, created_at)` can't serve.
+
+#### Step 2: Run the automated backend checks
+
+**Where:** Same terminal as step 1 (window 2, in `backend/`, venv active).
+
+**What this does:** Runs the whole backend test suite, then only the new posts tests, then the linter and
+formatter check.
+
+```bash
+python -m pytest                                    # 1087 passed
+python -m pytest apps/posts -q                      # 383 passed
+ruff check . ; ruff format --check .                # All checks passed! / 103 files already formatted
+```
+
+**You should see:** the full run ends with `1087 passed`, the second command with `383 passed`, and the
+last prints `All checks passed!` and `103 files already formatted`. (Counts may grow later; what matters
+is that nothing fails.)
+
+- The 383 are spread over: `test_models.py` (69: one test per database rule, which constraint fired,
+  and the indexes), `test_validators.py` (195: the shared source vectors plus the codes and messages),
+  `test_services.py` (24: status by type, the rolling quota to the microsecond, and two simultaneous
+  fact posts at 9 of 10, which let exactly one through, plus a control run without the lock that lets
+  both through), `test_api_create.py` (41), `test_api_feed.py` (25: ordering, exclusions, no repeats or
+  skips when posts arrive between pages, a crafted cursor, query counts), `test_api_quota.py` (7),
+  `test_emergency.py` (14), `test_no_network.py` (4) and `test_admin.py` (4).
+- `apps/accounts/tests/test_tokens.py` changed too: its `run_together` helper moved to that folder's
+  `conftest.py` so the posts tests can share it.
+
+#### Step 3: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 80 files, 1089 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 20 passed
+CI=1 npm run test:e2e                               # 20 passed (against the production build)
+cd ../backend                                       # back to backend/ for steps 4 to 11
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  80 passed (80)` and `Tests  1089 passed (1089)`. `npm run build` lists the routes as in Part 3
+(`/home` is still `○`: the page is static, and the feed loads in the browser). Each E2E run ends with
+`20 passed`: the 15 earlier tests and 5 new ones in `e2e/posts.spec.ts`.
+
+- The E2E tests sign up their own accounts and verify them through the file mailbox, then: post a fact
+  with a DOI and a URL (CHECKING FACTS… and "doi.org/… +1 more", the allowance down by one, still there
+  after a reload and visible to a visitor), post an opinion (OPINION in italic, no source line), check
+  that a bad post is blocked on the page before anything is sent, check an unverified account can read but
+  not post, and check the composer at phone width.
+- `NEXT_PUBLIC_GOOGLE_CLIENT_ID= ` bakes in "no Google" for the production-mode run (as in Part 3).
+
+#### Step 4: Start the server and make two accounts
+
+**Where:** First window 1 (start the server), then window 2 (the commands). **Keep using window 2 for
+steps 5 to 9.**
+
+**What this does:** Window 1 runs the Django server. In window 2 you sign up three accounts through the
+API: `ada` and `cy`, which you mark verified with a shell command (it stands in for the email link), and
+`bo`, who stays unverified.
+
+Window 1 (in `backend/`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend/` with the venv active: steps 1 to 3 leave you there; needs `jq`). If you opened a
+new terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the addresses are new each run
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+signup() { jq -nc --arg e "$1" --arg u "$2" '{email: $e, username: $u, password: "correct-horse-battery-42", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/signup | jq -r .meta.access_token; }
+ada=$(signup "part4-ada-$id@example.test" "part4_ada_$id")      # $ada = ada's login token
+bo=$(signup "part4-bo-$id@example.test" "part4_bo_$id")         # $bo = bo's login token
+cy=$(signup "part4-cy-$id@example.test" "part4_cy_$id")         # $cy = cy's login token (kept for the browser)
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__in=['part4-ada-$id@example.test', 'part4-cy-$id@example.test']).update(is_email_verified=True), 'accounts marked verified')" | tail -1
+for t in "$ada" "$bo" "$cy"; do curl -s -H "Authorization: Bearer $t" http://localhost:8000/api/v1/me/ | jq -c '{username, is_email_verified}'; done
+api=http://localhost:8000/api/v1
+post() { local out; out=$(curl -s -w '\n%{http_code}' -H "Authorization: Bearer $1" -H "Content-Type: application/json" --data-binary "$2" $api/posts/); printf '%s  ' "${out##*$'\n'}"; printf '%s' "${out%$'\n'*}" | jq -c "${3:-.}"; }   # post <token> <json> [jq filter]: prints the status code, then the answer
+```
+
+Sanity check (this step sets `id`, `ada`, `bo`, `cy`, `api` and `post`; the tokens must not be empty):
+
+```bash
+echo ${ada:0:10} ${bo:0:10} ${cy:0:10}               # three prefixes, not an empty line
+```
+
+**You should see** (the number in the names is your `id`, so it differs):
+
+```text
+2 accounts marked verified
+{"username":"part4_ada_235103","is_email_verified":true}
+{"username":"part4_bo_235103","is_email_verified":false}
+{"username":"part4_cy_235103","is_email_verified":true}
+```
+
+and, from the sanity check, `eyJhbGciOi eyJhbGciOi eyJhbGciOi` (every token of this kind starts that way).
+
+- `post` is a helper for the next steps: it sends a JSON body with a login token, prints the HTTP status,
+  then the answer (optionally cut down with a `jq` filter).
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet.
+
+**If it differs:** empty tokens (`null`) mean the sign-up failed: `runserver` isn't running, `jq` is
+missing, or you signed up more than 20 times in a minute. Fix that and run this step again from
+`id=$(date +%H%M%S)`.
+
+#### Step 5: Who may post
+
+**Where:** Terminal window 2 (the same terminal as step 4).
+
+**What this does:** Tries to post as nobody, as the unverified account, and reads the feed with no login.
+Posting needs a **verified email**; reading doesn't.
+
+```bash
+curl -s -w '  %{http_code}\n' -H "Content-Type: application/json" --data '{"content":"hi","post_type":"opinion"}' $api/posts/   # 1: nobody
+post "$bo" '{"content":"hi","post_type":"opinion"}'                                                                   # 2: unverified
+curl -s -o /dev/null -w '%{http_code}\n' $api/posts/                                                                  # 3: the feed, no login
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $bo" $api/me/fact-quota/                           # 4: the allowance, unverified
+```
+
+**You should see** (four commands, four answers):
+
+```text
+{"detail":"Authentication credentials were not provided.","code":"not_authenticated"}  401
+403  {"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}
+200
+200
+```
+
+- 401 means "log in first", 403 `email_unverified` means "logged in but not verified". Reading the feed
+  needs nothing. Asking for your allowance needs a login only, so the composer can show it.
+
+#### Step 6: Post an opinion and a fact
+
+**Where:** Terminal window 2.
+
+**What this does:** Posts as `ada` (verified) and shows what the server stored. An opinion is
+`published` at once; a fact is `pending` ("Checking facts…") because the fact-check pipeline arrives in
+Part 9. Sources are normalised, never fetched.
+
+```bash
+post "$ada" '{"content":"I think the new tram line will change how the city moves.","post_type":"opinion"}' '{status, post_type, sources, is_mine, confidence_score, emergency_active}'
+post "$ada" '{"content":"Solar capacity grew by roughly 30% worldwide last year.","post_type":"fact","sources":["doi:10.1038/s41558-024-02102","HTTPS://www.IEA.org/reports/renewables-2023"]}' '{status, post_type, sources, author: .author.username}'
+post "$ada" '{"content":"  Water boils at 100C at sea level.  ","post_type":"fact"}' '{status, content, sources}'
+post "$ada" '{"content":"Opinion with a bad idea","post_type":"opinion","status":"verified_true","confidence_score":"99.00"}' '{status, confidence_score}'
+post "$ada" '{"content":"Hosts are folded to punycode","post_type":"fact","sources":["https://bücher.example/über?q=1","https://faß.de:443/x"]}' '.sources'
+```
+
+**You should see** (five commands; `201` is "created"):
+
+```text
+201  {"status":"published","post_type":"opinion","sources":[],"is_mine":true,"confidence_score":null,"emergency_active":false}
+201  {"status":"pending","post_type":"fact","sources":[{"value":"10.1038/s41558-024-02102","kind":"doi"},{"value":"https://www.iea.org/reports/renewables-2023","kind":"url"}],"author":"part4_ada_235103"}
+201  {"status":"pending","content":"Water boils at 100C at sea level.","sources":[]}
+201  {"status":"published","confidence_score":null}
+201  [{"value":"https://xn--bcher-kva.example/%C3%BCber?q=1","kind":"url"},{"value":"https://xn--fa-hia.de/x","kind":"url"}]
+```
+
+- **Line 2:** `doi:10.1038/…` is stored as the bare DOI `10.1038/s41558-024-02102` with kind `doi`; the second
+  source's scheme and host are lower-cased (`HTTPS://www.IEA.org/…` → `https://www.iea.org/…`). The
+  order you gave is the order kept.
+- **Line 3:** the text is trimmed. A fact with no sources is fine (sources are optional).
+- **Line 4:** `status` and `confidence_score` in the request are ignored: only the server sets them.
+- **Line 5:** `bücher.example` and `faß.de` become punycode, the way a browser opens them (`faß.de` is
+  `xn--fa-hia.de`, not the `fass.de` of the old IDNA 2003 rules), the `ü` in the path is percent-encoded,
+  and the default port `:443` is dropped.
+- No source is ever visited by the server. Step 11 runs the test that blocks the network to prove it.
+
+#### Step 7: See what the server refuses
+
+**Where:** Terminal window 2.
+
+**What this does:** Sends eight bad posts. Each answer says which field is wrong; nothing is saved.
+
+```bash
+post "$ada" '{"content":"No type"}'
+post "$ada" '{"content":"   ","post_type":"opinion"}'
+post "$ada" "$(jq -nc '{content: ("x" * 501), post_type: "opinion"}')"
+post "$ada" '{"content":"Only facts have sources","post_type":"opinion","sources":["10.1000/xyz"]}'
+post "$ada" '{"content":"Bad sources","post_type":"fact","sources":["10.1000/ok","javascript:alert(1)","http://127.0.0.1/admin","https://user:pw@example.org/"]}'
+post "$ada" '{"content":"Repeats","post_type":"fact","sources":["doi:10.1000/xyz","https://doi.org/10.1000/XYZ"]}'
+post "$ada" '{"content":"Too many","post_type":"fact","sources":["10.1000/a","10.1000/b","10.1000/c","10.1000/d","10.1000/e","javascript:x"]}'
+post "$ada" '{"content":"Emergency","post_type":"fact","is_emergency":true}'
+```
+
+**You should see** (eight commands, eight answers, all `400`):
+
+```text
+400  {"post_type":["Choose Opinion or Fact."]}
+400  {"content":["Write something first."]}
+400  {"content":["Keep it to 500 characters."]}
+400  {"sources":["Only fact posts can have sources."]}
+400  {"sources":{"1":["Enter a link that starts with https:// or http://, or a DOI such as 10.1000/xyz."],"2":["Links to IP addresses and localhost aren't allowed."],"3":["Links with a username or password aren't allowed."]}}
+400  {"sources":{"1":["Same as source 1."]}}
+400  {"sources":["You can add up to 5 sources."]}
+400  {"detail":"Emergency posts aren't available yet.","code":"emergency_unavailable"}
+```
+
+- **Line 5:** the numbers are the position in your list (0 is the first): sources 1, 2 and 3 are wrong,
+  all reported at once, and the good first one doesn't save the post.
+- **Line 6:** `doi:10.1000/xyz` and `https://doi.org/10.1000/XYZ` are the same DOI (DOIs ignore case), so the
+  later one is the repeat.
+- **Line 7:** six sources are refused with only the list message, even though one of them is also bad.
+- **Line 8:** emergency posts are Part 11C; until then the flag is refused.
+
+#### Step 8: The fact allowance
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads how many fact posts `ada` may still make in the last 24 hours, uses them all,
+and shows the refusal. Each fact post counts for 24 hours, even if it is deleted or removed later, so
+deleting and reposting can't get around the limit. Opinions never count.
+
+```bash
+curl -s -H "Authorization: Bearer $ada" $api/me/fact-quota/ | jq -c .
+left=$(curl -s -H "Authorization: Bearer $ada" $api/me/fact-quota/ | jq .remaining)
+echo "posting $left more facts"
+for i in $(seq 1 $left); do post "$ada" "{\"content\":\"Quota claim $i\",\"post_type\":\"fact\"}" '.status' | tr '\n' ' '; done; echo
+curl -s -H "Authorization: Bearer $ada" $api/me/fact-quota/ | jq -c .
+curl -s -i -H "Authorization: Bearer $ada" -H "Content-Type: application/json" --data '{"content":"One too many","post_type":"fact"}' $api/posts/ | tr -d '\r' | grep -i -E "^HTTP|^Retry-After|^\{"
+post "$ada" '{"content":"Opinions are not limited","post_type":"opinion"}' '.status'
+```
+
+**You should see** (with a limit of 10; the times and `Retry-After` differ):
+
+```text
+{"limit":10,"used":3,"remaining":7,"window_hours":24,"next_slot_at":null}
+posting 7 more facts
+201  "pending" 201  "pending" 201  "pending" 201  "pending" 201  "pending" 201  "pending" 201  "pending" 
+{"limit":10,"used":10,"remaining":0,"window_hours":24,"next_slot_at":"2026-10-09T17:51:04.118320Z"}
+HTTP/1.1 429 Too Many Requests
+Retry-After: 86382
+{"detail":"You've used all 10 of your fact posts for the last 24 hours. You can post another at 17:51 UTC.","code":"fact_quota_exceeded"}
+201  "published"
+```
+
+- `used` was 3 because steps 6 and 7 made three fact posts. When nothing is left, `next_slot_at` is the
+  moment the oldest counted post is 24 hours old: the composer shows it as "next at 5:51 PM" in your own
+  time zone.
+- The refusal is **429 `fact_quota_exceeded`** with a `Retry-After` in seconds (about 24 hours here). It
+  is a different 429 from `throttled`, so the page can tell "you've used your allowance" from "you're
+  posting too fast". An allowance of 0 (Django Admin → Platform settings) answers **403
+  `fact_posts_paused`** instead.
+
+#### Step 9: The Recent feed and its cursor
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads the public feed (no login), pages through it three posts at a time and tries a
+fake cursor.
+
+```bash
+curl -s "$api/posts/?page_size=3" | jq -c '{pinned, pinned_total, kinds: [.results[].kind], contents: [.results[].post.content[0:28]], has_next: (.next_cursor != null)}'
+c=$(curl -s "$api/posts/?page_size=3" | jq -r .next_cursor)
+curl -s "$api/posts/?page_size=3&cursor=$c" | jq -c '{contents: [.results[].post.content[0:28]], has_next: (.next_cursor != null)}'
+curl -s -w '  %{http_code}\n' "$api/posts/?cursor=not-a-cursor"
+curl -s -w '  %{http_code}\n' "$api/posts/?cursor=cD1nYXJiYWdl"
+curl -s -H "Authorization: Bearer $ada" "$api/posts/?page_size=1" | jq -c '.results[0].post | {is_mine, keys: (keys | length)}'
+curl -s "$api/posts/?page_size=1" | jq -c '.results[0].post | {is_mine, keys: (keys | length)}'
+```
+
+**You should see:**
+
+```text
+{"pinned":[],"pinned_total":0,"kinds":["post","post","post"],"contents":["Opinions are not limited","Quota claim 7","Quota claim 6"],"has_next":true}
+{"contents":["Quota claim 5","Quota claim 4","Quota claim 3"],"has_next":true}
+{"detail":"Invalid cursor","code":"not_found"}  404
+{"detail":"Invalid cursor","code":"not_found"}  404
+{"is_mine":true,"keys":23}
+{"is_mine":false,"keys":23}
+```
+
+- Newest first. `pinned` is empty until emergency posts (Part 11C), and Recent only has `post` items
+  (reposts are Part 7B).
+- The next page starts exactly where the last one ended: a post made between two page loads never
+  repeats or skips a post (the automated tests make 5 new posts between pages 1 and 2).
+- `cD1nYXJiYWdl` is the base64 of `p=garbage`, a hand-made cursor. It is a clean **404**, not a server
+  error.
+- Every post has the same 23 fields; `is_mine` depends on who is asking. The feed has no counts yet (likes,
+  comments and reposts arrive in Parts 7 and 7B), so those fields are 0 or false.
+
+#### Step 10: The database refuses bad rows
+
+**Where:** Terminal window 2, in `backend/` with the venv active.
+
+**What this does:** Tries to write six impossible posts straight into the database, skipping the API.
+The database itself must refuse each one, and say which rule stopped it. Every attempt is rolled back.
+
+```bash
+python manage.py shell -c "
+from django.db import IntegrityError, transaction
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.posts.models import Post
+user = User.objects.get(email='part4-ada-$id@example.test')
+cases = {
+    'an opinion with a source': dict(post_type='opinion', status='published', sources=['10.1000/xyz']),
+    'an opinion that is verified': dict(post_type='opinion', status='verified_true'),
+    'a published fact': dict(post_type='fact', status='published'),
+    'six sources': dict(post_type='fact', status='pending', sources=['10.1/a','10.1/b','10.1/c','10.1/d','10.1/e','10.1/f']),
+    'an empty source': dict(post_type='fact', status='pending', sources=['']),
+    'an emergency opinion': dict(post_type='opinion', status='published', is_emergency=True, emergency_expires_at=timezone.now()),
+}
+for name, fields in cases.items():
+    try:
+        with transaction.atomic():
+            Post.objects.create(author=user, content='x', **fields)
+    except IntegrityError as error:
+        print(name + ' ->', error.__cause__.diag.constraint_name)
+print(Post.objects.filter(content='x').count(), 'rows written')
+" | tail -7
+```
+
+**You should see:**
+
+```text
+an opinion with a source -> posts_post_sources_fact_only
+an opinion that is verified -> posts_post_opinion_status
+a published fact -> posts_post_fact_not_published
+six sources -> posts_post_sources_max
+an empty source -> posts_post_sources_not_empty
+an emergency opinion -> posts_post_emergency_fact_only
+0 rows written
+```
+
+- Each line is the name of the database rule that fired. `0 rows written` confirms nothing got through.
+- One more rule the database can't state: a source over 500 characters. Postgres would *truncate* it
+  silently through Django's cast, so `validators.normalize_source` refuses it first (step 7's tests cover
+  499, 500 and 501 characters).
+
+#### Step 11: No source is ever fetched
+
+**Where:** Terminal window 2, in `backend/` with the venv active.
+
+**What this does:** Runs the test that blocks every way Python can reach the network (sockets, DNS,
+`urllib`, `requests`, `http.client`), then posts a fact with five kinds of source. It must still work,
+because the server only validates and stores a link.
+
+```bash
+python -m pytest apps/posts/tests/test_no_network.py -v 2>&1 | grep -E "PASSED|passed|FAILED"
+```
+
+**You should see:**
+
+```text
+apps/posts/tests/test_no_network.py::test_creating_a_post_with_sources_makes_no_network_request PASSED [ 25%]
+apps/posts/tests/test_no_network.py::test_a_refused_source_makes_no_request_either PASSED [ 50%]
+apps/posts/tests/test_no_network.py::test_the_blocker_really_blocks PASSED [ 75%]
+apps/posts/tests/test_no_network.py::test_the_posts_code_imports_nothing_that_can_fetch PASSED [100%]
+============================== 4 passed in 0.41s ===============================
+```
+
+- The last test also reads every file in `apps/posts/` and fails if one imports a library that can fetch.
+  This is what keeps a user's link from ever becoming a request from our server.
+
+#### Step 12: Django Admin shows the posts, read-only
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Opens the admin list of posts. Part 10 adds the moderator actions; until then nobody can
+change a post from here, so nothing can skip the rules the API enforces.
+
+| URL | Expect |
+|---|---|
+| http://localhost:8000/admin/ | Sign in with the superuser you made in Part 0A (email and password). If it 404s, `ADMIN_URL_PATH` in `backend/.env` isn't `admin/`; use that path. |
+| http://localhost:8000/admin/posts/post/ | The posts, newest first, with columns Post, Post type, Status, Author, Created at and Deleted at, a filter panel (type, status) and a search box (text or username). **No "Add post" button.** |
+| Search `tram` or `Quota` | Only the matching posts (the opinion about the tram line, or the seven "Quota claim" facts) |
+| Open one post | Its fields are shown but not editable, and there are no Save buttons or Delete button |
+
+- The same rules are checked by the automated tests (add, change and delete are refused with 403).
+
+#### Step 13: The composer and the Recent feed in the browser
+
+**Where:** First window 3 (start the frontend), then the browser. Window 1 must still be running `runserver`.
+
+**What this does:** Starts the Next.js dev server and uses the composer as `cy` (verified, with a full
+allowance) and `bo` (unverified).
+
+Window 3:
+
+```bash
+cd frontend                                         # from the repo root
+npm run dev                                         # leave it running
+```
+
+Browser. Log in at http://localhost:3000/login as **`cy`**, with `part4-cy-<your id>@example.test` and
+`correct-horse-battery-42` (the id from step 4), then:
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home | A white column titled by the **RECENT** tab (blue underline), then a card that looks like a text box: a pencil tile, "What do you want to say?" and a blue **New post** pill. Below it, the posts from steps 6 to 9, newest first. |
+| Look at a fact card | A grey **FACT** chip and a dashed **CHECKING FACTS…** chip with a spinning glyph, the claim in upright serif, and under it one row with a link glyph: `doi.org/10.1038/s41558-024-02102 ↗` and `+1 more`. The left edge stripe is a pale grey-green. |
+| Look at an opinion card | A grey **OPINION** chip only (no status chip), the text in *italic* serif, and no source row. |
+| Click the card (or the rail's blue **New post**) | A dialog **New post** with the cursor in the text. Under the text: `0 / 500 characters`. Then "Post type  Choose one to continue", a pill with **Opinion** and **Fact** (neither selected), and a footer: `10/10 fact posts left` (your limit), **Cancel** and **Post**. |
+| Click **Post** with nothing typed | Nothing is sent. Under the text: "Write something first." Under the choice: "Choose Opinion or Fact." The cursor goes back to the text. |
+| Type a sentence and click **Fact** | A **Source (URL or DOI) (optional)** group appears with one field, "DOI preferred" (teal, top right) and **+ Add another source**. The button now says **Post fact, will be checked**. The hint beside "Post type" says "Fact posts are checked after you post". |
+| Click **Opinion** | The source group disappears (your text stays) and the button says **Post opinion**. Click **Fact** again. |
+| Type `http://127.0.0.1/admin` in the field and press Tab | The field turns red: "Links to IP addresses and localhost aren't allowed." |
+| Replace it with `doi:10.1000/xyz`, click **Add another source** | The error goes; a second field appears with the cursor in it and a **×** to its right. Add up to five fields in total, then the add button disappears. |
+| Type `https://doi.org/10.1000/XYZ` in the second field and click **Post fact…** | The second field turns red: "Same as source 1." Nothing is sent. Change it to `https://example.org/report`. |
+| Click **Post fact, will be checked** | The button shows **Posting…**, then the dialog closes, a dark toast says **Posted. Checking the facts…**, and your post is at the top of the feed with **CHECKING FACTS…** and `doi.org/10.1000/xyz` `+1 more`. The page did not reload. |
+| Open the composer again | The text is empty again, and the footer says one fact post fewer (`9/10 …`). |
+| Type something, press **Esc**, open the composer again | Your text is still there: closing keeps the draft. |
+| Reload the page | The posts come back from the server, in the same order. |
+
+- Not in the table, but covered by the automated tests: pasting more than 500 characters (the counter turns
+  red and "Keep it to 500 characters." appears on **Post**; an emoji counts as one character, as on the
+  server), the allowance reaching 0 (the footer shows `0/10 fact posts left · next at 5:51 PM` and a fact is
+  refused on the page without sending anything; `ada`, whose allowance step 8 used up, shows exactly
+  that), and closing the dialog while a post is still being sent.
+- Log in as `bo` (a private window): the card and the rail's **New post** are greyed out; clicking either
+  shows the toast "Verify your email to post. Check your inbox, or resend the link from the banner." and
+  opens nothing. The feed still loads.
+- Log out and open http://localhost:3000/home: the card says "Log in to share an opinion or a fact." with a
+  blue **Log in to post** link, and the feed is the same.
+
+#### Step 14: A phone-sized window
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Checks the same screens at phone width. In Firefox or Chrome press `F12`, then the
+"responsive design" / device toolbar button, and set the width to 390.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home | A top bar with the logo and your avatar, the Recent tab, the card (placeholder "What do you want to say?" in full, no blue pill), the posts and a bottom bar (Home, Search, New post, Notifications, Profile). No sideways scrolling. |
+| Look at a post's header | The author's name sits on one line (long names get "…"); the FACT and status chips wrap onto a line of their own under it. |
+| Tap **New post** in the bottom bar | The same dialog, almost full width. Pick **Fact**, add sources up to five: each row keeps its **×**, long links scroll inside their field, and the page still doesn't scroll sideways. |
+| Look at the footer | `9/10 fact posts left` (or `10/10` if you haven't posted yet) on its own line, with **Cancel** and the submit button below it (the long label may wrap onto two lines). |
+
+#### Step 15: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts and their posts (the posts go with them). In window 2, in `backend/` with the
+  venv active:
+
+  ```bash
+  python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part4-').delete())" | tail -1
+  ```
+
+  After one clean run of this guide it prints `(19, {'posts.Post': 13, 'account.EmailAddress': 3,
+  'accounts.User': 3})`: how many rows went in all, and per table (13 posts: 5 from step 6 and 8 from step 8;
+  you get more if you made posts as `cy` or ran the guide twice). Nothing else is touched. (The E2E tests' accounts stay in your local database, as in
+  earlier parts: Django Admin → Users deletes them.)
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
+  token and the throwaway password of the test accounts.
 
 ---
 
@@ -5358,3 +5889,567 @@ python manage.py shell -c "from allauth.socialaccount.models import SocialAccoun
   wipes the whole local database, which is destructive.
 - Real Google data never goes into git: the client ID stays in your own `.env` files (it is public by
   design), and there is no client secret anywhere.
+
+### Part 4: Posts (composer + Recent feed)
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
+`frontend\.env.local`. Part 4 adds one migration (`posts.0001_initial`), one pinned dependency
+(`idna==3.20`, which was already installed through `requests`, so `pip install` says "Requirement
+already satisfied") and no env variable.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 4, **after** step 3 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 4 to 14 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for steps 4 to 9**: the variables and functions you set in step 4 (`$id`, `$h`, `$ada`, `$bo`, `$cy`, `$api`, `Signup`, `Post`) only live in that one PowerShell window. If you close it, redo step 4. | 1 to 11, 15 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 13 and 14 |
+| Browser | Steps 12 to 14 | 12 to 14 |
+
+Things to know first:
+
+- Steps 4 to 10 talk to the API directly with `curl.exe` (with `.exe`: in PowerShell 5.1 plain `curl` is a
+  different command). Steps 12 to 14 use the browser. Step 4 makes three accounts: `ada` for the API steps (step 8 uses up her whole fact
+  allowance), `bo` (unverified) and `cy`, who stays untouched for the browser steps.
+- **The PowerShell blocks below were not run on Windows.** The agent works on the Linux PC; it ran the bash
+  twin of every command in the Linux guide on 2026-10-08, and the outputs below are those, reshaped to what
+  `ConvertTo-Json -Compress` and `-join` print. The PowerShell commands follow the patterns Parts 1 to 3
+  proved on Windows (JSON written to a file and sent with `--data-binary "@file"`, `curl.exe`, no `&&`). If
+  one behaves differently, tell the agent which. The browser steps were checked the same day with headless
+  Chromium (screenshots at 1280 and 390 px), not by a person at a keyboard. Numbers in names, times and
+  token prefixes differ on every run.
+- **The fact allowance comes from your own settings.** `FACT_POSTS_PER_DAY` in `backend\.env` (the
+  example file says 10) seeds it, and Django Admin → Platform settings changes it. Step 8 reads the
+  number from the server, so it works with any value of 1 or more; the sample output uses 10. It is a
+  **rolling 24 hours**, not a calendar day.
+- A post is limited to 30 per hour per account (`post_create`). Steps 5 to 9 use about 25 of them
+  (refused attempts count). If you repeat steps 6 to 8 within an hour, make new accounts (step 4 again)
+  or you will see `429 throttled` instead.
+- Nothing here sends an email: step 4 marks two accounts verified with a shell command, which stands in
+  for clicking the link (Part 2 shows the real flow).
+
+#### Step 1: Apply the migration and check the schema
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, installs what
+`requirements.txt` pins, creates the `posts` table and counts its database rules.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements-dev.txt 2>&1 | Select-String idna       # Requirement already satisfied: idna==3.20 …
+python manage.py migrate                                   # first time: "Applying posts.0001_initial... OK"
+python manage.py check                                     # System check identified no issues (0 silenced).
+python manage.py makemigrations --check --dry-run          # No changes detected
+python manage.py showmigrations posts
+python manage.py shell -c "from django.db import connection as c; cur = c.cursor(); k = c.introspection.get_constraints(cur, 'posts_post'); print(len([n for n, v in k.items() if v['check']]), 'checks;', sorted(n for n in k if n.endswith('_idx')))" | Select-Object -Last 1
+```
+
+**You should see:** the first `migrate` after pulling Part 4 prints `Applying posts.0001_initial... OK`
+(a database that already has it says `No migrations to apply.`). The two checks print their messages,
+`showmigrations` prints `[X] 0001_initial`, and the last line is:
+
+```text
+19 checks; ['posts_author_created_idx', 'posts_pending_queue_idx', 'posts_pinned_emerg_idx', 'posts_recent_idx', 'posts_review_queue_idx', 'posts_status_created_idx']
+```
+
+- The 19 checks are our 17 rules (content length, every status and type, "an opinion can't carry a
+  fact status", "a fact can't be `published`", at most 5 sources, no sources on an opinion, no empty or
+  NULL source, no emergency opinion, the emergency expiry, the confidence range) plus Django's own two
+  "not negative" checks on the two counters.
+- `posts_recent_idx` is the one index that is not in the original data model: Recent lists every status
+  except `removed`, which `(status, created_at)` can't serve.
+
+#### Step 2: Run the automated backend checks
+
+**Where:** Same terminal as step 1 (window 2, in `backend\`, venv active).
+
+**What this does:** Runs the whole backend test suite, then only the new posts tests, then the linter and
+formatter check.
+
+```powershell
+python -m pytest                                    # 1087 passed
+python -m pytest apps/posts -q                      # 383 passed
+ruff check . ; ruff format --check .                # All checks passed! / 103 files already formatted
+```
+
+**You should see:** the full run ends with `1087 passed`, the second command with `383 passed`, and the
+last prints `All checks passed!` and `103 files already formatted`. (Counts may grow later; what matters
+is that nothing fails.)
+
+- The 383 are spread over: `test_models.py` (69: one test per database rule, which constraint fired,
+  and the indexes), `test_validators.py` (195: the shared source vectors plus the codes and messages),
+  `test_services.py` (24: status by type, the rolling quota to the microsecond, and two simultaneous
+  fact posts at 9 of 10, which let exactly one through, plus a control run without the lock that lets
+  both through), `test_api_create.py` (41), `test_api_feed.py` (25: ordering, exclusions, no repeats or
+  skips when posts arrive between pages, a crafted cursor, query counts), `test_api_quota.py` (7),
+  `test_emergency.py` (14), `test_no_network.py` (4) and `test_admin.py` (4).
+- `apps/accounts/tests/test_tokens.py` changed too: its `run_together` helper moved to that folder's
+  `conftest.py` so the posts tests can share it.
+
+#### Step 3: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 80 files, 1089 tests passed
+npm run build
+npm run test:e2e                                    # 20 passed
+$env:CI = "1" ; npm run test:e2e ; Remove-Item Env:CI   # 20 passed (against the production build)
+cd ..\backend                                       # back to backend\ for steps 4 to 11
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  80 passed (80)` and `Tests  1089 passed (1089)`. `npm run build` lists the routes as in Part 3
+(`/home` is still `○`: the page is static, and the feed loads in the browser). Each E2E run ends with
+`20 passed`: the 15 earlier tests and 5 new ones in `e2e/posts.spec.ts`.
+
+- The E2E tests sign up their own accounts and verify them through the file mailbox, then: post a fact
+  with a DOI and a URL (CHECKING FACTS… and "doi.org/… +1 more", the allowance down by one, still there
+  after a reload and visible to a visitor), post an opinion (OPINION in italic, no source line), check
+  that a bad post is blocked on the page before anything is sent, check an unverified account can read but
+  not post, and check the composer at phone width.
+- On Windows `npm run build` can't blank `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (PowerShell's `$env:NAME = ""` *deletes* the
+  variable), so a `frontend\.env.local` with your real client ID is baked into that build and the CI-mode run is less
+  representative than on Linux. The default run pins an empty client ID for both servers, so it is unaffected.
+
+#### Step 4: Start the server and make two accounts
+
+**Where:** First window 1 (start the server), then window 2 (the commands). **Keep using window 2 for
+steps 5 to 9.**
+
+**What this does:** Window 1 runs the Django server. In window 2 you sign up three accounts through the
+API: `ada` and `cy`, which you mark verified with a shell command (it stands in for the email link), and
+`bo`, who stays unverified.
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 to 3 leave you there). If you opened a new window,
+first run `cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the addresses are new each run
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+function Signup($email, $username) {
+@"
+{"email": "$email", "username": "$username", "password": "correct-horse-battery-42", "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-signup.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-signup.json" http://localhost:8000/api/auth/app/v1/auth/signup | ConvertFrom-Json).meta.access_token
+}
+$ada = Signup "part4-ada-$id@example.test" "part4_ada_$id"      # $ada = ada's login token
+$bo = Signup "part4-bo-$id@example.test" "part4_bo_$id"         # $bo = bo's login token
+$cy = Signup "part4-cy-$id@example.test" "part4_cy_$id"         # $cy = cy's login token (kept for the browser)
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__in=['part4-ada-$id@example.test', 'part4-cy-$id@example.test']).update(is_email_verified=True), 'accounts marked verified')" | Select-Object -Last 1
+foreach ($t in $ada, $bo, $cy) { curl.exe -s -H "Authorization: Bearer $t" http://localhost:8000/api/v1/me/ | ConvertFrom-Json | Select-Object username, is_email_verified | ConvertTo-Json -Compress }
+$api = 'http://localhost:8000/api/v1'
+# Post <token> <json> [fields]: prints the HTTP status, then the answer (cut down to `fields` when given)
+function Post($token, $json, $props) {
+  $json | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+  $out = curl.exe -s -w "`n%{http_code}" -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/"
+  $body = $out[0..($out.Count - 2)] -join ''
+  if ($props) { $body = $body | ConvertFrom-Json | Select-Object $props | ConvertTo-Json -Depth 5 -Compress }
+  "$($out[-1])  $body"
+}
+```
+
+Sanity check (this step sets `$id`, `$ada`, `$bo`, `$cy`, `$api` and `Post`; the tokens must not be empty):
+
+```powershell
+"$($ada.Substring(0,10)) $($bo.Substring(0,10)) $($cy.Substring(0,10))"      # three prefixes, not an error
+```
+
+**You should see** (the number in the names is your `id`, so it differs):
+
+```text
+2 accounts marked verified
+{"username":"part4_ada_235103","is_email_verified":true}
+{"username":"part4_bo_235103","is_email_verified":false}
+{"username":"part4_cy_235103","is_email_verified":true}
+```
+
+and, from the sanity check, `eyJhbGciOi eyJhbGciOi eyJhbGciOi` (every token of this kind starts that way).
+
+- `Post` is a helper for the next steps: it sends a JSON body with a login token, prints the HTTP status,
+  then the answer (optionally cut down to the fields you name).
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet.
+
+**If it differs:** empty tokens mean the sign-up failed: `runserver` isn't running, or you signed up more than 20 times in a minute. Fix that and run this step again from
+`$id = Get-Date …`.
+
+#### Step 5: Who may post
+
+**Where:** Terminal window 2 (the same terminal as step 4).
+
+**What this does:** Tries to post as nobody, as the unverified account, and reads the feed with no login.
+Posting needs a **verified email**; reading doesn't.
+
+```powershell
+'{"content":"hi","post_type":"opinion"}' | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+curl.exe -s -w '  %{http_code}\n' -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/"   # 1: nobody
+Post $bo '{"content":"hi","post_type":"opinion"}'                                                                   # 2: unverified
+curl.exe -s -o NUL -w '%{http_code}\n' "$api/posts/"                                                                 # 3: the feed, no login
+curl.exe -s -o NUL -w '%{http_code}\n' -H "Authorization: Bearer $bo" "$api/me/fact-quota/"                          # 4: the allowance, unverified
+```
+
+**You should see** (four commands, four answers):
+
+```text
+{"detail":"Authentication credentials were not provided.","code":"not_authenticated"}  401
+403  {"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}
+200
+200
+```
+
+- 401 means "log in first", 403 `email_unverified` means "logged in but not verified". Reading the feed
+  needs nothing. Asking for your allowance needs a login only, so the composer can show it.
+
+#### Step 6: Post an opinion and a fact
+
+**Where:** Terminal window 2.
+
+**What this does:** Posts as `ada` (verified) and shows what the server stored. An opinion is
+`published` at once; a fact is `pending` ("Checking facts…") because the fact-check pipeline arrives in
+Part 9. Sources are normalised, never fetched.
+
+```powershell
+Post $ada '{"content":"I think the new tram line will change how the city moves.","post_type":"opinion"}' 'status','post_type','sources','is_mine','confidence_score','emergency_active'
+Post $ada '{"content":"Solar capacity grew by roughly 30% worldwide last year.","post_type":"fact","sources":["doi:10.1038/s41558-024-02102","HTTPS://www.IEA.org/reports/renewables-2023"]}' 'status','post_type','sources',@{n='author';e={$_.author.username}}
+Post $ada '{"content":"  Water boils at 100C at sea level.  ","post_type":"fact"}' 'status','content','sources'
+Post $ada '{"content":"Opinion with a bad idea","post_type":"opinion","status":"verified_true","confidence_score":"99.00"}' 'status','confidence_score'
+Post $ada '{"content":"Hosts are folded to punycode","post_type":"fact","sources":["https://b\u00fccher.example/\u00fcber?q=1","https://fa\u00df.de:443/x"]}' 'sources'
+```
+
+**You should see** (five commands; `201` is "created"):
+
+```text
+201  {"status":"published","post_type":"opinion","sources":[],"is_mine":true,"confidence_score":null,"emergency_active":false}
+201  {"status":"pending","post_type":"fact","sources":[{"value":"10.1038/s41558-024-02102","kind":"doi"},{"value":"https://www.iea.org/reports/renewables-2023","kind":"url"}],"author":"part4_ada_235103"}
+201  {"status":"pending","content":"Water boils at 100C at sea level.","sources":[]}
+201  {"status":"published","confidence_score":null}
+201  {"sources":[{"value":"https://xn--bcher-kva.example/%C3%BCber?q=1","kind":"url"},{"value":"https://xn--fa-hia.de/x","kind":"url"}]}
+```
+
+- **Line 2:** `doi:10.1038/…` is stored as the bare DOI `10.1038/s41558-024-02102` with kind `doi`; the second
+  source's scheme and host are lower-cased (`HTTPS://www.IEA.org/…` → `https://www.iea.org/…`). The
+  order you gave is the order kept.
+- **Line 3:** the text is trimmed. A fact with no sources is fine (sources are optional).
+- **Line 4:** `status` and `confidence_score` in the request are ignored: only the server sets them.
+- **Line 5:** `bücher.example` and `faß.de` become punycode, the way a browser opens them (`faß.de` is
+  `xn--fa-hia.de`, not the `fass.de` of the old IDNA 2003 rules), the `ü` in the path is percent-encoded,
+  and the default port `:443` is dropped.
+- No source is ever visited by the server. Step 11 runs the test that blocks the network to prove it.
+
+#### Step 7: See what the server refuses
+
+**Where:** Terminal window 2.
+
+**What this does:** Sends eight bad posts. Each answer says which field is wrong; nothing is saved.
+
+```powershell
+Post $ada '{"content":"No type"}'
+Post $ada '{"content":"   ","post_type":"opinion"}'
+Post $ada ('{"content":"' + ('x' * 501) + '","post_type":"opinion"}')
+Post $ada '{"content":"Only facts have sources","post_type":"opinion","sources":["10.1000/xyz"]}'
+Post $ada '{"content":"Bad sources","post_type":"fact","sources":["10.1000/ok","javascript:alert(1)","http://127.0.0.1/admin","https://user:pw@example.org/"]}'
+Post $ada '{"content":"Repeats","post_type":"fact","sources":["doi:10.1000/xyz","https://doi.org/10.1000/XYZ"]}'
+Post $ada '{"content":"Too many","post_type":"fact","sources":["10.1000/a","10.1000/b","10.1000/c","10.1000/d","10.1000/e","javascript:x"]}'
+Post $ada '{"content":"Emergency","post_type":"fact","is_emergency":true}'
+```
+
+**You should see** (eight commands, eight answers, all `400`):
+
+```text
+400  {"post_type":["Choose Opinion or Fact."]}
+400  {"content":["Write something first."]}
+400  {"content":["Keep it to 500 characters."]}
+400  {"sources":["Only fact posts can have sources."]}
+400  {"sources":{"1":["Enter a link that starts with https:// or http://, or a DOI such as 10.1000/xyz."],"2":["Links to IP addresses and localhost aren't allowed."],"3":["Links with a username or password aren't allowed."]}}
+400  {"sources":{"1":["Same as source 1."]}}
+400  {"sources":["You can add up to 5 sources."]}
+400  {"detail":"Emergency posts aren't available yet.","code":"emergency_unavailable"}
+```
+
+- **Line 5:** the numbers are the position in your list (0 is the first): sources 1, 2 and 3 are wrong,
+  all reported at once, and the good first one doesn't save the post.
+- **Line 6:** `doi:10.1000/xyz` and `https://doi.org/10.1000/XYZ` are the same DOI (DOIs ignore case), so the
+  later one is the repeat.
+- **Line 7:** six sources are refused with only the list message, even though one of them is also bad.
+- **Line 8:** emergency posts are Part 11C; until then the flag is refused.
+
+#### Step 8: The fact allowance
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads how many fact posts `ada` may still make in the last 24 hours, uses them all,
+and shows the refusal. Each fact post counts for 24 hours, even if it is deleted or removed later, so
+deleting and reposting can't get around the limit. Opinions never count.
+
+```powershell
+curl.exe -s -H "Authorization: Bearer $ada" "$api/me/fact-quota/"
+$left = (curl.exe -s -H "Authorization: Bearer $ada" "$api/me/fact-quota/" | ConvertFrom-Json).remaining
+"posting $left more facts"
+1..$left | ForEach-Object { Post $ada ('{"content":"Quota claim N","post_type":"fact"}'.Replace('N', "$_")) 'status' }
+curl.exe -s -H "Authorization: Bearer $ada" "$api/me/fact-quota/"
+'{"content":"One too many","post_type":"fact"}' | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+curl.exe -s -i -H "Authorization: Bearer $ada" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | Select-String -Pattern '^HTTP|^Retry-After|^\{'
+Post $ada '{"content":"Opinions are not limited","post_type":"opinion"}' 'status'
+```
+
+**You should see** (with a limit of 10; the times and `Retry-After` differ):
+
+```text
+{"limit":10,"used":3,"remaining":7,"window_hours":24,"next_slot_at":null}
+posting 7 more facts
+201  {"status":"pending"}
+201  {"status":"pending"}
+201  {"status":"pending"}
+201  {"status":"pending"}
+201  {"status":"pending"}
+201  {"status":"pending"}
+201  {"status":"pending"}
+{"limit":10,"used":10,"remaining":0,"window_hours":24,"next_slot_at":"2026-10-09T17:51:04.118320Z"}
+HTTP/1.1 429 Too Many Requests
+Retry-After: 86382
+{"detail":"You've used all 10 of your fact posts for the last 24 hours. You can post another at 17:51 UTC.","code":"fact_quota_exceeded"}
+201  {"status":"published"}
+```
+
+- `used` was 3 because steps 6 and 7 made three fact posts. When nothing is left, `next_slot_at` is the
+  moment the oldest counted post is 24 hours old: the composer shows it as "next at 5:51 PM" in your own
+  time zone.
+- The refusal is **429 `fact_quota_exceeded`** with a `Retry-After` in seconds (about 24 hours here). It
+  is a different 429 from `throttled`, so the page can tell "you've used your allowance" from "you're
+  posting too fast". An allowance of 0 (Django Admin → Platform settings) answers **403
+  `fact_posts_paused`** instead.
+
+#### Step 9: The Recent feed and its cursor
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads the public feed (no login), pages through it three posts at a time and tries a
+fake cursor.
+
+```powershell
+$f = curl.exe -s "$api/posts/?page_size=3" | ConvertFrom-Json
+"pinned: $($f.pinned.Count), pinned_total: $($f.pinned_total), kinds: $($f.results.kind -join ','), has_next: $([bool]$f.next_cursor)"
+$f.results.post.content -join ' | '
+$c = $f.next_cursor
+$f2 = curl.exe -s "$api/posts/?page_size=3&cursor=$c" | ConvertFrom-Json
+"$($f2.results.post.content -join ' | '), has_next: $([bool]$f2.next_cursor)"
+curl.exe -s -w '  %{http_code}\n' "$api/posts/?cursor=not-a-cursor"
+curl.exe -s -w '  %{http_code}\n' "$api/posts/?cursor=cD1nYXJiYWdl"
+$mine = (curl.exe -s -H "Authorization: Bearer $ada" "$api/posts/?page_size=1" | ConvertFrom-Json).results[0].post
+"is_mine: $($mine.is_mine), keys: $(($mine | Get-Member -MemberType NoteProperty).Count)"
+$theirs = (curl.exe -s "$api/posts/?page_size=1" | ConvertFrom-Json).results[0].post
+"is_mine: $($theirs.is_mine), keys: $(($theirs | Get-Member -MemberType NoteProperty).Count)"
+```
+
+**You should see:**
+
+```text
+pinned: 0, pinned_total: 0, kinds: post,post,post, has_next: True
+Opinions are not limited | Quota claim 7 | Quota claim 6
+Quota claim 5 | Quota claim 4 | Quota claim 3, has_next: True
+{"detail":"Invalid cursor","code":"not_found"}  404
+{"detail":"Invalid cursor","code":"not_found"}  404
+is_mine: True, keys: 23
+is_mine: False, keys: 23
+```
+
+- Newest first. `pinned` is empty until emergency posts (Part 11C), and Recent only has `post` items
+  (reposts are Part 7B).
+- The next page starts exactly where the last one ended: a post made between two page loads never
+  repeats or skips a post (the automated tests make 5 new posts between pages 1 and 2).
+- `cD1nYXJiYWdl` is the base64 of `p=garbage`, a hand-made cursor. It is a clean **404**, not a server
+  error.
+- Every post has the same 23 fields; `is_mine` depends on who is asking. The feed has no counts yet (likes,
+  comments and reposts arrive in Parts 7 and 7B), so those fields are 0 or false.
+
+#### Step 10: The database refuses bad rows
+
+**Where:** Terminal window 2, in `backend\` with the venv active.
+
+**What this does:** Tries to write six impossible posts straight into the database, skipping the API.
+The database itself must refuse each one, and say which rule stopped it. Every attempt is rolled back.
+
+```powershell
+$py = @"
+from django.db import IntegrityError, transaction
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.posts.models import Post
+user = User.objects.get(email='part4-ada-$id@example.test')
+cases = {
+    'an opinion with a source': dict(post_type='opinion', status='published', sources=['10.1000/xyz']),
+    'an opinion that is verified': dict(post_type='opinion', status='verified_true'),
+    'a published fact': dict(post_type='fact', status='published'),
+    'six sources': dict(post_type='fact', status='pending', sources=['10.1/a','10.1/b','10.1/c','10.1/d','10.1/e','10.1/f']),
+    'an empty source': dict(post_type='fact', status='pending', sources=['']),
+    'an emergency opinion': dict(post_type='opinion', status='published', is_emergency=True, emergency_expires_at=timezone.now()),
+}
+for name, fields in cases.items():
+    try:
+        with transaction.atomic():
+            Post.objects.create(author=user, content='x', **fields)
+    except IntegrityError as error:
+        print(name + ' ->', error.__cause__.diag.constraint_name)
+print(Post.objects.filter(content='x').count(), 'rows written')
+"@
+$py | Set-Content -Encoding ascii $env:TEMP\rz-db.py
+python manage.py shell -c (Get-Content -Raw $env:TEMP\rz-db.py) | Select-Object -Last 7
+```
+
+**You should see:**
+
+```text
+an opinion with a source -> posts_post_sources_fact_only
+an opinion that is verified -> posts_post_opinion_status
+a published fact -> posts_post_fact_not_published
+six sources -> posts_post_sources_max
+an empty source -> posts_post_sources_not_empty
+an emergency opinion -> posts_post_emergency_fact_only
+0 rows written
+```
+
+- Each line is the name of the database rule that fired. `0 rows written` confirms nothing got through.
+- One more rule the database can't state: a source over 500 characters. Postgres would *truncate* it
+  silently through Django's cast, so `validators.normalize_source` refuses it first (step 7's tests cover
+  499, 500 and 501 characters).
+
+#### Step 11: No source is ever fetched
+
+**Where:** Terminal window 2, in `backend\` with the venv active.
+
+**What this does:** Runs the test that blocks every way Python can reach the network (sockets, DNS,
+`urllib`, `requests`, `http.client`), then posts a fact with five kinds of source. It must still work,
+because the server only validates and stores a link.
+
+```powershell
+python -m pytest apps/posts/tests/test_no_network.py -v 2>&1 | Select-String -Pattern 'PASSED|passed|FAILED'
+```
+
+**You should see:**
+
+```text
+apps/posts/tests/test_no_network.py::test_creating_a_post_with_sources_makes_no_network_request PASSED [ 25%]
+apps/posts/tests/test_no_network.py::test_a_refused_source_makes_no_request_either PASSED [ 50%]
+apps/posts/tests/test_no_network.py::test_the_blocker_really_blocks PASSED [ 75%]
+apps/posts/tests/test_no_network.py::test_the_posts_code_imports_nothing_that_can_fetch PASSED [100%]
+============================== 4 passed in 0.41s ===============================
+```
+
+- The last test also reads every file in `apps/posts/` and fails if one imports a library that can fetch.
+  This is what keeps a user's link from ever becoming a request from our server.
+
+#### Step 12: Django Admin shows the posts, read-only
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Opens the admin list of posts. Part 10 adds the moderator actions; until then nobody can
+change a post from here, so nothing can skip the rules the API enforces.
+
+| URL | Expect |
+|---|---|
+| http://localhost:8000/admin/ | Sign in with the superuser you made in Part 0A (email and password). If it 404s, `ADMIN_URL_PATH` in `backend\.env` isn't `admin/`; use that path. |
+| http://localhost:8000/admin/posts/post/ | The posts, newest first, with columns Post, Post type, Status, Author, Created at and Deleted at, a filter panel (type, status) and a search box (text or username). **No "Add post" button.** |
+| Search `tram` or `Quota` | Only the matching posts (the opinion about the tram line, or the seven "Quota claim" facts) |
+| Open one post | Its fields are shown but not editable, and there are no Save buttons or Delete button |
+
+- The same rules are checked by the automated tests (add, change and delete are refused with 403).
+
+#### Step 13: The composer and the Recent feed in the browser
+
+**Where:** First window 3 (start the frontend), then the browser. Window 1 must still be running `runserver`.
+
+**What this does:** Starts the Next.js dev server and uses the composer as `cy` (verified, with a full
+allowance) and `bo` (unverified).
+
+Window 3:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run dev                                         # leave it running
+```
+
+Browser. Log in at http://localhost:3000/login as **`cy`**, with `part4-cy-<your id>@example.test` and
+`correct-horse-battery-42` (the id from step 4), then:
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home | A white column titled by the **RECENT** tab (blue underline), then a card that looks like a text box: a pencil tile, "What do you want to say?" and a blue **New post** pill. Below it, the posts from steps 6 to 9, newest first. |
+| Look at a fact card | A grey **FACT** chip and a dashed **CHECKING FACTS…** chip with a spinning glyph, the claim in upright serif, and under it one row with a link glyph: `doi.org/10.1038/s41558-024-02102 ↗` and `+1 more`. The left edge stripe is a pale grey-green. |
+| Look at an opinion card | A grey **OPINION** chip only (no status chip), the text in *italic* serif, and no source row. |
+| Click the card (or the rail's blue **New post**) | A dialog **New post** with the cursor in the text. Under the text: `0 / 500 characters`. Then "Post type  Choose one to continue", a pill with **Opinion** and **Fact** (neither selected), and a footer: `10/10 fact posts left` (your limit), **Cancel** and **Post**. |
+| Click **Post** with nothing typed | Nothing is sent. Under the text: "Write something first." Under the choice: "Choose Opinion or Fact." The cursor goes back to the text. |
+| Type a sentence and click **Fact** | A **Source (URL or DOI) (optional)** group appears with one field, "DOI preferred" (teal, top right) and **+ Add another source**. The button now says **Post fact, will be checked**. The hint beside "Post type" says "Fact posts are checked after you post". |
+| Click **Opinion** | The source group disappears (your text stays) and the button says **Post opinion**. Click **Fact** again. |
+| Type `http://127.0.0.1/admin` in the field and press Tab | The field turns red: "Links to IP addresses and localhost aren't allowed." |
+| Replace it with `doi:10.1000/xyz`, click **Add another source** | The error goes; a second field appears with the cursor in it and a **×** to its right. Add up to five fields in total, then the add button disappears. |
+| Type `https://doi.org/10.1000/XYZ` in the second field and click **Post fact…** | The second field turns red: "Same as source 1." Nothing is sent. Change it to `https://example.org/report`. |
+| Click **Post fact, will be checked** | The button shows **Posting…**, then the dialog closes, a dark toast says **Posted. Checking the facts…**, and your post is at the top of the feed with **CHECKING FACTS…** and `doi.org/10.1000/xyz` `+1 more`. The page did not reload. |
+| Open the composer again | The text is empty again, and the footer says one fact post fewer (`9/10 …`). |
+| Type something, press **Esc**, open the composer again | Your text is still there: closing keeps the draft. |
+| Reload the page | The posts come back from the server, in the same order. |
+
+- Not in the table, but covered by the automated tests: pasting more than 500 characters (the counter turns
+  red and "Keep it to 500 characters." appears on **Post**; an emoji counts as one character, as on the
+  server), the allowance reaching 0 (the footer shows `0/10 fact posts left · next at 5:51 PM` and a fact is
+  refused on the page without sending anything; `ada`, whose allowance step 8 used up, shows exactly
+  that), and closing the dialog while a post is still being sent.
+- Log in as `bo` (a private window): the card and the rail's **New post** are greyed out; clicking either
+  shows the toast "Verify your email to post. Check your inbox, or resend the link from the banner." and
+  opens nothing. The feed still loads.
+- Log out and open http://localhost:3000/home: the card says "Log in to share an opinion or a fact." with a
+  blue **Log in to post** link, and the feed is the same.
+
+#### Step 14: A phone-sized window
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Checks the same screens at phone width. In Firefox or Chrome press `F12`, then the
+"responsive design" / device toolbar button, and set the width to 390.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home | A top bar with the logo and your avatar, the Recent tab, the card (placeholder "What do you want to say?" in full, no blue pill), the posts and a bottom bar (Home, Search, New post, Notifications, Profile). No sideways scrolling. |
+| Look at a post's header | The author's name sits on one line (long names get "…"); the FACT and status chips wrap onto a line of their own under it. |
+| Tap **New post** in the bottom bar | The same dialog, almost full width. Pick **Fact**, add sources up to five: each row keeps its **×**, long links scroll inside their field, and the page still doesn't scroll sideways. |
+| Look at the footer | `9/10 fact posts left` (or `10/10` if you haven't posted yet) on its own line, with **Cancel** and the submit button below it (the long label may wrap onto two lines). |
+
+#### Step 15: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts and their posts (the posts go with them). In window 2, in `backend\` with the
+  venv active:
+
+  ```powershell
+  python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part4-').delete())" | Select-Object -Last 1
+  ```
+
+  After one clean run of this guide it prints `(19, {'posts.Post': 13, 'account.EmailAddress': 3,
+  'accounts.User': 3})`: how many rows went in all, and per table (13 posts: 5 from step 6 and 8 from step 8;
+  you get more if you made posts as `cy` or ran the guide twice). Nothing else is touched. (The E2E tests' accounts stay in your local database, as in
+  earlier parts: Django Admin → Users deletes them.)
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
+  token and the throwaway password of the test accounts.

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatCompactNumber, formatConfidence, formatRelativeTime } from "./format";
+import {
+  countCharacters,
+  formatCompactNumber,
+  formatConfidence,
+  formatRelativeTime,
+} from "./format";
 
 const NOW = new Date("2026-09-30T12:00:00Z");
 
@@ -46,5 +51,20 @@ describe("formatConfidence", () => {
     expect(formatConfidence(undefined)).toBe("");
     expect(formatConfidence("")).toBe("");
     expect(formatConfidence("n/a")).toBe("");
+  });
+});
+
+describe("countCharacters", () => {
+  it("counts code points, like Python's len and Postgres's char_length", () => {
+    expect(countCharacters("")).toBe(0);
+    expect(countCharacters("abc")).toBe(3);
+    expect(countCharacters("\u{1F600}")).toBe(1); // 2 UTF-16 units
+    expect(countCharacters("\u{1F600}".repeat(500))).toBe(500);
+    expect(countCharacters("caf\u00e9")).toBe(4);
+    expect(countCharacters("a\nb")).toBe(3);
+  });
+
+  it("counts a combining sequence as its code points, as the server does", () => {
+    expect(countCharacters("e\u0301")).toBe(2);
   });
 });

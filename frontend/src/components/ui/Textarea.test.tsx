@@ -23,6 +23,28 @@ describe("Textarea", () => {
     expect(screen.getByLabelText("Post")).toHaveAttribute("aria-invalid", "true");
   });
 
+  it("counts an emoji as one character, as the server does", async () => {
+    render(<Textarea label="Post" maxCount={500} />);
+    await userEvent.type(screen.getByLabelText("Post"), "a\u{1F600}b");
+    expect(screen.getByText("3 / 500 characters")).toBeInTheDocument();
+  });
+
+  it("counts a controlled and a default value by code point too", () => {
+    const { rerender } = render(
+      <Textarea label="Post" maxCount={4} value={"\u{1F600}".repeat(4)} onChange={() => {}} />,
+    );
+    expect(screen.getByText("4 / 4 characters")).toHaveClass("text-outline");
+    rerender(
+      <Textarea label="Post" maxCount={4} value={"\u{1F600}".repeat(5)} onChange={() => {}} />,
+    );
+    expect(screen.getByText("5 / 4 characters")).toHaveClass("text-error");
+  });
+
+  it("has no maxLength attribute", () => {
+    render(<Textarea label="Post" maxCount={3} />);
+    expect(screen.getByLabelText("Post")).not.toHaveAttribute("maxlength");
+  });
+
   it("links the counter to the field for assistive tech", () => {
     render(<Textarea label="Post" maxCount={500} />);
     expect(screen.getByLabelText("Post")).toHaveAccessibleDescription("0 / 500 characters");

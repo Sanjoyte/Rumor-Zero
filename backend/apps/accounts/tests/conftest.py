@@ -3,6 +3,7 @@
 import datetime
 import json
 import re
+import threading
 import time
 import uuid
 from urllib.parse import unquote
@@ -17,6 +18,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from django.contrib.sessions.backends.db import SessionStore
+from django.db import connection
 from django.test import Client
 
 from apps.accounts import middleware
@@ -269,3 +271,26 @@ def google(monkeypatch):
         DefaultSocialAccountAdapter, "get_requests_session", lambda self: FakeCertsSession(fake)
     )
     return fake
+
+
+def run_together(*tasks):
+    barrier = threading.Barrier(len(tasks))
+    results = [None] * len(tasks)
+    errors = []
+
+    def runner(index, task):
+        try:
+            barrier.wait()
+            results[index] = task()
+        except Exception as exc:  # collected and asserted on below
+            errors.append(exc)
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=runner, args=item) for item in enumerate(tasks)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert errors == []
+    return results

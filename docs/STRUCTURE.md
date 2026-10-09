@@ -68,10 +68,18 @@ rumor-zero/
 │   │   ├── posts/               4–5 Post model + status constraints, validators.py (sources/DOI), services (the only place
 │   │   │                            status changes), feeds, status polling; 11C emergency eligibility + pinned feeds;
 │   │   │                            11D stats endpoint; 12 search_vector GeneratedField + search API
+│   │   │                        ✅ 4 models.py (Post + every §2 column but search_vector, 17 CheckConstraints, 6 indexes,
+│   │   │                            PostQuerySet.visible()/for_list()), validators.py (normalize_source, validate_sources,
+│   │   │                            source_kind; never fetches), emergency.py (is_active_emergency, pure; Part 9's
+│   │   │                            routing.py imports it), services.py (create_post, fact_quota: rolling 24 h, row lock),
+│   │   │                            exceptions.py, serializers.py (PostSerializer = the §9 object, SourcesField),
+│   │   │                            pagination.py (FeedPagination: feed envelope + cursor guard), views.py (GET/POST
+│   │   │                            /posts/, /me/fact-quota/), urls.py, admin.py (read-only), migrations/0001_initial.py,
+│   │   │                            tests/ (factories, conftest, source_vectors.json shared with the frontend)
 │   │   ├── social/              6–7 Follow, Like, Comment; 7B Bookmark, Repost, mixed Following feed
 │   │   ├── reports/             8   Report + windowed threshold
-│   │   ├── pipeline/            9   contract.py (dataclasses), clients.py (stub/http), routing.py (pure functions,
-│   │   │                            incl. is_active_emergency), processor.py (SKIP LOCKED batch),
+│   │   ├── pipeline/            9   contract.py (dataclasses), clients.py (stub/http), routing.py (pure functions; imports
+│   │   │                            is_active_emergency from apps/posts/emergency.py), processor.py (SKIP LOCKED batch),
 │   │   │                            management/commands/process_pending.py
 │   │   ├── moderation/          10–11 ModerationAction, Appeal (label/removal), admin.py (review queue, bulk actions,
 │   │   │                            audit log); 11C emergency actions
@@ -111,8 +119,8 @@ rumor-zero/
 │   ├── public/
 │   │   └── brand/               ✅ 0D  generated: logo.svg, mark.svg, icon-192/512/maskable-512.png, email-logo.png,
 │   │                                google-oauth-logo.png (never hand-edited)
-│   ├── e2e/                     ✅ 0C  Playwright specs: smoke.spec.ts (0C), auth.spec.ts (1), email-flows.spec.ts (2);
-│   │                                helpers.ts (shared sign-up), mailbox.ts (reads backend/tmp/mail); one flow per later part
+│   ├── e2e/                     ✅ 0C  Playwright specs: smoke.spec.ts (0C), auth.spec.ts (1), email-flows.spec.ts (2), posts.spec.ts (4);
+│   │                                helpers.ts (shared sign-up; ✅ 4 signUpVerified, marker), mailbox.ts (reads backend/tmp/mail); one flow per later part
 │   └── src/
 │       ├── app/                 🅑 App Router (routes below)
 │       │   ├── layout.tsx       🔨 0B  fonts (next/font), <html lang="en">, providers
@@ -161,7 +169,10 @@ rumor-zero/
 │       │   ├── auth/            ✅ 1 SignupForm, LoginForm, Turnstile, useUsernameAvailability, useRedirectWhenLoggedIn,
 │       │   │                        messages.ts (+ test-helpers.tsx for their tests); ✅ 2 useResendVerification, VerifyEmailPending,
 │       │   │                        VerifyEmailStatus, ForgotPasswordForm, ResetPasswordForm; ✅ 3 GoogleButton (+ src/lib/google-identity.ts)
-│       │   ├── posts/           ✅ 0B PostCard (props only); 4–5, 9  SourceLink, Composer(Modal), FeedList, PostDetail, useStatusPolling;
+│       │   ├── posts/           ✅ 0B PostCard (props only); ✅ 4 SourceLink, PostCardSkeleton, sources.ts (client mirror of validators.py),
+│       │   │                        posts-api.ts, useCursorFeed (generic), FeedList, ComposerProvider, ComposerModal, SourceFields,
+│       │   │                        ComposerTrigger, HomeFeed, draft.ts, quota.ts, messages.ts, post-card-props.ts (+ test-helpers.tsx);
+│       │   │                        5, 9  PostDetail, useStatusPolling;
 │       │   │                        11C EmergencyChip, PinnedEmergencies; 11D PostStats
 │       │   ├── social/          6–7  FollowButton, UserRow, ProfileHeader, LikeButton, CommentList, CommentComposer;
 │       │   │                        7B RepostButton, BookmarkButton, RepostHeader, UnavailablePostCard
@@ -182,7 +193,7 @@ rumor-zero/
 │       │   │                            ✅ 2 email-key.ts (decodes and validates the key route params); auth-api.ts gains the verify/reset/resend calls
 │       │   ├── turnstile.ts     ✅ 1  loads Cloudflare's Turnstile script (explicit render) once
 │       │   ├── brand-assets.json ✅ 0D  generated list of logo assets (read by Logo and manifest.ts); brand-guard.test.ts guards the rule
-│       │   └── cn.ts, format.ts, password-strength.ts, post-display.ts  ✅ 0B  className joiner, relative time / number formatting,
+│       │   └── cn.ts, format.ts, password-strength.ts, post-display.ts  ✅ 0B  className joiner, relative time / number formatting (✅ 4 countCharacters: code points),
 │       │                                advisory password score, pure stripe + badge rules (ARCHITECTURE §4 table)
 │       └── test/setup.ts        ✅ 0B  RTL + jest-dom setup for Vitest, plus a jsdom shim for <dialog>
 │

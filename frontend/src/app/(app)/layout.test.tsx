@@ -9,6 +9,11 @@ import { AuthSession } from "@/lib/auth/session";
 import AppLayout from "./layout";
 
 const resendMock = vi.hoisted(() => vi.fn<() => Promise<void>>());
+const quotaMock = vi.hoisted(() => vi.fn());
+vi.mock("@/features/posts/posts-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/posts/posts-api")>()),
+  fetchFactQuota: quotaMock,
+}));
 vi.mock("@/lib/auth/auth-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/auth/auth-api")>()),
   resendVerificationEmail: resendMock,
@@ -65,6 +70,14 @@ function renderLayout(session: AuthSession) {
 }
 
 beforeEach(() => {
+  quotaMock.mockReset();
+  quotaMock.mockResolvedValue({
+    limit: 10,
+    used: 3,
+    remaining: 7,
+    window_hours: 24,
+    next_slot_at: null,
+  });
   resendMock.mockReset();
   resendMock.mockResolvedValue(undefined);
   pathname = "/settings";
@@ -189,5 +202,55 @@ describe("(app) layout, unverified email", () => {
     expect(within(sidebar).getByRole("button", { name: "New post" })).not.toHaveAttribute(
       "aria-disabled",
     );
+  });
+});
+
+describe("(app) layout, the composer (Part 4)", () => {
+  async function renderSignedIn() {
+    pathname = "/home";
+    renderLayout(sessionWith("authenticated"));
+    const sidebar = await screen.findByRole("complementary");
+    await within(sidebar).findByText("Ada Lovelace");
+    return sidebar;
+  }
+
+  it("opens the composer from the rail's New post button", async () => {
+    const sidebar = await renderSignedIn();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await userEvent.click(within(sidebar).getByRole("button", { name: "New post" }));
+    expect(screen.getByRole("dialog", { name: "New post" })).toBeInTheDocument();
+    expect(await screen.findByText(/fact posts left/)).toBeInTheDocument();
+  });
+
+  it("opens the same composer from the phone's New post tab", async () => {
+    await renderSignedIn();
+    const buttons = screen.getAllByRole("button", { name: "New post" });
+    expect(buttons).toHaveLength(2); // the rail and the bottom tab
+    await userEvent.click(buttons[1]);
+    expect(screen.getByRole("dialog", { name: "New post" })).toBeInTheDocument();
+  });
+
+  it("keeps what you typed when the composer is closed and opened again", async () => {
+    const sidebar = await renderSignedIn();
+    const open = () => userEvent.click(within(sidebar).getByRole("button", { name: "New post" }));
+    await open();
+    await userEvent.type(screen.getByRole("textbox", { name: "Post text" }), "Unfinished");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await open();
+    expect(screen.getByRole("textbox", { name: "Post text" })).toHaveValue("Unfinished");
+  });
+
+  it("does not open it for an unverified user (the toast explains)", async () => {
+    pathname = "/home";
+    renderLayout(
+      sessionWith("authenticated", {
+        fetchMe: vi.fn(async () => ({ ...ME, is_email_verified: false })),
+      }),
+    );
+    const sidebar = await screen.findByRole("complementary");
+    await within(sidebar).findByText("Ada Lovelace");
+    await userEvent.click(within(sidebar).getByRole("button", { name: "New post" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(quotaMock).not.toHaveBeenCalled();
   });
 });

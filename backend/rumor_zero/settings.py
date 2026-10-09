@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "whitenoise.runserver_nostatic",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     "rest_framework",
     "allauth",
     "allauth.account",
@@ -78,6 +79,7 @@ INSTALLED_APPS = [
     "anymail",
     "apps.core",
     "apps.accounts",
+    "apps.posts",
 ]
 
 AUTH_USER_MODEL = "accounts.User"

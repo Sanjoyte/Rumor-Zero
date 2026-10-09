@@ -97,9 +97,9 @@ Conventions:
 |---|---|---|
 | id | uuid PK | |
 | author | FK users, CASCADE, indexed | |
-| content | text, 1–500 chars (CheckConstraint) | plain text only |
+| content | text, 1–500 chars (CheckConstraint) | plain text only. Counted in **code points** (`char_length`, Python `len`, the client counter), so an emoji is 1 |
 | post_type | `opinion` \| `fact` | chosen explicitly by the author, immutable |
-| sources | `varchar(500)[]` (`ArrayField`), default `[]`, not null | optional, fact posts only: 0–5 validated http(s) URLs or bare DOIs, in the order entered (§4c). **Never fetched.** Immutable. Checks: at most 5 elements; empty unless `post_type='fact'`; no empty element. The kind (`url`/`doi`) is derived, not stored |
+| sources | `varchar(500)[]` (`ArrayField`), default `[]`, not null | optional, fact posts only: 0–5 validated http(s) URLs or bare DOIs, in the order entered (§4c). **Never fetched.** Immutable. Checks: at most 5 elements; empty unless `post_type='fact'`; no empty and no NULL element. The kind (`url`/`doi`) is derived, not stored. The 500-character limit per element is enforced by `validators.normalize_source`, **not** by the column: Django writes `%s::varchar(500)[]` and an explicit cast truncates silently (a plain literal INSERT would raise) |
 | is_emergency | bool, default false | chosen at creation, immutable; check: only when `post_type='fact'` (§4b) |
 | emergency_expires_at | timestamptz null | `created_at + emergency_duration_hours`, stored at creation; check: set iff `is_emergency` |
 | emergency_demoted_at | timestamptz null | priority ended early (moderator demotion or FALSE verdict) |
@@ -121,15 +121,16 @@ Conventions:
 | moderated_at | timestamptz null | |
 | deleted_at | timestamptz null | author soft delete (D6): hidden everywhere, kept for audit |
 | search_vector | `GeneratedField(SearchVector('content', config='english'), db_persist=True)` | GIN index (c-31) |
-| created_at, updated_at | timestamptz | |
+| created_at, updated_at | timestamptz | `created_at` has `default=timezone.now`, not `auto_now_add`: the service passes `now` and tests place posts in the past |
 
-Indexes:
-- `(status, created_at DESC)`
-- `(author_id, created_at DESC)`
+Indexes (Django limits an index name to 30 characters; the `author` FK has no index of its own because `(author_id, created_at DESC)` covers it):
+- `(status, created_at DESC)` (`posts_status_created_idx`)
+- `(author_id, created_at DESC)` (`posts_author_created_idx`; it also serves the fact-quota count)
 - GIN `(search_vector)`
 - partial `(is_emergency DESC, created_at) WHERE post_type='fact' AND status='pending' AND deleted_at IS NULL` (queue; emergencies first)
 - partial `(created_at) WHERE status='under_review'` (review queue)
 - partial `(emergency_expires_at) WHERE is_emergency AND emergency_demoted_at IS NULL AND deleted_at IS NULL` (pinned emergencies)
+- partial `(created_at DESC, id DESC) WHERE deleted_at IS NULL AND NOT status='removed'` (`posts_recent_idx`, added in Part 4): the Recent feed lists every status except removed, which `(status, created_at)` cannot serve
 
 The sources, emergency and `pre_removal_status` columns are created in Part 4 with the rest of the table. Their logic arrives in Parts 4/5 (sources), 11 (removal appeals) and 11C (emergency), so no later schema change is needed.
 
@@ -252,7 +253,7 @@ A separate table keeps image bytes out of every `users` query.
 | Report window (hours) | 24 | `REPORT_WINDOW_HOURS` | ✅ |
 | Min account age for a report to count (hours) | 24 | `REPORT_MIN_ACCOUNT_AGE_HOURS` | ✅ |
 | Confidence threshold (0–100) | 85 | `CONFIDENCE_THRESHOLD` | ✅ |
-| Fact posts per user per day | 10 | `FACT_POSTS_PER_DAY` | ✅ |
+| Fact posts per user per **rolling 24 hours** (deleted and removed ones count) | 10 | `FACT_POSTS_PER_DAY` | ✅ (0 pauses fact posts) |
 | Emergency duration (hours) | 24 | `EMERGENCY_DURATION_HOURS` | ✅ (applies to new emergencies; the expiry is stored at creation) |
 | Emergency posts per user per 24 h (they also count as fact posts) | 1 | `EMERGENCY_POSTS_PER_DAY` | ✅ |
 | Min account age for emergency posts (days) | 7 | `EMERGENCY_MIN_ACCOUNT_AGE_DAYS` | ✅ |
@@ -289,6 +290,10 @@ DRF throttles (per user, Redis-backed; scope → rate):
 - `username_check` 30/min per IP
 
 The emergency limit (1 per 24 h) is a service rule checked against the DB, not a throttle.
+
+**Fact quota (Part 4; user decision 2026-10-08):** a rolling window, not a calendar day. `posts.services.fact_quota()` counts the author's fact posts with `created_at > now − 24 h`, **including ones deleted or removed later** (otherwise deleting and reposting would get around it); a post exactly 24 h old no longer counts. Opinions and other people's posts don't count. `create_post` locks the author's `users` row (`SELECT … FOR UPDATE`) before counting, so two simultaneous fact posts at 9/10 let exactly one through. Refusals: **429 `fact_quota_exceeded`** with `Retry-After` (seconds until a slot frees; the answer tells it apart from the throttle's 429 `throttled`), and **403 `fact_posts_paused`** when the limit is 0. `next_slot_at` is the `(used − limit + 1)`-th oldest counted post plus 24 h, which is right even after the limit is lowered.
+
+**`post_create` applies to `POST /api/v1/posts/` only.** DRF runs throttles on every method, so the view picks permissions and throttles by method (`get_permissions`, `get_throttles`): reading the feed never uses up the posting allowance. The check order is authentication → permissions (401/403) → throttle (429 `throttled`) → validation (400) → service (400/403/429), so a 401 or 403 never counts against the 30/h, but a 400 or a quota refusal does.
 
 Auth endpoints use allauth's `ACCOUNT_RATE_LIMITS`, keyed on `REMOTE_ADDR` (the real client IP from `ClientIPMiddleware`). Part 1 pins allauth 65.19.5's defaults:
 - `login` 30/min per IP (every login POST);
@@ -356,7 +361,8 @@ def enter_review(post, reason):
     else:
         post.pre_review_status, post.status, post.flagged_reason = post.status, UNDER_REVIEW, reason
 
-def is_active_emergency(post, now):                 # read-time only; no scheduler (§4b)
+def is_active_emergency(post, now):                 # read-time only; no scheduler (§4b). Defined in apps/posts/emergency.py
+                                                    # (Part 4; apps/pipeline doesn't exist until Part 9) and imported here
     return (post.is_emergency and post.emergency_demoted_at is None and now < post.emergency_expires_at
             and post.status != REMOVED and post.deleted_at is None)
 
@@ -494,7 +500,15 @@ Nothing else changes the score:
   - a host with a dot, no user/password, no IP-address or `localhost` hosts, no whitespace or control characters;
   - internationalised hosts are converted to punycode for storage and display.
 - **Kind is derived, not stored:** a stored DOI is bare and starts with `10.`; a stored URL always starts with `http://` or `https://`. One helper, `posts.validators.source_kind(value)`, returns `doi` or `url`, and the serializer uses it.
-- **API input:** `POST /api/v1/posts/` takes an optional `sources: ["…", …]` (at most 5 strings; the client drops empty rows). Errors are reported per index (`{"sources": {"1": ["…"]}}`), with the codes `too_many_sources` and `duplicate_source` for the list rules. Sources on an opinion are refused.
+- **API input:** `POST /api/v1/posts/` takes an optional `sources: ["…", …]` (at most 5 strings; the client drops empty rows). On the wire the answers are messages only (the core handler sends no `code` for validation errors): `{"sources": {"1": ["…"]}}` per bad index, every bad index at once, `{"sources": ["You can add up to 5 sources."]}` for the list rule (checked first: six sources with one bad element give only this), and `Same as source 1.` on the **later** of two equal ones. The codes `invalid_source`, `invalid_doi`, `empty_source`, `source_too_long`, `too_many_sources`, `duplicate_source` exist inside the server (tests read them with `get_codes()`). Sources on an opinion are refused.
+- **Normalisation (Part 4)** is one algorithm in two languages: `apps/posts/validators.py` and `frontend/src/features/posts/sources.ts`, both driven by `apps/posts/tests/source_vectors.json`. The browser's `URL` parser is deliberately **not** the algorithm (it turns `\` into `/`, decodes `%xx` in hosts and accepts `https:example.com`).
+  1. Trim **ASCII** whitespace only (JS `trim()` and Python `strip()` disagree on U+FEFF and others); empty → `empty_source`; over 2,000 characters → `source_too_long`.
+  2. **DOI first:** a `doi:` prefix (any case, spaces or tabs after it) must be followed by a DOI, else `invalid_doi`; `http(s)://(dx.)doi.org/` is tried as a DOI and, if what follows isn't one (a query, say), the input is an ordinary URL; bare text starting `10.` must be a DOI. The pattern is `10\.[0-9]{4,9}/[-._;()/:A-Za-z0-9]+` matched as a whole, with no ignore-case flag (`[0-9]`, not `\d`; no trailing newline; no Kelvin sign), and the prefix is matched ASCII-only (`httpſ://` is not https). Stored bare, case kept; two DOIs that differ only in case are duplicates.
+  3. **Characters:** any `\` or character in Unicode category Cc, Cf (bidi marks), Cs (lone surrogates), Zs, Zl or Zp is refused.
+  4. **Split** with RFC 3986's appendix-B expression (the same in both languages, not `urlsplit`): the scheme (lower-cased) must be `http` or `https`, `//authority` is required, `@` (credentials) is refused, the port must be 1–65535 in ASCII digits, and the scheme's default port is dropped.
+  5. **Host:** no `%`, `[` or `]`; ASCII hosts are lower-cased, non-ASCII ones go through `idna.encode(host, uts46=True)` (UTS #46, the browsers' rules: `faß.de` → `xn--fa-hia.de`, not the old IDNA 2003 `fass.de`; idna 3.20 ignores `transitional` and is always non-transitional; the client uses the browser's own `URL` for punycode only). Each label must match `[a-z0-9_]([a-z0-9_-]{0,61}[a-z0-9_])?` (underscores and `--` inside are allowed, as browsers do; **idna's own check would reject both for ASCII hosts, so ASCII hosts never go through it**); at least two labels, at most 253 characters; no trailing dot or empty label; not `localhost` or `*.localhost`; the last label must not be numeric or `0x…` (WHATWG reads `127.1` and `0x7f.1` as IPv4). Only the server checks that an `xn--` label really is an A-label (`idna.decode`); a browser accepts `xn--zzzz.example`, so the page can't tell and the server's 400 lands on that row.
+  6. **Rebuild** as `scheme://host[:port]` + path (`/` when empty) + query + fragment as typed; only non-ASCII characters are percent-encoded (UTF-8, uppercase hex). The result must be at most 500 characters (after punycode and encoding).
+  The function is idempotent.
 - **Never fetched.** The server makes no request to any source: no previews, no HEAD checks (no SSRF). A test enforces this.
 - **Display:**
   - Fact cards keep one line: the first source's host (or `doi.org/…` for a DOI), then "+N more" when there are more. From Part 5, "+N more" links to the detail page.
@@ -792,6 +806,7 @@ Other settings:
   "is_mine": false, "can_appeal": false, "appeal_status": null, "created_at": "…" }
 ```
 
+- The object has exactly these **23 keys** (Part 4's tests pin them); nothing else leaks (no `flagged_reason`, pipeline fields, `report_count` or moderation fields).
 - `sources` is `[]` for opinions and for facts without sources; `kind` is derived from the stored value (§4c).
 - `confidence_score` is non-null only for `verified_*` with `verdict_source=pipeline`.
 - `emergency_active` is computed at serialization with `now` (§4b).
@@ -823,6 +838,11 @@ Other settings:
 | 13 | GET `/api/v1/notifications/` · GET `…/unread-count/` · POST `…/mark-read/` | notifications |
 | 14 | PATCH `/api/v1/me/` · POST `/api/v1/me/password/` · GET `/api/v1/me/export/` · DELETE `/api/v1/me/` | settings |
 | 14B | PUT/DELETE `/api/v1/me/avatar/` · GET `/api/v1/avatars/{user_id}/{version}-{size}.webp` | profile photos |
+
+**Posts (Part 4):**
+- `GET /api/v1/posts/` (public, never cached): the feed shape above, newest first (`created_at` then `id`), every status except `removed` and deleted posts, 20 per page (`?page_size=` up to 50), 1 query anonymous and 2 signed in, whatever the page holds. The cursor's position is validated (a crafted one is 404 `not_found`, not a 500); a whole page sharing one timestamp falls back to a plain offset, which can't happen with microsecond timestamps.
+- `POST /api/v1/posts/` `{content, post_type, sources?}` (verified user; `IsAuthenticated` + `IsEmailVerified`, throttle `post_create`, §3) → **201** with the post object. `content` is trimmed, 1–500 code points ("Write something first." / "Keep it to 500 characters."); `post_type` is required ("Choose Opinion or Fact."); undeclared fields (`status`, `author`, `created_at`, …) are ignored. Errors: 400 per field (`{"content": […]}`, `{"post_type": […]}`, `{"sources": …}` per §4c), 400 `emergency_unavailable` (`is_emergency: true` until 11C), 403 `email_unverified`, 403 `fact_posts_paused`, 429 `fact_quota_exceeded` (+ `Retry-After`), 429 `throttled`.
+- `GET /api/v1/me/fact-quota/` (`IsAuthenticated`, never cached): `{limit, used, remaining, window_hours: 24, next_slot_at: ISO | null}`. `next_slot_at` is set only when nothing is left and `limit > 0`. 11C adds an `emergency` block.
 
 **Auth payloads (Part 1):**
 - `GET /api/v1/me/` (`IsAuthenticated`, never cached, **two queries**: the user, and the `google_connected` `exists()` check): `{id, username, display_name, email, is_email_verified, role, has_usable_password, google_connected, avatar_url}`. `google_connected` is true when the user has a Google `SocialAccount` (Part 3); `avatar_url` follows the rule above (null until 14B). Staff (`is_staff`: moderators and superusers) also get `admin_url`, the absolute Django Admin URL on the backend host. Anonymous → 401 `not_authenticated`.
@@ -874,6 +894,14 @@ Other settings:
   - **New post while unverified** (user decision 2026-10-06): the rail button and the bottom tab are `aria-disabled` (not `disabled`, so they stay focusable), with `aria-disabled:cursor-not-allowed aria-disabled:opacity-60`, no hover colour, and an `aria-describedby` hint "Verify your email to post." (a separate `sr-only` span with its own id for each copy, outside the button). A click calls `onNewPostBlocked`, which the layout turns into a toast: "Verify your email to post. Check your inbox, or resend the link from the banner." It becomes a normal button once `/me` says verified.
   - **Auth pages:** `/login`, `/signup` and `/forgot-password` stay prerendered, and so does `/verify-email`; `/verify-email/[key]` and `/reset-password/[key]` are dynamic (they take the key as a route param, pass it raw to a client component, and set `robots: noindex` and `referrer: no-referrer`, because the key is a single-use secret in the address). "Forgot password?" sits in a3's options row under the password field. Sign-up goes to `/verify-email` (`?next=` rides along), through a `submitted` ref that keeps `useRedirectWhenLoggedIn` from sending the new account to `/home`; a visitor who is already logged in still goes to `next ?? /home`. A logged-in visitor goes on to `safeNextPath(?next=)` or `/home`; `next` is read from `window.location` (useSearchParams on a static page needs a Suspense boundary). `safeNextPath` (`src/lib/auth/next-path.ts`) keeps only same-origin paths: no backslash or control character, no `//…` after resolving dot segments, and nothing under `/api`, `/login`, `/signup`, `/reset-password` or `/verify-email/…` (the key-bearing pages; `/verify-email` itself is allowed). The API relay also forwards `x-password-reset-key`.
   - **`GoogleButton`** (`src/features/auth/GoogleButton.tsx`, Part 3; loader `src/lib/google-identity.ts`, call `googleLogin` in `src/lib/auth/auth-api.ts`): Google's own rendered button, then a shared `Divider` ("or log in with email" on a3, "or continue with email" on a2). It can't be Stitch's custom button with the inline "G": Google returns an ID token only from its own button or One Tap. Options: `theme: outline`, `size: large`, `text: continue_with`, `shape: rectangular`, `logo_alignment: center`, `locale: en`, width = the card's width clamped to 200–400 px. The client ID comes from `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (a `clientId` prop overrides it in tests); **empty renders nothing** (no button, no rule, no script). The script loads only here, on `/login` and `/signup`, once (`loadGoogleIdentity`); `initialize` runs once per page (Google keeps only the last call), with the credential routed through a module-level handler the mounted button replaces and releases on unmount. `busy`, `disabled`, `onError` and `onAttempt` are read through refs, because Google keeps the first callbacks. While another sign-in is submitting (`disabled`), or one Google sign-in is running, a credential is ignored. Failures go to the form's banner (`googleErrorMessage`: `invalid_token`, `google_email_unverified`, `account_inactive`, `staff_password_login`, `google_link_requires_password`, else the usual 429/503/network text); a script that can't load shows an inline error and keeps the rule. A closed popup has no event: nothing happens. Playwright pins an empty client ID for both servers, so E2E never reaches Google.
+  - **Composer and Recent feed (Part 4):** `ComposerProvider` (`features/posts/`, mounted above the shell in `(app)/layout.tsx`) owns the draft, the request and the one `ComposerModal`; every "New post" button (rail, phone tab, the `/home` card) calls `useComposer().open`. Decisions of 2026-10-08:
+    - **Insert on success:** the modal shows "Posting…" and stays open until the API answers; on 201 it closes, the draft is cleared, listeners (`onPosted`) get the server's post (`HomeFeed` puts it at the top, with no refetch) and a toast says "Posted." or "Posted. Checking the facts…". Errors keep the draft and stay in the composer. Away from `/home` the post just toasts.
+    - **The provider, not the modal, owns the request:** Esc or × can close the modal while a post is on its way (the relay waits up to 70 s). The result is still handled: success clears the draft and toasts; failure keeps the draft and toasts that it is saved.
+    - The draft (text, type, source rows) survives Cancel, Esc and ×, in memory only, and is cleared by a successful post or a change of user.
+    - Characters are counted in code points (`countCharacters`, §2), with no `maxLength` attribute. The type has no default. The submit button stays enabled (except while posting): clicking it shows every problem and focuses the first. It reads "Post" until a type is chosen, then "Post opinion" or "Post fact, will be checked". A fact that the known allowance says will be refused isn't sent.
+    - Source rows: one to start, "Add another source" up to 5, remove on rows 2–5, a check on blur and on submit (including "Same as source N."), empty rows dropped when sending; a server error at `sources.N` lands on the Nth **sent** source's row (empty rows are dropped, so not necessarily row N).
+    - Unverified users get `aria-disabled` triggers and Part 2's toast; visitors see "Log in to post" (`/login?next=`); the modal itself shows a disabled form with a verify prompt (after a 403 `email_unverified` too).
+    - `HomeFeed` (`/home`): a Recent tab (Following is Part 6), the composer trigger card (b1's inline composer as a button) and `FeedList` over `useCursorFeed` (generic: waits for the session, reloads when the user changes, `prepend` kept apart from loaded pages and de-duplicated by key, one Load more at a time, a cursor 404 starts again from the top). A card shows a fact's first source and "+N more" (`SourceLink`); a blank display name shows `@username` once.
   - Menus and the sheet are native `popover` elements with explicit positioning (a popover is centred by default). `aria-current="page"` comes from `usePathname()` on the item and everything below it (`/u/ada/followers` keeps Profile active).
   - Marketing links go only to pages that exist (user decision 2026-10-01): nav How it works, Log in, Sign up; footer How verification works, Privacy, Terms, "© 2026 Rumor Zero".
   - Titles: the root metadata template is `"%s · Rumor Zero"`. `not-found`, `error` and `global-error` are basic AuthLayout cards with the logo (Part 15 polishes them). `/dev/shell` previews the shell with a sample user in development only.

@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { MESSAGES } from "@/features/auth/messages";
 import { useResendVerification } from "@/features/auth/useResendVerification";
+import { ComposerProvider, useComposer } from "@/features/posts/ComposerProvider";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { isProtectedPath, loginRedirectFor } from "@/lib/auth/route-guard";
 
@@ -15,9 +16,19 @@ const LOGOUT_FAILED = "Couldn't log out. Check your connection and try again.";
 /**
  * Every app page sits in the shell. Pages that need a user (`PROTECTED_PREFIXES`) show a
  * placeholder while the session is restored, and send anonymous visitors to `/login?next=…`.
+ * The composer lives above the shell (Part 4), so every "New post" button opens the same one.
  */
 export default function AppLayout({ children }: { children: ReactNode }) {
+  return (
+    <ComposerProvider>
+      <AppFrame>{children}</AppFrame>
+    </ComposerProvider>
+  );
+}
+
+function AppFrame({ children }: { children: ReactNode }) {
   const { status, user, logout } = useAuth();
+  const composer = useComposer();
   const pathname = usePathname() ?? "/";
   const router = useRouter();
   const toast = useToast();
@@ -52,6 +63,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       user={user}
       status={status}
       onLogout={onLogout}
+      onNewPost={composer.open}
       onNewPostBlocked={onNewPostBlocked}
       onResend={() => void resend.resend()}
       resendSecondsLeft={resend.secondsLeft}

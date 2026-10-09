@@ -88,7 +88,7 @@ not let the review expand the part's scope without user approval.
 | 1 | Auth core: sign up, log in, tokens, log out | 0C | [x] Done (2026-10-03) |
 | 2 | Email verification & password reset | 1 | [x] Done (2026-10-07) |
 | 3 | Continue with Google | 1 | [x] Done (2026-10-08) |
-| 4 | Posts: composer + Recent feed | 1 | [ ] |
+| 4 | Posts: composer + Recent feed | 1 | [x] Done (2026-10-09) |
 | 5 | Post detail, sharing, deletion, status polling | 4 | [ ] |
 | 6 | Profiles, follows, Following feed | 4 | [ ] |
 | 7 | Likes & comments | 5 | [ ] |
@@ -566,7 +566,7 @@ All three jobs run on test values only; no secrets.
 - [x] Wrong-audience, expired or forged ID tokens are rejected with 400
 - [ ] It works end to end on `http://localhost:3000` with your client ID (manual check). **Pending you:** needs a real Google account, so the agent could not run it. The real button renders (410×44 px, 0 px overflow at 1280 and 390 px), a click opens Google's own sign-in window, and closing it changes nothing; the sign-in itself is `docs/test-command.md` Part 3, steps 7 and 8.
 
-**Deviations and decisions (plan approved 2026-10-08; built 2026-10-08; recorded in ARCHITECTURE §2/§3/§7/§9/§10/§12 and ANALYSIS b-2, c-29 and the GoogleButton row):**
+**Deviations and decisions (plan approved 2026-10-08; built 2026-10-08 to 2026-10-09; recorded in ARCHITECTURE §2/§3/§7/§9/§10/§12 and ANALYSIS b-2, c-29 and the GoogleButton row):**
 - **User decisions (2026-10-07):**
   - An **unverified** local account that matches the Google email is linked: its password becomes unusable (whoever signed up with someone else's address is locked out), the address is marked verified, and other sessions end at their next refresh. A verified one keeps its password.
   - Only addresses Google itself hosts link to an existing account: `@gmail.com`, or a token with an `hd` (Workspace) claim. Any other matching address answers 400 `google_link_requires_password`. A *new* person with any verified address can sign up. This narrows "auto-connect by verified email" above, following Google's ID-token guide.
@@ -592,7 +592,7 @@ All three jobs run on test values only; no secrets.
 ---
 
 ## Part 4: Posts (composer + Recent feed)
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-09; built 2026-10-08 to 2026-10-09)
 **Goal:** create opinion/fact posts with the selector, with up to 5 optional sources (URL or DOI) on fact posts (ARCHITECTURE §4c), and see them in a reverse-chronological public feed (guide roadmap step 3). Fact posts stay `pending`; the pipeline comes in Part 9.
 **Depends on:** 1.
 **Stitch files to convert:**
@@ -629,18 +629,43 @@ All three jobs run on test values only; no secrets.
 **API endpoints:** `POST /api/v1/posts/`, `GET /api/v1/posts/?cursor=`, `GET /api/v1/me/fact-quota/`.
 
 **Acceptance criteria**
-- [ ] An opinion appears as OPINION in italic serif; a fact appears with CHECKING FACTS… and a neutral stripe
-- [ ] Unverified users can't post: the UI explains why and the API returns 403
-- [ ] Posting without a type, empty, or over 500 chars is blocked on both client and server
-- [ ] The 11th fact post of the day is refused with a clear message; the quota line updates
-- [ ] Load more never duplicates or skips posts when new ones arrive meanwhile
-- [ ] DB constraints reject an opinion with `verified_*`, a fact with `published`, an opinion with sources, more than 5 sources, an empty source element, and an emergency opinion
-- [ ] Source validation, on both client and server:
+- [x] An opinion appears as OPINION in italic serif; a fact appears with CHECKING FACTS… and a neutral stripe
+- [x] Unverified users can't post: the UI explains why and the API returns 403
+- [x] Posting without a type, empty, or over 500 chars is blocked on both client and server
+- [x] The 11th fact post in a rolling 24 hours is refused with a clear message (429 `fact_quota_exceeded`); the quota line updates (the day became a rolling 24 h window: user decision 2026-10-08)
+- [x] Load more never duplicates or skips posts when new ones arrive meanwhile
+- [x] DB constraints reject an opinion with `verified_*`, a fact with `published`, an opinion with sources, more than 5 sources, an empty source element, and an emergency opinion
+- [x] Source validation, on both client and server:
   - rejected: `javascript:`/`data:` URLs, credentials in URLs, IP or `localhost` hosts, malformed DOIs
   - `doi:10.1000/xyz` and `https://doi.org/10.1000/xyz` are both stored as `10.1000/xyz`
   - a 6th source and duplicates after normalisation are refused; one bad element refuses the whole post with a per-index error
   - sources keep the order entered
-- [ ] The server makes no network request for any source (a test with outbound network blocked)
+- [x] The server makes no network request for any source (a test with outbound network blocked)
+
+**Deviations and decisions (plan approved 2026-10-08; built 2026-10-08 to 2026-10-09; recorded in ARCHITECTURE §2/§3/§4/§4c/§9/§10, ANALYSIS D7 and the b-3 quota row, SETUP B1, STRUCTURE, MEMORY):**
+- **User decisions (2026-10-08):**
+  - The fact quota is a **rolling 24 hours**, not a calendar day, and counts deleted and removed fact posts. (task.md and Stitch said "of the day" / "today".)
+  - **`idna==3.20` is pinned** in `requirements.txt` (already installed through `requests`/`anymail`). In 3.20 `transitional` is ignored, so the call is `idna.encode(host, uts46=True)`.
+  - **"Optimistic insert" means insert on success**: the composer shows "Posting…" until the API answers, then the server's post goes to the top of Recent with no refetch. (Not a placeholder card that appears before the answer.)
+  - Posting away from `/home` stays on the page and toasts.
+- **Defaults approved with the plan:** quota refusal is 429 `fact_quota_exceeded` + `Retry-After`; a limit of 0 is 403 `fact_posts_paused`; one extra partial index for Recent (`posts_recent_idx`); characters are counted in code points everywhere (the `Textarea` counter changed, with no `maxLength`); the posts admin is read-only until Part 10; the composer keeps its draft when closed; the submit button stays enabled and shows every problem; a toast after every successful post.
+- **Found while building (all handled):**
+  - `varchar(500)[]` **cannot refuse** a long source through Django: its `::varchar(500)[]` cast truncates silently. `normalize_source` is the guard; ARCHITECTURE §2 says so.
+  - A crafted cursor position was a **500** (DRF passes it into the queryset filter): `FeedPagination` validates it (404).
+  - DRF runs throttles on every method, so the combined GET/POST view picks permissions and throttles by method.
+  - `idna` 3.20 rejects `_` and `ab--cd` in ASCII labels, which browsers accept: ASCII hosts use our own label rule; only non-ASCII hosts go through `idna`.
+  - The browser's `new URL()` repairs input (`\`, `%xx` in hosts, `https:example.com`, `127.1`), so the page mirrors the server's algorithm (shared `source_vectors.json`, 172 cases) and uses `URL` only for punycode. **The page can't check that an `xn--` label is a real A-label** (the server does; its 400 lands on that row).
+  - `sourceLabel()` for a non-http value had an empty host (blank row): it falls back to the raw value.
+- **Built differently from the plan:**
+  - The §9 post object has **23** keys (the plan said 24); the tests pin the 23.
+  - The "too many sources" check lives in `validate_sources` (the serializer field just calls it).
+  - `TextField` has no `ref`, so rows and fields are focused by `id` (no change to Part 0B's primitive).
+  - The submit button reads **"Post"** until a type is chosen (it said "Post opinion" before; misleading).
+  - The footer wraps on a phone: the allowance above, the buttons below.
+  - `apps/accounts/serializers.py` gained `UserSummarySerializer` (Part 7B's `reposted_by` reuses it); `run_together` moved from `test_tokens.py` to the accounts `conftest.py`; ARCHITECTURE §4's `is_active_emergency` lives in `apps/posts/emergency.py` until Part 9.
+- **Closed here:** the 0C follow-ups (`onNewPost` wired to the composer; PostCard's header no longer wraps the author name at 390 px).
+- **Not done (later parts):** the emergency toggle and `pinned` (11C); "+N more" as a link (5); an **idempotency key** for `POST /api/v1/posts/` (a relay timeout after Django saved the post makes a retry a duplicate; the composer's message mentions it) and the cursor guard for other lists that use the core `CursorPagination` (both Part 16); toasts still render below an open `<dialog>` (0B follow-up; the composer shows its errors inline).
+- **Verified:** see HANDOFF (backend 1087 tests, frontend 1089, E2E 20 in dev and CI mode, the Linux blocks of `docs/test-command.md` Part 4 run verbatim from the doc, screenshots at 1280 and 390 px). The PowerShell blocks of that section were not run on Windows. CI itself runs when you push.
 
 **Required tests:** model constraints; source validator table (URLs, DOIs, IDN/punycode, every rejection) plus list rules (0, 5 and 6 sources, duplicates, per-index errors, order kept) and `source_kind`; `create_post` (status by type, quota, throttle, sources, emergency refused); feed shape (`sources: [{value, kind}]`), ordering, exclusion and cursor stability; query count constant for 20 posts with sources; frontend Composer validation and states (add/remove source rows, limit 5, duplicates), PostCard variants and SourceLink ("+N more"), FeedList pagination; E2E: log in → post a fact with a DOI and a URL → CHECKING FACTS… and the line "doi.org/… +1 more" in the feed.
 

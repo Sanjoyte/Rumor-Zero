@@ -113,4 +113,71 @@ describe("PostCard", () => {
     render(<PostCard {...BASE} status="verified_false" />);
     expect(document.body.textContent).not.toMatch(/debunk/i);
   });
+
+  describe("sources (Part 4)", () => {
+    const SOURCES = [
+      { value: "10.1038/s41558-024-02102", kind: "doi" as const },
+      { value: "https://www.iea.org/reports/renewables-2023", kind: "url" as const },
+    ];
+
+    it("shows the first source and '+N more' under a fact claim", () => {
+      render(<PostCard {...BASE} sources={SOURCES} />);
+      expect(screen.getByText("doi.org/10.1038/s41558-024-02102")).toBeInTheDocument();
+      expect(screen.getByText("+1 more")).toBeInTheDocument();
+    });
+
+    it("has no source row when a fact has none", () => {
+      render(<PostCard {...BASE} sources={[]} />);
+      expect(screen.queryByRole("link")).toBeNull();
+      expect(screen.queryByText(/more/)).toBeNull();
+    });
+
+    it("never shows one on an opinion, even if given sources", () => {
+      render(
+        <PostCard
+          {...BASE}
+          postType="opinion"
+          status="published"
+          verdictSource={null}
+          sources={SOURCES}
+        />,
+      );
+      expect(screen.queryByRole("link")).toBeNull();
+    });
+
+    it("never shows one on the removed tombstone", () => {
+      render(<PostCard {...BASE} status="removed" sources={SOURCES} />);
+      expect(screen.queryByRole("link")).toBeNull();
+    });
+
+    it("keeps the claim before the sources in reading order", () => {
+      render(<PostCard {...BASE} sources={SOURCES} />);
+      const claim = screen.getByText(/Solar capacity grew/);
+      const link = screen.getByRole("link");
+      expect(claim.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  });
+
+  describe("blank display name", () => {
+    it("shows @username once, in bold, with no second handle", () => {
+      render(<PostCard {...BASE} author={{ displayName: "", username: "ada" }} />);
+      expect(screen.getAllByText("@ada")).toHaveLength(1);
+      expect(screen.getByText("@ada")).toHaveClass("font-bold");
+    });
+
+    it("treats a whitespace-only display name as blank", () => {
+      render(<PostCard {...BASE} author={{ displayName: "  ", username: "ada" }} />);
+      expect(screen.getAllByText("@ada")).toHaveLength(1);
+    });
+  });
+
+  it("lets a long name truncate instead of wrapping (390 px header)", () => {
+    render(
+      <PostCard
+        {...BASE}
+        author={{ displayName: "A very long display name indeed", username: "ada" }}
+      />,
+    );
+    expect(screen.getByText("A very long display name indeed")).toHaveClass("truncate");
+  });
 });

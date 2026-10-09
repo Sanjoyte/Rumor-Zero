@@ -12,6 +12,23 @@ def avatar_url(user, size=96):
     return f"/api/v1/avatars/{user.pk}/{user.avatar_version}-{size}.webp"
 
 
+def user_summary(user):
+    """The public bits of a user inside other objects (post authors, reposters): §9."""
+    return {
+        "id": str(user.pk),
+        "username": user.username,
+        "display_name": user.display_name,
+        "avatar_url": avatar_url(user),
+    }
+
+
+class UserSummarySerializer(serializers.BaseSerializer):
+    """`{id, username, display_name, avatar_url}`; never the email, role or credibility."""
+
+    def to_representation(self, user):
+        return user_summary(user)
+
+
 class MeSerializer(serializers.ModelSerializer):
     """`GET /api/v1/me/` (ARCHITECTURE §9). Staff also get `admin_url`."""
 

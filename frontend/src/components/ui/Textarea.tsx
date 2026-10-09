@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { cn } from "@/lib/cn";
+import { countCharacters } from "@/lib/format";
 import {
   CONTROL_BASE,
   CONTROL_FONT,
@@ -28,7 +29,11 @@ export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElemen
    * text straight on the page, no border, with the label hidden.
    */
   variant?: "filled" | "bare";
-  /** Shows "n / max characters". The counter turns red over the limit. */
+  /**
+   * Shows "n / max characters" (code points, as the server counts them). The counter turns red
+   * over the limit. There is no `maxLength` attribute: it counts UTF-16 units and would cut
+   * emoji text short.
+   */
   maxCount?: number;
   wrapperClassName?: string;
 }
@@ -54,15 +59,15 @@ export function Textarea({
   const hintId = hint ? `${textareaId}-hint` : undefined;
   const errorId = error ? `${textareaId}-error` : undefined;
   const counterId = maxCount !== undefined ? `${textareaId}-count` : undefined;
-  const [innerLength, setInnerLength] = useState(String(defaultValue ?? "").length);
-  const length = value !== undefined ? String(value).length : innerLength;
+  const [innerLength, setInnerLength] = useState(countCharacters(String(defaultValue ?? "")));
+  const length = value !== undefined ? countCharacters(String(value)) : innerLength;
   const over = maxCount !== undefined && length > maxCount;
   const describedBy = [rest["aria-describedby"], errorId, hintId, counterId]
     .filter(Boolean)
     .join(" ");
 
   function handleChange(event: ChangeEvent<HTMLTextAreaElement>) {
-    setInnerLength(event.target.value.length);
+    setInnerLength(countCharacters(event.target.value));
     onChange?.(event);
   }
 

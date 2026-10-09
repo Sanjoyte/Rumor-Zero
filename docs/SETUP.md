@@ -424,6 +424,7 @@ Versions are the latest stable releases as of 2026-09-29. Part 0 re-checks patch
 | `gunicorn` | 26.2.0 | Production WSGI server on Render (not used locally: `runserver` is; it also doesn't run on Windows) |
 | `django-anymail[brevo]` | 15.2 | Sends email through Brevo's HTTPS API. Switchable to Resend later. |
 | `sentry-sdk[django]` | 2.71.0 | Error tracking, active only when `SENTRY_DSN` is set |
+| `idna` | 3.20 | **Added in Part 4.** Turns a non-ASCII host in a post's source link into punycode with the browsers' rules (UTS #46: `faß.de` → `xn--fa-hia.de`; Python's built-in codec is the old IDNA 2003 and gives `fass.de`, a different site). Already installed through `requests` (allauth) and `anymail`; now pinned because `apps/posts/validators.py` imports it. BSD-licensed, no service. |
 | `Pillow` | 12.3.x (12.3.0 released 2026-07-01; the next quarterly release is due 2026-10-15) | **Added in Part 14B.** Decodes, validates and re-encodes profile photos to WebP, dropping EXIF/GPS. Prebuilt wheels for Windows and Linux (Render), with WebP support built in. |
 
 ### B2. Backend: `backend/requirements-dev.txt` (dev and test only)

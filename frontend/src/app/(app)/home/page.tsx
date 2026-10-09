@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import { Placeholder } from "@/components/shell/Placeholder";
+import { HomeFeed } from "@/features/posts/HomeFeed";
 
 export const metadata: Metadata = { title: "Home" };
 
-/** Placeholder; the screen arrives in a later part. */
+/** Stitch b1: the composer trigger and the public Recent feed (Part 4). Following is Part 6. */
 export default function Page() {
-  return <Placeholder title="Home" />;
+  return <HomeFeed />;
 }

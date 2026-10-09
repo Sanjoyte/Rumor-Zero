@@ -1,8 +1,10 @@
 # Plan: Part 4, Posts (composer + Recent feed)
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-08, together with the decisions and
-  defaults below. Saved here and linked from `docs/agents/HANDOFF.md` at planning time; not
-  implemented yet.
+  defaults below. **IMPLEMENTED 2026-10-09** (started 2026-10-08; Claude, Sonnet 5.5). Deviations: see `task.md` Part 4 and
+  `docs/agents/HANDOFF.md` (23 keys in the post object, not 24; the "too many sources" check lives in
+  `validate_sources`; rows are focused by `id` because `TextField` has no `ref`; the submit button reads
+  "Post" until a type is chosen; `varchar(500)[]` turned out to truncate rather than refuse).
 - **Drafted:** 2026-10-08 by Claude (Opus 5.5). A separate design-review pass checked it against the
   installed sources, and its findings are folded in. **Implement with:** Sonnet 5.5 · high (task.md).
 - **Evidence:** read-only research. Django 5.2.17, DRF 3.18.1 and idna 3.20 read in
