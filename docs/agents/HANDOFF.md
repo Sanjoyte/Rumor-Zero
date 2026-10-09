@@ -6,20 +6,21 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none. **Part 5 (Post detail, sharing, deletion, status polling) is done** (2026-10-09;
-  built from the approved plan; every required test and check green; `task.md` updated). Parts 0A, 0B,
-  0D, 0C, 1, 2, 3, 4 and 5 are done. Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4 and 5
-  CI have not run yet.**
+- **Part:** **6 (Profiles, follows, Following feed): planned and approved, not started.** Parts 0A, 0B,
+  0D, 0C, 1, 2, 3, 4 and 5 are done (Part 5 was committed by the user as `b5b8089`). Part 1 CI is green
+  (user-reported 2026-10-06); **Part 2, 3, 4 and 5 CI have not run yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after finishing Part 5; Part 6 is not started).
-- **Phase:** done, uncommitted. The user reviews and commits.
+- **Owner:** none (Claude stopped after planning Part 6; no code written).
+- **Phase:** plan approved and saved; implementation not started. Uncommitted: the new plan file and this
+  file (the user reviews and commits).
 - **Approved plan:**
-  [`docs/agents/plans/part-5-post-detail-sharing-deletion-polling.md`](plans/part-5-post-detail-sharing-deletion-polling.md)
-  (status line now says IMPLEMENTED)
+  [`docs/agents/plans/part-6-profiles-follows-following-feed.md`](plans/part-6-profiles-follows-following-feed.md)
 - **Previous plans:**
+  - [`part-5-post-detail-sharing-deletion-polling.md`](plans/part-5-post-detail-sharing-deletion-polling.md),
+    implemented 2026-10-09 (committed as `b5b8089`);
   - [`part-4-posts-composer-recent-feed.md`](plans/part-4-posts-composer-recent-feed.md),
     implemented 2026-10-09;
   - [`part-3-continue-with-google.md`](plans/part-3-continue-with-google.md), implemented
@@ -28,9 +29,48 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-09 by Claude (Sonnet 5.5), Part 5 implementation.
+- **Last updated:** 2026-10-09 by Claude (Sonnet 5.5), Part 6 planning.
 
 ## Completed checkpoints
+
+- 2026-10-09 (Claude, Sonnet 5.5): **Part 6 planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `b5b8089` ("Implementation Part 5…", committed by the user), a clean tree. (The
+    older text of this file said Part 5 was uncommitted; the user committed it in between.)
+  - **Dependency check:** Part 6 depends only on Part 4 (Done 2026-10-09); its chain 1 → 0C → 0A/0B/0D plus
+    2, 3 and 5 is Done. Open but not blocking: Part 3 criterion 4, and CI for Parts 2 to 5.
+  - **Research:** read-only only: two Explore agents (backend; frontend and Stitch c1/c3/b1) plus direct
+    reads of ARCHITECTURE §2/§3/§9/§10, ANALYSIS, STRUCTURE, the Part 5 plan, `HomeFeed`,
+    `FeedPagination`, `usePostDetail`, and DRF's cursor code in the installed source.
+  - **Changed this session:** only the new plan file and this file. No code, no setup command, no
+    `task.md` edit, no env file read, `design/` untouched.
+  - **User decisions (2026-10-09):**
+    - `/home` tabs are **Recent first and default, Following second**; Following is for signed-in users only
+      and loads lazily; its empty state has an action that switches to Recent.
+    - The per-user Following cache holds **only the ids of page 1**; posts are loaded fresh on each request
+      (deleted or removed posts vanish at once; Part 7's `*_by_me` is never stale).
+    - Profile counters `verified` and `FALSE` **include deleted posts** (not removed ones); `posts` counts
+      only what the public can see.
+    - The author's avatar and name on post cards and the post page **link to `/u/<username>`**.
+  - **Defaults approved with the plan** are in the plan's "Defaults" section: lookup by
+    `normalize_username` and unknown or inactive users are 404; the profile object (`counts`, `reputation`,
+    `is_following`, `is_me`; one query anonymous, two signed in); follow is 201/200 and verified-only,
+    unfollow is 204 and login-only, both throttled by `follow` 100/h; `FEED_CACHE_SECONDS` (0 to 300, 0 = off);
+    a cursor-guard mixin moved into `apps/core/pagination.py`; two composite indexes on `follows`; the SSR and
+    `/u/Ada` → `/u/ada` redirect; `FilterChips` All/Facts/Opinions; counters printed as "1,420".
+  - **Found during planning** (all handled in the plan):
+    - `FEED_CACHE_SECONDS` is only in `backend/.env.example`; no code reads it, and `ENV_GUIDE.md` wrongly files
+      it with the admin-editable PlatformSettings seeds (lines ~111, 382, 562).
+    - `task.md` says "no self-follow check", while ARCHITECTURE §2 and the acceptance criteria want a DB check
+      and a 400: built per ARCHITECTURE; the `task.md` wording is fixed when the part is closed.
+    - ARCHITECTURE §2 says `index(following)` for follows: replaced by two composite indexes
+      (`following, created_at DESC, id DESC` and `follower, created_at DESC, id DESC`); §2 is updated in Part 6.
+    - DRF's `CursorPagination` accepts `.values()` rows, which the ids-only cache relies on.
+    - `useCursorFeed` doesn't refetch when `fetchPage` changes: a new filter or username needs a new
+      `resetKey` or a remount.
+    - Existing tests assert card link counts (`PostCard.test.tsx`, `e2e/posts.spec.ts`) and a single home tab
+      (`HomeFeed.test.tsx`); they change on purpose.
+    - A page-level `openGraph` replaces the root's whole object (MEMORY 2026-10-09), so `/u/[username]` sets
+      its own images (reusing the descriptor in `post-metadata.ts`, which the brand guard already allows).
 
 - 2026-10-09 (Claude, Sonnet 5.5): **Part 5 implemented** (uncommitted). Started from HEAD `f0e15d0`
   ("Plan Part 5", committed by the user), a clean tree that matched this file; Docker healthy, ports free.
@@ -353,13 +393,13 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `f0e15d0` ("Plan Part 5", committed by the user). **Uncommitted:** the whole Part 5
-  implementation: 37 modified files (this file included) and 27 new ones: 3 backend test files,
-  `frontend/src/app/(app)/p/[id]/page.tsx`, 18 files in `frontend/src/features/posts/`, 4 in
-  `frontend/src/lib/api/` and `frontend/e2e/post-detail.spec.ts` (`git status --short -uall`).
-- Docker (Postgres 18 + Redis) is up; no dev server is running; ports 3000/8000 are free (the servers
-  started for the manual checks were stopped).
-- The local database has `posts.0001_initial` applied (Part 5 adds no migration). The guide's `part4-*` test accounts and their
+- HEAD is `b5b8089` ("Implementation Part 5: Post detail, sharing, deletion, status polling", committed by
+  the user); the tree was clean when this session started. **Uncommitted:** only the new plan file
+  `docs/agents/plans/part-6-profiles-follows-following-feed.md` and this file. No code was written.
+- Docker, the dev servers and the ports were **not re-checked** in the Part 6 planning session (nothing was
+  started or stopped). As last recorded after Part 5: Docker (Postgres 18 + Redis) up, no dev server, ports
+  3000/8000 free. Run `docker compose up -d` before the first backend command.
+- The local database has `posts.0001_initial` applied (Part 6 will add `social.0001_initial`). The guide's `part4-*` test accounts and their
   posts were deleted at the end; accounts from the E2E and screenshot runs (`post_*`, `opinion_*`, `invalid_*`,
   `unverified_*`, `phone_*`, `shot_*`, …) and their posts remain (Django Admin → Users deletes them).
 - Ignored artifacts from the checks: `backend/tmp/mail/*.log`, `frontend/test-results/`,
@@ -619,18 +659,26 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-1. **User:** review the diff and the Part 5 section of `docs/test-command.md` (its Linux steps 3 to 9 take
-   about five minutes, plus a minute's wait in step 8; the browser steps 10 to 13 need a Next dev server).
-   Then commit, and push so CI runs; report the CI result (Part 2's to Part 5's jobs). Still open from
-   Part 3: the real-Google check (`docs/test-command.md` Part 3, steps 7 and 8).
-2. **Next part:** Part 6 (profiles, follows, Following feed), from `task.md`. Fresh session (`/clear`), first
-   `git status` and `docker compose up -d`. It reuses `useCursorFeed`, `FeedList`, `useStatusPolling` and
-   `status-overlay.ts`, and `/u/[username]` needs its own `openGraph` images if it sets `openGraph`
-   (MEMORY, 2026-10-09).
+1. **Implement Part 6 from the approved plan**
+   ([`plans/part-6-profiles-follows-following-feed.md`](plans/part-6-profiles-follows-following-feed.md)).
+   Fresh session (`/clear`); prompt: `Implement only the approved Part 6 plan, validate it, update task.md and
+   HANDOFF.md, then stop.` Start with the plan's step 0: `git status` and `git diff` against this file (expect
+   only the plan file and this file uncommitted), `docker compose up -d`, then set the phase above to
+   "implementing". Step 1 is the backend app skeleton: `mkdir backend/apps/social`, then
+   `python manage.py startapp social apps/social` and `ruff check --fix . ; ruff format .`. Recommended model:
+   Sonnet 5.5 · medium (task.md).
+2. **User, any time (not blocking Part 6):** commit the plan and this file; push so CI runs and report the
+   result (Part 2's to Part 5's jobs have never run). Still open from Part 3: the real-Google check
+   (`docs/test-command.md` Part 3, steps 7 and 8), and the Part 5 section of `docs/test-command.md` if you
+   haven't walked it yet (Linux steps 3 to 9, about five minutes plus a minute's wait in step 8).
 
 ## Blockers or user decisions
 
 - None open.
+- User decisions for Part 6 (2026-10-09), **to go into ARCHITECTURE §9/§10 and ANALYSIS when built** (listed
+  in the plan and in the Part 6 checkpoint above): Recent is the first and default `/home` tab, Following the
+  second (signed-in only); the Following cache holds only ids; `verified` and `FALSE` counters include deleted
+  posts; author names and avatars link to profiles.
 - User decisions for Part 5 (2026-10-09), now in ARCHITECTURE §3/§9 and ANALYSIS b-2: a removed post's public
   view is the same 23 keys with the text, sources, note, confidence and verdict source blanked (the author
   sees it in full); the public status endpoint has a `status_poll` throttle of 120/min per client IP.
