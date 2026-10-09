@@ -206,6 +206,14 @@ def test_visible_leaves_out_removed_and_deleted_posts():
     assert set(Post.objects.visible()) == {shown, pending, review}
 
 
+def test_not_deleted_keeps_removed_posts_but_not_deleted_ones():
+    shown = PostFactory()
+    removed = PostFactory(removed=True)
+    PostFactory(deleted=True)
+    PostFactory(removed=True, deleted=True)
+    assert set(Post.objects.not_deleted()) == {shown, removed}
+
+
 def test_for_list_joins_the_author_and_defers_the_pipeline_blob(django_assert_num_queries):
     PostFactory(pipeline_result={"raw": True})
     with django_assert_num_queries(1):

@@ -41,7 +41,7 @@ describe("SourceLink", () => {
     expect(screen.getByText(/doi\.org\/10\.1038/)).toBeInTheDocument();
     expect(screen.queryByText(/iea\.org/)).toBeNull();
     expect(screen.getByText("+2 more")).toBeInTheDocument();
-    expect(screen.getAllByRole("link")).toHaveLength(1); // "+N more" links to the detail page in Part 5
+    expect(screen.getAllByRole("link")).toHaveLength(1); // "+N more" is plain text without an address
   });
 
   it("has no '+N more' for a single source", () => {
@@ -67,5 +67,17 @@ describe("SourceLink", () => {
       />,
     );
     expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("makes '+N more' a link when it is given the detail page's sources address", () => {
+    render(<SourceLink sources={[URL_SOURCE, DOI_SOURCE, DOI_SOURCE]} moreHref="/p/abc#sources" />);
+    const more = screen.getByRole("link", { name: "+2 more" });
+    expect(more).toHaveAttribute("href", "/p/abc#sources");
+    expect(more).not.toHaveAttribute("target");
+  });
+
+  it("has no '+N more' for a single source, address or not", () => {
+    render(<SourceLink sources={[URL_SOURCE]} moreHref="/p/abc#sources" />);
+    expect(screen.queryByText(/more/)).toBeNull();
   });
 });

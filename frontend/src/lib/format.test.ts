@@ -3,6 +3,7 @@ import {
   countCharacters,
   formatCompactNumber,
   formatConfidence,
+  formatFullDateTime,
   formatRelativeTime,
 } from "./format";
 
@@ -66,5 +67,17 @@ describe("countCharacters", () => {
 
   it("counts a combining sequence as its code points, as the server does", () => {
     expect(countCharacters("e\u0301")).toBe(2);
+  });
+});
+
+describe("formatFullDateTime", () => {
+  it("prints an exact UTC time, whatever the viewer's zone", () => {
+    expect(formatFullDateTime("2026-10-09T14:05:00Z")).toBe("Oct 9, 2026, 2:05 PM UTC");
+    expect(formatFullDateTime("2026-01-01T00:00:00Z")).toBe("Jan 1, 2026, 12:00 AM UTC");
+    expect(formatFullDateTime(new Date("2026-10-09T23:59:00Z"))).toBe("Oct 9, 2026, 11:59 PM UTC");
+  });
+
+  it("gives nothing for an invalid date", () => {
+    expect(formatFullDateTime("not a date")).toBe("");
   });
 });

@@ -85,6 +85,19 @@ export interface FeedResponse extends CursorPage<FeedItem> {
   pinned_total: number;
 }
 
+/** One entry of `GET /api/v1/posts/status/?ids=` (Part 5): what a badge needs and nothing else. */
+export interface PostStatusUpdate {
+  id: string;
+  status: PostStatus;
+  /** Non-null only for pipeline verdicts; null for a removed post. */
+  confidence_score: string | null;
+  verdict_source: VerdictSource | null;
+}
+
+export interface PostStatusResponse {
+  results: PostStatusUpdate[];
+}
+
 /** `GET /api/v1/me/fact-quota/`: the rolling 24-hour fact-post allowance (§3). */
 export interface FactQuota {
   limit: number;

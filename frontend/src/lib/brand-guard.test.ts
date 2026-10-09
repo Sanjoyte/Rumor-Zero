@@ -13,6 +13,10 @@ const BRAND_AWARE = new Set([
   "lib/brand-guard.test.ts",
   "app/manifest.ts",
   "app/manifest.test.ts",
+  // `/p/[id]` must name the static share images itself: a page-level `openGraph` replaces the root
+  // layout's, images included (Part 5; ARCHITECTURE §10).
+  "features/posts/post-metadata.ts",
+  "features/posts/post-metadata.test.ts",
 ]);
 
 function sourceFiles(dir: string, out: string[] = []): string[] {

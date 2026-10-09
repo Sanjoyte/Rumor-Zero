@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -3204,6 +3204,481 @@ Browser. Log in at http://localhost:3000/login as **`cy`**, with `part4-cy-<your
   'accounts.User': 3})`: how many rows went in all, and per table (13 posts: 5 from step 6 and 8 from step 8;
   you get more if you made posts as `cy` or ran the guide twice). Nothing else is touched. (The E2E tests' accounts stay in your local database, as in
   earlier parts: Django Admin → Users deletes them.)
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
+  token and the throwaway password of the test accounts.
+
+### Part 5: Post detail, sharing, deletion, status polling
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
+`frontend/.env.local`. Part 5 adds **no migration, no dependency and no env variable**. It adds one throttle
+scope (`status_poll`, in code) and three endpoints: `GET` and `DELETE /api/v1/posts/{id}/` and
+`GET /api/v1/posts/status/`.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend/`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 13 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 9**: the variables and functions you set in step 3 (`id`, `h`, `ada`, `bo`, `cy`, `api`, `mk`, `get`, `fact`, `op`) only live in that one terminal. If you close it, redo step 3. | 1 to 10, 14 |
+| Window 3 (frontend) | `npm run dev` in `frontend/`. Leave it running. | 9 to 13 |
+| Browser | Steps 10 to 13 | 10 to 13 |
+
+Things to know first:
+
+- Steps 3 to 9 talk to the API directly with `curl` (they need `jq`: `sudo apt install jq`). Steps 10 to 13 use
+  the browser. Step 3 makes three accounts, all verified: `ada` writes the posts, `bo` is "another user", and
+  `cy` stays untouched for the browser steps.
+- The API and page outputs below were recorded on Linux on 2026-10-09. The browser steps were checked the same
+  day with headless Chromium (screenshots at 1280 and 390 px), not by a person at a keyboard. Ids, numbers in
+  names, times and token prefixes differ on every run.
+- Nothing here sends an email: step 3 marks the accounts verified with a shell command, which stands in for
+  clicking the link (Part 2 shows the real flow). Step 7 sets a post to `removed` the same way, because the
+  moderator tools that do it for real arrive in Part 10.
+- **Part 5 doesn't change any post's text or sources**; a post can only be deleted by its author, and "deleted"
+  only hides it (the row stays, so a moderator can still find it).
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, confirms there is no
+new migration, then runs the whole backend test suite, the new posts tests, the linter and the formatter check.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 1160 passed
+python -m pytest apps/posts -q                      # 456 passed
+ruff check . ; ruff format --check .                # All checks passed! / 106 files already formatted
+```
+
+**You should see:** `No changes detected` and `System check identified no issues (0 silenced).`, then the full
+run ends with `1160 passed`, the posts run with `456 passed`, and the last line pair is `All checks passed!` and
+`106 files already formatted`. (Counts may grow later; what matters is that nothing fails.)
+
+- The 73 new posts tests: `test_api_detail.py` (33: who sees what in every status, the removed tombstone, 404s,
+  query counts), `test_api_delete.py` (22: permissions, soft delete, two simultaneous deletes give one success
+  and one 404, the row lock), `test_api_status.py` (17: the four-key shape, the 50-id cap, one query for 50
+  posts, the 120-a-minute throttle) and one more in `test_models.py` (`not_deleted()`).
+- `apps/core/tests/test_settings.py` now expects eleven throttle scopes (`status_poll` is the new one).
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 91 files, 1210 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 24 passed
+CI=1 npm run test:e2e                               # 24 passed (against the production build)
+cd ../backend                                       # back to backend/ for steps 3 to 9
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  91 passed (91)` and `Tests  1210 passed (1210)`. `npm run build` lists the routes as in Part 4, plus
+`ƒ /p/[id]` (dynamic: it is rendered on the server for each post). Each E2E run ends with `24 passed`: the 20
+earlier tests and 4 new ones in `e2e/post-detail.spec.ts`.
+
+- The new E2E tests sign up their own accounts, then: open a fact from its card (sources numbered `01`, `02`,
+  Copy link, and an anonymous request for `/p/<id>` returning the claim, the `<title>` and the Open Graph tags);
+  delete an opinion (gone from Recent, a 404 page and a 404 from the API); watch a pending fact turn into
+  `VERIFIED 94%` on the feed and on its own page after a status change made in the database (about 10 to 15
+  seconds); and check a removed post (a tombstone for a visitor, the full text for its author).
+- One of them is an E2E-only trick worth knowing: `e2e/helpers.ts` changes the status by running `manage.py
+  shell` against the same database, exactly as step 12 below does by hand.
+
+#### Step 3: Start the servers and make three accounts and two posts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 9.**
+
+**What this does:** Windows 1 and 3 run the two servers. In window 2 you sign up three accounts through the API
+and mark them verified, then `ada` posts a fact with two sources and an opinion. The helpers `mk` (make a post,
+print its id) and `get` (print the status code, then the answer) are used by the next steps.
+
+Window 1 (in `backend/`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```bash
+cd frontend                                         # from the repo root
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend/` with the venv active: steps 1 and 2 leave you there; needs `jq`). If you opened a new
+terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the addresses are new each run
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+signup() { jq -nc --arg e "$1" --arg u "$2" '{email: $e, username: $u, password: "correct-horse-battery-42", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/signup | jq -r .meta.access_token; }
+ada=$(signup "part5-ada-$id@example.test" "part5_ada_$id")      # $ada = ada's login token (the author)
+bo=$(signup "part5-bo-$id@example.test" "part5_bo_$id")         # $bo = bo's login token (another reader)
+cy=$(signup "part5-cy-$id@example.test" "part5_cy_$id")         # $cy = cy's login token (kept for the browser)
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part5-', email__endswith='$id@example.test').update(is_email_verified=True), 'accounts marked verified')" | tail -1
+for t in "$ada" "$bo" "$cy"; do curl -s -H "Authorization: Bearer $t" http://localhost:8000/api/v1/me/ | jq -c '{username, is_email_verified}'; done
+api=http://localhost:8000/api/v1
+mk() { curl -s -H "Authorization: Bearer $1" -H "Content-Type: application/json" --data-binary "$2" $api/posts/ | jq -r .id; }   # mk <token> <json>: makes a post, prints its id
+get() { local out; out=$(curl -s -w '\n%{http_code}' ${2:+-H "Authorization: Bearer $2"} "$api$1"); printf '%s  ' "${out##*$'\n'}"; printf '%s' "${out%$'\n'*}" | jq -c "${3:-.}"; }   # get <path> [token] [jq filter]: prints the status code, then the answer
+fact=$(mk "$ada" '{"content":"Solar capacity grew by roughly 30% worldwide last year.","post_type":"fact","sources":["doi:10.1038/s41558-024-02102","https://www.iea.org/reports/renewables-2023"]}')
+op=$(mk "$ada" '{"content":"I think the new tram line will change how the city moves.","post_type":"opinion"}')
+echo ${ada:0:10} ${bo:0:10} ${cy:0:10}               # three prefixes, not an empty line
+echo "fact=$fact"; echo "op=$op"                     # two ids, not empty
+```
+
+**You should see** (the number in the names is your `id`, and the ids differ):
+
+```text
+3 accounts marked verified
+{"username":"part5_ada_190845","is_email_verified":true}
+{"username":"part5_bo_190845","is_email_verified":true}
+{"username":"part5_cy_190845","is_email_verified":true}
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+fact=fb1fc4a4-232f-4d10-830c-d83b343e5b5a
+op=d51f9804-6080-4107-bda3-90e1bdd1f27d
+```
+
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet.
+
+**If it differs:** an empty token or an `id` of `null` means the sign-up or the post failed: `runserver` isn't
+running, `jq` is missing, or you signed up more than 20 times in a minute. Fix that and run this step again
+from `id=$(date +%H%M%S)`.
+
+#### Step 4: Read a post
+
+**Where:** Terminal window 2 (the same terminal as step 3).
+
+**What this does:** Reads the post's page data, `GET /api/v1/posts/{id}/`, as nobody, as another user and as
+the author. Anyone can read a post; only `is_mine` differs. Then two bad ids.
+
+```bash
+get /posts/$fact/ "" '{status, post_type, content, sources: [.sources[].kind], is_mine, verdict_note, confidence_score, keys: (keys | length)}'   # 1: anyone, no login
+get /posts/$fact/ "$bo" '{is_mine}'                                                                                                               # 2: another user
+get /posts/$fact/ "$ada" '{is_mine}'                                                                                                              # 3: the author
+get /posts/$op/ "" '{status, post_type, content, sources, is_mine}'                                                                               # 4: an opinion
+get /posts/not-a-post-id/ "" .                                                                                                                    # 5: not an id at all
+get /posts/00000000-0000-4000-8000-000000000000/ "" .                                                                                             # 6: no such post
+```
+
+**You should see** (six commands, six answers):
+
+```text
+200  {"status":"pending","post_type":"fact","content":"Solar capacity grew by roughly 30% worldwide last year.","sources":["doi","url"],"is_mine":false,"verdict_note":"","confidence_score":null,"keys":23}
+200  {"is_mine":false}
+200  {"is_mine":true}
+200  {"status":"published","post_type":"opinion","content":"I think the new tram line will change how the city moves.","sources":[],"is_mine":false}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+```
+
+- The answer has the same 23 keys as a post in the feed. The sources come with their kind (`doi`, `url`) in the
+  order you gave them.
+- An id that isn't an id gets the same JSON 404 as an unknown one, never a server error.
+
+#### Step 5: Ask for the live status of several posts
+
+**Where:** Terminal window 2.
+
+**What this does:** Calls `GET /api/v1/posts/status/?ids=…`, the endpoint the badges poll. It is public, takes up
+to 50 ids and returns only what a badge needs.
+
+```bash
+get "/posts/status/?ids=$fact,$op,00000000-0000-4000-8000-000000000000"            # 1: two real posts and one that doesn't exist
+get "/posts/status/?ids=$fact" "not-a-token" '.results | length'                    # 2: a garbage token is simply ignored
+get "/posts/status/"                                                                # 3: no ids
+get "/posts/status/?ids=nope"                                                       # 4: a malformed id
+many=$(python -c "import uuid; print(','.join(str(uuid.uuid4()) for _ in range(51)))")
+get "/posts/status/?ids=$many"                                                      # 5: 51 ids
+```
+
+**You should see:**
+
+```text
+200  {"results":[{"id":"fb1fc4a4-232f-4d10-830c-d83b343e5b5a","status":"pending","confidence_score":null,"verdict_source":null},{"id":"d51f9804-6080-4107-bda3-90e1bdd1f27d","status":"published","confidence_score":null,"verdict_source":null}]}
+200  1
+400  {"ids":["Send the ids of the posts to check."]}
+400  {"ids":["'nope' isn't a post id."]}
+400  {"ids":["Check at most 50 posts at a time."]}
+```
+
+- Line 1 leaves out the id that doesn't exist; the order is the order you asked in. `confidence_score` is only
+  set for a verdict the pipeline made, and `verdict_source` tells who decided.
+- Line 2: this endpoint never checks the login, so an expired token can't turn a public read into a 401.
+  (`GET /api/v1/posts/{id}/` does check a token it is given, and the page then refreshes and retries.)
+
+#### Step 6: The author deletes a post
+
+**Where:** Terminal window 2.
+
+**What this does:** Tries to delete the opinion as nobody, as another user and as its author, then looks at the
+result everywhere. Deleting only hides the post: the row stays in the database.
+
+```bash
+curl -s -w '  %{http_code}\n' -X DELETE $api/posts/$op/                                                  # 1: nobody
+curl -s -w '  %{http_code}\n' -X DELETE -H "Authorization: Bearer $bo" $api/posts/$op/                    # 2: another user
+curl -s -w '  %{http_code}\n' -X DELETE -H "Authorization: Bearer $ada" $api/posts/$op/                   # 3: the author
+curl -s -w '  %{http_code}\n' -X DELETE -H "Authorization: Bearer $ada" $api/posts/$op/                   # 4: the author again
+get /posts/$op/ "$ada" .                                                                                  # 5: its page, even for the author
+curl -s $api/posts/ | jq "[.results[].post.id] | index(\"$op\")"                                          # 6: the feed
+python manage.py shell -c "from apps.posts.models import Post; p = Post.objects.get(pk='$op'); print(p.status, p.deleted_at is not None, p.content[:20])" | tail -1   # 7: the database
+```
+
+**You should see:**
+
+```text
+{"detail":"Authentication credentials were not provided.","code":"not_authenticated"}  401
+{"detail":"Only the author can do that.","code":"not_author"}  403
+  204
+{"detail":"Not found.","code":"not_found"}  404
+404  {"detail":"Not found.","code":"not_found"}
+null
+published True I think the new tram
+```
+
+- 204 means done, with no body. Deleting twice is a 404 (the post is already hidden). `null` on line 6 means the
+  post isn't in the feed any more.
+- Line 7 is the audit trail: the post is still there, still `published`, with `deleted_at` set (`True`).
+  Django Admin shows it too (step 10). A deleted fact post still counts toward the author's 24-hour fact
+  allowance, so deleting and reposting can't get around it.
+- Deleting doesn't use up the `post_create` throttle (30 posts an hour).
+
+#### Step 7: A removed post is a tombstone
+
+**Where:** Terminal window 2, in `backend/` with the venv active.
+
+**What this does:** Makes a third post, then sets it to `removed` straight in the database (what a moderator's
+Remove will do in Part 10, with a note kept only for staff). A visitor and another user get the same keys with
+the text, sources and note blanked; its author still sees everything.
+
+```bash
+fact2=$(mk "$ada" '{"content":"Rain is wet, says the weather office.","post_type":"fact","sources":["10.1000/xyz"]}')
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$fact2').update(status='removed', verdict_note='internal'), 'post set to removed')" | tail -1
+get /posts/$fact2/ "" '{status, content, sources, verdict_note, author: .author.username, is_mine, keys: (keys | length)}'     # 1: the public
+get /posts/$fact2/ "$bo" '{status, content}'                                                                                  # 2: another user
+get /posts/$fact2/ "$ada" '{status, content, sources: (.sources | length), verdict_note, is_mine}'                            # 3: the author
+get "/posts/status/?ids=$fact2" "" '.results'                                                                                 # 4: the poll
+curl -s $api/posts/ | jq "[.results[].post.id] | index(\"$fact2\")"                                                          # 5: the feed
+```
+
+**You should see** (the name is your `id`):
+
+```text
+1 post set to removed
+200  {"status":"removed","content":"","sources":[],"verdict_note":"","author":"part5_ada_190845","is_mine":false,"keys":23}
+200  {"status":"removed","content":""}
+200  {"status":"removed","content":"Rain is wet, says the weather office.","sources":1,"verdict_note":"internal","is_mine":true}
+200  [{"id":"cd39bb38-a178-4122-bc48-80a150bd7210","status":"removed","confidence_score":null,"verdict_source":null}]
+null
+```
+
+- Line 1 is the **tombstone**: still 23 keys, the author's name and the post time stay, but `content`, `sources`,
+  `verdict_note` (and the confidence and verdict source) are blank, so nothing of the post leaks.
+- Line 3: the author sees their own removed post in full. The removal reason and the appeal button come with
+  Parts 10 and 11.
+- Line 4: the poll answers `removed` (so an open tab learns it) with nothing else. Line 5: it is not in the feed.
+
+#### Step 8: The status endpoint is rate limited
+
+**Where:** Terminal window 2.
+
+**What this does:** Waits a minute so the allowance starts fresh, then asks for the status 125 times. The
+limit is `status_poll`: 120 a minute per client address. It counts only this endpoint, so reading the feed
+still works.
+
+```bash
+sleep 61                                            # let the one-minute allowance start fresh
+for i in $(seq 125); do curl -s -o /dev/null -w '%{http_code}\n' "$api/posts/status/?ids=$fact"; done | sort | uniq -c
+curl -s "$api/posts/status/?ids=$fact" | jq -c .
+curl -s -D - -o /dev/null "$api/posts/status/?ids=$fact" | grep -i -E "^(HTTP|retry-after)"
+curl -s -o /dev/null -w 'the feed still answers: %{http_code}\n' $api/posts/
+```
+
+**You should see** (the seconds differ):
+
+```text
+    120 200
+      5 429
+{"detail":"Request was throttled. Expected available in 59 seconds.","code":"throttled"}
+HTTP/1.1 429 Too Many Requests
+Retry-After: 59
+the feed still answers: 200
+```
+
+- One tab polling at its fastest makes 6 requests a minute, so 120 is room for about 20 tabs behind one address.
+- Wait a minute before step 9 if you want to poll again from this terminal.
+
+#### Step 9: What a link preview or a search crawler sees
+
+**Where:** Terminal window 2, with `runserver` (window 1) and `npm run dev` (window 3) running.
+
+**What this does:** Asks the Next.js server for a post's page with no cookies and no JavaScript, the way a crawler
+does, and picks out the head tags. The server reads the post from Django itself, so the claim and its status are
+in the HTML.
+
+```bash
+curl -s http://localhost:3000/p/$fact | grep -o -E '<title>[^<]*</title>|(property|name)="(og:title|og:description|og:type|og:image|twitter:image|twitter:card)" content="[^"]*"|rel="canonical" href="[^"]*"' | sort -u
+echo ---
+curl -s http://localhost:3000/p/$fact | grep -o "Solar capacity grew by roughly 30% worldwide last year\." | wc -l
+curl -s -o /dev/null -w 'deleted post: %{http_code}\n' http://localhost:3000/p/$op
+curl -s -o /dev/null -w 'not an id: %{http_code}\n' http://localhost:3000/p/not-a-post-id
+curl -s -w '\nremoved post: %{http_code}\n' http://localhost:3000/p/$fact2 | grep -o -E '<title>[^<]*</title>|name="robots" content="[^"]*"|removed post: [0-9]+|Solar|Rain is wet' | sort -u
+```
+
+**You should see** (the first compile of the page in `next dev` takes a few seconds; the post id and the
+count of claim occurrences can differ):
+
+```text
+name="twitter:card" content="summary_large_image"
+name="twitter:image" content="http://localhost:3000/twitter-image.png"
+property="og:description" content="Fact · CHECKING FACTS…"
+property="og:image" content="http://localhost:3000/opengraph-image.png"
+property="og:title" content="Solar capacity grew by roughly 30% worldwide last year. · Rumor Zero"
+property="og:type" content="article"
+rel="canonical" href="http://localhost:3000/p/fb1fc4a4-232f-4d10-830c-d83b343e5b5a"
+<title>Solar capacity grew by roughly 30% worldwide last year. · Rumor Zero</title>
+---
+8
+deleted post: 404
+not an id: 404
+name="robots" content="noindex, nofollow"
+removed post: 200
+<title>Removed post · Rumor Zero</title>
+```
+
+- The title is the start of the claim plus ` · Rumor Zero`; the description is the type and the status label.
+  The share image is the site's static one (generating one per post would cost too much CPU on the free
+  Workers plan).
+- The claim appears several times (title, tags and the page itself). A post that was deleted, or an id that
+  isn't one, is a real HTTP 404.
+- A **removed** post is a 200 with the title "Removed post", `noindex`, and none of its text (the last command
+  finds neither "Solar" nor "Rain is wet").
+
+#### Step 10: Django Admin still shows a deleted post
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Opens the admin list of posts and finds the opinion `ada` deleted in step 6. The admin is
+read-only until Part 10.
+
+| URL | Expect |
+|---|---|
+| http://localhost:8000/admin/ | Sign in with the superuser you made in Part 0A. If it 404s, `ADMIN_URL_PATH` in `backend/.env` isn't `admin/`; use that path. |
+| http://localhost:8000/admin/posts/post/ | The posts, newest first, including "I think the new tram line…" with a date in the **Deleted at** column. The filter panel now has **By deleted at** with *All*, *Empty* and *Not empty*. |
+| Click **Not empty** under *By deleted at* | Only the deleted posts (the tram opinion). **Empty** shows everything that is still live. |
+
+- The same rules are checked by the automated tests (`test_api_delete.py` finds the row through the admin
+  changelist and both filter values).
+
+#### Step 11: The post page in the browser
+
+**Where:** Browser, with `runserver` (window 1) and `npm run dev` (window 3) running. Log in at
+http://localhost:3000/login as **`cy`**, with `part5-cy-<your id>@example.test` and `correct-horse-battery-42`
+(the id from step 3).
+
+**What this does:** Posts a fact as `cy`, opens its page from the card, and tries Copy link and Delete.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home, click **New post**, type `Global solar output doubled in six years, the agency says.`, choose **Fact**, put `doi:10.1038/s41558-024-02102` in Source 1, click **Add another source** and put `https://www.iea.org/reports/renewables-2023` in Source 2, click **Post fact, will be checked** | The post is at the top of Recent with **CHECKING FACTS…**. |
+| Look at its card's text and sources row | The claim is a link, and so is the whole card (the border darkens on hover). The row under it shows `doi.org/10.1038/s41558-024-02102 ↗` (opens doi.org in a new tab) and a blue `+1 more`. |
+| Click the claim (or `+1 more`) | The address becomes `http://localhost:3000/p/<id>` (with `#sources` for `+1 more`, which scrolls to the sources). The page: **← BACK TO HOME**, a white card with a pale grey left edge holding **FACT** and **CHECKING FACTS…**, the claim in large upright serif, `@part5_cy_<id>` with `Oct 9, 2026, 1:10 PM UTC` (a UTC time), then **Copy link** and **Delete** |
+| Look under the card | A **Verdict** card saying **Checking facts…** and "We're checking this claim. This page updates on its own when there is a result.", then **Sources (2)**: `01  DOI  10.1038/s41558-024-02102` and `02  LINK  https://www.iea.org/reports/renewables-2023`, each with an open-in-new icon |
+| Click an open-in-new icon | The source opens in a new tab (the DOI goes to `https://doi.org/10.1038/…`). |
+| Click **Copy link** | A dark toast says **Link copied.** Paste into the address bar: it is `http://localhost:3000/p/<id>`. |
+| Click **Delete** | A dialog **Delete this post?**: "It disappears from feeds and from its page right away. This can't be undone." and, because it is a fact, "A deleted fact post still counts toward your fact posts for the last 24 hours." with **Cancel** and a red **Delete post**. Click **Cancel**: nothing changes. |
+| Click **Delete**, then **Delete post** | You are back on `/home` with the toast **Post deleted.** and the post is gone from Recent (also after a reload). |
+| Open the old `/p/<id>` address | The page "Page not found" (a real 404, for you as well). |
+| Open a post you didn't write (any post by `ada`) | Same page, with **Copy link** but **no Delete**. |
+
+- Log out and open any `/p/<id>`: the same page without Delete, no login needed.
+- A post removed by a moderator (step 7's `fact2`): as a visitor, `/p/<id>` shows a white card with the author's
+  name, the date and "This post was removed by a moderator." and nothing else. Logged in as its author, the page
+  shows the text under a pale orange note "This post was removed by a moderator. Only you can see this text.",
+  a grey **REMOVED** badge next to **FACT**, and no Verdict card. In the feed, a card that is open when its post
+  is removed turns into a grey "Removed by a moderator" card within about 10 seconds.
+
+#### Step 12: Badges update by themselves
+
+**Where:** Browser (logged in as `cy`, with a fresh fact on screen) and Terminal window 2.
+
+**What this does:** Changes a pending post's status in the database while its page and the feed are open, the way
+the pipeline (Part 9) and the moderators (Part 10) will, and watches the badge change without a reload. The
+status endpoint is polled every 10 seconds at first, then every 15, 22 … up to every 60, only while the tab is
+on screen, and it stops after 10 minutes of visible time.
+
+First post another fact as `cy` (step 11's first row) and open its page; keep the feed (`/home`) open in a
+second tab. Copy the post's id from the address (`/p/<id>`). In window 2:
+
+```bash
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='<id>').update(status='verified_true', verdict_source='pipeline', pipeline_verdict='true', confidence_score=94), 'post updated')" | tail -1
+```
+
+Replace `<id>` with the id you copied.
+
+**You should see** `1 post updated`, and in the browser, within about 10 seconds and with no reload:
+
+| Where | Expect |
+|---|---|
+| The post's page | The chip changes from **CHECKING FACTS…** to a teal **VERIFIED 94%**, the left edge turns teal, and the Verdict card says **Checked automatically · 94% confidence** and "This claim was found to be true." |
+| The feed tab (when you switch to it) | The card for that post shows **VERIFIED 94%** too. |
+
+- Watching the polling: open DevTools → Network, filter on `status`. Requests to `/api/v1/posts/status/?ids=…`
+  go out about every 10 s, then 15 s, 22 s … while a pending post is on screen, and **stop for good once nothing
+  is pending**. Switch to another browser tab: no requests while it is hidden, and one the moment you come back.
+  (These timings are covered by the automated tests with fake timers; the "badge changes within about 10 seconds"
+  part was also watched in headless Chromium.)
+- Try `status='removed'` instead: the feed card turns into a grey "Removed by a moderator" card, and the page
+  becomes the tombstone for everyone but the author.
+
+#### Step 13: A phone-sized window
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Checks the post page at phone width. In Firefox or Chrome press `F12`, then the "responsive
+design" / device toolbar button, and set the width to 390. Open any `/p/<id>` of a fact.
+
+| Do this | Expect |
+|---|---|
+| Open the post's page | A top bar with the logo and your avatar, then **← BACK TO HOME**, the card with the claim wrapped over several lines, the author line and a UTC date, and **Copy link** and **Delete** side by side. A bottom bar (Home, Search, New post, Notifications, Profile). **No sideways scrolling.** |
+| Scroll down | **Verdict** and **Sources (2)**: a long link wraps inside its row (`https://www.iea.org/reports/r` / `enewables-2023`), and the open-in-new icon stays at the right. |
+| Tap **Delete** | The dialog fits the screen, with **Cancel** and **Delete post**. |
+
+#### Step 14: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts and their posts (the posts go with them). In window 2, in `backend/` with the
+  venv active:
+
+  ```bash
+  python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part5-').delete())" | tail -1
+  ```
+
+  After one clean run of this guide it prints `(12, {'posts.Post': 6, 'account.EmailAddress': 3, 'accounts.User': 3})`: how many rows went in all, and per
+  table (6 posts: the three `ada` made in steps 3 and 7, plus the ones you made as `cy` in steps 11 and 12, so your
+  count differs; a deleted post is still a row). Nothing else is touched. (The E2E tests' accounts stay in your local database, as in earlier parts: Django
+  Admin → Users deletes them.)
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
   wipes the whole local database, which is destructive.
 - No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
@@ -6449,6 +6924,511 @@ Browser. Log in at http://localhost:3000/login as **`cy`**, with `part4-cy-<your
   'accounts.User': 3})`: how many rows went in all, and per table (13 posts: 5 from step 6 and 8 from step 8;
   you get more if you made posts as `cy` or ran the guide twice). Nothing else is touched. (The E2E tests' accounts stay in your local database, as in
   earlier parts: Django Admin → Users deletes them.)
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
+  token and the throwaway password of the test accounts.
+
+### Part 5: Post detail, sharing, deletion, status polling
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
+`frontend\.env.local`. Part 5 adds **no migration, no dependency and no env variable**. It adds one throttle
+scope (`status_poll`, in code) and three endpoints: `GET` and `DELETE /api/v1/posts/{id}/` and
+`GET /api/v1/posts/status/`.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 13 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for steps 3 to 9**: the variables and functions you set in step 3 (`$id`, `$h`, `$ada`, `$bo`, `$cy`, `$api`, `$fact`, `$op`, `Signup`, `Mk`, `Fetch`) only live in that one terminal. If you close it, redo step 3. | 1 to 10, 14 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 9 to 13 |
+| Browser | Steps 10 to 13 | 10 to 13 |
+
+Things to know first:
+
+- Steps 3 to 9 talk to the API directly with `curl.exe` (with `.exe`: in PowerShell 5.1 plain `curl` is a
+  different command). Steps 10 to 13 use the browser. Step 3 makes three accounts, all verified: `ada` writes the posts, `bo` is "another user", and
+  `cy` stays untouched for the browser steps.
+- **The PowerShell blocks below were not run on Windows.** The agent works on the Linux PC; it ran the bash
+  twin of every command in the Linux guide on 2026-10-09, and the outputs below are those, reshaped to what
+  `ConvertTo-Json -Compress`, `Group-Object` and `Select-String` print. The PowerShell commands follow the
+  patterns Parts 1 to 4 proved on Windows (JSON written to a file and sent with `--data-binary "@file"`,
+  `curl.exe`, no `&&`). If one behaves differently, tell the agent which. The API and page outputs were
+  recorded on Linux on 2026-10-09. The browser steps were checked the same
+  day with headless Chromium (screenshots at 1280 and 390 px), not by a person at a keyboard. Ids, numbers in
+  names, times and token prefixes differ on every run.
+- Nothing here sends an email: step 3 marks the accounts verified with a shell command, which stands in for
+  clicking the link (Part 2 shows the real flow). Step 7 sets a post to `removed` the same way, because the
+  moderator tools that do it for real arrive in Part 10.
+- **Part 5 doesn't change any post's text or sources**; a post can only be deleted by its author, and "deleted"
+  only hides it (the row stays, so a moderator can still find it).
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, confirms there is no
+new migration, then runs the whole backend test suite, the new posts tests, the linter and the formatter check.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 1160 passed
+python -m pytest apps/posts -q                      # 456 passed
+ruff check . ; ruff format --check .                # All checks passed! / 106 files already formatted
+```
+
+**You should see:** `No changes detected` and `System check identified no issues (0 silenced).`, then the full
+run ends with `1160 passed`, the posts run with `456 passed`, and the last line pair is `All checks passed!` and
+`106 files already formatted`. (Counts may grow later; what matters is that nothing fails.)
+
+- The 73 new posts tests: `test_api_detail.py` (33: who sees what in every status, the removed tombstone, 404s,
+  query counts), `test_api_delete.py` (22: permissions, soft delete, two simultaneous deletes give one success
+  and one 404, the row lock), `test_api_status.py` (17: the four-key shape, the 50-id cap, one query for 50
+  posts, the 120-a-minute throttle) and one more in `test_models.py` (`not_deleted()`).
+- `apps/core/tests/test_settings.py` now expects eleven throttle scopes (`status_poll` is the new one).
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 91 files, 1210 tests passed
+npm run build
+npm run test:e2e                                    # 24 passed
+$env:CI = "1" ; npm run test:e2e ; Remove-Item Env:CI   # 24 passed (against the production build)
+cd ..\backend                                       # back to backend\ for steps 3 to 9
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  91 passed (91)` and `Tests  1210 passed (1210)`. `npm run build` lists the routes as in Part 4, plus
+`ƒ /p/[id]` (dynamic: it is rendered on the server for each post). Each E2E run ends with `24 passed`: the 20
+earlier tests and 4 new ones in `e2e/post-detail.spec.ts`.
+
+- The new E2E tests sign up their own accounts, then: open a fact from its card (sources numbered `01`, `02`,
+  Copy link, and an anonymous request for `/p/<id>` returning the claim, the `<title>` and the Open Graph tags);
+  delete an opinion (gone from Recent, a 404 page and a 404 from the API); watch a pending fact turn into
+  `VERIFIED 94%` on the feed and on its own page after a status change made in the database (about 10 to 15
+  seconds); and check a removed post (a tombstone for a visitor, the full text for its author).
+- On Windows `npm run build` can't blank `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (PowerShell's `$env:NAME = ""` *deletes* the
+  variable), so a `frontend\.env.local` with your real client ID is baked into that build and the CI-mode run is less
+  representative than on Linux. The default run pins an empty client ID for both servers, so it is unaffected.
+- One of them is an E2E-only trick worth knowing: `e2e/helpers.ts` changes the status by running `manage.py
+  shell` against the same database, exactly as step 12 below does by hand.
+
+#### Step 3: Start the servers and make three accounts and two posts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 9.**
+
+**What this does:** Windows 1 and 3 run the two servers. In window 2 you sign up three accounts through the API
+and mark them verified, then `ada` posts a fact with two sources and an opinion. The helpers `Mk` (make a post,
+print its id) and `Fetch` (print the status code, then the answer) are used by the next steps.
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 and 2 leave you there). If you opened a new window,
+first run `cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the addresses are new each run
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+function Signup($email, $username) {
+@"
+{"email": "$email", "username": "$username", "password": "correct-horse-battery-42", "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-signup.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-signup.json" http://localhost:8000/api/auth/app/v1/auth/signup | ConvertFrom-Json).meta.access_token
+}
+$ada = Signup "part5-ada-$id@example.test" "part5_ada_$id"      # $ada = ada's login token (the author)
+$bo = Signup "part5-bo-$id@example.test" "part5_bo_$id"         # $bo = bo's login token (another reader)
+$cy = Signup "part5-cy-$id@example.test" "part5_cy_$id"         # $cy = cy's login token (kept for the browser)
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part5-', email__endswith='$id@example.test').update(is_email_verified=True), 'accounts marked verified')" | Select-Object -Last 1
+foreach ($t in $ada, $bo, $cy) { curl.exe -s -H "Authorization: Bearer $t" http://localhost:8000/api/v1/me/ | ConvertFrom-Json | Select-Object username, is_email_verified | ConvertTo-Json -Compress }
+$api = 'http://localhost:8000/api/v1'
+# Mk <token> <json>: makes a post, prints its id
+function Mk($token, $json) {
+  $json | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+  (curl.exe -s -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | ConvertFrom-Json).id
+}
+# Fetch <path> [token] [fields]: prints the HTTP status, then the answer (cut down to `fields` when given)
+function Fetch($path, $token, $props) {
+  $a = @()
+  if ($token) { $a = '-H', "Authorization: Bearer $token" }
+  $out = curl.exe -s -w "`n%{http_code}" @a "$api$path"
+  $body = $out[0..($out.Count - 2)] -join ''
+  if ($props -and $body) { $body = $body | ConvertFrom-Json | Select-Object $props | ConvertTo-Json -Depth 5 -Compress }
+  "$($out[-1])  $body"
+}
+$fact = Mk $ada '{"content":"Solar capacity grew by roughly 30% worldwide last year.","post_type":"fact","sources":["doi:10.1038/s41558-024-02102","https://www.iea.org/reports/renewables-2023"]}'
+$op = Mk $ada '{"content":"I think the new tram line will change how the city moves.","post_type":"opinion"}'
+"$($ada.Substring(0,10)) $($bo.Substring(0,10)) $($cy.Substring(0,10))"      # three prefixes, not an error
+"fact=$fact"; "op=$op"                                                      # two ids, not empty
+```
+
+**You should see** (the number in the names is your `id`, and the ids differ):
+
+```text
+3 accounts marked verified
+{"username":"part5_ada_190845","is_email_verified":true}
+{"username":"part5_bo_190845","is_email_verified":true}
+{"username":"part5_cy_190845","is_email_verified":true}
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+fact=fb1fc4a4-232f-4d10-830c-d83b343e5b5a
+op=d51f9804-6080-4107-bda3-90e1bdd1f27d
+```
+
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet.
+
+**If it differs:** an empty token or an empty `$fact` means the sign-up or the post failed: `runserver` isn't
+running, or you signed up more than 20 times in a minute. Fix that and run this step again
+from `$id = Get-Date …`.
+
+#### Step 4: Read a post
+
+**Where:** Terminal window 2 (the same terminal as step 3).
+
+**What this does:** Reads the post's page data, `GET /api/v1/posts/{id}/`, as nobody, as another user and as
+the author. Anyone can read a post; only `is_mine` differs. Then two bad ids.
+
+```powershell
+Fetch "/posts/$fact/" $null @('status', 'post_type', 'content', @{n='sources'; e={@($_.sources.kind)}}, 'is_mine', 'verdict_note', 'confidence_score', @{n='keys'; e={@($_.PSObject.Properties).Count}})   # 1: anyone, no login
+Fetch "/posts/$fact/" $bo @('is_mine')                                                                                       # 2: another user
+Fetch "/posts/$fact/" $ada @('is_mine')                                                                                      # 3: the author
+Fetch "/posts/$op/" $null @('status', 'post_type', 'content', 'sources', 'is_mine')                                          # 4: an opinion
+Fetch "/posts/not-a-post-id/"                                                                                                # 5: not an id at all
+Fetch "/posts/00000000-0000-4000-8000-000000000000/"                                                                         # 6: no such post
+```
+
+**You should see** (six commands, six answers):
+
+```text
+200  {"status":"pending","post_type":"fact","content":"Solar capacity grew by roughly 30% worldwide last year.","sources":["doi","url"],"is_mine":false,"verdict_note":"","confidence_score":null,"keys":23}
+200  {"is_mine":false}
+200  {"is_mine":true}
+200  {"status":"published","post_type":"opinion","content":"I think the new tram line will change how the city moves.","sources":[],"is_mine":false}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+```
+
+- The answer has the same 23 keys as a post in the feed. The sources come with their kind (`doi`, `url`) in the
+  order you gave them.
+- An id that isn't an id gets the same JSON 404 as an unknown one, never a server error.
+
+#### Step 5: Ask for the live status of several posts
+
+**Where:** Terminal window 2.
+
+**What this does:** Calls `GET /api/v1/posts/status/?ids=…`, the endpoint the badges poll. It is public, takes up
+to 50 ids and returns only what a badge needs.
+
+```powershell
+Fetch "/posts/status/?ids=$fact,$op,00000000-0000-4000-8000-000000000000"            # 1: two real posts and one that doesn't exist
+Fetch "/posts/status/?ids=$fact" "not-a-token" @(@{n='count'; e={@($_.results).Count}})  # 2: a garbage token is simply ignored
+Fetch "/posts/status/"                                                                   # 3: no ids
+Fetch "/posts/status/?ids=nope"                                                          # 4: a malformed id
+$many = python -c "import uuid; print(','.join(str(uuid.uuid4()) for _ in range(51)))"
+Fetch "/posts/status/?ids=$many"                                                         # 5: 51 ids
+```
+
+**You should see:**
+
+```text
+200  {"results":[{"id":"fb1fc4a4-232f-4d10-830c-d83b343e5b5a","status":"pending","confidence_score":null,"verdict_source":null},{"id":"d51f9804-6080-4107-bda3-90e1bdd1f27d","status":"published","confidence_score":null,"verdict_source":null}]}
+200  {"count":1}
+400  {"ids":["Send the ids of the posts to check."]}
+400  {"ids":["'nope' isn't a post id."]}
+400  {"ids":["Check at most 50 posts at a time."]}
+```
+
+- Line 1 leaves out the id that doesn't exist; the order is the order you asked in. `confidence_score` is only
+  set for a verdict the pipeline made, and `verdict_source` tells who decided.
+- Line 2: this endpoint never checks the login, so an expired token can't turn a public read into a 401.
+  (`GET /api/v1/posts/{id}/` does check a token it is given, and the page then refreshes and retries.)
+
+#### Step 6: The author deletes a post
+
+**Where:** Terminal window 2.
+
+**What this does:** Tries to delete the opinion as nobody, as another user and as its author, then looks at the
+result everywhere. Deleting only hides the post: the row stays in the database.
+
+```powershell
+curl.exe -s -w '  %{http_code}\n' -X DELETE "$api/posts/$op/"                                                  # 1: nobody
+curl.exe -s -w '  %{http_code}\n' -X DELETE -H "Authorization: Bearer $bo" "$api/posts/$op/"                    # 2: another user
+curl.exe -s -w '  %{http_code}\n' -X DELETE -H "Authorization: Bearer $ada" "$api/posts/$op/"                   # 3: the author
+curl.exe -s -w '  %{http_code}\n' -X DELETE -H "Authorization: Bearer $ada" "$api/posts/$op/"                   # 4: the author again
+Fetch "/posts/$op/" $ada                                                                                       # 5: its page, even for the author
+[array]::IndexOf(@((curl.exe -s "$api/posts/" | ConvertFrom-Json).results.post.id), $op)                       # 6: the feed (-1 = not in it)
+python manage.py shell -c "from apps.posts.models import Post; p = Post.objects.get(pk='$op'); print(p.status, p.deleted_at is not None, p.content[:20])" | Select-Object -Last 1   # 7: the database
+```
+
+**You should see:**
+
+```text
+{"detail":"Authentication credentials were not provided.","code":"not_authenticated"}  401
+{"detail":"Only the author can do that.","code":"not_author"}  403
+  204
+{"detail":"Not found.","code":"not_found"}  404
+404  {"detail":"Not found.","code":"not_found"}
+-1
+published True I think the new tram
+```
+
+- 204 means done, with no body. Deleting twice is a 404 (the post is already hidden). `-1` on line 6 means the
+  post isn't in the feed any more.
+- Line 7 is the audit trail: the post is still there, still `published`, with `deleted_at` set (`True`).
+  Django Admin shows it too (step 10). A deleted fact post still counts toward the author's 24-hour fact
+  allowance, so deleting and reposting can't get around it.
+- Deleting doesn't use up the `post_create` throttle (30 posts an hour).
+
+#### Step 7: A removed post is a tombstone
+
+**Where:** Terminal window 2, in `backend\` with the venv active.
+
+**What this does:** Makes a third post, then sets it to `removed` straight in the database (what a moderator's
+Remove will do in Part 10, with a note kept only for staff). A visitor and another user get the same keys with
+the text, sources and note blanked; its author still sees everything.
+
+```powershell
+$fact2 = Mk $ada '{"content":"Rain is wet, says the weather office.","post_type":"fact","sources":["10.1000/xyz"]}'
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$fact2').update(status='removed', verdict_note='internal'), 'post set to removed')" | Select-Object -Last 1
+Fetch "/posts/$fact2/" $null @('status', 'content', 'sources', 'verdict_note', @{n='author'; e={$_.author.username}}, 'is_mine', @{n='keys'; e={@($_.PSObject.Properties).Count}})   # 1: the public
+Fetch "/posts/$fact2/" $bo @('status', 'content')                                                                             # 2: another user
+Fetch "/posts/$fact2/" $ada @('status', 'content', @{n='sources'; e={@($_.sources).Count}}, 'verdict_note', 'is_mine')        # 3: the author
+Fetch "/posts/status/?ids=$fact2"                                                                                             # 4: the poll
+[array]::IndexOf(@((curl.exe -s "$api/posts/" | ConvertFrom-Json).results.post.id), $fact2)                                  # 5: the feed (-1 = not in it)
+```
+
+**You should see** (the name is your `id`):
+
+```text
+1 post set to removed
+200  {"status":"removed","content":"","sources":[],"verdict_note":"","author":"part5_ada_190845","is_mine":false,"keys":23}
+200  {"status":"removed","content":""}
+200  {"status":"removed","content":"Rain is wet, says the weather office.","sources":1,"verdict_note":"internal","is_mine":true}
+200  {"results":[{"id":"cd39bb38-a178-4122-bc48-80a150bd7210","status":"removed","confidence_score":null,"verdict_source":null}]}
+-1
+```
+
+- Line 1 is the **tombstone**: still 23 keys, the author's name and the post time stay, but `content`, `sources`,
+  `verdict_note` (and the confidence and verdict source) are blank, so nothing of the post leaks.
+- Line 3: the author sees their own removed post in full. The removal reason and the appeal button come with
+  Parts 10 and 11.
+- Line 4: the poll answers `removed` (so an open tab learns it) with nothing else. Line 5 (`-1`): it is not in the feed.
+
+#### Step 8: The status endpoint is rate limited
+
+**Where:** Terminal window 2.
+
+**What this does:** Waits a minute so the allowance starts fresh, then asks for the status 125 times. The
+limit is `status_poll`: 120 a minute per client address. It counts only this endpoint, so reading the feed
+still works.
+
+```powershell
+Start-Sleep 61                                      # let the one-minute allowance start fresh
+1..125 | ForEach-Object { curl.exe -s -o NUL -w '%{http_code}\n' "$api/posts/status/?ids=$fact" } | Group-Object | Select-Object Count, Name
+curl.exe -s "$api/posts/status/?ids=$fact"
+curl.exe -s -D - -o NUL "$api/posts/status/?ids=$fact" | Select-String -Pattern '^(HTTP|retry-after)'
+curl.exe -s -o NUL -w 'the feed still answers: %{http_code}\n' "$api/posts/"
+```
+
+**You should see** (the seconds differ):
+
+```text
+
+Count Name
+----- ----
+  120 200
+    5 429
+{"detail":"Request was throttled. Expected available in 59 seconds.","code":"throttled"}
+HTTP/1.1 429 Too Many Requests
+Retry-After: 59
+the feed still answers: 200
+```
+
+- One tab polling at its fastest makes 6 requests a minute, so 120 is room for about 20 tabs behind one address.
+- Wait a minute before step 9 if you want to poll again from this terminal.
+
+#### Step 9: What a link preview or a search crawler sees
+
+**Where:** Terminal window 2, with `runserver` (window 1) and `npm run dev` (window 3) running.
+
+**What this does:** Asks the Next.js server for a post's page with no cookies and no JavaScript, the way a crawler
+does, and picks out the head tags. The server reads the post from Django itself, so the claim and its status are
+in the HTML.
+
+```powershell
+$html = (curl.exe -s "http://localhost:3000/p/$fact") -join "`n"
+[regex]::Matches($html, '<title>[^<]*</title>|(?:property|name)="(?:og:title|og:description|og:type|og:image|twitter:image|twitter:card)" content="[^"]*"|rel="canonical" href="[^"]*"') | ForEach-Object Value | Sort-Object -Unique
+"---"
+([regex]::Matches($html, [regex]::Escape('Solar capacity grew by roughly 30% worldwide last year.'))).Count
+curl.exe -s -o NUL -w 'deleted post: %{http_code}\n' "http://localhost:3000/p/$op"
+curl.exe -s -o NUL -w 'not an id: %{http_code}\n' http://localhost:3000/p/not-a-post-id
+$gone = (curl.exe -s -w "`nremoved post: %{http_code}" "http://localhost:3000/p/$fact2") -join "`n"
+[regex]::Matches($gone, '<title>[^<]*</title>|name="robots" content="[^"]*"|removed post: [0-9]+|Solar|Rain is wet') | ForEach-Object Value | Sort-Object -Unique
+```
+
+**You should see** (the first compile of the page in `next dev` takes a few seconds; the post id and the
+count of claim occurrences can differ):
+
+```text
+name="twitter:card" content="summary_large_image"
+name="twitter:image" content="http://localhost:3000/twitter-image.png"
+property="og:description" content="Fact · CHECKING FACTS…"
+property="og:image" content="http://localhost:3000/opengraph-image.png"
+property="og:title" content="Solar capacity grew by roughly 30% worldwide last year. · Rumor Zero"
+property="og:type" content="article"
+rel="canonical" href="http://localhost:3000/p/fb1fc4a4-232f-4d10-830c-d83b343e5b5a"
+<title>Solar capacity grew by roughly 30% worldwide last year. · Rumor Zero</title>
+---
+8
+deleted post: 404
+not an id: 404
+name="robots" content="noindex, nofollow"
+removed post: 200
+<title>Removed post · Rumor Zero</title>
+```
+
+- The title is the start of the claim plus ` · Rumor Zero`; the description is the type and the status label.
+  The share image is the site's static one (generating one per post would cost too much CPU on the free
+  Workers plan).
+- The claim appears several times (title, tags and the page itself). A post that was deleted, or an id that
+  isn't one, is a real HTTP 404.
+- A **removed** post is a 200 with the title "Removed post", `noindex`, and none of its text (the last command
+  finds neither "Solar" nor "Rain is wet").
+
+#### Step 10: Django Admin still shows a deleted post
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Opens the admin list of posts and finds the opinion `ada` deleted in step 6. The admin is
+read-only until Part 10.
+
+| URL | Expect |
+|---|---|
+| http://localhost:8000/admin/ | Sign in with the superuser you made in Part 0A. If it 404s, `ADMIN_URL_PATH` in `backend\.env` isn't `admin/`; use that path. |
+| http://localhost:8000/admin/posts/post/ | The posts, newest first, including "I think the new tram line…" with a date in the **Deleted at** column. The filter panel now has **By deleted at** with *All*, *Empty* and *Not empty*. |
+| Click **Not empty** under *By deleted at* | Only the deleted posts (the tram opinion). **Empty** shows everything that is still live. |
+
+- The same rules are checked by the automated tests (`test_api_delete.py` finds the row through the admin
+  changelist and both filter values).
+
+#### Step 11: The post page in the browser
+
+**Where:** Browser, with `runserver` (window 1) and `npm run dev` (window 3) running. Log in at
+http://localhost:3000/login as **`cy`**, with `part5-cy-<your id>@example.test` and `correct-horse-battery-42`
+(the id from step 3).
+
+**What this does:** Posts a fact as `cy`, opens its page from the card, and tries Copy link and Delete.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home, click **New post**, type `Global solar output doubled in six years, the agency says.`, choose **Fact**, put `doi:10.1038/s41558-024-02102` in Source 1, click **Add another source** and put `https://www.iea.org/reports/renewables-2023` in Source 2, click **Post fact, will be checked** | The post is at the top of Recent with **CHECKING FACTS…**. |
+| Look at its card's text and sources row | The claim is a link, and so is the whole card (the border darkens on hover). The row under it shows `doi.org/10.1038/s41558-024-02102 ↗` (opens doi.org in a new tab) and a blue `+1 more`. |
+| Click the claim (or `+1 more`) | The address becomes `http://localhost:3000/p/<id>` (with `#sources` for `+1 more`, which scrolls to the sources). The page: **← BACK TO HOME**, a white card with a pale grey left edge holding **FACT** and **CHECKING FACTS…**, the claim in large upright serif, `@part5_cy_<id>` with `Oct 9, 2026, 1:10 PM UTC` (a UTC time), then **Copy link** and **Delete** |
+| Look under the card | A **Verdict** card saying **Checking facts…** and "We're checking this claim. This page updates on its own when there is a result.", then **Sources (2)**: `01  DOI  10.1038/s41558-024-02102` and `02  LINK  https://www.iea.org/reports/renewables-2023`, each with an open-in-new icon |
+| Click an open-in-new icon | The source opens in a new tab (the DOI goes to `https://doi.org/10.1038/…`). |
+| Click **Copy link** | A dark toast says **Link copied.** Paste into the address bar: it is `http://localhost:3000/p/<id>`. |
+| Click **Delete** | A dialog **Delete this post?**: "It disappears from feeds and from its page right away. This can't be undone." and, because it is a fact, "A deleted fact post still counts toward your fact posts for the last 24 hours." with **Cancel** and a red **Delete post**. Click **Cancel**: nothing changes. |
+| Click **Delete**, then **Delete post** | You are back on `/home` with the toast **Post deleted.** and the post is gone from Recent (also after a reload). |
+| Open the old `/p/<id>` address | The page "Page not found" (a real 404, for you as well). |
+| Open a post you didn't write (any post by `ada`) | Same page, with **Copy link** but **no Delete**. |
+
+- Log out and open any `/p/<id>`: the same page without Delete, no login needed.
+- A post removed by a moderator (step 7's `fact2`): as a visitor, `/p/<id>` shows a white card with the author's
+  name, the date and "This post was removed by a moderator." and nothing else. Logged in as its author, the page
+  shows the text under a pale orange note "This post was removed by a moderator. Only you can see this text.",
+  a grey **REMOVED** badge next to **FACT**, and no Verdict card. In the feed, a card that is open when its post
+  is removed turns into a grey "Removed by a moderator" card within about 10 seconds.
+
+#### Step 12: Badges update by themselves
+
+**Where:** Browser (logged in as `cy`, with a fresh fact on screen) and Terminal window 2.
+
+**What this does:** Changes a pending post's status in the database while its page and the feed are open, the way
+the pipeline (Part 9) and the moderators (Part 10) will, and watches the badge change without a reload. The
+status endpoint is polled every 10 seconds at first, then every 15, 22 … up to every 60, only while the tab is
+on screen, and it stops after 10 minutes of visible time.
+
+First post another fact as `cy` (step 11's first row) and open its page; keep the feed (`/home`) open in a
+second tab. Copy the post's id from the address (`/p/<id>`). In window 2:
+
+```powershell
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='<id>').update(status='verified_true', verdict_source='pipeline', pipeline_verdict='true', confidence_score=94), 'post updated')" | Select-Object -Last 1
+```
+
+Replace `<id>` with the id you copied.
+
+**You should see** `1 post updated`, and in the browser, within about 10 seconds and with no reload:
+
+| Where | Expect |
+|---|---|
+| The post's page | The chip changes from **CHECKING FACTS…** to a teal **VERIFIED 94%**, the left edge turns teal, and the Verdict card says **Checked automatically · 94% confidence** and "This claim was found to be true." |
+| The feed tab (when you switch to it) | The card for that post shows **VERIFIED 94%** too. |
+
+- Watching the polling: open DevTools → Network, filter on `status`. Requests to `/api/v1/posts/status/?ids=…`
+  go out about every 10 s, then 15 s, 22 s … while a pending post is on screen, and **stop for good once nothing
+  is pending**. Switch to another browser tab: no requests while it is hidden, and one the moment you come back.
+  (These timings are covered by the automated tests with fake timers; the "badge changes within about 10 seconds"
+  part was also watched in headless Chromium.)
+- Try `status='removed'` instead: the feed card turns into a grey "Removed by a moderator" card, and the page
+  becomes the tombstone for everyone but the author.
+
+#### Step 13: A phone-sized window
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Checks the post page at phone width. In Firefox or Chrome press `F12`, then the "responsive
+design" / device toolbar button, and set the width to 390. Open any `/p/<id>` of a fact.
+
+| Do this | Expect |
+|---|---|
+| Open the post's page | A top bar with the logo and your avatar, then **← BACK TO HOME**, the card with the claim wrapped over several lines, the author line and a UTC date, and **Copy link** and **Delete** side by side. A bottom bar (Home, Search, New post, Notifications, Profile). **No sideways scrolling.** |
+| Scroll down | **Verdict** and **Sources (2)**: a long link wraps inside its row (`https://www.iea.org/reports/r` / `enewables-2023`), and the open-in-new icon stays at the right. |
+| Tap **Delete** | The dialog fits the screen, with **Cancel** and **Delete post**. |
+
+#### Step 14: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts and their posts (the posts go with them). In window 2, in `backend\` with the
+  venv active:
+
+  ```powershell
+  python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part5-').delete())" | Select-Object -Last 1
+```
+
+  After one clean run of this guide it prints `(12, {'posts.Post': 6, 'account.EmailAddress': 3, 'accounts.User': 3})`: how many rows went in all, and per
+  table (6 posts: the three `ada` made in steps 3 and 7, plus the ones you made as `cy` in steps 11 and 12, so your
+  count differs; a deleted post is still a row). Nothing else is touched. (The E2E tests' accounts stay in your local database, as in earlier parts: Django
+  Admin → Users deletes them.)
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
   wipes the whole local database, which is destructive.
 - No secret was used or printed in this part: the only values in the commands are Cloudflare's public test

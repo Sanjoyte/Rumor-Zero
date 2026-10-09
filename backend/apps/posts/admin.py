@@ -9,7 +9,8 @@ class PostAdmin(admin.ModelAdmin):
     actions, `moderation.services`), so nothing may bypass them from here."""
 
     list_display = ("excerpt", "post_type", "status", "author", "created_at", "deleted_at")
-    list_filter = ("post_type", "status")
+    # "Deleted by author": the author's soft delete keeps the row, so a moderator can still find it.
+    list_filter = ("post_type", "status", ("deleted_at", admin.EmptyFieldListFilter))
     search_fields = ("content", "author__username")
     list_select_related = ("author",)
     show_full_result_count = False

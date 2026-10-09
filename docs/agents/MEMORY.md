@@ -235,3 +235,27 @@ in `task.md`; transient continuation state belongs in `HANDOFF.md`.
   - **A `fieldset disabled` is the cheap way to lock a whole form** (textarea, inputs, the segmented control and add/remove buttons all disable natively) while the modal's × stays usable. A modal can be closed mid-request (Esc, ×), so the provider, not the modal, owns the request.
   - **Playwright won't click an `aria-disabled` button** without `force: true` (already noted in Part 2); in unit tests, closing a modal with `{Escape}` while a button is disabled sends the key to `body`, not the dialog: click ×.
 - **Evidence:** Part 4 implementation (`ComposerProvider.tsx`, `useCursorFeed.ts`, `ComposerModal.tsx`).
+
+### 2026-10-09 — Next 16.3.8 metadata and DRF facts that Part 5's post page depends on
+
+- **Applies to:** Parts 5, 6 (`/u/[username]` metadata), 12, 15, 18, and every Next or DRF upgrade.
+- **Facts (read in the installed source, then pinned by tests):**
+  - **A page-level `openGraph` or `twitter` replaces the parent's whole object** (`next/dist/lib/metadata/resolve-metadata.js`, `mergeMetadata`: `newResolvedMetadata.openGraph = resolveOpenGraph(metadata.openGraph…)`), and the root's file-convention share image is merged only at the root segment (`mergeStaticMetadata`). A page that sets `openGraph` without `images` loses `og:image`, `siteName` and `type`; OG and Twitter titles also get **no** title template. `post-metadata.ts` sets them all, and names `/opengraph-image.png` and `/twitter-image.png`, which `brand-guard.test.ts` normally forbids outside the brand files (the two metadata files are allow-listed). Any later page with its own `openGraph` (profiles in Part 6) needs the same.
+  - `next dev` and `next start` answer `curl /p/<id>` with the tags in the HTML (title, `og:*`, `twitter:*`, canonical, `robots`), so the crawler check is a plain `curl | grep`.
+  - **A public DRF GET still authenticates a Bearer token it is given:** `JWTAuthentication` makes a stale token a 401 even under `AllowAny`. The page client refreshes and retries; `PostStatusView` sets `authentication_classes = []` (it never needs the user) and the poller sends `token: false`.
+  - **A `<uuid:pk>` URL converter answers Django's HTML 404** (URL resolution fails before DRF's handler). Routes take `<str:post_id>` and the view parses it with `uuid.UUID`; the literal `posts/status/` route must come first.
+  - `Post.updated_at` is `auto_now`: `save(update_fields=[...])` must list `"updated_at"` or it isn't bumped. `delete_post` re-reads the row with `select_for_update().not_deleted()` inside `atomic()`, so two simultaneous deletes give one success and one `PostNotFound` (test: `run_together`, `transaction=True`).
+  - A throttle test for `status_poll` makes the real 120 requests (rates are bound at import, see the Part 4 entry); it takes about 1 s.
+- **Evidence:** Part 5 plan and implementation; `test_api_detail.py`, `test_api_delete.py`, `test_api_status.py`, `post-metadata.test.ts`, `e2e/post-detail.spec.ts`.
+
+### 2026-10-09 — Frontend facts from Part 5 (StrictMode, polling, the E2E status flip)
+
+- **Applies to:** every part with a client effect that fetches (Parts 6, 7, 13), and every E2E test that needs a status change.
+- **Facts:**
+  - **StrictMode runs effect → cleanup → effect on mount in `next dev`.** A cleanup that aborts the request, plus an "already fetched" marker set *before* the request finishes, leaves the page without data: the author never got `is_mine` (and so no Delete button) when arriving from a card. Mark a viewer as fetched in the success handler. The bug only shows when the page mounts after the session settled (a client navigation): a unit test must mount `PostDetail` behind a `useAuth().status === "authenticated"` gate inside `<StrictMode>`; the mutation of the fix fails it. The E2E suite found it first.
+  - `react-hooks/set-state-in-effect` (eslint-config-next) refuses `setState` in an effect body: put "go to loading and refetch" in the `retry` callback, not in an effect on a counter.
+  - **Polling results are an overlay** (`status-overlay.ts`), not edits to `useCursorFeed`'s pages: the feed keeps owning its pages, and a reload can't resurrect an older status. `useStatusPolling` filters its own ids (settled or vanished ones drop out), so consumers pass the posts *loaded* as pending without a circular dependency.
+  - The visible-time budget uses `document.visibilityState` through `vi.spyOn(document, "visibilityState", "get")` in tests and `act(() => vi.advanceTimersByTimeAsync(…))` for timers.
+  - **The E2E status flip** (`e2e/helpers.ts` `setPostState`) runs `manage.py shell -c` with `backend/.venv` against the database the E2E backend uses (the same env: `REDIS_URL=""`, `EMAIL_PROVIDER=file`). A fact needs `verdict_source`, `pipeline_verdict` and `confidence_score` set with `status='verified_true'` to satisfy the database checks. A reused (not Playwright-started) `runserver` must also use `EMAIL_PROVIDER=file`, or `signUpVerified` can't read the mail.
+  - A `VerdictBlock` for a removed post rendered an empty card (its `explain()` has no text for `removed`): found only by looking at the author's page, now `null` and tested.
+- **Evidence:** Part 5 implementation (`usePostDetail.ts`, `useStatusPolling.ts`, `PostDetail.test.tsx`, `e2e/post-detail.spec.ts`).

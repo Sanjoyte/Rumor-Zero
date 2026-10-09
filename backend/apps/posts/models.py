@@ -53,9 +53,14 @@ class ArrayPosition(Func):
 
 
 class PostQuerySet(models.QuerySet):
+    def not_deleted(self):
+        """Everything the author hasn't deleted: removed posts included (the detail page shows a
+        tombstone for them, and the author still sees their own)."""
+        return self.filter(deleted_at__isnull=True)
+
     def visible(self):
         """What every public list shows: not deleted by the author, not removed by a moderator."""
-        return self.filter(deleted_at__isnull=True).exclude(status=PostStatus.REMOVED)
+        return self.not_deleted().exclude(status=PostStatus.REMOVED)
 
     def for_list(self):
         """One query for a list of cards: the author joined in, the raw pipeline blob left out."""

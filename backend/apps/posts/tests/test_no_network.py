@@ -54,6 +54,11 @@ def test_creating_a_post_with_sources_makes_no_network_request(blocked, auth_cli
     assert response.status_code == 201, response.content
     # Reading it back (list and sources display) is network-free too.
     assert client.get("/api/v1/posts/").status_code == 200
+    # ...and so are the detail, the status poll and the delete (Part 5).
+    post_id = response.json()["id"]
+    assert client.get(f"/api/v1/posts/{post_id}/").json()["sources"]
+    assert client.get("/api/v1/posts/status/", {"ids": post_id}).status_code == 200
+    assert client.delete(f"/api/v1/posts/{post_id}/").status_code == 204
     assert blocked == []
 
 

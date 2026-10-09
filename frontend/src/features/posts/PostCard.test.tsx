@@ -180,4 +180,44 @@ describe("PostCard", () => {
     );
     expect(screen.getByText("A very long display name indeed")).toHaveClass("truncate");
   });
+
+  describe("the link to the detail page (Part 5)", () => {
+    const HREF = "/p/11111111-1111-4111-8111-111111111111";
+    const SOURCES = [
+      { value: "10.1038/s41558-024-02102", kind: "doi" as const },
+      { value: "https://www.iea.org/reports/renewables-2023", kind: "url" as const },
+    ];
+
+    it("makes the claim a link, without prefetch, when the card has an address", () => {
+      render(<PostCard {...BASE} href={HREF} />);
+      const link = screen.getByRole("link", { name: /Solar capacity grew/ });
+      expect(link).toHaveAttribute("href", HREF);
+      expect(link.className).toContain("after:absolute");
+      expect(link.className).toContain("after:inset-0");
+    });
+
+    it("stays inert without an address", () => {
+      render(<PostCard {...BASE} />);
+      expect(screen.queryByRole("link")).toBeNull();
+    });
+
+    it("keeps the source links separate, above the card link, and sends '+N more' to #sources", () => {
+      render(<PostCard {...BASE} href={HREF} sources={SOURCES} />);
+      const links = screen.getAllByRole("link");
+      expect(links).toHaveLength(3);
+      const source = screen.getByRole("link", { name: /doi\.org\/10\.1038/ });
+      expect(source).toHaveAttribute("href", "https://doi.org/10.1038/s41558-024-02102");
+      expect(source.className).toContain("z-10");
+      const more = screen.getByRole("link", { name: "+1 more" });
+      expect(more).toHaveAttribute("href", `${HREF}#sources`);
+      expect(more.className).toContain("z-10");
+      // No link sits inside another.
+      for (const link of links) expect(link.querySelector("a")).toBeNull();
+    });
+
+    it("never links the removed tombstone", () => {
+      render(<PostCard {...BASE} href={HREF} status="removed" />);
+      expect(screen.queryByRole("link")).toBeNull();
+    });
+  });
 });

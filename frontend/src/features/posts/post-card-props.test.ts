@@ -27,6 +27,7 @@ describe("toPostCardProps", () => {
       appealPending: false,
       createdAt: "2026-10-08T12:00:00Z",
       sources: [{ value: "10.1000/xyz", kind: "doi" }],
+      href: "/p/11111111-1111-4111-8111-111111111111",
     });
   });
 

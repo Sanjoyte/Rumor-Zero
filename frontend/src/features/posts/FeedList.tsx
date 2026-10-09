@@ -9,6 +9,7 @@ import { PostCard } from "./PostCard";
 import { PostCardSkeleton } from "./PostCardSkeleton";
 import { feedErrorMessage, POST_MESSAGES } from "./messages";
 import { toPostCardProps } from "./post-card-props";
+import { applyStatus, type StatusOverlay } from "./status-overlay";
 import { feedItemKey } from "./posts-api";
 import type { CursorFeed } from "./useCursorFeed";
 
@@ -17,8 +18,21 @@ import type { CursorFeed } from "./useCursorFeed";
  * empty state, the cards, and Load more with b1's "You're caught up." end line. A failed Load more
  * keeps the list and shows an inline error beside the button, which tries again.
  */
-export function FeedList({ feed }: { feed: CursorFeed<FeedItem> }) {
-  const { phase, items } = feed;
+export function FeedList({
+  feed,
+  statusUpdates = {},
+  gone,
+}: {
+  feed: CursorFeed<FeedItem>;
+  /** Polled statuses laid over the loaded posts (Part 5): a badge changes without a reload. */
+  statusUpdates?: StatusOverlay;
+  /** Posts the poll found deleted: they disappear. */
+  gone?: ReadonlySet<string>;
+}) {
+  const { phase } = feed;
+  const items = gone
+    ? feed.items.filter((i) => i.kind !== "post" || !gone.has(i.post.id))
+    : feed.items;
 
   if (phase === "idle" || phase === "loading") {
     return (
@@ -55,7 +69,10 @@ export function FeedList({ feed }: { feed: CursorFeed<FeedItem> }) {
       {items.map((item) =>
         // Reposts arrive in Part 7B (Following and profiles; never in Recent).
         item.kind === "post" ? (
-          <PostCard key={feedItemKey(item)} {...toPostCardProps(item.post)} />
+          <PostCard
+            key={feedItemKey(item)}
+            {...toPostCardProps(applyStatus(item.post, statusUpdates))}
+          />
         ) : null,
       )}
       {feed.moreError !== null && <Alert tone="error">{POST_MESSAGES.moreFailed} Try again.</Alert>}

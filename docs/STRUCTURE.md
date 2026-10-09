@@ -76,6 +76,10 @@ rumor-zero/
 │   │   │                            pagination.py (FeedPagination: feed envelope + cursor guard), views.py (GET/POST
 │   │   │                            /posts/, /me/fact-quota/), urls.py, admin.py (read-only), migrations/0001_initial.py,
 │   │   │                            tests/ (factories, conftest, source_vectors.json shared with the frontend)
+│   │   │                        ✅ 5 PostQuerySet.not_deleted(), services.delete_post (row lock, soft delete), PostNotFound/NotPostAuthor,
+│   │   │                            NotAuthorError (403 `not_author`), PostDetailView (GET public, DELETE author), PostStatusView
+│   │   │                            (public, unauthenticated, `status_poll` throttle), the tombstone rule in PostSerializer, admin
+│   │   │                            "deleted at" filter, tests test_api_detail/delete/status
 │   │   ├── social/              6–7 Follow, Like, Comment; 7B Bookmark, Repost, mixed Following feed
 │   │   ├── reports/             8   Report + windowed threshold
 │   │   ├── pipeline/            9   contract.py (dataclasses), clients.py (stub/http), routing.py (pure functions; imports
@@ -144,7 +148,7 @@ rumor-zero/
 │       │   ├── (app)/           ✅ 0C AppShell (sidebar/top bar/mobile nav) + placeholders for every nav destination
 │       │   │   ├── layout.tsx           ✅ 1 route guard (PROTECTED_PREFIXES → /login?next=), loading skeleton, Log out
 │       │   │   ├── home/                    "/home" ← b1 (4, following tab 6, reposts 7B, pinned emergencies 11C)
-│       │   │   ├── p/[id]/                  "/p/:id" ← b3 (5, comments 7, repost/bookmark 7B, appeal 11, stats 11D)
+│       │   │   ├── p/[id]/                  "/p/:id" ✅ 5 ← b3 (light SSR + generateMetadata; PostDetail; comments 7, repost/bookmark 7B, appeal 11, stats 11D)
 │       │   │   ├── bookmarks/               "/bookmarks" ← b1 layout (7B)
 │       │   │   ├── search/                  ← b4 (12)
 │       │   │   ├── u/[username]/            ← c1 (6, credibility 11B/11D)
@@ -172,7 +176,8 @@ rumor-zero/
 │       │   ├── posts/           ✅ 0B PostCard (props only); ✅ 4 SourceLink, PostCardSkeleton, sources.ts (client mirror of validators.py),
 │       │   │                        posts-api.ts, useCursorFeed (generic), FeedList, ComposerProvider, ComposerModal, SourceFields,
 │       │   │                        ComposerTrigger, HomeFeed, draft.ts, quota.ts, messages.ts, post-card-props.ts (+ test-helpers.tsx);
-│       │   │                        5, 9  PostDetail, useStatusPolling;
+│       │   │                        ✅ 5 PostDetail, usePostDetail, VerdictBlock, SourceList, CopyLinkButton, DeletePostModal, post-metadata.ts,
+│       │   │                            useStatusPolling + status-overlay.ts (PostCard/SourceLink link to the page; FeedList/HomeFeed poll);
 │       │   │                        11C EmergencyChip, PinnedEmergencies; 11D PostStats
 │       │   ├── social/          6–7  FollowButton, UserRow, ProfileHeader, LikeButton, CommentList, CommentComposer;
 │       │   │                        7B RepostButton, BookmarkButton, RepostHeader, UnavailablePostCard
@@ -186,14 +191,15 @@ rumor-zero/
 │       │   └── dev/             ✅ 0B  UiGallery and its sections, served at /dev/ui (404 in production builds); 0C ShellPreview (/dev/shell)
 │       ├── lib/
 │       │   ├── api/             ✅ 0C  client.ts (fetch wrapper: base "/api", bearer token, single-flight 401 hook with one retry,
-│       │   │                            error normalisation), types.ts (API shapes from ARCHITECTURE §9), relay.ts (server-only relay logic)
+│       │   │                            error normalisation), types.ts (API shapes from ARCHITECTURE §9), relay.ts (server-only relay logic);
+│       │   │                            ✅ 5 backend-origin.ts (the BACKEND_ORIGIN rule, shared), server.ts (anonymous server-side post read for /p/[id])
 │       │   ├── auth/            ✅ 0C token-store.ts (memory only), refresh-lock.ts (Web Locks API); ✅ 1 session.ts (framework-free
 │       │   │                            session: bootstrap, schedule, backoff, broadcasts), AuthProvider.tsx (React binding),
 │       │   │                            auth-api.ts, jwt.ts, session-hint.ts, next-path.ts (safeNextPath), route-guard.ts
 │       │   │                            ✅ 2 email-key.ts (decodes and validates the key route params); auth-api.ts gains the verify/reset/resend calls
 │       │   ├── turnstile.ts     ✅ 1  loads Cloudflare's Turnstile script (explicit render) once
 │       │   ├── brand-assets.json ✅ 0D  generated list of logo assets (read by Logo and manifest.ts); brand-guard.test.ts guards the rule
-│       │   └── cn.ts, format.ts, password-strength.ts, post-display.ts  ✅ 0B  className joiner, relative time / number formatting (✅ 4 countCharacters: code points),
+│       │   └── cn.ts, format.ts, password-strength.ts, post-display.ts  ✅ 0B  className joiner, relative time / number formatting (✅ 4 countCharacters: code points; ✅ 5 formatFullDateTime: exact UTC time),
 │       │                                advisory password score, pure stripe + badge rules (ARCHITECTURE §4 table)
 │       └── test/setup.ts        ✅ 0B  RTL + jest-dom setup for Vitest, plus a jsdom shim for <dialog>
 │

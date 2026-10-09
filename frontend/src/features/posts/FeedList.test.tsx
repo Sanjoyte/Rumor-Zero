@@ -118,4 +118,57 @@ describe("FeedList", () => {
     render(<FeedList feed={feedWith({ items: [repost, entry(post("a"))] })} />);
     expect(screen.getAllByRole("article")).toHaveLength(1);
   });
+
+  describe("polled statuses (Part 5)", () => {
+    const pendingFact = (id: string) =>
+      post(id, { post_type: "fact", status: "pending", is_mine: false });
+
+    it("lays a polled status over the card, with its confidence", () => {
+      const items = [entry(pendingFact("a")), entry(pendingFact("b"))];
+      render(
+        <FeedList
+          feed={feedWith({ items })}
+          statusUpdates={{
+            a: {
+              id: "a",
+              status: "verified_true",
+              confidence_score: "94.00",
+              verdict_source: "pipeline",
+            },
+          }}
+        />,
+      );
+      const [first, second] = screen.getAllByRole("article");
+      expect(first).toHaveTextContent("VERIFIED 94%");
+      expect(first).not.toHaveTextContent("CHECKING FACTS…");
+      expect(second).toHaveTextContent("CHECKING FACTS…");
+    });
+
+    it("turns a card whose post was removed into the tombstone", () => {
+      render(
+        <FeedList
+          feed={feedWith({ items: [entry(pendingFact("a"))] })}
+          statusUpdates={{
+            a: { id: "a", status: "removed", confidence_score: null, verdict_source: null },
+          }}
+        />,
+      );
+      const card = screen.getByRole("article");
+      expect(card).toHaveTextContent("Removed by a moderator");
+      expect(card).not.toHaveTextContent("Content of a");
+    });
+
+    it("hides a post the poll found deleted", () => {
+      const items = [entry(pendingFact("a")), entry(pendingFact("b"))];
+      render(<FeedList feed={feedWith({ items })} gone={new Set(["a"])} />);
+      const cards = screen.getAllByRole("article");
+      expect(cards).toHaveLength(1);
+      expect(cards[0]).toHaveTextContent("Content of b");
+    });
+
+    it("links every card to its page", () => {
+      render(<FeedList feed={feedWith({ items: [entry(post("a"))] })} />);
+      expect(screen.getByRole("link", { name: /Content of a/ })).toHaveAttribute("href", "/p/a");
+    });
+  });
 });

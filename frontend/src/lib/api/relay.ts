@@ -5,6 +5,8 @@
  * Server-only. Never import this from a client component: it reads PROXY_SHARED_SECRET.
  */
 
+import { parseBackendOrigin } from "./backend-origin";
+
 /** Render's free tier takes about a minute to wake up. */
 export const RELAY_TIMEOUT_MS = 70_000;
 
@@ -40,7 +42,6 @@ export const RESPONSE_HEADER_ALLOWLIST = [
 
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 const GATEWAY_STATUSES = new Set([502, 503, 504]);
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 /** A plausible IPv4/IPv6 literal. Django re-parses it strictly; this only keeps junk out. */
 const IP_LITERAL = /^[0-9A-Fa-f:.]{2,45}$/;
 /** Encoded "/", "\" and NUL would be decoded by Django into a different path than we checked. */
@@ -82,20 +83,11 @@ export function backendWaking(): Response {
  * never returned or logged.
  */
 export function readConfig(env: RelayEnv): RelayConfig | { invalid: string } {
-  let url: URL;
-  try {
-    url = new URL(env.BACKEND_ORIGIN ?? "");
-  } catch {
-    return { invalid: "BACKEND_ORIGIN" };
-  }
-  const plainOrigin = url.pathname === "/" && !url.search && !url.hash && !url.username;
-  // The relay adds the shared secret, so it may only travel in clear to this machine.
-  const safeScheme =
-    url.protocol === "https:" || (url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname));
-  if (!plainOrigin || !safeScheme) return { invalid: "BACKEND_ORIGIN" };
+  const origin = parseBackendOrigin(env.BACKEND_ORIGIN);
+  if (!origin) return { invalid: "BACKEND_ORIGIN" };
   const secret = env.PROXY_SHARED_SECRET ?? "";
   if (!secret) return { invalid: "PROXY_SHARED_SECRET" };
-  return { origin: url.origin, secret };
+  return { origin, secret };
 }
 
 /**

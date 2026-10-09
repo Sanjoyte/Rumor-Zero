@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { TabPanel, Tabs } from "@/components/ui/Tabs";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { ComposerTrigger } from "./ComposerTrigger";
 import { useComposer } from "./ComposerProvider";
 import { FeedList } from "./FeedList";
 import { feedItemKey, fetchRecentFeed } from "./posts-api";
+import { pendingPostIds } from "./status-overlay";
 import { useCursorFeed } from "./useCursorFeed";
+import { useStatusPolling } from "./useStatusPolling";
 
 const TABS = [{ id: "recent", label: "Recent" }];
 const PREFIX = "home-feed";
@@ -28,6 +30,9 @@ export function HomeFeed() {
     resetKey: user?.id ?? null,
   });
   const { prepend } = feed;
+  // "CHECKING FACTS…" badges update by themselves (Part 5): visible tab only, 10 s backing off to 60 s.
+  const pendingIds = useMemo(() => pendingPostIds(feed.items), [feed.items]);
+  const polling = useStatusPolling(pendingIds);
 
   useEffect(
     () =>
@@ -43,7 +48,7 @@ export function HomeFeed() {
       <Tabs tabs={TABS} value="recent" onChange={() => {}} label="Feed" idPrefix={PREFIX} />
       <ComposerTrigger />
       <TabPanel idPrefix={PREFIX} tab="recent" selected>
-        <FeedList feed={feed} />
+        <FeedList feed={feed} statusUpdates={polling.updates} gone={polling.gone} />
       </TabPanel>
     </div>
   );

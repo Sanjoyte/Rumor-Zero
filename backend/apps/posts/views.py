@@ -1,6 +1,10 @@
+import uuid
+
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
+from rest_framework import serializers
+from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
@@ -12,6 +16,7 @@ from apps.posts.exceptions import (
     EmergencyUnavailableError,
     FactPostsPausedError,
     FactQuotaExceededError,
+    NotAuthorError,
 )
 from apps.posts.models import Post
 from apps.posts.pagination import FeedPagination
@@ -20,7 +25,20 @@ from apps.posts.serializers import (
     PostSerializer,
     fact_quota_data,
     feed_item,
+    status_item,
 )
+
+# `GET /api/v1/posts/status/?ids=` takes at most this many posts (ARCHITECTURE §9).
+MAX_STATUS_IDS = 50
+
+
+def parse_post_id(value):
+    """The post id from the URL, or None. A malformed id is a JSON 404 from the view: a `<uuid:>`
+    URL converter would answer Django's HTML 404 instead."""
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        return None
 
 
 @method_decorator(never_cache, name="dispatch")
@@ -84,3 +102,79 @@ class FactQuotaView(APIView):
 
     def get(self, request):
         return Response(fact_quota_data(services.fact_quota(request.user)))
+
+
+@method_decorator(never_cache, name="dispatch")
+class PostDetailView(APIView):
+    """`GET /api/v1/posts/{id}/` (public) and `DELETE …/{id}/` (the author's soft delete).
+
+    A deleted post is 404 for everyone, its author included. A removed post is the full object for
+    its author and a tombstone for everyone else (`PostSerializer` blanks it). Like `PostListView`,
+    permissions depend on the method. DELETE has no throttle of its own.
+    """
+
+    def get_permissions(self):
+        return [IsAuthenticated()] if self.request.method == "DELETE" else [AllowAny()]
+
+    def get(self, request, post_id):
+        pk = parse_post_id(post_id)
+        post = None if pk is None else Post.objects.not_deleted().for_list().filter(pk=pk).first()
+        if post is None:
+            raise NotFound
+        return Response(PostSerializer(post, context={"request": request}).data)
+
+    def delete(self, request, post_id):
+        pk = parse_post_id(post_id)
+        if pk is None:
+            raise NotFound
+        try:
+            services.delete_post(post_id=pk, user=request.user)
+        except services.PostNotFound:
+            raise NotFound from None
+        except services.NotPostAuthor:
+            raise NotAuthorError from None
+        return Response(status=204)
+
+
+@method_decorator(never_cache, name="dispatch")
+class PostStatusView(APIView):
+    """`GET /api/v1/posts/status/?ids=a,b`: the live status of up to 50 posts, for the badge poller.
+
+    Public and uncached. It never authenticates (`authentication_classes = []`): a stale Bearer
+    token would otherwise turn a public read into a 401, and the answer doesn't depend on who asks.
+    Throttled per client IP by `status_poll`. Deleted and unknown ids are left out; a removed post
+    answers `status: "removed"` and nothing else.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "status_poll"
+
+    def get(self, request):
+        ids = self._ids(request.query_params.get("ids", ""))
+        posts = {
+            post.pk: post
+            for post in Post.objects.not_deleted()
+            .filter(pk__in=ids)
+            .only("id", "status", "confidence_score", "verdict_source")
+        }
+        return Response({"results": [status_item(posts[pk]) for pk in ids if pk in posts]})
+
+    @staticmethod
+    def _ids(raw):
+        parts = [part.strip() for part in raw.split(",") if part.strip()]
+        if not parts:
+            raise serializers.ValidationError({"ids": ["Send the ids of the posts to check."]})
+        ids = []
+        for part in parts:
+            pk = parse_post_id(part)
+            if pk is None:
+                raise serializers.ValidationError({"ids": [f"{part[:40]!r} isn't a post id."]})
+            if pk not in ids:
+                ids.append(pk)
+        if len(ids) > MAX_STATUS_IDS:
+            raise serializers.ValidationError(
+                {"ids": [f"Check at most {MAX_STATUS_IDS} posts at a time."]}
+            )
+        return ids

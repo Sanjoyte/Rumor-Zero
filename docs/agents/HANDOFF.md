@@ -6,19 +6,19 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 5 (Post detail, sharing, deletion, status polling): planned and approved**
-  (2026-10-09), **not started.** Parts 0A, 0B, 0D, 0C, 1, 2, 3 and 4 are done; Part 5's only
-  dependency (Part 4) is done (`task.md`, both places, 2026-10-09; committed as `2b1fb19`). Part 1 CI
-  is green (user-reported 2026-10-06); **Part 2, Part 3 and Part 4 CI have not run yet.**
+- **Part:** none. **Part 5 (Post detail, sharing, deletion, status polling) is done** (2026-10-09;
+  built from the approved plan; every required test and check green; `task.md` updated). Parts 0A, 0B,
+  0D, 0C, 1, 2, 3, 4 and 5 are done. Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4 and 5
+  CI have not run yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after saving the Part 5 plan; no code written).
-- **Phase:** plan approved, saved, uncommitted. The user commits it, then starts implementation.
+- **Owner:** none (Claude stopped after finishing Part 5; Part 6 is not started).
+- **Phase:** done, uncommitted. The user reviews and commits.
 - **Approved plan:**
   [`docs/agents/plans/part-5-post-detail-sharing-deletion-polling.md`](plans/part-5-post-detail-sharing-deletion-polling.md)
-  (status line says APPROVED; implement with Sonnet 5.5 · medium per `task.md`)
+  (status line now says IMPLEMENTED)
 - **Previous plans:**
   - [`part-4-posts-composer-recent-feed.md`](plans/part-4-posts-composer-recent-feed.md),
     implemented 2026-10-09;
@@ -28,9 +28,53 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-09 by Claude (Sonnet 5.5), Part 5 planning.
+- **Last updated:** 2026-10-09 by Claude (Sonnet 5.5), Part 5 implementation.
 
 ## Completed checkpoints
+
+- 2026-10-09 (Claude, Sonnet 5.5): **Part 5 implemented** (uncommitted). Started from HEAD `f0e15d0`
+  ("Plan Part 5", committed by the user), a clean tree that matched this file; Docker healthy, ports free.
+  - **Backend** (`backend/`):
+    - `apps/posts/`: `models.py` (`PostQuerySet.not_deleted()`), `serializers.py` (`shown_confidence`,
+      `status_item`, the tombstone rule in `PostSerializer`), `services.py` (`delete_post`, `PostNotFound`,
+      `NotPostAuthor`), `exceptions.py` (`NotAuthorError`), `views.py` (`PostDetailView`, `PostStatusView`),
+      `urls.py`, `admin.py` ("By deleted at" filter).
+    - `rumor_zero/settings.py` (`status_poll` 120/min).
+    - Tests: new `test_api_detail.py` (33), `test_api_delete.py` (22), `test_api_status.py` (17); changed
+      `test_models.py`, `test_no_network.py`, `apps/core/tests/test_settings.py` (eleven scopes).
+    - No migration.
+  - **Frontend** (`frontend/`):
+    - New `src/app/(app)/p/[id]/page.tsx`; `src/lib/api/{backend-origin,server}.ts`; in
+      `src/features/posts/`: `PostDetail`, `usePostDetail`, `VerdictBlock`, `SourceList`, `CopyLinkButton`,
+      `DeletePostModal`, `post-metadata.ts`, `useStatusPolling`, `status-overlay.ts`, a test for each, and
+      `posts-api.test.ts`; `e2e/post-detail.spec.ts`.
+    - Changed: `PostCard`, `SourceLink` (links), `post-card-props.ts`, `FeedList`, `HomeFeed`
+      (overlay, polling), `posts-api.ts`, `lib/api/{relay,types}.ts`, `lib/format.ts`
+      (`formatFullDateTime`), `brand-guard.test.ts` (allow-list), `e2e/helpers.ts` (`setPostState`),
+      `e2e/posts.spec.ts` (the opinion card now has one link) and the unit tests for those.
+  - **Docs:**
+    - ARCHITECTURE §3/§4/§9/§10, ANALYSIS b-2 "Removed", STRUCTURE, MEMORY (2 entries), `task.md`
+      (criteria, deviations, both status spots), the plan's status line.
+    - `docs/test-command.md`: a "Part 5" section in **both** guides (14 steps each) and one word in the
+      intro list; nothing else touched.
+  - No new service, dependency or env variable; no env file read or edited; `design/` untouched.
+  - **User decisions and defaults** are in `task.md` Part 5 (tombstone = 23 keys blanked; `status_poll`).
+  - **Deviations from the plan** (all in `task.md`): `useStatusPolling` filters its own ids; the origin
+    rule moved to `backend-origin.ts`; the brand guard allow-lists `post-metadata.ts`; the admin filter is
+    headed "By deleted at"; the redundant removed-confidence check was dropped.
+  - **Found and fixed on the way:** StrictMode aborted the signed-in detail fetch and the "already
+    fetched" marker was set too early (the author got no Delete button; found by E2E; the unit test
+    reproduces it); an empty "Verdict" card on a removed post (found in a screenshot); a page-level
+    `openGraph` drops the root's image (MEMORY).
+  - **Test-command notes:**
+    - The section is `### Part 5` inside each guide.
+    - The file has **no comment marker** at its bottom (as in Parts 3 and 4): it ends with the last cleanup
+      bullet of the Windows Part 5 section.
+    - The Linux bash blocks of steps 3 to 9, 12 and the cleanup were **extracted from the doc by script and
+      run verbatim** against live Django and `next dev`; the browser steps 11 to 13 were driven by headless
+      Chromium scripts (screenshots at 1280 and 390 px), and steps 1 and 2 are the commands listed in
+      "Validation of Part 5". The recorded cleanup line `(12, {'posts.Post': 6, …})` comes from a run that
+      also made browser posts; a bare run of steps 3 to 9 printed `(9, {'posts.Post': 3, …})`.
 
 - 2026-10-09 (Claude, Sonnet 5.5): **Part 5 planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `2b1fb19` ("Implemented Part 4: posts composer and Recent feed",
@@ -309,19 +353,65 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `2b1fb19` ("Implemented Part 4: posts composer and Recent feed", committed by the user).
-  **Uncommitted:** the new plan `docs/agents/plans/part-5-post-detail-sharing-deletion-polling.md` and
-  this file (`git status --short`). Everything else is the committed Part 4 state; no Part 5 code
-  exists yet.
-- As recorded at the end of Part 4 (not re-checked in the planning session, which ran no setup
-  command): Docker (Postgres 18 + Redis) up, no dev server running, ports 3000/8000 free. Verify with
-  `docker compose ps` before testing.
-- The local database has `posts.0001_initial` applied. The guide's `part4-*` test accounts and their
+- HEAD is `f0e15d0` ("Plan Part 5", committed by the user). **Uncommitted:** the whole Part 5
+  implementation: 37 modified files (this file included) and 27 new ones: 3 backend test files,
+  `frontend/src/app/(app)/p/[id]/page.tsx`, 18 files in `frontend/src/features/posts/`, 4 in
+  `frontend/src/lib/api/` and `frontend/e2e/post-detail.spec.ts` (`git status --short -uall`).
+- Docker (Postgres 18 + Redis) is up; no dev server is running; ports 3000/8000 are free (the servers
+  started for the manual checks were stopped).
+- The local database has `posts.0001_initial` applied (Part 5 adds no migration). The guide's `part4-*` test accounts and their
   posts were deleted at the end; accounts from the E2E and screenshot runs (`post_*`, `opinion_*`, `invalid_*`,
   `unverified_*`, `phone_*`, `shot_*`, …) and their posts remain (Django Admin → Users deletes them).
 - Ignored artifacts from the checks: `backend/tmp/mail/*.log`, `frontend/test-results/`,
   `frontend/playwright-report/`, and a production build in `frontend/.next/` made with an empty Google
   client ID (the last `npm run build` before the CI-mode E2E run).
+
+## Validation of Part 5 (2026-10-09)
+
+- **Backend** (`backend/`, venv, Postgres + Redis up), each exit 0:
+  - `python -m pytest` → **1160 passed** (was 1087); `pytest apps/posts` → **456 passed** (was 383):
+    `test_api_detail` 33, `test_api_delete` 22, `test_api_status` 17, `test_models` 70, `test_services` 24,
+    `test_admin` 4, `test_no_network` 4.
+  - `ruff check .` → "All checks passed!"; `ruff format --check .` → "106 files already formatted".
+  - `makemigrations --check --dry-run` → "No changes detected"; `manage.py check` → no issues.
+  - **Mutation checks** (a rule removed by hand, a test must fail), all caught: tombstone blanking
+    (content, note), the author exemption, the author check on delete, the delete row lock, the
+    `deleted_at` filter in the service, on the detail and on the status endpoint, the 50-id cap, the status
+    endpoint's `authentication_classes = []`, its throttle, the delete permission. One survivor was an
+    equivalent mutation (a redundant removed-confidence check) and was removed.
+- **Frontend** (`frontend/`), each exit 0: `npm run lint`, `lint:tokens`, `typecheck`, `format:check`;
+  `npm test` → **91 files, 1210 tests passed** (was 80 / 1089); `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build`
+  (routes: `ƒ /p/[id]` is new; `/home` still `○`).
+  - **Mutation checks**, all caught: the first delay, the visible-time budget, hidden-tab pause, restart for a
+    new id, the 50-id cap, dropping gone and settled ids, abort on unmount, ignoring aborted answers, the
+    overlay, hiding gone posts, the card link, the "+N more" link, the tombstone rule, the anonymous
+    no-refetch, a 404 as deleted, the busy guard, the fact-allowance note, `token: false`, the OG images,
+    the removed `noindex`, the copied origin, the SSR timeout, the SSR 404-versus-5xx split. The StrictMode
+    test fails on the old `usePostDetail`.
+- **E2E:** `npm run test:e2e` → **24 passed** (dev mode; 20 old + 4 new), and `CI=1 npm run test:e2e` after
+  the build → 24 passed (against `next start`).
+- **Manual, recorded in `docs/test-command.md` Part 5:**
+  - curl against `runserver` and `next dev` (the doc's own blocks, run verbatim): detail as visitor, other
+    user and author (23 keys); status (garbage token ignored, 400s for none, `nope` and 51 ids); delete
+    (401, 403 `not_author`, 204, then 404; the row still in the database); a removed post (tombstone for
+    visitor and other user, full for the author, `removed` in the poll, not in the feed); 120 × 200 then
+    5 × 429 with `Retry-After`; `/p/<id>` HTML (title, `og:*`, `twitter:*`, canonical, the claim 8 times;
+    404 for deleted and malformed ids; the removed post "Removed post" with `noindex` and none of its text).
+  - Headless Chromium: the card's links (claim, DOI, "+1 more" → `#sources`), the page (heading, `FACT`,
+    Verdict, Sources (2) as `01`/`02`, Copy link → clipboard = `http://localhost:3000/p/<id>`), the badge
+    turning into `VERIFIED 94%` about 10 s after a shell status change, the delete dialog and its toast,
+    the 404 page, the feed card turning into the tombstone about 10 s after a removal, the visitor's and
+    the author's removed-post pages, **0 px horizontal overflow** at 390 px and the delete dialog (350 px
+    wide) fitting.
+- **Not run:**
+  - **The Windows (PowerShell) blocks** of the new section (written from the Part 1 to 4 patterns), and CI on
+    GitHub (the user pushes).
+  - A person at a keyboard: the browser steps were driven by scripts. In particular a real **hidden tab**
+    was not observed (the pause and the 10-minute stop are covered by fake-timer tests), and neither was
+    DevTools' Network tab.
+  - The admin pages in a real browser (a Django-client test covers the changelist, the new filter and a
+    deleted row); a pixel comparison with Stitch b3 (layout and classes compared by eye); a Workers CPU
+    measurement of `/p/[id]` (Part 18).
 
 ## Validation of Part 4 (2026-10-09)
 
@@ -529,22 +619,21 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-**Implement Part 5 from the approved plan**
-([`plans/part-5-post-detail-sharing-deletion-polling.md`](plans/part-5-post-detail-sharing-deletion-polling.md)).
-
-1. **User:** commit the plan and this file. Optionally push so CI runs for Parts 2 to 4 and report the
-   result. Still open from Part 3: the real-Google check (`docs/test-command.md` Part 3, steps 7 and 8).
-2. **Agent** (fresh session, `/clear`; Sonnet 5.5 · medium), prompt:
-   `Implement only the approved Part 5 plan, validate it, update task.md and HANDOFF.md, then stop.`
-   First `git status`, `git diff` and `docker compose up -d`, then follow the plan's steps in order
-   (step 1: `PostQuerySet.not_deleted()`, `shown_confidence()`, the tombstone rule in `PostSerializer`,
-   `delete_post`, `NotAuthorError`, the `status_poll` scope).
-3. `task.md` Part 5 stays `[ ] Not started` until the implementation finishes (it was deliberately not
-   edited when the plan was approved).
+1. **User:** review the diff and the Part 5 section of `docs/test-command.md` (its Linux steps 3 to 9 take
+   about five minutes, plus a minute's wait in step 8; the browser steps 10 to 13 need a Next dev server).
+   Then commit, and push so CI runs; report the CI result (Part 2's to Part 5's jobs). Still open from
+   Part 3: the real-Google check (`docs/test-command.md` Part 3, steps 7 and 8).
+2. **Next part:** Part 6 (profiles, follows, Following feed), from `task.md`. Fresh session (`/clear`), first
+   `git status` and `docker compose up -d`. It reuses `useCursorFeed`, `FeedList`, `useStatusPolling` and
+   `status-overlay.ts`, and `/u/[username]` needs its own `openGraph` images if it sets `openGraph`
+   (MEMORY, 2026-10-09).
 
 ## Blockers or user decisions
 
 - None open.
+- User decisions for Part 5 (2026-10-09), now in ARCHITECTURE §3/§9 and ANALYSIS b-2: a removed post's public
+  view is the same 23 keys with the text, sources, note, confidence and verdict source blanked (the author
+  sees it in full); the public status endpoint has a `status_poll` throttle of 120/min per client IP.
 - User decisions for Part 5 (2026-10-09), to go into ARCHITECTURE §3/§9 when built: a removed post's
   public view is the same 23 keys with `content`, `sources`, `verdict_note`, `confidence_score` and
   `verdict_source` blanked (the author sees it in full); the public status endpoint gets a `status_poll`
@@ -557,15 +646,33 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 - User decisions for 0C (2026-10-01), in ARCHITECTURE §10: the reduced logged-out shell; phones get a
   top bar plus five bottom tabs with an account sheet; marketing links only to existing pages.
 
+## Follow-ups noted during Part 5 (still open)
+
+- **Part 6:** profile post lists reuse `useCursorFeed`, `FeedList` (pass `statusUpdates` and `gone`) and
+  `useStatusPolling`; a profile page that sets `openGraph` must set its images too.
+- **Part 7/7B:** counts and `*_by_me` (the post object already has the keys) and the action bar go on
+  `PostDetail`; comments sit below the Sources list; `PostCard` has no action bar yet.
+- **Part 10:** the review queue must skip posts with `deleted_at` set (the posts admin only filters them);
+  the admin stays read-only and has no "deleted" column filter label other than Django's "By deleted at".
+- **Part 11:** `RemovedPostCard` (public and author variants) replaces the detail page's basic tombstone and
+  the author's warning note; the removal reason, `can_appeal`, `appeal_status` and the appeal button come
+  with it; the `NotAuthorError` (403 `not_author`) is reusable for appeals.
+- **Part 11C:** the page's "Posted as an emergency on …" note; `emergency_active` is computed once per
+  request, so a page left open doesn't flip it (the poll doesn't carry it).
+- **Part 16:** the `status_poll` rate (120/min) is a guess to revisit with real usage; polling and delete
+  have no CSP impact; consider caching the SSR post read; the cursor guard for other lists (Part 4's item).
+- **Part 18:** Workers error 1102 (10 ms CPU) on `/p/[id]`: if it bites, the metadata-only fallback or
+  Workers Paid is the escape hatch (ANALYSIS c-35). Also confirm `AbortSignal.timeout` and `fetch` with
+  `cache: "no-store"` behave in the OpenNext build, and that `curl` of a deployed `/p/<id>` still shows the tags.
+- **Minor:** the author sees no Delete button until the signed-in fetch lands (the server render is the
+  anonymous view); a first `next dev` compile of `/p/[id]` takes a few seconds.
+- **Any Next upgrade:** re-read MEMORY "Next 16.3.8 metadata…" and run `post-metadata.test.ts` and
+  `e2e/post-detail.spec.ts` (the `curl` tag checks).
+
 ## Follow-ups noted during Part 4 (still open)
 
-- **Part 5:**
-  - `/p/[id]` and the detail endpoints; "+N more" on a card becomes a link; a `SourceList` for every
-    source (the helpers `sourceLabel`/`sourceHref` and `SourceLink` exist).
-  - Author soft-delete sets `deleted_at`: the quota still counts that post (by design); the feed already
-    leaves it out (`PostQuerySet.visible()`).
-  - Status polling for pending cards (`useStatusPolling`) is not started: a fact stays "CHECKING FACTS…"
-    until the page reloads.
+- **Part 5 (all done in Part 5):** `/p/[id]` and the detail endpoints, "+N more" as a link, `SourceList`,
+  the author's soft delete (the quota still counts the post, by design) and `useStatusPolling`.
 - **Part 6/7B:** `useCursorFeed`, `FeedList` and `FeedPagination` are written to be reused (a second tab,
   profile lists); reposts are skipped in `FeedList` for now (`item.kind === "post"` only).
 - **Part 9:** `routing.py` imports `is_active_emergency` from `apps/posts/emergency.py`; a fact post

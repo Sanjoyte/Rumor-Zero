@@ -106,7 +106,9 @@ test("post an opinion → OPINION in italic serif, no status badge and no source
   await expect(card.getByText("OPINION", { exact: true })).toBeVisible();
   await expect(card.getByRole("blockquote")).toHaveClass(/italic/);
   await expect(card.getByText("CHECKING FACTS…")).toHaveCount(0);
-  await expect(card.getByRole("link")).toHaveCount(0);
+  // Part 5: the claim is the card's one link, to the post's own page.
+  await expect(card.getByRole("link")).toHaveCount(1);
+  await expect(card.getByRole("link")).toHaveAttribute("href", /^\/p\/[0-9a-f-]{36}$/);
 });
 
 test("the composer blocks a bad post on the page, before anything is sent", async ({ page }) => {

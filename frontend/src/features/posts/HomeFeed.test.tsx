@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
@@ -12,6 +12,7 @@ import {
 } from "./test-helpers";
 
 const api = vi.hoisted(() => ({
+  fetchStatuses: vi.fn(),
   createPost: vi.fn(),
   fetchFactQuota: vi.fn(),
   fetchRecentFeed: vi.fn(),
@@ -31,6 +32,8 @@ const page = (ids: string[], nextCursor: string | null = null) => ({
 });
 
 beforeEach(() => {
+  api.fetchStatuses.mockReset();
+  api.fetchStatuses.mockResolvedValue([]);
   api.createPost.mockReset();
   api.fetchFactQuota.mockReset();
   api.fetchFactQuota.mockResolvedValue(makeQuota());
@@ -147,5 +150,106 @@ describe("HomeFeed", () => {
     await userEvent.click(screen.getByRole("button", { name: "Post opinion" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(cards()).toHaveLength(2);
+  });
+
+  describe("live badges (Part 5)", () => {
+    const pendingPage = () => ({
+      items: [
+        feedEntry(
+          makePost({
+            id: "f1",
+            content: "A pending claim",
+            post_type: "fact",
+            status: "pending",
+            is_mine: false,
+          }),
+        ),
+        feedEntry(makePost({ id: "o1", content: "An opinion", is_mine: false })),
+      ],
+      nextCursor: null,
+    });
+
+    it("updates a pending card's badge without a reload", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        api.fetchRecentFeed.mockResolvedValue(pendingPage());
+        api.fetchStatuses.mockResolvedValue([
+          {
+            id: "f1",
+            status: "verified_false",
+            confidence_score: "88.00",
+            verdict_source: "pipeline",
+          },
+        ]);
+        renderHome();
+        await waitFor(() => expect(cards()).toHaveLength(2));
+        expect(screen.getByText("CHECKING FACTS…")).toBeInTheDocument();
+        await act(() => vi.advanceTimersByTimeAsync(10_000));
+        // Only the pending post is asked about, never the opinion.
+        expect(api.fetchStatuses).toHaveBeenCalledWith(["f1"], expect.any(AbortSignal));
+        expect(await screen.findByText("FALSE 88%")).toBeInTheDocument();
+        expect(screen.queryByText("CHECKING FACTS…")).toBeNull();
+        expect(api.fetchRecentFeed).toHaveBeenCalledTimes(1); // no refetch of the feed
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("hides a post the poll no longer finds", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        api.fetchRecentFeed.mockResolvedValue(pendingPage());
+        api.fetchStatuses.mockResolvedValue([]);
+        renderHome();
+        await waitFor(() => expect(cards()).toHaveLength(2));
+        await act(() => vi.advanceTimersByTimeAsync(10_000));
+        await waitFor(() => expect(cards()).toHaveLength(1));
+        expect(screen.queryByText("A pending claim")).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("starts polling a fact you just posted", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        api.createPost.mockResolvedValue(
+          makePost({ id: "new1", content: "Fresh fact", post_type: "fact", status: "pending" }),
+        );
+        api.fetchStatuses.mockResolvedValue([
+          {
+            id: "new1",
+            status: "verified_true",
+            confidence_score: "90.00",
+            verdict_source: "pipeline",
+          },
+        ]);
+        renderHome();
+        await waitFor(() => expect(cards()).toHaveLength(2));
+        await userEvent.click(screen.getByRole("button", { name: /What do you want to say/ }));
+        await userEvent.click(screen.getByRole("radio", { name: "Fact" }));
+        await userEvent.type(screen.getByRole("textbox", { name: "Post text" }), "Fresh fact");
+        await userEvent.click(screen.getByRole("button", { name: "Post fact, will be checked" }));
+        await waitFor(() => expect(cards()).toHaveLength(3));
+        expect(api.fetchStatuses).not.toHaveBeenCalled();
+        await act(() => vi.advanceTimersByTimeAsync(10_000));
+        expect(api.fetchStatuses).toHaveBeenCalledWith(["new1"], expect.any(AbortSignal));
+        expect(await screen.findByText("VERIFIED 90%")).toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("asks nothing when no card is pending", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        renderHome();
+        await waitFor(() => expect(cards()).toHaveLength(2));
+        await act(() => vi.advanceTimersByTimeAsync(5 * 60_000));
+        expect(api.fetchStatuses).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

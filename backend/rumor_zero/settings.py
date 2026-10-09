@@ -182,6 +182,7 @@ REST_FRAMEWORK = {
         "bookmark": "300/hour",
         "avatar_upload": "5/day",
         "username_check": "30/min",
+        "status_poll": "120/min",
     },
 }
 

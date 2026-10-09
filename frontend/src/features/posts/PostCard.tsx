@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card } from "@/components/ui/Card";
 import { CategoryChip } from "@/components/ui/CategoryChip";
@@ -25,6 +26,12 @@ export interface PostCardProps {
   /** A fact post's sources (§4c): the card shows the first one and "+N more". */
   sources?: PostSource[];
   createdAt: string | Date;
+  /**
+   * Where the card opens (`/p/{id}`, Part 5). The claim text becomes a stretched link, so the whole
+   * card is clickable while the source links stay separate links above it. Without it the card is
+   * inert (the gallery, previews).
+   */
+  href?: string;
   /** Clock for the relative timestamp; tests and the gallery pass a fixed one. */
   now?: Date;
   className?: string;
@@ -45,6 +52,7 @@ export function PostCard({
   appealPending = false,
   sources = [],
   createdAt,
+  href,
   now,
   className,
 }: PostCardProps) {
@@ -117,11 +125,29 @@ export function PostCard({
               : "font-claim-opinion text-claim-opinion italic",
           )}
         >
-          {"\u201C"}
-          {content}
-          {"\u201D"}
+          {href ? (
+            // Not prefetched: every request is a Worker request (100k a day), and 20 cards would
+            // prefetch 20 pages.
+            <Link
+              href={href}
+              prefetch={false}
+              className="after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-secondary/30"
+            >
+              {"\u201C"}
+              {content}
+              {"\u201D"}
+            </Link>
+          ) : (
+            <>
+              {"\u201C"}
+              {content}
+              {"\u201D"}
+            </>
+          )}
         </blockquote>
-        {postType === "fact" && <SourceLink sources={sources} />}
+        {postType === "fact" && (
+          <SourceLink sources={sources} moreHref={href ? `${href}#sources` : undefined} />
+        )}
       </div>
     </Card>
   );

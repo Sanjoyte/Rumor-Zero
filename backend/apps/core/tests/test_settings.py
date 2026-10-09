@@ -357,7 +357,7 @@ def test_drf_defaults():
     assert "DEFAULT_THROTTLE_CLASSES" not in rest  # views opt in per scope
 
 
-def test_all_ten_throttle_scopes_parse_to_the_documented_rates():
+def test_all_eleven_throttle_scopes_parse_to_the_documented_rates():
     rates = project_settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
     hour, day, minute = 3600, 86400, 60
     expected = {
@@ -371,6 +371,7 @@ def test_all_ten_throttle_scopes_parse_to_the_documented_rates():
         "bookmark": (300, hour),
         "avatar_upload": (5, day),
         "username_check": (30, minute),
+        "status_poll": (120, minute),
     }
     assert {
         scope: SimpleRateThrottle.parse_rate(object(), rate) for scope, rate in rates.items()

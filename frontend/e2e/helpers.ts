@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import path from "node:path";
 import { expect, type Page } from "@playwright/test";
 import { waitForEmailLink } from "./mailbox";
 
@@ -63,4 +65,37 @@ export async function logOut(page: Page) {
   await page.getByRole("button", { name: "User menu" }).click();
   await page.getByRole("button", { name: "Log out" }).click();
   await expect(page).toHaveURL(/\/login$/);
+}
+
+const backendDir = path.resolve(__dirname, "../../backend");
+const python =
+  process.platform === "win32"
+    ? path.join(backendDir, ".venv", "Scripts", "python.exe")
+    : path.join(backendDir, ".venv", "bin", "python");
+
+/**
+ * Changes a post's status straight in the database, the way a moderator or the pipeline will
+ * (Parts 9 and 10) and the way the manual check does it in the Django shell. Runs the backend's own
+ * `manage.py shell` against the same database the E2E backend uses.
+ */
+export function setPostState(postId: string, state: "verified_true" | "removed") {
+  if (!/^[0-9a-f-]{36}$/.test(postId)) throw new Error("not a post id");
+  const fields =
+    state === "verified_true"
+      ? "status='verified_true', verdict_source='pipeline', pipeline_verdict='true', confidence_score=94"
+      : "status='removed'";
+  execFileSync(
+    python,
+    [
+      "manage.py",
+      "shell",
+      "-c",
+      `from apps.posts.models import Post; assert Post.objects.filter(pk='${postId}').update(${fields}) == 1`,
+    ],
+    {
+      cwd: backendDir,
+      env: { ...process.env, REDIS_URL: "", EMAIL_PROVIDER: "file", GOOGLE_OAUTH_CLIENT_ID: "" },
+      stdio: "pipe",
+    },
+  );
 }

@@ -1,4 +1,4 @@
-"""Creating posts and the fact quota (ARCHITECTURE §3, §4, §4b).
+"""Creating and deleting posts, and the fact quota (ARCHITECTURE §3, §4, §4b).
 
 Only this module and `apps/moderation/services.py` (Part 10) change `Post.status`. There is no HTTP
 here: the views turn these domain errors into responses.
@@ -34,6 +34,14 @@ class FactQuotaExceeded(Exception):
         super().__init__(f"{limit} fact posts in 24 hours")
         self.limit = limit
         self.next_slot_at = next_slot_at
+
+
+class PostNotFound(Exception):
+    """No such post, or the author already deleted it (a deleted post is hidden everywhere)."""
+
+
+class NotPostAuthor(Exception):
+    """Only the author can delete a post."""
 
 
 @dataclass(frozen=True)
@@ -109,3 +117,28 @@ def create_post(*, author, content, post_type, sources=(), is_emergency=False, n
             status=status,
             created_at=now,
         )
+
+
+def delete_post(*, post_id, user, now=None):
+    """The author's soft delete (D6): `deleted_at` is set and nothing else changes.
+
+    The status stays as it was, the row stays for the audit trail and the admin, and the post still
+    counts toward the fact quota. The row is locked and re-read as "not deleted", so two
+    simultaneous deletes give one success and one `PostNotFound`.
+    """
+    now = now or timezone.now()
+    with transaction.atomic():
+        post = (
+            Post.objects.select_for_update()
+            .not_deleted()
+            .only("id", "author_id", "deleted_at", "updated_at")
+            .filter(pk=post_id)
+            .first()
+        )
+        if post is None:
+            raise PostNotFound
+        if post.author_id != user.pk:
+            raise NotPostAuthor
+        post.deleted_at = now
+        post.save(update_fields=["deleted_at", "updated_at"])
+    return post

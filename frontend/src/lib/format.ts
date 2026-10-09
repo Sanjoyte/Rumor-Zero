@@ -20,6 +20,24 @@ export function formatRelativeTime(value: string | Date, now: Date = new Date())
   }).format(then);
 }
 
+/**
+ * "Oct 9, 2026, 2:05 PM UTC": the detail page's exact time. Always UTC, so the server render and
+ * the browser print the same text (no hydration mismatch) whatever the viewer's time zone.
+ */
+export function formatFullDateTime(value: string | Date): string {
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return "";
+  const text = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  }).format(date);
+  return `${text} UTC`;
+}
+
 /** 999 becomes "999", 1200 becomes "1.2K", 3400000 becomes "3.4M". */
 export function formatCompactNumber(value: number): string {
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(

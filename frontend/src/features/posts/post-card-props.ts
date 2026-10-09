@@ -18,5 +18,6 @@ export function toPostCardProps(post: Post): PostCardProps {
     appealPending: post.appeal_status === "open",
     createdAt: post.created_at,
     sources: post.sources,
+    href: `/p/${post.id}`,
   };
 }

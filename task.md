@@ -89,7 +89,7 @@ not let the review expand the part's scope without user approval.
 | 2 | Email verification & password reset | 1 | [x] Done (2026-10-07) |
 | 3 | Continue with Google | 1 | [x] Done (2026-10-08) |
 | 4 | Posts: composer + Recent feed | 1 | [x] Done (2026-10-09) |
-| 5 | Post detail, sharing, deletion, status polling | 4 | [ ] |
+| 5 | Post detail, sharing, deletion, status polling | 4 | [x] Done (2026-10-09) |
 | 6 | Profiles, follows, Following feed | 4 | [ ] |
 | 7 | Likes & comments | 5 | [ ] |
 | 7B | Bookmarks & reposts | 6, 7 | [ ] |
@@ -676,7 +676,7 @@ All three jobs run on test values only; no secrets.
 ---
 
 ## Part 5: Post detail, sharing, deletion, status polling
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-09)
 **Goal:** a shareable, indexable post page (guide §1.1), author soft-delete (D6), and live badge updates by polling (guide §5.1 step 5).
 **Depends on:** 4.
 **Stitch files to convert:** `b3_post_detail_forensic_proof`. Only the claim header, author row, verdict block, the primary-sources registry (as `SourceList`) and action bar. The comments area is Part 7; repost/bookmark are 7B; the gauge, tiles and chart are 11D. Drop the ledger and hashes, and the registry's sample titles, org-type chips, "% match" and archive lines.
@@ -698,11 +698,37 @@ All three jobs run on test values only; no secrets.
 **API endpoints:** `GET/DELETE /api/v1/posts/{id}/`, `GET /api/v1/posts/status/`.
 
 **Acceptance criteria**
-- [ ] `curl` of `/p/<id>` returns HTML containing the claim text and the correct `<title>`/OG tags
-- [ ] Changing a post's status in the Django shell updates the badge in an open tab without a reload
-- [ ] Polling pauses on a hidden tab and stops after 10 min
-- [ ] After the author deletes a post it's gone from feeds and detail (404) but still visible in the admin
-- [ ] A removed post shows the tombstone to the public
+- [x] `curl` of `/p/<id>` returns HTML containing the claim text and the correct `<title>`/OG tags (title, `og:*`, `twitter:*`, canonical; a removed post is "Removed post" with `noindex`)
+- [x] Changing a post's status in the Django shell updates the badge in an open tab without a reload (about 10 s; on the feed and on the page; E2E and a headless-browser run)
+- [x] Polling pauses on a hidden tab and stops after 10 min (10 minutes of *visible* time; covered by the fake-timer tests, **not watched in a real hidden tab**)
+- [x] After the author deletes a post it's gone from feeds and detail (404) but still visible in the admin (the admin row is covered by a Django-client test and a new "By deleted at" filter; the pages were not opened by a person)
+- [x] A removed post shows the tombstone to the public
+
+**Deviations and decisions (plan approved 2026-10-09; built 2026-10-09; recorded in ARCHITECTURE §3/§4/§9/§10, ANALYSIS b-2 "Removed", STRUCTURE, MEMORY):**
+- **User decisions (2026-10-09):**
+  - **A removed post's "tombstone payload" is the normal 23 keys with `content`, `sources`, `verdict_note` blanked** (and, by default, `confidence_score` and `verdict_source`). The author's name and the post time stay visible to the public; the author sees the full post. The rule is in `PostSerializer`, so no later list can leak a removed post.
+  - **A `status_poll` throttle (120/min per client IP) was added** to the public status endpoint (ARCHITECTURE §3 had none).
+- **Defaults approved with the plan:**
+  - The detail, delete and status shapes and codes: 404 for deleted, unknown or malformed ids (the author included); delete is 204, then 404 (403 `not_author` for others, no verified email needed, any status deletable, the post still counts toward the fact quota); the status endpoint is public with no authentication, in the order asked, a removed post answers `removed` with nulls and deleted ids are left out, 400 on `ids` for none, over 50 or a malformed id.
+  - Polling covers `pending` posts only, counts **visible** time (10 min), waits 10 s × 1.5 up to 60 s, restarts for a new pending id, and is silent on errors.
+  - The claim is a stretched card link with `prefetch={false}`; "+N more" goes to `/p/{id}#sources`; the detail claim is `text-headline-md` (28 px; b3's 36 px would be about 20 lines for 500 characters at 390 px); times are absolute UTC; Copy link copies `window.location.origin + /p/{id}`; delete ends on `/home` with a toast; the SSR fetch has a 5 s timeout and falls back to generic tags and a client fetch.
+- **Built differently from the plan:**
+  - `useStatusPolling` filters its own ids (a post that settled or vanished drops out), so `status-overlay.ts`'s `pendingPostIds` takes only the loaded posts.
+  - `lib/api/backend-origin.ts` was extracted from `relay.ts` (`readConfig` now calls it; same rules), and `server.ts` holds the SSR read.
+  - `brand-guard.test.ts` allow-lists `features/posts/post-metadata.ts` and its test: the page must name the static share images itself, because a page-level `openGraph`/`twitter` replaces the root layout's whole object (MEMORY).
+  - The admin filter is Django's `EmptyFieldListFilter`, headed **"By deleted at"** (All / Empty / Not empty), not "Deleted by author".
+  - The E2E status flip (`setPostState`, `manage.py shell` against the same database) was kept: it passes locally in both modes.
+  - The status endpoint's removed-post branch computes confidence through the shared `shown_confidence()`, which is already null for a removed post (a redundant check was dropped).
+- **Found while building (all fixed):**
+  - **StrictMode aborts the signed-in detail fetch** and the "already fetched" marker was set too early, so the author got no Delete button when arriving from a card (the E2E suite found it; the unit test now mounts the page after the session settled, inside `<StrictMode>`, and fails on the old code).
+  - A removed post's author page showed an **empty "Verdict" card**: `VerdictBlock` now renders nothing for `removed`.
+  - A page-level `openGraph` drops the root's `og:image`; the brand guard refused the image name outside the brand files (above).
+- **Not done (later parts):**
+  - The removal reason, `can_appeal` and `RemovedPostCard` (Part 11); the review queue must skip posts with `deleted_at` set (Part 10; the admin is still read-only).
+  - CSP is unchanged (nothing new loads); the `status_poll` value and the cursor guard for other lists (Part 16); a Workers CPU check of `/p/[id]` (error 1102, Part 18; not measurable locally).
+  - Counts and `*_by_me` on the page (7/7B); profile lists will reuse the polling hook (6).
+  - A signed-in author sees no Delete button for a moment: the server render is the anonymous view, and `is_mine` arrives with the signed-in fetch.
+- **Verified:** see HANDOFF (backend 1160 tests, frontend 1210, E2E 24 in dev and CI mode, the Linux blocks of `docs/test-command.md` Part 5 run verbatim from the doc, headless-browser runs with screenshots at 1280 and 390 px). The PowerShell blocks of that section were not run on Windows. CI itself runs when you push.
 
 **Required tests:** detail visibility matrix (anonymous / author / other × each status and deleted); delete permissions; status endpoint (limits, exclusions, query count); `useStatusPolling` with fake timers and visibility changes; PostDetail states; E2E: create → open detail → copy link.
 

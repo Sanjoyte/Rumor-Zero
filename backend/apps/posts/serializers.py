@@ -65,11 +65,37 @@ class PostCreateSerializer(serializers.Serializer):
         return attrs
 
 
+def shown_confidence(post):
+    """The public confidence, e.g. `"94.00"`: only a pipeline verdict (`verified_*`) has one."""
+    if (
+        post.status in (PostStatus.VERIFIED_TRUE, PostStatus.VERIFIED_FALSE)
+        and post.verdict_source == VerdictSource.PIPELINE
+        and post.confidence_score is not None
+    ):
+        return f"{post.confidence_score:.2f}"
+    return None
+
+
+def status_item(post):
+    """One entry of `GET /api/v1/posts/status/`: just what a badge needs. A removed post says only
+    that it is removed."""
+    removed = post.status == PostStatus.REMOVED
+    return {
+        "id": str(post.pk),
+        "status": post.status,
+        "confidence_score": shown_confidence(post),  # None unless a pipeline verdict
+        "verdict_source": None if removed else post.verdict_source,
+    }
+
+
 class PostSerializer(serializers.BaseSerializer):
-    """The post object of ARCHITECTURE §9, for lists and for the 201 answer.
+    """The post object of ARCHITECTURE §9, for lists, the detail page and the 201 answer.
 
     Fields later parts fill (counts, `*_by_me`, appeals) are `0`, `false` or `null` for now. Nothing
     internal leaks: no `flagged_reason`, pipeline fields, `report_count` or moderation fields.
+    **A removed post is a tombstone for everyone but its author** (user decision 2026-10-09): the
+    same keys, with `content`, `sources`, `verdict_note`, `confidence_score` and `verdict_source`
+    blanked. The rule lives here so no list can ever leak a removed post's text.
     Context: `request` (for `is_mine`) and `now` (one clock for `emergency_active`).
     """
 
@@ -77,24 +103,23 @@ class PostSerializer(serializers.BaseSerializer):
         request = self.context.get("request")
         user = getattr(request, "user", None)
         now = self.context.get("now") or timezone.now()
-        show_confidence = (
-            post.status in (PostStatus.VERIFIED_TRUE, PostStatus.VERIFIED_FALSE)
-            and post.verdict_source == VerdictSource.PIPELINE
-            and post.confidence_score is not None
-        )
+        is_mine = bool(user and user.is_authenticated and post.author_id == user.pk)
+        tombstone = post.status == PostStatus.REMOVED and not is_mine
         return {
             "id": str(post.pk),
             "author": user_summary(post.author),
-            "content": post.content,
+            "content": "" if tombstone else post.content,
             "post_type": post.post_type,
             "status": post.status,
-            "sources": [{"value": s, "kind": source_kind(s)} for s in post.sources],
+            "sources": (
+                [] if tombstone else [{"value": s, "kind": source_kind(s)} for s in post.sources]
+            ),
             "is_emergency": post.is_emergency,
             "emergency_active": is_active_emergency(post, now),
             "emergency_expires_at": iso(post.emergency_expires_at),
-            "confidence_score": f"{post.confidence_score:.2f}" if show_confidence else None,
-            "verdict_source": post.verdict_source,
-            "verdict_note": post.verdict_note,
+            "confidence_score": None if tombstone else shown_confidence(post),
+            "verdict_source": None if tombstone else post.verdict_source,
+            "verdict_note": "" if tombstone else post.verdict_note,
             "like_count": 0,
             "comment_count": 0,
             "repost_count": 0,
@@ -102,7 +127,7 @@ class PostSerializer(serializers.BaseSerializer):
             "reposted_by_me": False,
             "bookmarked_by_me": False,
             "reported_by_me": False,
-            "is_mine": bool(user and user.is_authenticated and post.author_id == user.pk),
+            "is_mine": is_mine,
             "can_appeal": False,
             "appeal_status": None,
             "created_at": iso(post.created_at),

@@ -13,6 +13,12 @@ class EmergencyUnavailableError(APIException):
     default_detail = "Emergency posts aren't available yet."
 
 
+class NotAuthorError(APIException):
+    status_code = 403
+    default_code = "not_author"
+    default_detail = "Only the author can do that."
+
+
 class FactPostsPausedError(APIException):
     status_code = 403
     default_code = "fact_posts_paused"

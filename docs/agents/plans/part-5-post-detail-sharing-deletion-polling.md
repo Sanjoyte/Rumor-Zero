@@ -1,7 +1,10 @@
 # Plan: Part 5, Post detail, sharing, deletion, status polling
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-09, together with the decisions and
-  defaults below. Not implemented yet.
+  defaults below. **IMPLEMENTED 2026-10-09** (Claude, Sonnet 5.5). Deviations: see `task.md` Part 5 and
+  `docs/agents/HANDOFF.md` (`useStatusPolling` filters its own ids; `backend-origin.ts` extracted from
+  the relay; the brand guard allow-lists `post-metadata.ts`; the admin filter is headed "By deleted at";
+  a StrictMode refetch bug and an empty Verdict card for removed posts were found and fixed).
 - **Drafted:** 2026-10-09 by Claude (Sonnet 5.5). **Implement with:** Sonnet 5.5 · medium (task.md).
 - **Evidence:** read-only. The Part 4 backend and frontend code, ARCHITECTURE §2/§3/§4/§9/§10/§13,
   ANALYSIS b-2/c-26/c-35/d, Stitch b3 and c1, Next 16.3.8's `resolve-metadata.js`, and DRF/Django
