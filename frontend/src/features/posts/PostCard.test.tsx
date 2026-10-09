@@ -221,3 +221,51 @@ describe("PostCard", () => {
     });
   });
 });
+
+describe("PostCard author link (Part 6)", () => {
+  const WITH_LINK: PostCardProps = {
+    ...BASE,
+    author: { displayName: "Ada Lovelace", username: "ada", href: "/u/ada" },
+    href: "/p/post-1",
+  };
+
+  it("links the avatar and name to the profile, without prefetching", () => {
+    render(<PostCard {...WITH_LINK} />);
+    const link = screen.getByRole("link", { name: /Ada Lovelace/ });
+    expect(link).toHaveAttribute("href", "/u/ada");
+    expect(link).toHaveTextContent("@ada");
+  });
+
+  it("keeps the time and the claim link outside the author link", () => {
+    render(<PostCard {...WITH_LINK} />);
+    const author = screen.getByRole("link", { name: /Ada Lovelace/ });
+    expect(author).not.toContainElement(screen.getByText("3h"));
+    const claim = screen.getByRole("link", { name: /Solar capacity grew/ });
+    expect(claim).toHaveAttribute("href", "/p/post-1");
+    expect(author).not.toContainElement(claim);
+  });
+
+  it("sits above the stretched claim link, so the rest of the card still opens the post", () => {
+    render(<PostCard {...WITH_LINK} />);
+    expect(screen.getByRole("link", { name: /Ada Lovelace/ })).toHaveClass("relative", "z-10");
+  });
+
+  it("is plain text without an href (the gallery, previews)", () => {
+    render(<PostCard {...BASE} />);
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
+  });
+
+  it("shows @username once, as the link, for a blank display name", () => {
+    render(
+      <PostCard {...WITH_LINK} author={{ displayName: "", username: "ada", href: "/u/ada" }} />,
+    );
+    expect(screen.getAllByText("@ada")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "@ada" })).toHaveAttribute("href", "/u/ada");
+  });
+
+  it("has no author on the removed tombstone, so no profile link", () => {
+    render(<PostCard {...WITH_LINK} status="removed" />);
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+});

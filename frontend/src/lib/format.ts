@@ -38,6 +38,22 @@ export function formatFullDateTime(value: string | Date): string {
   return `${text} UTC`;
 }
 
+/** "March 2024": when someone joined. UTC, so the server render and the browser agree. */
+export function formatMonthYear(value: string | Date): string {
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+/** A profile counter in full with a thousands separator, as Stitch shows it: 1420 becomes "1,420". */
+export function formatCount(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
 /** 999 becomes "999", 1200 becomes "1.2K", 3400000 becomes "3.4M". */
 export function formatCompactNumber(value: number): string {
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(

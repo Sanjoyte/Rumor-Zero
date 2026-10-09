@@ -14,6 +14,7 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.core.services import get_platform_settings
 from apps.posts.models import Post, PostStatus, PostType
+from apps.social.feed import bust_following_feed
 
 # The quota is a rolling window, not a calendar day (user decision 2026-10-08): a slot frees up 24
 # hours after the post that used it. It counts every fact post made in the window, **including ones
@@ -109,7 +110,7 @@ def create_post(*, author, content, post_type, sources=(), is_emergency=False, n
             status = PostStatus.PENDING
         else:
             status = PostStatus.PUBLISHED
-        return Post.objects.create(
+        post = Post.objects.create(
             author=author,
             content=content,
             post_type=post_type,
@@ -117,6 +118,9 @@ def create_post(*, author, content, post_type, sources=(), is_emergency=False, n
             status=status,
             created_at=now,
         )
+        # Your own Following feed must show the new post at once, despite its cache (Part 6).
+        bust_following_feed(author.pk)
+        return post
 
 
 def delete_post(*, post_id, user, now=None):

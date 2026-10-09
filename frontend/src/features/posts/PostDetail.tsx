@@ -57,10 +57,14 @@ function AuthorRow({ post }: { post: Post }) {
   const hasName = post.author.display_name.trim() !== "";
   const name = hasName ? post.author.display_name : `@${post.author.username}`;
   return (
-    <div className="flex items-center gap-space-md">
+    <Link
+      href={`/u/${post.author.username}`}
+      prefetch={false}
+      className="group flex items-center gap-space-md self-start rounded-lg focus-visible:ring-2 focus-visible:ring-secondary/30 focus-visible:outline-none"
+    >
       <Avatar name={name} src={post.author.avatar_url} size={10} decorative />
       <div className="flex min-w-0 flex-col">
-        <span className="truncate font-body-md text-body-md font-semibold text-on-surface">
+        <span className="truncate font-body-md text-body-md font-semibold text-on-surface group-hover:underline">
           {name}
         </span>
         <span className="flex flex-wrap items-center gap-space-xs font-label-code text-label-code text-outline">
@@ -69,7 +73,7 @@ function AuthorRow({ post }: { post: Post }) {
           <time dateTime={post.created_at}>{formatFullDateTime(post.created_at)}</time>
         </span>
       </div>
-    </div>
+    </Link>
   );
 }
 

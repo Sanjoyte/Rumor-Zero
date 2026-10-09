@@ -1,6 +1,7 @@
 import base64
 from urllib import parse
 
+from django.utils.dateparse import parse_datetime
 from rest_framework import pagination
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
@@ -57,3 +58,22 @@ class CursorPagination(pagination.CursorPagination):
                 "next_cursor": {"type": "string", "nullable": True},
             },
         }
+
+
+class TimestampCursorMixin:
+    """For a list ordered by a timestamp first (`-created_at`): check the cursor's position.
+
+    DRF passes the position straight into a `created_at__lt=…` filter, so a crafted cursor would
+    raise Django's ValidationError and answer 500. Put it before `CursorPagination` in the bases.
+    """
+
+    def decode_cursor(self, request):
+        cursor = super().decode_cursor(request)
+        if cursor is not None and cursor.position is not None:
+            try:
+                moment = parse_datetime(cursor.position)
+            except ValueError:
+                moment = None
+            if moment is None or moment.tzinfo is None:
+                raise NotFound(self.invalid_cursor_message)
+        return cursor

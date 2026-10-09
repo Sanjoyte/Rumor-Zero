@@ -115,6 +115,35 @@ export interface CreatePostBody {
   sources?: string[];
 }
 
+/** `GET /api/v1/users/{username}/` (Part 6). The counts of `verified` and `false` include deleted posts. */
+export interface UserProfile {
+  id: string;
+  username: string;
+  display_name: string;
+  bio: string;
+  avatar_url: string | null;
+  created_at: string;
+  counts: { followers: number; following: number; posts: number; verified: number; false: number };
+  reputation: Reputation;
+  /** false for visitors; the server render is always the visitor's view. */
+  is_following: boolean;
+  is_me: boolean;
+}
+
+/** One row of the followers and following lists (Part 6). */
+export interface UserRowData {
+  id: string;
+  username: string;
+  display_name: string;
+  bio: string;
+  avatar_url: string | null;
+  reputation: Reputation;
+  is_following: boolean;
+  is_me: boolean;
+}
+
+export type UserListResponse = CursorPage<UserRowData>;
+
 export type Role = "user" | "moderator" | "senior_moderator";
 
 /** `GET /api/v1/me/` (Part 1). */

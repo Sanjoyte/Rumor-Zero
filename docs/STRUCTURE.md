@@ -80,7 +80,11 @@ rumor-zero/
 │   │   │                            NotAuthorError (403 `not_author`), PostDetailView (GET public, DELETE author), PostStatusView
 │   │   │                            (public, unauthenticated, `status_poll` throttle), the tombstone rule in PostSerializer, admin
 │   │   │                            "deleted at" filter, tests test_api_detail/delete/status
-│   │   ├── social/              6–7 Follow, Like, Comment; 7B Bookmark, Repost, mixed Following feed
+│   │   ├── social/              ✅ 6 Follow (models, two list indexes, migration 0001), services.py (follow/unfollow, `lookup_name`),
+│   │   │                            feed.py (Following feed: ids-only first-page cache, `bust_following_feed`), serializers.py (profile and
+│   │   │                            user-row objects), pagination.py (UserListPagination), exceptions.py (`cannot_follow_self`), views.py,
+│   │   │                            urls.py, read-only admin, tests (160)
+│   │   │                        7 Like, Comment; 7B Bookmark, Repost, mixed Following feed
 │   │   ├── reports/             8   Report + windowed threshold
 │   │   ├── pipeline/            9   contract.py (dataclasses), clients.py (stub/http), routing.py (pure functions; imports
 │   │   │                            is_active_emergency from apps/posts/emergency.py), processor.py (SKIP LOCKED batch),
@@ -151,8 +155,8 @@ rumor-zero/
 │       │   │   ├── p/[id]/                  "/p/:id" ✅ 5 ← b3 (light SSR + generateMetadata; PostDetail; comments 7, repost/bookmark 7B, appeal 11, stats 11D)
 │       │   │   ├── bookmarks/               "/bookmarks" ← b1 layout (7B)
 │       │   │   ├── search/                  ← b4 (12)
-│       │   │   ├── u/[username]/            ← c1 (6, credibility 11B/11D)
-│       │   │   ├── u/[username]/followers/, following/   ← c3 (6)
+│       │   │   ├── u/[username]/            ✅ 6 ← c1 (light SSR + generateMetadata; ProfilePage; credibility 11B/11D)
+│       │   │   ├── u/[username]/followers/, following/   ✅ 6 ← c3 (Connections, client-rendered)
 │       │   │   ├── notifications/           ← c4 (13)
 │       │   │   └── settings/                ← c2 (14, photo 14B)
 │       │   ├── dev/shell/       ✅ 0C  dev-only shell preview with a sample user (404 in production)
@@ -179,7 +183,9 @@ rumor-zero/
 │       │   │                        ✅ 5 PostDetail, usePostDetail, VerdictBlock, SourceList, CopyLinkButton, DeletePostModal, post-metadata.ts,
 │       │   │                            useStatusPolling + status-overlay.ts (PostCard/SourceLink link to the page; FeedList/HomeFeed poll);
 │       │   │                        11C EmergencyChip, PinnedEmergencies; 11D PostStats
-│       │   ├── social/          6–7  FollowButton, UserRow, ProfileHeader, LikeButton, CommentList, CommentComposer;
+│       │   ├── social/          ✅ 6 FollowButton, UserRow, ProfileHeader, ProfilePage, ProfilePosts, Connections, useProfile,
+│       │   │                        social-api.ts, profile-metadata.ts, messages.ts (+ test-helpers.tsx);
+│       │   │                        7 LikeButton, CommentList, CommentComposer;
 │       │   │                        7B RepostButton, BookmarkButton, RepostHeader, UnavailablePostCard
 │       │   ├── bookmarks/       7B   BookmarkList
 │       │   ├── reports/         8    ReportModal

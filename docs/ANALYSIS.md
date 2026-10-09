@@ -424,6 +424,13 @@ The original default was "drop all". Since 2026-09-29 the seven features you nam
     - Part 18 checks Workers observability for CPU-limit (1102) errors on `/p/[id]` (0C has no deploy).
 36. **Next.js 16 renamed `middleware.ts` to `proxy.ts`.** Our "proxy" is **not** that file: it is a normal Route Handler we call the **API relay** (`src/app/api/[...path]/route.ts`). `proxy.ts`/middleware stays unused (only experimental on OpenNext).
 
+37. **Part 6 decisions (user, 2026-10-09)** on points the guide and Stitch leave open:
+    - **Home tabs:** Recent is the first and default tab; Following is the second, for signed-in users only (b1 lists Following first, but a new account with zero follows would land on an empty feed). Its empty state sends you to Recent.
+    - **Following cache (guide §9.2):** only the ordered ids of the first page are cached for `FEED_CACHE_SECONDS`; the posts are read fresh on every request. Caching the whole serialized page would show a deleted or removed post's text for up to 30 s and, from Part 7, stale likes.
+    - **Profile counters:** `verified` and `FALSE` include the author's deleted posts (a removed post is in neither); `posts` counts what the public can see. Deleting a post must not erase a FALSE label (same principle as ARCHITECTURE §4a: deleting undoes no events).
+    - **Author links:** the avatar and name on post cards and the post page link to `/u/<username>` (otherwise profiles are reachable only by URL, the rail, and the follower lists until search in Part 12).
+    - `task.md`'s "no self-follow check" was read as "no self-follow *is allowed*": a DB check constraint plus a 400, as ARCHITECTURE §2 and the acceptance criteria say.
+
 ---
 
 ## d) Deployment topology (no owned domain)

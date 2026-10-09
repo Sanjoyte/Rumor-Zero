@@ -8,6 +8,7 @@ export function toPostCardProps(post: Post): PostCardProps {
       displayName: post.author.display_name,
       username: post.author.username,
       avatarUrl: post.author.avatar_url,
+      href: `/u/${post.author.username}`,
     },
     content: post.content,
     postType: post.post_type,

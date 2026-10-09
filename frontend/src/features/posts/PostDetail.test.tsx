@@ -329,3 +329,17 @@ describe("PostDetail (polling)", () => {
     }
   });
 });
+
+describe("PostDetail author link (Part 6)", () => {
+  it("links the author row to the profile", () => {
+    renderDetail(fact());
+    const link = screen.getByRole("link", { name: /Ada/ });
+    expect(link).toHaveAttribute("href", "/u/ada");
+    expect(link).toHaveTextContent("Oct 8, 2026, 12:00 PM UTC");
+  });
+
+  it("links the author on a removed post's tombstone too (the author is public)", () => {
+    renderDetail(fact({ status: "removed", content: "", sources: [] }));
+    expect(screen.getByRole("link", { name: /Ada/ })).toHaveAttribute("href", "/u/ada");
+  });
+});

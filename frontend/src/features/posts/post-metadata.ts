@@ -10,6 +10,16 @@ import type { PublicPostResult } from "@/lib/api/server";
 import { statusBadgeSpec } from "@/lib/post-display";
 
 export const SITE_NAME = "Rumor Zero";
+/**
+ * The static share images (`app/opengraph-image.png`, `app/twitter-image.png`). Any page that sets
+ * its own `openGraph` or `twitter` must repeat them, so every such page imports these two
+ * descriptors from here: this file is the one place besides the brand files that names them.
+ */
+export const OG_IMAGES = [
+  { url: "/opengraph-image.png", width: 1200, height: 630, alt: SITE_NAME },
+];
+export const TWITTER_IMAGES = [{ url: "/twitter-image.png", alt: SITE_NAME }];
+
 const FALLBACK_DESCRIPTION =
   "Text-only posts, labelled Opinion or Fact, with facts checked before you rely on them.";
 const REMOVED_DESCRIPTION = "This post was removed by a moderator.";
@@ -38,13 +48,13 @@ function share(id: string, title: string, description: string, noindex: boolean)
       title: fullTitle,
       description,
       url: `/p/${id}`,
-      images: [{ url: "/opengraph-image.png", width: 1200, height: 630, alt: SITE_NAME }],
+      images: OG_IMAGES,
     },
     twitter: {
       card: "summary_large_image",
       title: fullTitle,
       description,
-      images: [{ url: "/twitter-image.png", alt: SITE_NAME }],
+      images: TWITTER_IMAGES,
     },
     ...(noindex && { robots: { index: false, follow: false } }),
   };

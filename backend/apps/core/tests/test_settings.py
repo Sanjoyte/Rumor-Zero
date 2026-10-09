@@ -163,6 +163,9 @@ def test_a_missing_required_variable_fails_by_name_without_leaking_values(name):
         ({"EMAIL_PROVIDER": "file"}, "EMAIL_PROVIDER must be brevo"),
         ({"JWT_ACCESS_TOKEN_MINUTES": "61"}, "JWT_ACCESS_TOKEN_MINUTES must be an integer"),
         ({"JWT_REFRESH_TOKEN_DAYS": "0"}, "JWT_REFRESH_TOKEN_DAYS must be an integer"),
+        ({"FEED_CACHE_SECONDS": "301"}, "FEED_CACHE_SECONDS must be an integer"),
+        ({"FEED_CACHE_SECONDS": "-1"}, "FEED_CACHE_SECONDS must be an integer"),
+        ({"FEED_CACHE_SECONDS": "soon"}, "FEED_CACHE_SECONDS must be an integer"),
     ],
 )
 def test_production_auth_guards_fail_by_name_without_leaking_values(overrides, message):
@@ -221,6 +224,33 @@ def test_production_auth_settings_come_from_the_environment():
     assert probe["refresh_seconds"] == probe["cookie_seconds"] == 14 * 86400
     assert probe["cookie_secure"] is True
     assert_no_secret_in(result.stdout + result.stderr, env)
+
+
+FEED_PROBE = """
+import json
+from django.conf import settings
+print(json.dumps({"seconds": settings.FEED_CACHE_SECONDS}))
+"""
+
+
+def feed_cache_seconds(**overrides):
+    env = production_env(**overrides)
+    env["DJANGO_SETTINGS_MODULE"] = "rumor_zero.settings"
+    result = run_python(["-c", "import django; django.setup()\n" + FEED_PROBE], env)
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout.strip().splitlines()[-1])["seconds"]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"), [("", 30), ("45", 45), ("0", 0), ("300", 300), (" 20 ", 20)]
+)
+def test_feed_cache_seconds_defaults_to_30_and_accepts_0_to_300(value, expected):
+    assert feed_cache_seconds(FEED_CACHE_SECONDS=value) == expected
+
+
+def test_the_feed_cache_setting_is_not_a_platform_setting():
+    assert "FEED_CACHE_SECONDS" not in {name.upper() for name in FIELDS}
+    assert "feed_cache_seconds" not in FIELDS
 
 
 GOOGLE_CLIENT_ID = "123456789012-abcdefghijklmnop.apps.googleusercontent.com"

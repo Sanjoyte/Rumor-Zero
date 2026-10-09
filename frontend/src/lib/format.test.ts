@@ -3,7 +3,9 @@ import {
   countCharacters,
   formatCompactNumber,
   formatConfidence,
+  formatCount,
   formatFullDateTime,
+  formatMonthYear,
   formatRelativeTime,
 } from "./format";
 
@@ -79,5 +81,31 @@ describe("formatFullDateTime", () => {
 
   it("gives nothing for an invalid date", () => {
     expect(formatFullDateTime("not a date")).toBe("");
+  });
+});
+
+describe("formatMonthYear", () => {
+  it("prints the month and year in UTC", () => {
+    expect(formatMonthYear("2024-03-15T10:00:00Z")).toBe("March 2024");
+    expect(formatMonthYear("2026-01-01T00:00:00Z")).toBe("January 2026");
+    expect(formatMonthYear(new Date("2026-12-31T23:59:59Z"))).toBe("December 2026");
+  });
+
+  it("does not move across a month boundary with the viewer's zone", () => {
+    expect(formatMonthYear("2026-10-31T23:30:00Z")).toBe("October 2026");
+    expect(formatMonthYear("2026-11-01T00:30:00Z")).toBe("November 2026");
+  });
+
+  it("gives nothing for an invalid date", () => {
+    expect(formatMonthYear("soon")).toBe("");
+  });
+});
+
+describe("formatCount", () => {
+  it("prints the whole number with a thousands separator", () => {
+    expect(formatCount(0)).toBe("0");
+    expect(formatCount(999)).toBe("999");
+    expect(formatCount(1420)).toBe("1,420");
+    expect(formatCount(1234567)).toBe("1,234,567");
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { makePost } from "@/features/posts/test-helpers";
-import { fetchPublicPost, SSR_FETCH_TIMEOUT_MS } from "./server";
+import { fetchPublicPost, fetchPublicProfile, SSR_FETCH_TIMEOUT_MS } from "./server";
+import { makeProfile } from "@/features/social/test-helpers";
 
 const ID = "11111111-1111-4111-8111-111111111111";
 
@@ -88,5 +89,67 @@ describe("fetchPublicPost", () => {
     expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toBe(
       "http://127.0.0.1:8000/api/v1/posts/a%2Fb%3Fc/",
     );
+  });
+});
+
+describe("fetchPublicProfile", () => {
+  const options = { backendOrigin: "http://127.0.0.1:8000" };
+
+  it("reads the profile anonymously and uncached, with nothing but an accept header", async () => {
+    const profile = makeProfile();
+    const fetchImpl = respond(200, profile);
+    expect(await fetchPublicProfile("bob", { ...options, fetchImpl })).toEqual({
+      kind: "found",
+      profile,
+    });
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/users/bob/");
+    expect(init.cache).toBe("no-store");
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect([...new Headers(init.headers).keys()]).toEqual(["accept"]);
+  });
+
+  it("encodes the name in the path", async () => {
+    const fetchImpl = respond(404);
+    await fetchPublicProfile("a/b?x", { ...options, fetchImpl });
+    const [url] = fetchImpl.mock.calls[0] as unknown as [string];
+    expect(url).toBe("http://127.0.0.1:8000/api/v1/users/a%2Fb%3Fx/");
+  });
+
+  it("is a 404 only when the backend says so", async () => {
+    expect(await fetchPublicProfile("bob", { ...options, fetchImpl: respond(404) })).toEqual({
+      kind: "not-found",
+    });
+    for (const status of [500, 502, 503, 401]) {
+      expect(await fetchPublicProfile("bob", { ...options, fetchImpl: respond(status) })).toEqual({
+        kind: "unavailable",
+      });
+    }
+  });
+
+  it("is unavailable, never an exception, when the backend is down or answers oddly", async () => {
+    const down = vi.fn(async () => {
+      throw new TypeError("fetch failed");
+    });
+    expect(await fetchPublicProfile("bob", { ...options, fetchImpl: down })).toEqual({
+      kind: "unavailable",
+    });
+    expect(
+      await fetchPublicProfile("bob", { ...options, fetchImpl: respond(200, { id: "x" }) }),
+    ).toEqual({ kind: "unavailable" });
+    const html = vi.fn(async () => new Response("<html>", { status: 200 }));
+    expect(await fetchPublicProfile("bob", { ...options, fetchImpl: html })).toEqual({
+      kind: "unavailable",
+    });
+  });
+
+  it("makes no request when BACKEND_ORIGIN is missing or unsafe", async () => {
+    const fetchImpl = respond(200, makeProfile());
+    for (const backendOrigin of ["", "http://api.example.test", "not a url"]) {
+      expect(await fetchPublicProfile("bob", { backendOrigin, fetchImpl })).toEqual({
+        kind: "unavailable",
+      });
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 });

@@ -108,7 +108,8 @@ Gotcha: don't wrap these values in quotes, and don't leave trailing spaces.
 | `EMAIL_PROVIDER` | `console` | Verification and reset emails are **printed in the `runserver` terminal**. Copy the link from there. `file` writes each email to `backend/tmp/mail/` instead (git-ignored). Playwright starts Django that way, and the Part 2 E2E tests read the links from there; a `runserver` you reuse for E2E must be started with `EMAIL_PROVIDER=file` too. With `DJANGO_DEBUG=False` only `brevo` is accepted. |
 | `DEFAULT_FROM_EMAIL` | `"Rumor Zero <no-reply@example.com>"` | Only shows in the printed email |
 | `BREVO_API_KEY` | *(empty)* | Not used locally |
-| `REPORT_THRESHOLD` … `FEED_CACHE_SECONDS` | defaults | Guide §6.2, §7.2, §9.2; ANALYSIS D7 |
+| `REPORT_THRESHOLD` … `FACT_POSTS_PER_DAY` | defaults | Guide §6.2, §7.2; ANALYSIS D7 (only initial values; then Django Admin) |
+| `FEED_CACHE_SECONDS` | `30` | Seconds the first page of a user's Following feed stays cached (Part 6; 0 to 300, **0 turns the cache off**). Read by Django settings, **not** seeded into PlatformSettings or editable in Django Admin. Needs `REDIS_URL` to be shared between processes (without it each process keeps its own copy) |
 | `EMERGENCY_DURATION_HOURS` … `EMERGENCY_FALSE_COOLDOWN_DAYS` (6 variables, new on 2026-09-29) | defaults | **Needed for local dev: no action.** Emergency-post limits (ANALYSIS f-1). If your `backend/.env` was copied before they existed, the defaults apply; see §1.8 |
 | `PIPELINE_BACKEND` / `PIPELINE_INLINE_KICK` | `stub` / `True` | Built-in fake pipeline |
 | `PIPELINE_URL` / `PIPELINE_API_KEY` | *(empty)* | Reserved for the future real pipeline |
@@ -379,7 +380,8 @@ Also pick `ADMIN_URL_PATH`: run `python3 -c "import secrets; print('mod-' + secr
    | `TURNSTILE_SECRET_KEY` | §2.8 (set after the widget exists) |
    | `GOOGLE_OAUTH_CLIENT_ID` | §1.6 (same client) |
    | `EMAIL_PROVIDER` / `BREVO_API_KEY` / `DEFAULT_FROM_EMAIL` | §2.4 |
-   | `REPORT_THRESHOLD` … `FEED_CACHE_SECONDS` | defaults (only initial values) |
+   | `REPORT_THRESHOLD` … `FACT_POSTS_PER_DAY` | defaults (only initial values) |
+   | `FEED_CACHE_SECONDS` | optional, default 30 (a real setting, not an initial value) |
    | `EMERGENCY_DURATION_HOURS` … `EMERGENCY_FALSE_COOLDOWN_DAYS` | **deployment: optional.** Leave them out to use the defaults in §1.8 (only initial values; then Django Admin) |
    | `PIPELINE_BACKEND` / `PIPELINE_INLINE_KICK` | `stub` / `True` |
    | `INTERNAL_CRON_SECRET` | from §2.1 |
@@ -559,7 +561,8 @@ If a secret was ever **committed to git**, rotate it **first**, then clean histo
 | `TURNSTILE_SECRET_KEY` | backend/.env | Render | 1.5 / 2.8 |
 | `GOOGLE_OAUTH_CLIENT_ID` | backend/.env | Render | 1.6 / 2.9 |
 | `EMAIL_PROVIDER`, `DEFAULT_FROM_EMAIL`, `BREVO_API_KEY` | backend/.env | Render | 1.3 / 2.4 |
-| `REPORT_THRESHOLD`, `REPORT_WINDOW_HOURS`, `REPORT_MIN_ACCOUNT_AGE_HOURS`, `CONFIDENCE_THRESHOLD`, `FACT_POSTS_PER_DAY`, `FEED_CACHE_SECONDS` | backend/.env | Render (initial values; then Django Admin) | 1.3 |
+| `REPORT_THRESHOLD`, `REPORT_WINDOW_HOURS`, `REPORT_MIN_ACCOUNT_AGE_HOURS`, `CONFIDENCE_THRESHOLD`, `FACT_POSTS_PER_DAY` | backend/.env | Render (initial values; then Django Admin) | 1.3 |
+| `FEED_CACHE_SECONDS` (optional, default 30; a setting, not editable in Django Admin) | backend/.env | Render (optional) | 1.3 |
 | `EMERGENCY_DURATION_HOURS`, `EMERGENCY_POSTS_PER_DAY`, `EMERGENCY_MIN_ACCOUNT_AGE_DAYS`, `EMERGENCY_MIN_REPUTATION`, `EMERGENCY_REPORT_THRESHOLD`, `EMERGENCY_FALSE_COOLDOWN_DAYS` (optional; defaults in code) | backend/.env (optional) | Render (optional; initial values; then Django Admin) | 1.8 / 2.6 |
 | `PIPELINE_BACKEND`, `PIPELINE_INLINE_KICK`, `PIPELINE_URL`, `PIPELINE_API_KEY` | backend/.env | Render | 1.3 |
 | `INTERNAL_CRON_SECRET` | backend/.env | Render + GitHub secret + cron-job.org header | 1.2 / 2.1 / 2.10 / 2.12 |

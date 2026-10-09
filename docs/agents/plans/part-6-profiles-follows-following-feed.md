@@ -1,7 +1,11 @@
 # Plan: Part 6, Profiles, follows, Following feed
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-09, together with the four decisions and the
-  defaults below. Saved here and linked from `HANDOFF.md`. **Not implemented yet.**
+  defaults below. Saved here and linked from `HANDOFF.md`. **IMPLEMENTED 2026-10-09** (Claude, Sonnet 5.5).
+  Deviations: see `task.md` Part 6 and `docs/agents/HANDOFF.md` (the cursor check lives in a
+  `TimestampCursorMixin`; `lookup_name` guards every username lookup after a NUL-byte 500 was found; the hover
+  label shares one grid cell; `social.spec.ts` is serial with two shared accounts and the sign-up helper waits
+  longer; `FollowAdmin` is read-only; the `docs/ENV_GUIDE.md` rows for `FEED_CACHE_SECONDS` were corrected).
 - **Drafted:** 2026-10-09 by Claude (Sonnet 5.5). **Implement with:** Sonnet 5.5 · medium (task.md).
 - **Evidence (read-only):** HANDOFF, MEMORY, `task.md` Part 6, ARCHITECTURE §2/§3/§9/§10, ANALYSIS
   (c1/c3/b1 rows, D4), Stitch b1/c1/c3, and the Part 4/5 backend and frontend code (two Explore passes plus

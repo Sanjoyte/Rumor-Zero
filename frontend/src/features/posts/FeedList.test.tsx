@@ -171,4 +171,24 @@ describe("FeedList", () => {
       expect(screen.getByRole("link", { name: /Content of a/ })).toHaveAttribute("href", "/p/a");
     });
   });
+
+  it("shows the default empty state, or the one it is given", () => {
+    const { rerender } = render(<FeedList feed={feedWith()} />);
+    expect(screen.getByText("No posts yet")).toBeInTheDocument();
+    expect(screen.getByText("Be the first to post something.")).toBeInTheDocument();
+    rerender(<FeedList feed={feedWith()} empty={<p>Follow people first</p>} />);
+    expect(screen.getByText("Follow people first")).toBeInTheDocument();
+    expect(screen.queryByText("No posts yet")).toBeNull();
+  });
+
+  it("ignores a custom empty state while there are posts", () => {
+    render(
+      <FeedList
+        feed={feedWith({ items: [entry(post("a"))] })}
+        empty={<p>Follow people first</p>}
+      />,
+    );
+    expect(screen.queryByText("Follow people first")).toBeNull();
+    expect(screen.getByText(/Content of a/)).toBeInTheDocument();
+  });
 });

@@ -80,6 +80,7 @@ INSTALLED_APPS = [
     "apps.core",
     "apps.accounts",
     "apps.posts",
+    "apps.social",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
@@ -130,6 +131,10 @@ DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 CACHES = cache_config(env.str("REDIS_URL", default=""))
+
+# Seconds the first page of a user's Following feed stays cached (ARCHITECTURE §3, §9). 0 turns the
+# cache off. Not a PlatformSettings value: it is read here, not edited in Django Admin.
+FEED_CACHE_SECONDS = int_in_range(env, "FEED_CACHE_SECONDS", 30, 0, 300)
 
 # ---------- Passwords ----------
 PASSWORD_HASHERS = [

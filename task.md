@@ -90,7 +90,7 @@ not let the review expand the part's scope without user approval.
 | 3 | Continue with Google | 1 | [x] Done (2026-10-08) |
 | 4 | Posts: composer + Recent feed | 1 | [x] Done (2026-10-09) |
 | 5 | Post detail, sharing, deletion, status polling | 4 | [x] Done (2026-10-09) |
-| 6 | Profiles, follows, Following feed | 4 | [ ] |
+| 6 | Profiles, follows, Following feed | 4 | [x] Done (2026-10-09) |
 | 7 | Likes & comments | 5 | [ ] |
 | 7B | Bookmarks & reposts | 6, 7 | [ ] |
 | 8 | Reporting & threshold | 5 | [ ] |
@@ -739,7 +739,7 @@ All three jobs run on test values only; no secrets.
 ---
 
 ## Part 6: Profiles, follows, Following feed
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-09)
 **Goal:** public profiles, follow/unfollow, follower and following lists, and the fan-out-on-read Following feed with a short cache (guide §9.2).
 **Depends on:** 4.
 **Stitch files to convert:**
@@ -763,10 +763,36 @@ All three jobs run on test values only; no secrets.
 **API endpoints:** the users/follow endpoints above, plus `GET /api/v1/feed/`.
 
 **Acceptance criteria**
-- [ ] Follow and unfollow are idempotent; self-follow returns 400; counts update
-- [ ] The Following feed shows only followed accounts + your own posts, newest first; your new post shows immediately despite the cache
-- [ ] An unknown username returns 404; lookup is case-insensitive
-- [ ] List endpoints use a constant number of queries
+- [x] Follow and unfollow are idempotent; self-follow returns 400; counts update (201 then 200, 204 always; `cannot_follow_self`; the profile's follower count moves, and so does the button, optimistically)
+- [x] The Following feed shows only followed accounts + your own posts, newest first; your new post shows immediately despite the cache (the cache holds only ids and your own feed is cleared when you post, follow or unfollow)
+- [x] An unknown username returns 404; lookup is case-insensitive (also for inactive and malformed names; `/u/Ada` redirects to `/u/ada`)
+- [x] List endpoints use a constant number of queries (followers, following, a person's posts, the Following feed and the profile; each pinned with 3 and 20 rows)
+
+**Deviations and decisions (plan approved 2026-10-09; built 2026-10-09; recorded in ARCHITECTURE §2/§3/§9/§10, ANALYSIS c-37, STRUCTURE, ENV_GUIDE, MEMORY):**
+- **User decisions (2026-10-09):**
+  - **`/home` tabs: Recent first and default, Following second**, for signed-in users only (b1 lists Following first).
+  - **The Following cache holds only the ids of page 1**; the posts are loaded fresh on every request.
+  - **Profile counters: `verified` and `FALSE` include deleted posts** (not removed ones); `posts` counts only what the public can see.
+  - **The author's avatar and name link to `/u/<username>`** on post cards and the post page (not in this part's list).
+- **Defaults approved with the plan:** names are looked up by NFKC + lower-case + exact match (unknown, inactive or malformed: 404); follow needs a verified email (201/200), unfollow only a login (204 always), both throttled by `follow` 100/h; `GET /api/v1/feed/` needs a login but not a verified email; `FEED_CACHE_SECONDS` 0 to 300 (0 = off); profile and user-row objects carry a `reputation` block (always `score: null` until 11B); a read-only `FollowAdmin`; `/u/Ada` redirects (307) to `/u/ada`; counters print as "1,420"; `FilterChips` All / Facts / Opinions; the profile is one column at `max-w-reading`; Edit profile links to `/settings` (a placeholder until Part 14).
+- **Built differently from the plan:**
+  - The cursor check moved into **`TimestampCursorMixin`** in `apps/core/pagination.py` (the plan said "a small mixin"; `FeedPagination` and `UserListPagination` use it; `FeedPagination` gained an `envelope()` helper for the cached feed).
+  - **`services.lookup_name`** (a `[a-z0-9_]{3,30}` full match before any query) was added after a test found that a NUL byte in the name was a 500.
+  - The two list pages are `ƒ` (dynamic) routes in the build although they read nothing on the server; they take their name from the path.
+  - **`social.spec.ts` is a serial file with two shared accounts**, and `signUp` in `e2e/helpers.ts` now waits up to 30 s for `/verify-email` (see MEMORY); `posts.spec.ts` expects two links on a card.
+  - `FollowButton`'s hover label shares one grid cell with "Following" (the first version hid it with `display: none` and the accessible name fell back to the title).
+  - `ProfilePosts` adds your own new post to the top of your own profile when the filter matches (not in the plan; a few lines and tested).
+  - `docs/ENV_GUIDE.md` filed `FEED_CACHE_SECONDS` with the admin-editable PlatformSettings values; it is a plain setting, and the three rows were corrected.
+  - ARCHITECTURE §2: the plain `index(following)` became two composite indexes (`following, created_at DESC, id DESC` and `follower, created_at DESC, id DESC`).
+  - "No self-follow check" in this part's scope line contradicted ARCHITECTURE §2 and the acceptance criterion; it was built as a DB check constraint plus a 400.
+- **Found while building (all fixed):** the NUL-byte 500 above; a mutation check showed `_by_status` unused in the counters (the verdict-of-deleted-posts rule had no test) and that removed posts weren't covered in the page of ids; the hover label bug; E2E sign-up flakiness under load; a brand-guard failure when a test named the share image files.
+- **Not done (later parts):**
+  - Likes, comments, reposts and bookmarks (7, 7B); `FeedList` still skips `repost` items, and 7B turns the Following cursor into `(activity_at, item id)`.
+  - The credibility score on profiles and rows (11B/11D); the Edit profile page, rename (14); profile photos at 256 px (14B); people search reuses `UserRow` (12); follow notifications (13).
+  - Part 16: the `follow` rate and the cache TTL are guesses; Upstash command use (a Following first-page view costs one to three commands); the cursor guard for the remaining core-pagination lists.
+  - Part 18: Workers CPU of `/u/[username]` (the same escape hatch as `/p/[id]`).
+  - Unfollowing inside your own Following list doesn't change the tab count shown above it.
+- **Verified:** see HANDOFF (backend 1336 tests, frontend 1320, E2E 29 in dev and CI mode, 26 backend and 44 frontend mutation checks, an EXPLAIN of the Following query, the Linux blocks of `docs/test-command.md` Part 6 extracted from the doc and run verbatim, screenshots at 1280 and 390 px). The PowerShell blocks of that section were not run on Windows. CI itself runs when you push.
 
 **Required tests:** constraints; follow API idempotency; feed composition, caching and invalidation; profile counts; query counts; FollowButton optimistic and rollback; E2E: A follows B → B posts → A sees it under Following.
 

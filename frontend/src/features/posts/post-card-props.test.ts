@@ -17,7 +17,7 @@ const POST: Post = makePost({
 describe("toPostCardProps", () => {
   it("maps the API post to the card's props", () => {
     expect(toPostCardProps(POST)).toEqual({
-      author: { displayName: "Ada", username: "ada", avatarUrl: null },
+      author: { displayName: "Ada", username: "ada", avatarUrl: null, href: "/u/ada" },
       content: "Claim",
       postType: "fact",
       status: "verified_true",

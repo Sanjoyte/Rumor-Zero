@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card } from "@/components/ui/Card";
 import { CategoryChip } from "@/components/ui/CategoryChip";
@@ -12,7 +13,13 @@ import { type PostStatus, type PostType, type VerdictSource, stripeTone } from "
 import { SourceLink } from "./SourceLink";
 
 export interface PostCardProps {
-  author: { displayName: string; username: string; avatarUrl?: string | null };
+  author: {
+    displayName: string;
+    username: string;
+    avatarUrl?: string | null;
+    /** Where the avatar and name go (`/u/{username}`, Part 6). Without it they are plain text. */
+    href?: string;
+  };
   content: string;
   postType: PostType;
   status: PostStatus;
@@ -35,6 +42,27 @@ export interface PostCardProps {
   /** Clock for the relative timestamp; tests and the gallery pass a fixed one. */
   now?: Date;
   className?: string;
+}
+
+/**
+ * The avatar and name: a link to the profile when there is somewhere to go. It sits above the
+ * stretched claim link (`z-10`, as the source links do), so the rest of the card still opens the post.
+ */
+function AuthorLink({ href, children }: { href?: string; children: ReactNode }) {
+  const layout = "group flex min-w-0 items-center gap-space-md";
+  if (!href) return <div className={layout}>{children}</div>;
+  return (
+    <Link
+      href={href}
+      prefetch={false}
+      className={cn(
+        layout,
+        "relative z-10 rounded-lg focus-visible:ring-2 focus-visible:ring-secondary/30 focus-visible:outline-none",
+      )}
+    >
+      {children}
+    </Link>
+  );
 }
 
 /**
@@ -84,27 +112,26 @@ export function PostCard({
       {tone && <VerdictStripe tone={tone} />}
       <div className="flex flex-col gap-space-md p-space-lg">
         <div className="flex flex-col gap-space-sm sm:flex-row sm:items-start sm:justify-between sm:gap-space-md">
-          <div className="flex min-w-0 items-center gap-space-md">
-            <Avatar name={name} src={author.avatarUrl} size={10} decorative />
-            <div className="flex min-w-0 items-center gap-space-xs">
-              <span className="min-w-0 truncate font-body-md text-body-md font-bold text-on-surface">
-                {name}
-              </span>
-              {hasName && (
-                <span className="min-w-0 truncate font-label-code text-label-code text-outline">
-                  @{author.username}
+          <div className="flex min-w-0 items-center gap-space-xs">
+            <AuthorLink href={author.href}>
+              <Avatar name={name} src={author.avatarUrl} size={10} decorative />
+              <span className="flex min-w-0 items-center gap-space-xs">
+                <span className="min-w-0 truncate font-body-md text-body-md font-bold text-on-surface group-hover:underline">
+                  {name}
                 </span>
-              )}
-              <span aria-hidden="true" className="shrink-0 text-outline-variant">
-                ·
+                {hasName && (
+                  <span className="min-w-0 truncate font-label-code text-label-code text-outline">
+                    @{author.username}
+                  </span>
+                )}
               </span>
-              <time
-                dateTime={iso}
-                className="shrink-0 font-label-code text-label-code text-outline"
-              >
-                {time}
-              </time>
-            </div>
+            </AuthorLink>
+            <span aria-hidden="true" className="shrink-0 text-outline-variant">
+              ·
+            </span>
+            <time dateTime={iso} className="shrink-0 font-label-code text-label-code text-outline">
+              {time}
+            </time>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-space-sm sm:justify-end">
             <CategoryChip type={postType} />

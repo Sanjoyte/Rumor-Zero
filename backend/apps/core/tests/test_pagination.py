@@ -71,3 +71,49 @@ def test_an_invalid_cursor_is_a_404_with_a_code():
     page = get_page(cursor="%%not-a-cursor%%")
     assert page.status_code == 404
     assert page.data["code"] == "not_found"
+
+
+# ---------- TimestampCursorMixin (Part 6): the guard FeedPagination used to own ----------
+
+
+class GuardedList(UserList):
+    from apps.core.pagination import CursorPagination, TimestampCursorMixin
+
+    class pagination_class(TimestampCursorMixin, CursorPagination):
+        ordering = ("-created_at", "-id")
+
+
+def guarded_page(cursor):
+    response = GuardedList.as_view()(APIRequestFactory().get("/", {"cursor": cursor}))
+    response.render()
+    return response
+
+
+def encoded(**tokens):
+    import base64
+    from urllib.parse import urlencode
+
+    return base64.urlsafe_b64encode(urlencode(tokens).encode()).decode().rstrip("=")
+
+
+@pytest.mark.parametrize(
+    "position",
+    ["not a date", "2026-01-01T00:00:00", "9999-99-99T00:00:00+00:00", "", "12"],
+)
+def test_the_mixin_turns_a_crafted_position_into_a_404(position):
+    UserFactory.create_batch(3)
+    assert guarded_page(encoded(p=position)).status_code == 404
+
+
+def test_the_mixin_lets_a_real_position_through():
+    UserFactory.create_batch(3)
+    assert guarded_page(encoded(p="2999-01-01T00:00:00+00:00")).status_code == 200
+
+
+def test_the_unguarded_default_class_would_have_failed_on_the_same_cursor():
+    """Control: without the mixin a crafted position raises instead of answering 404."""
+    UserFactory.create_batch(3)
+    cursor = encoded(p="not a date")
+    with pytest.raises(Exception) as caught:  # noqa: PT011 (Django's ValidationError)
+        get_page(cursor=cursor)
+    assert caught.value.__class__.__name__ == "ValidationError"

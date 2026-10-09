@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -3679,6 +3679,560 @@ design" / device toolbar button, and set the width to 390. Open any `/p/<id>` of
   table (6 posts: the three `ada` made in steps 3 and 7, plus the ones you made as `cy` in steps 11 and 12, so your
   count differs; a deleted post is still a row). Nothing else is touched. (The E2E tests' accounts stay in your local database, as in earlier parts: Django
   Admin → Users deletes them.)
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
+  token and the throwaway password of the test accounts.
+
+### Part 6: Profiles, follows, Following feed
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
+`frontend/.env.local`. Part 6 adds **one migration** (`social.0001_initial`, the follows table), **no dependency**
+and **no new variable** (`FEED_CACHE_SECONDS` was already in `.env.example`; the code reads it now). It adds
+the endpoints `GET /api/v1/users/{username}/` (and `…/posts/`, `…/followers/`, `…/following/`),
+`POST` and `DELETE /api/v1/users/{username}/follow/`, and `GET /api/v1/feed/`.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 14 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 10**: the variables and functions you set in step 3 (`id`, `h`, `ada`, `bo`, `cy`, `api`, `boname`, `signup`, `mk`, `get`) only live in that one terminal. If you close it, redo step 3. | 1 to 10, 15 |
+| Window 3 (frontend) | `npm run dev` in `frontend/`. Leave it running. | 10 to 14 |
+| Browser | Steps 11 to 14 | 11 to 14 |
+
+Things to know first:
+
+- Steps 3 to 10 talk to the API directly with `curl` (they need `jq`: `sudo apt install jq`). Steps 11 to 14 use the
+  browser. Step 3 makes three accounts, all verified: `bo` is the person whose profile we look at, `ada` follows
+  `bo`, and `cy` stays for the browser steps. Later steps add `dee` (never verified) and `fay` (for the throttle).
+- The API and page outputs below were recorded on Linux on 2026-10-09. The browser steps were checked the same
+  day with headless Chromium (screenshots at 1280 and 390 px), not by a person at a keyboard. Ids, numbers in
+  names, times and token prefixes differ on every run.
+- Nothing here sends an email: step 3 marks the accounts verified with a shell command, which stands in for
+  clicking the link (Part 2 shows the real flow). Step 7 sets post statuses the same way, because the pipeline
+  and the moderator tools that do it for real arrive in Parts 9 and 10.
+- **What Part 6 does and doesn't show:** profiles are public; following needs a verified email; a profile's
+  **Verified** and **FALSE** counters also count posts the author deleted, but never removed ones (step 7);
+  the Following feed keeps only the *ids* of its first page for 30 seconds (step 8). Likes, comments,
+  reposts and the credibility score come in later parts.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies the new migration,
+confirms there is no further one, then runs the whole backend test suite, the new social tests, the linter and
+the formatter check.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                            # Applying social.0001_initial... OK
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 1336 passed
+python -m pytest apps/social -q                     # 160 passed
+ruff check . ; ruff format --check .                # All checks passed! / 132 files already formatted
+```
+
+**You should see:** `Applying social.0001_initial... OK` (nothing to apply the second time), `No changes detected`
+and `System check identified no issues (0 silenced).`, then the full run ends with `1336 passed`, the social run
+with `160 passed`, and the last line pair is `All checks passed!` and `132 files already formatted`. (Counts may
+grow later; what matters is that nothing fails.)
+
+- The 160 new social tests: `test_models.py` (6: the unique pair, nobody follows themselves, both list indexes),
+  `test_services.py` (18: follow is idempotent, two simultaneous follows make one row, the cache is cleared),
+  `test_api_profile.py` (26), `test_api_follow.py` (23, including the real 100-requests-an-hour throttle),
+  `test_api_lists.py` (23: order, cursor walk, crafted cursors, constant query counts), `test_api_user_posts.py`
+  (19), `test_api_feed.py` (14), `test_feed_cache.py` (25: what is cached, when it is cleared, what a hit still
+  reads fresh), `test_admin.py` (4) and `test_no_network.py` (2).
+- Outside `apps/social`: the cursor check moved into a shared `TimestampCursorMixin` (`apps/core/tests/test_pagination.py`
+  tests it, with a control showing what the unguarded class does), `FEED_CACHE_SECONDS` has settings tests, and
+  `create_post` clears the author's cached feed.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 99 files, 1320 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 29 passed
+CI=1 npm run test:e2e                               # 29 passed (against the production build)
+cd ../backend                                       # back to backend/ for steps 3 to 10
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  99 passed (99)` and `Tests  1320 passed (1320)`. `npm run build` lists the routes as in Part 5, plus
+`ƒ /u/[username]`, `ƒ /u/[username]/followers` and `ƒ /u/[username]/following` (dynamic: the profile is read on the
+server for each request). Each E2E run ends with `29 passed`: the 24 earlier tests and 5 new ones in
+`e2e/social.spec.ts`.
+
+- The new E2E file signs up **two** people once and shares them (allauth limits sign-ups to 20 a minute per
+  address and the rest of the suite already uses most of that). Its tests: a crawler gets a profile's `<title>`,
+  Open Graph and canonical tags, an upper-case address redirects and an unknown name is a 404; a visitor is sent
+  to log in to follow and sees no Following tab; the profile, the followers list and `/home` fit a phone with no
+  sideways scroll; A follows B, B posts, A sees it under Following, then unfollows and the tab is empty again;
+  your own post is in your Following tab at once and your own profile shows Edit profile and no Follow.
+- Two E2E helpers changed: the sign-up helper now waits up to 30 seconds for `/verify-email` (hashing the password
+  takes a while when six workers sign up at once; this flake predates Part 6), and `posts.spec.ts` now expects two
+  links on a card (the author and the claim).
+
+#### Step 3: Start the servers and make three accounts and two posts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 10.**
+
+**What this does:** Windows 1 and 3 run the two servers. In window 2 you sign up three accounts through the API
+and mark them verified, then `bo` posts an opinion and a fact with a DOI. The helpers `mk` (make a post, print its id) and `get` (print the status code, then the answer) are used by the next steps.
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```bash
+cd frontend                                         # from the repo root
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend` with the venv active: steps 1 and 2 leave you there; needs `jq`). If you opened a new
+terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the addresses are new each run
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+signup() { jq -nc --arg e "$1" --arg u "$2" '{email: $e, username: $u, password: "correct-horse-battery-42", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/signup | jq -r .meta.access_token; }
+ada=$(signup "part6-ada-$id@example.test" "part6_ada_$id")      # $ada = ada's login token (follows bo)
+bo=$(signup "part6-bo-$id@example.test" "part6_bo_$id")         # $bo = bo's login token (the author we look at)
+cy=$(signup "part6-cy-$id@example.test" "part6_cy_$id")         # $cy = cy's login token (kept for the browser)
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part6-', email__endswith='$id@example.test').update(is_email_verified=True), 'accounts marked verified')" | tail -1
+api=http://localhost:8000/api/v1
+adaname=part6_ada_$id; boname=part6_bo_$id; cyname=part6_cy_$id
+mk() { curl -s -H "Authorization: Bearer $1" -H "Content-Type: application/json" --data-binary "$2" $api/posts/ | jq -r .id; }   # mk <token> <json>: makes a post, prints its id
+get() { local out; out=$(curl -s -w '\n%{http_code}' ${2:+-H "Authorization: Bearer $2"} "$api$1"); printf '%s  ' "${out##*$'\n'}"; printf '%s' "${out%$'\n'*}" | jq -c "${3:-.}"; }   # get <path> [token] [jq filter]: prints the status code, then the answer
+op1=$(mk "$bo" '{"content":"I think the new tram line will change how the city moves.","post_type":"opinion"}')
+fact1=$(mk "$bo" '{"content":"Solar capacity grew by roughly 30% worldwide last year.","post_type":"fact","sources":["doi:10.1038/s41558-024-02102"]}')
+echo ${ada:0:10} ${bo:0:10} ${cy:0:10}               # three prefixes, not an empty line
+echo "op1=$op1"; echo "fact1=$fact1"                 # two ids, not empty
+```
+
+**You should see** (the number in the names is your `id`, and the ids differ):
+
+```text
+3 accounts marked verified
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+op1=94dd0202-8d1c-4aca-8c33-8aeee8c7833b
+fact1=bb1b71af-8729-4d83-9e4f-26bc1a537d0d
+```
+
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet.
+
+**If it differs:** an empty token or an `id` of `null` means the sign-up or the post failed: `runserver` isn't
+running, `jq` is missing, or you signed up more than 20 times in a minute. Fix that and run this step again
+from `id=$(date +%H%M%S)`.
+
+#### Step 4: Read a profile
+
+**Where:** Terminal window 2 (the same terminal as step 3).
+
+**What this does:** Reads `GET /api/v1/users/{username}/` as nobody and as other people. A profile is public; only
+`is_following` and `is_me` depend on who asks. Then four names that don't give a profile.
+
+```bash
+get /users/$boname/ "" '{username, display_name, bio, avatar_url, counts, reputation, is_following, is_me, keys: (keys | length)}'   # 1: anyone, no login
+get /users/${boname^^}/ "" '{username}'                                                                                              # 2: upper case works
+get /users/$boname/ "$ada" '{is_following, is_me}'                                                                                  # 3: ada, who doesn't follow bo yet
+get /users/$boname/ "$bo" '{is_following, is_me}'                                                                                   # 4: bo looking at himself
+get /users/nobody_$id/ "" .                                                                                                         # 5: no such user
+get /users/ab/ "" .                                                                                                                 # 6: too short to be a username
+get "/users/$boname%00x/" "" .                                                                                                      # 7: a NUL byte in the name
+```
+
+**You should see** (seven commands, seven answers):
+
+```text
+200  {"username":"part6_bo_212733","display_name":"","bio":"","avatar_url":null,"counts":{"followers":0,"following":0,"posts":2,"verified":0,"false":0},"reputation":{"score":null,"sample":0},"is_following":false,"is_me":false,"keys":10}
+200  {"username":"part6_bo_212733"}
+200  {"is_following":false,"is_me":false}
+200  {"is_following":false,"is_me":true}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+```
+
+- The profile has exactly 10 keys and never an email or role. `posts` is 2: the opinion and the fact. A new
+  account has a blank display name, so the page shows `@username` once instead.
+- `reputation` is there already (`score` stays `null` until a person has 3 counted events, which Part 11B
+  starts counting); the page doesn't show it yet.
+- Lookup is case-insensitive (line 2). An unknown name, a name too short to be one and a name with a NUL byte
+  all give the same JSON 404, never a server error (the NUL case was a 500 until a test caught it).
+
+#### Step 5: Follow and unfollow
+
+**Where:** Terminal window 2.
+
+**What this does:** Follows and unfollows through `POST` and `DELETE /api/v1/users/{username}/follow/`, with
+every refusal. Both are idempotent. Following needs a verified email, unfollowing only a login.
+
+```bash
+follow() { curl -s -w '  %{http_code}\n' -X POST ${2:+-H "Authorization: Bearer $2"} $api/users/$1/follow/; }       # follow <username> [token]
+unfollow() { curl -s -w '  %{http_code}\n' -X DELETE ${2:+-H "Authorization: Bearer $2"} $api/users/$1/follow/; }   # unfollow <username> [token]
+follow $boname "$ada"                                # 1: the first follow is 201
+follow $boname "$ada"                                # 2: again: 200, nothing changes
+follow $boname                                       # 3: nobody logged in
+follow $adaname "$ada"                               # 4: following yourself
+follow nobody_$id "$ada"                             # 5: no such user
+dee=$(signup "part6-dee-$id@example.test" "part6_dee_$id")    # dee never verifies the email
+follow $boname "$dee"                                # 6: an unverified account can't follow
+get /users/$boname/ "$ada" '{counts: {followers: .counts.followers}, is_following}'    # 7: the count moved
+unfollow $boname "$ada"                              # 8: unfollow: 204
+unfollow $boname "$ada"                              # 9: again: still 204
+unfollow $boname "$dee"                              # 10: an unverified account may unfollow (nothing to remove here)
+get /users/$boname/ "$ada" '{counts: {followers: .counts.followers}, is_following}'    # 11: back to 0
+follow $boname "$ada"                                # 12: ada follows again for the next steps
+```
+
+**You should see** (twelve commands, twelve answers):
+
+```text
+{"is_following":true}  201
+{"is_following":true}  200
+{"detail":"Authentication credentials were not provided.","code":"not_authenticated"}  401
+{"detail":"You can't follow yourself.","code":"cannot_follow_self"}  400
+{"detail":"Not found.","code":"not_found"}  404
+{"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}  403
+200  {"counts":{"followers":1},"is_following":true}
+  204
+  204
+  204
+200  {"counts":{"followers":0},"is_following":false}
+{"is_following":true}  201
+```
+
+- 201 the first time, 200 when you already followed: the same answer, so a retry is safe. Unfollowing is 204 with
+  no body, whether or not you were following. Two simultaneous follows make one row (a test proves it).
+- Order of checks: login (401), verified email (403), then the throttle, then the name (404), then the rule
+  (400). A 401 or 403 never counts against the 100-an-hour allowance (step 9).
+
+#### Step 6: Followers, following and a person's posts
+
+**Where:** Terminal window 2.
+
+**What this does:** `cy` follows `bo` and `bo` follows `cy`; then reads both lists, one page at a time, and
+`bo`'s posts with the Facts / Opinions filter. `is_following` and `is_me` are from the point of view of whoever
+asks.
+
+```bash
+follow $boname "$cy"                                 # cy follows bo too
+follow $cyname "$bo"                                 # and bo follows cy
+get /users/$boname/followers/ "$cy" '{names: [.results[].username | sub("part6_"; "") | sub("_'$id'"; "")], is_following: [.results[].is_following], is_me: [.results[].is_me], keys: (.results[0] | keys | length), next_cursor}'   # 1: bo's followers, as cy
+get /users/$boname/followers/ "" '{names: [.results[].username | sub("part6_"; "") | sub("_'$id'"; "")], is_following: [.results[].is_following]}'   # 2: the same list as a visitor
+get /users/$boname/following/ "" '{names: [.results[].username | sub("part6_"; "") | sub("_'$id'"; "")]}'                                          # 3: who bo follows
+get "/users/$boname/followers/?page_size=1" "" '{names: [.results[].username | sub("part6_"; "") | sub("_'$id'"; "")], more: (.next_cursor != null)}'  # 4: one per page
+get "/users/$boname/followers/?cursor=cD1ub3QtYS1kYXRl" "" .                                                                                          # 5: a made-up cursor (it decodes to p=not-a-date)
+get /users/$boname/posts/ "" '{pinned, kinds: [.results[].kind], posts: [.results[].post | {type: .post_type, status, is_mine}]}'                     # 6: bo's posts
+get "/users/$boname/posts/?post_type=fact" "" '{types: [.results[].post.post_type]}'                                                                         # 7: facts only
+get "/users/$boname/posts/?post_type=opinion" "" '{types: [.results[].post.post_type]}'                                                                      # 8: opinions only
+get "/users/$boname/posts/?post_type=both" "" .                                                                                                     # 9: not a type
+```
+
+**You should see:**
+
+```text
+{"is_following":true}  201
+{"is_following":true}  201
+200  {"names":["cy","ada"],"is_following":[false,false],"is_me":[true,false],"keys":8,"next_cursor":null}
+200  {"names":["cy","ada"],"is_following":[false,false]}
+200  {"names":["cy"]}
+200  {"names":["cy"],"more":true}
+404  {"detail":"Invalid cursor","code":"not_found"}
+200  {"pinned":[],"kinds":["post","post"],"posts":[{"type":"fact","status":"pending","is_mine":false},{"type":"opinion","status":"published","is_mine":false}]}
+200  {"types":["fact"]}
+200  {"types":["opinion"]}
+400  {"post_type":["Choose fact or opinion, or leave it out."]}
+```
+
+- Followers come newest follow first (`cy`, then `ada`). A row has 8 keys: the public bits plus `bio`,
+  `reputation`, `is_following` and `is_me`; never an email. Line 1 is as `cy`, so `cy`'s own row has `is_me`
+  true; `is_following` is false everywhere because `cy` follows only `bo`.
+- Pages are 20 long (`?page_size=` up to 50); `next_cursor` is an opaque token. A made-up one is a 404, never a
+  server error. The number of database queries doesn't grow with the list (tests pin it).
+- `bo`'s posts: the same feed shape as Recent (`pinned` is always `[]` here), newest first, only what the public
+  can see; a bad `post_type` is a 400 on that field.
+
+#### Step 7: The Verified and FALSE counters
+
+**Where:** Terminal window 2, in `backend` with the venv active.
+
+**What this does:** Gives `bo` four more fact posts and sets their status the way the pipeline (Part 9) and the
+moderators (Part 10) will: one verified, one FALSE, one verified and then **deleted by `bo`**, one **removed**. Then
+reads the counters. A deleted post's verdict still counts (so deleting can't erase a FALSE label); a removed post
+is in neither counter.
+
+```bash
+factA=$(mk "$bo" '{"content":"The river authority says the bridge reopened on Monday.","post_type":"fact"}')
+factB=$(mk "$bo" '{"content":"The harvest was the largest ever recorded.","post_type":"fact"}')
+factC=$(mk "$bo" '{"content":"The ferry now runs every ten minutes.","post_type":"fact"}')
+factD=$(mk "$bo" '{"content":"The museum is free on Sundays.","post_type":"fact"}')
+python manage.py shell -c "
+from apps.posts.models import Post
+for pk, fields in [('$factA', dict(status='verified_true', verdict_source='pipeline', pipeline_verdict='true', confidence_score=94)),
+                   ('$factB', dict(status='verified_false', verdict_source='pipeline', pipeline_verdict='false', confidence_score=90)),
+                   ('$factC', dict(status='verified_true', verdict_source='pipeline', pipeline_verdict='true', confidence_score=91)),
+                   ('$factD', dict(status='removed'))]:
+    Post.objects.filter(pk=pk).update(**fields)
+print('4 posts set')" | tail -1
+get /users/$boname/ "" '{counts}'                                          # 1: two verified so far, one FALSE
+curl -s -o /dev/null -w 'delete the verified post: %{http_code}\n' -X DELETE -H "Authorization: Bearer $bo" $api/posts/$factC/   # 2: bo deletes factC
+get /users/$boname/ "" '{counts}'                                          # 3: it is hidden, but its verdict still counts
+get /users/$boname/posts/ "" '{statuses: [.results[].post.status]}'                   # 4: the list: no removed, no deleted post
+```
+
+**You should see:**
+
+```text
+4 posts set
+200  {"counts":{"followers":2,"following":1,"posts":5,"verified":2,"false":1}}
+delete the verified post: 204
+200  {"counts":{"followers":2,"following":1,"posts":4,"verified":2,"false":1}}
+200  {"statuses":["verified_false","verified_true","pending","published"]}
+```
+
+- Line 1: `posts` is 5 (the opinion, the pending fact and three of the four new ones: the removed one is
+  hidden), `verified` 2, `false` 1. After the delete (line 3) `posts` falls to 4 but **`verified` stays 2**: the
+  deleted post is hidden from the list and the count of posts, yet its verdict stays on the record.
+- The list (line 4) has no removed and no deleted post, even for their author.
+
+#### Step 8: The Following feed and its cache
+
+**Where:** Terminal window 2. Needs `REDIS_URL` set in `backend/.env` (as in `.env.example`): line 3 reads the
+cache from a second process, which only works when the cache is the shared Redis, not each process's memory.
+
+**What this does:** Reads `GET /api/v1/feed/` as `ada`, who follows `bo`. Shows what is kept in the cache
+(only ids), that your own new post appears at once, that a post by someone you follow can take up to 30 seconds
+(`FEED_CACHE_SECONDS`), and that a post deleted by its author vanishes immediately because the posts themselves
+are read fresh every time. (This step waits 31 seconds.)
+
+```bash
+adaid=$(curl -s -H "Authorization: Bearer $ada" $api/me/ | jq -r .id)
+get /feed/ "" .                                                           # 1: nobody logged in
+get /feed/ "$ada" '{contents: [.results[].post.content]}'                             # 2: ada follows bo: bo's posts, newest first
+python manage.py shell -c "from django.core.cache import cache; print(cache.get('social:following-feed:v1:$adaid'))" | tail -1   # 3: what is cached for ada
+mine=$(mk "$ada" '{"content":"I think ada can see her own post at once.","post_type":"opinion"}')
+get /feed/ "$ada" '.results[0].post | {content, is_mine}'               # 4: ada's own post is first, despite the cache
+mk "$bo" '{"content":"Bo posts something new right now.","post_type":"opinion"}' > /dev/null
+get /feed/ "$ada" '{seen: ([.results[].post.content] | any(. == "Bo posts something new right now."))}'   # 5: ada does not see it yet (the cache lives for 30 s)
+sleep 31
+get /feed/ "$ada" '{seen: ([.results[].post.content] | any(. == "Bo posts something new right now."))}'   # 6: after 30 seconds she does
+curl -s -o /dev/null -w 'bo deletes his tram opinion: %{http_code}\n' -X DELETE -H "Authorization: Bearer $bo" $api/posts/$op1/
+get /feed/ "$ada" '{tram: ([.results[].post.content | select(startswith("I think the new tram"))] | length)}'   # 7: gone at once, no waiting
+```
+
+**You should see:**
+
+```text
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+200  {"contents":["The harvest was the largest ever recorded.","The river authority says the bridge reopened on Monday.","Solar capacity grew by roughly 30% worldwide last year.","I think the new tram line will change how the city moves."]}
+{'ids': ['f44bbb89-28fc-4482-a788-f84c53c1eb09', '83f46a4f-fbb6-4160-a6ec-ddca8d9ebfd5', 'bb1b71af-8729-4d83-9e4f-26bc1a537d0d', '94dd0202-8d1c-4aca-8c33-8aeee8c7833b'], 'next': None}
+200  {"content":"I think ada can see her own post at once.","is_mine":true}
+200  {"seen":false}
+200  {"seen":true}
+bo deletes his tram opinion: 204
+200  {"tram":0}
+```
+
+- Line 3: what the cache holds for `ada` is only a list of post **ids** and the next-page cursor, never any
+  text. The posts are read again on every request, so a deleted or removed post disappears at once (line 7), and
+  likes and counts (Part 7) will never be stale.
+- The cache is cleared for you when you post (line 4), follow or unfollow. A post by someone you follow
+  reaches you after at most `FEED_CACHE_SECONDS` (30 by default; 0 turns the cache off). Only a first page asked
+  with the default size is cached.
+- The Following feed needs a login (line 1) but not a verified email: reading is allowed.
+
+#### Step 9: Following is rate limited
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes a fresh verified account, `fay`, and sends 101 follow requests as her. The limit is
+`follow`: 100 an hour per user, shared by follow and unfollow. Reading profiles is not counted.
+
+```bash
+fay=$(signup "part6-fay-$id@example.test" "part6_fay_$id")
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email='part6-fay-$id@example.test').update(is_email_verified=True), 'account marked verified')" | tail -1
+for i in $(seq 101); do curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $fay" $api/users/$boname/follow/; done | sort | uniq -c
+curl -s -X POST -H "Authorization: Bearer $fay" $api/users/$boname/follow/ | jq -c .
+curl -s -D - -o /dev/null -X POST -H "Authorization: Bearer $fay" $api/users/$boname/follow/ | grep -i -E "^(HTTP|retry-after)"
+curl -s -o /dev/null -w 'reading profiles still works: %{http_code}\n' $api/users/$boname/
+```
+
+**You should see** (the seconds differ):
+
+```text
+1 account marked verified
+     99 200
+      1 201
+      1 429
+{"detail":"Request was throttled. Expected available in 3599 seconds.","code":"throttled"}
+HTTP/1.1 429 Too Many Requests
+Retry-After: 3599
+reading profiles still works: 200
+```
+
+- 100 requests went through (the first made the follow, the other 99 were repeats), the 101st was refused with
+  `429` and a `Retry-After` in seconds. The same limit applies to unfollowing, so someone can't flip a follow back
+  and forth all day.
+- A 401 (not logged in) or 403 (email not verified) doesn't use up the allowance.
+
+#### Step 10: What a link preview or a search crawler sees
+
+**Where:** Terminal window 2, with `runserver` (window 1) and `npm run dev` (window 3) running.
+
+**What this does:** Asks the Next.js server for a profile page with no cookies and no JavaScript, the way a
+crawler does, and picks out the head tags. The server reads the profile from Django itself.
+
+```bash
+curl -s http://localhost:3000/u/$boname | grep -o -E '<title>[^<]*</title>|(property|name)="(og:title|og:description|og:type|og:image|twitter:image|twitter:card)" content="[^"]*"|rel="canonical" href="[^"]*"' | sort -u
+echo ---
+curl -s http://localhost:3000/u/$boname | grep -o "@$boname" | sort | uniq -c
+curl -s -o /dev/null -w 'upper case: %{http_code} -> %{redirect_url}\n' http://localhost:3000/u/${boname^^}
+curl -s -o /dev/null -w 'no such user: %{http_code}\n' http://localhost:3000/u/nobody_$id
+curl -s -o /dev/null -w 'not a username: %{http_code}\n' http://localhost:3000/u/ab
+curl -s http://localhost:3000/u/nobody_$id | grep -o -E 'name="robots" content="[^"]*"' | sort -u
+```
+
+**You should see** (the first compile of the page in `next dev` takes a few seconds; the name and the count of
+`@name` occurrences differ):
+
+```text
+name="twitter:card" content="summary_large_image"
+name="twitter:image" content="http://localhost:3000/twitter-image.png"
+property="og:description" content="Posts by @part6_bo_212733 on Rumor Zero."
+property="og:image" content="http://localhost:3000/opengraph-image.png"
+property="og:title" content="@part6_bo_212733 · Rumor Zero"
+property="og:type" content="profile"
+rel="canonical" href="http://localhost:3000/u/part6_bo_212733"
+<title>@part6_bo_212733 · Rumor Zero</title>
+---
+     13 @part6_bo_212733
+upper case: 307 -> http://localhost:3000/u/part6_bo_212733
+no such user: 404
+not a username: 404
+name="robots" content="noindex"
+```
+
+- The title is `Display Name (@name)`, or `@name` when there is no display name (a new account has none). The
+  description is the bio's first 160 characters, or "Posts by @name on Rumor Zero.". The share image is the
+  site's static one, set again on this page because a page's own Open Graph tags replace the site-wide ones.
+- `/u/NAME` in capitals answers `307` to the lower-case address, so there is one canonical URL. An unknown name,
+  or one that can't be a username, is a real HTTP 404 with `noindex`. (The count of `@name` only has to be
+  above zero: Next repeats it in the page and in its payload.)
+
+#### Step 11: Django Admin lists the follows
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Opens the admin list of follows, which is read-only: changes only go through the follow
+service, so the feed cache can't be left out of date.
+
+| URL | Expect |
+|---|---|
+| http://localhost:8000/admin/ | Sign in with the superuser you made in Part 0A. If it 404s, `ADMIN_URL_PATH` in `backend/.env` isn't `admin/`; use that path. |
+| http://localhost:8000/admin/social/follow/ | **Follows**: follower, following and created time, newest first, with a search box on the usernames. There is no **Add follow** button. |
+| Click a follow | A page that only shows the values: no Save and no Delete (they answer 403 if you type the address). |
+
+- Covered by `test_admin.py` (the list, the search, and 403 for add, change and delete); not opened by a person.
+
+#### Step 12: A profile in the browser
+
+**Where:** Browser, with `runserver` (window 1) and `npm run dev` (window 3) running. First give `bo` a name and a
+bio (the Settings page arrives in Part 14), in window 2:
+
+```bash
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(username='$boname').update(display_name='Bo Stone', bio='Climate reporter. I write about energy, rivers and trams.\nPosts here are mine alone.'), 'profile updated')" | tail -1
+```
+
+Then log in at http://localhost:3000/login as **`cy`**, with `part6-cy-<your id>@example.test` and
+`correct-horse-battery-42` (the id from step 3).
+
+**What this does:** Opens profiles, follows and unfollows, and uses the filter chips.
+
+| Do this | Expect |
+|---|---|
+| Open `http://localhost:3000/u/part6_bo_<id>` (your id) | One white card: a round avatar with the initials **BS**, **Bo Stone** in large serif, `@part6_bo_<id>` under it in blue, the bio (two lines), `Joined <this month and year> · 4 posts`, and a pale panel with four counters: **3 FOLLOWERS**, **1 FOLLOWING**, **● 2 VERIFIED** (teal dot), **● 1 FALSE** (red dot). Top right of the card a white **Following** button (`cy` follows `bo` since step 6). No "Debunked" anywhere. |
+| Below the card | Three chips **All** (dark), **Facts**, **Opinions**, then `bo`'s posts as cards, newest first: the new opinion from step 8, a FALSE 90% card (red edge), a VERIFIED 94% card (teal edge) and a CHECKING FACTS… card with its DOI row. No removed or deleted post, and not the tram opinion `bo` deleted. |
+| Click **Facts** | The list reloads with only the three facts (the opinion is gone); **Facts** is dark. Click it again: back to **All**. |
+| Hover the **Following** button | The word becomes **Unfollow** (the button keeps its width). Click it: it turns blue **Follow** at once and **3 FOLLOWERS** becomes **2**; click it again: **Following** and **3**. |
+| Click **3 FOLLOWERS** | `/u/part6_bo_<id>/followers`: **← Back to Bo Stone (@part6_bo_<id>)**, tabs **FOLLOWERS 3** (underlined) and **FOLLOWING 1**, and three rows (`fay`, `cy`, `ada`): avatar, `@name`, a **Follow** button on `fay` and `ada`, **none on your own row** (`cy`). |
+| Click **FOLLOWING 1** | `/u/part6_bo_<id>/following`: one row, `cy`, with no button (it is your own row). |
+| Open `/u/part6_ada_<id>` and click **Follow** | **Following** at once, and the **FOLLOWERS** counter goes up by one. Click again: it goes back. |
+| Open `/u/part6_cy_<id>` (yourself) | **Edit profile** (a button that goes to `/settings`, a placeholder until Part 14) instead of Follow. |
+| Open `/u/PART6_BO_<id>` in capitals | The address changes to the lower-case one. |
+| Open `/u/nobody_here` | The "Page not found" page. |
+| Log out and open `/u/part6_bo_<id>` | The same profile with a blue **Follow** link; clicking it goes to the log-in page and back to the profile afterwards. |
+
+- Verified and FALSE count `bo`'s deleted post too, so they can be higher than the verified posts listed (step 7).
+
+#### Step 13: The Following tab on /home
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Uses the second tab of the home feed. Recent stays the first tab and the default.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home | Two tabs, **RECENT** (underlined) and **FOLLOWING**. Logged out there is only **RECENT**. Opening `/home` makes no request for Following yet (DevTools → Network). |
+| Click **FOLLOWING** | `bo`'s posts and your own, newest first, with the same cards as Recent; **You're caught up.** at the end. One request, `/api/v1/feed/`. Click **RECENT** and **FOLLOWING** again: no new request. |
+| Click **New post** and post an opinion | It appears at the top of the open tab, and in the other tab too, without a reload. |
+| Open `/u/part6_bo_<id>`, click **Following** to unfollow `bo`, then open `/home` and **FOLLOWING** | Only your own posts: `bo`'s are gone at once (the cache is cleared when you unfollow). |
+| Log in with a brand-new account (no posts, no follows) and open **FOLLOWING** | **Follow people to see their posts here** with a **See Recent** button; the button switches to **RECENT**. |
+| On a post card, click the author's name or avatar | Their profile opens. Clicking the claim text or empty space on the card still opens the post. |
+
+#### Step 14: A phone-sized window
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Checks the new pages at phone width. In Firefox or Chrome press `F12`, then the "responsive
+design" / device toolbar button, and set the width to 390.
+
+| Do this | Expect |
+|---|---|
+| Open a profile | A top bar with the logo and your avatar; the profile card with the avatar and name side by side, the **Follow** button **below** them (not squeezed beside), the counters in a 2 by 2 grid; the chips; the posts. A bottom bar (Home, Search, New post, Notifications, Profile). **No sideways scrolling.** |
+| Open `/followers` | Rows with the name truncated if long and the **Follow** button at the right. |
+| Open `/home` and **FOLLOWING** | The two tabs under the top bar, the cards with the author's name and handle on one line. |
+
+#### Step 15: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts, their posts and their follows (all go with the accounts). In window 2, in `backend` with the
+  venv active:
+
+  ```bash
+  python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part6-').delete())" | tail -1
+  ```
+
+  After one clean run of this guide it prints `(22, {'posts.Post': 8, 'social.Follow': 4, 'account.EmailAddress': 5, 'accounts.User': 5})`:
+  how many rows went in all, and per table (8 posts: seven by `bo`, six in steps 3 and 7 and one in step 8, and one by `ada` in step 8; a deleted
+  post is still a row). Your count differs if you did the browser steps (more posts and follows). Nothing else is touched.
+  (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
   wipes the whole local database, which is destructive.
 - No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
@@ -7429,6 +7983,588 @@ design" / device toolbar button, and set the width to 390. Open any `/p/<id>` of
   table (6 posts: the three `ada` made in steps 3 and 7, plus the ones you made as `cy` in steps 11 and 12, so your
   count differs; a deleted post is still a row). Nothing else is touched. (The E2E tests' accounts stay in your local database, as in earlier parts: Django
   Admin → Users deletes them.)
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
+  token and the throwaway password of the test accounts.
+
+### Part 6: Profiles, follows, Following feed
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
+`frontend\.env.local`. Part 6 adds **one migration** (`social.0001_initial`, the follows table), **no dependency**
+and **no new variable** (`FEED_CACHE_SECONDS` was already in `.env.example`; the code reads it now). It adds
+the endpoints `GET /api/v1/users/{username}/` (and `…/posts/`, `…/followers/`, `…/following/`),
+`POST` and `DELETE /api/v1/users/{username}/follow/`, and `GET /api/v1/feed/`.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 14 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for steps 3 to 10**: the variables and functions you set in step 3 (`$id`, `$h`, `$ada`, `$bo`, `$cy`, `$api`, `$boname`, `Signup`, `Mk`, `Fetch`) only live in that one terminal. If you close it, redo step 3. | 1 to 10, 15 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 10 to 14 |
+| Browser | Steps 11 to 14 | 11 to 14 |
+
+Things to know first:
+
+- Steps 3 to 10 talk to the API directly with `curl.exe` (with `.exe`: in PowerShell 5.1 plain `curl` is a different command). Steps 11 to 14 use the
+  browser. Step 3 makes three accounts, all verified: `bo` is the person whose profile we look at, `ada` follows
+  `bo`, and `cy` stays for the browser steps. Later steps add `dee` (never verified) and `fay` (for the throttle).
+- **The PowerShell blocks below were not run on Windows.** The agent works on the Linux PC; it ran the bash
+  twin of every command in the Linux guide on 2026-10-09, and the outputs below are those. The PowerShell
+  commands follow the patterns Parts 1 to 5 proved on Windows (JSON written to a file and sent with
+  `--data-binary "@file"`, `curl.exe`, no `&&`). If one behaves differently, tell the agent which.
+- The API and page outputs below were recorded on Linux on 2026-10-09. The browser steps were checked the same
+  day with headless Chromium (screenshots at 1280 and 390 px), not by a person at a keyboard. Ids, numbers in
+  names, times and token prefixes differ on every run.
+- Nothing here sends an email: step 3 marks the accounts verified with a shell command, which stands in for
+  clicking the link (Part 2 shows the real flow). Step 7 sets post statuses the same way, because the pipeline
+  and the moderator tools that do it for real arrive in Parts 9 and 10.
+- **What Part 6 does and doesn't show:** profiles are public; following needs a verified email; a profile's
+  **Verified** and **FALSE** counters also count posts the author deleted, but never removed ones (step 7);
+  the Following feed keeps only the *ids* of its first page for 30 seconds (step 8). Likes, comments,
+  reposts and the credibility score come in later parts.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies the new migration,
+confirms there is no further one, then runs the whole backend test suite, the new social tests, the linter and
+the formatter check.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                            # Applying social.0001_initial... OK
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 1336 passed
+python -m pytest apps/social -q                     # 160 passed
+ruff check . ; ruff format --check .                # All checks passed! / 132 files already formatted
+```
+
+**You should see:** `Applying social.0001_initial... OK` (nothing to apply the second time), `No changes detected`
+and `System check identified no issues (0 silenced).`, then the full run ends with `1336 passed`, the social run
+with `160 passed`, and the last line pair is `All checks passed!` and `132 files already formatted`. (Counts may
+grow later; what matters is that nothing fails.)
+
+- The 160 new social tests: `test_models.py` (6: the unique pair, nobody follows themselves, both list indexes),
+  `test_services.py` (18: follow is idempotent, two simultaneous follows make one row, the cache is cleared),
+  `test_api_profile.py` (26), `test_api_follow.py` (23, including the real 100-requests-an-hour throttle),
+  `test_api_lists.py` (23: order, cursor walk, crafted cursors, constant query counts), `test_api_user_posts.py`
+  (19), `test_api_feed.py` (14), `test_feed_cache.py` (25: what is cached, when it is cleared, what a hit still
+  reads fresh), `test_admin.py` (4) and `test_no_network.py` (2).
+- Outside `apps/social`: the cursor check moved into a shared `TimestampCursorMixin` (`apps/core/tests/test_pagination.py`
+  tests it, with a control showing what the unguarded class does), `FEED_CACHE_SECONDS` has settings tests, and
+  `create_post` clears the author's cached feed.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 99 files, 1320 tests passed
+npm run build
+npm run test:e2e                                    # 29 passed
+$env:CI = "1" ; npm run test:e2e ; Remove-Item Env:CI   # 29 passed (against the production build)
+cd ..\backend                                       # back to backend\ for steps 3 to 10
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  99 passed (99)` and `Tests  1320 passed (1320)`. `npm run build` lists the routes as in Part 5, plus
+`ƒ /u/[username]`, `ƒ /u/[username]/followers` and `ƒ /u/[username]/following` (dynamic: the profile is read on the
+server for each request). Each E2E run ends with `29 passed`: the 24 earlier tests and 5 new ones in
+`e2e/social.spec.ts`.
+
+- The new E2E file signs up **two** people once and shares them (allauth limits sign-ups to 20 a minute per
+  address and the rest of the suite already uses most of that). Its tests: a crawler gets a profile's `<title>`,
+  Open Graph and canonical tags, an upper-case address redirects and an unknown name is a 404; a visitor is sent
+  to log in to follow and sees no Following tab; the profile, the followers list and `/home` fit a phone with no
+  sideways scroll; A follows B, B posts, A sees it under Following, then unfollows and the tab is empty again;
+  your own post is in your Following tab at once and your own profile shows Edit profile and no Follow.
+- On Windows `npm run build` can't blank `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (PowerShell's `$env:NAME = ""` *deletes* the
+  variable), so a `frontend\.env.local` with your real client ID is baked into that build and the CI-mode run is less
+  representative than on Linux. The default run pins an empty client ID for both servers, so it is unaffected.
+- Two E2E helpers changed: the sign-up helper now waits up to 30 seconds for `/verify-email` (hashing the password
+  takes a while when six workers sign up at once; this flake predates Part 6), and `posts.spec.ts` now expects two
+  links on a card (the author and the claim).
+
+#### Step 3: Start the servers and make three accounts and two posts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 10.**
+
+**What this does:** Windows 1 and 3 run the two servers. In window 2 you sign up three accounts through the API
+and mark them verified, then `bo` posts an opinion and a fact with a DOI. The helpers `Mk` (make a post, print its id) and `Fetch` (print the status code, then the answer) are used by the next steps.
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 and 2 leave you there). If you opened a new
+terminal, first run `cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the addresses are new each run
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+function Signup($email, $username) {
+@"
+{"email": "$email", "username": "$username", "password": "correct-horse-battery-42", "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-signup.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-signup.json" http://localhost:8000/api/auth/app/v1/auth/signup | ConvertFrom-Json).meta.access_token
+}
+$ada = Signup "part6-ada-$id@example.test" "part6_ada_$id"      # $ada = ada's login token (follows bo)
+$bo = Signup "part6-bo-$id@example.test" "part6_bo_$id"         # $bo = bo's login token (the author we look at)
+$cy = Signup "part6-cy-$id@example.test" "part6_cy_$id"         # $cy = cy's login token (kept for the browser)
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part6-', email__endswith='$id@example.test').update(is_email_verified=True), 'accounts marked verified')" | Select-Object -Last 1
+$api = 'http://localhost:8000/api/v1'
+$adaname = "part6_ada_$id"; $boname = "part6_bo_$id"; $cyname = "part6_cy_$id"
+# Mk <token> <json>: makes a post, prints its id
+function Mk($token, $json) {
+  $json | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+  (curl.exe -s -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | ConvertFrom-Json).id
+}
+# Fetch <path> [token] [fields]: prints the HTTP status, then the answer (cut down to `fields` when given)
+function Fetch($path, $token, $props) {
+  $a = @()
+  if ($token) { $a = '-H', "Authorization: Bearer $token" }
+  $out = curl.exe -s -w "`n%{http_code}" @a "$api$path"
+  $body = $out[0..($out.Count - 2)] -join ''
+  if ($props -and $body) { $body = $body | ConvertFrom-Json | Select-Object $props | ConvertTo-Json -Depth 5 -Compress }
+  "$($out[-1])  $body"
+}
+$op1 = Mk $bo '{"content":"I think the new tram line will change how the city moves.","post_type":"opinion"}'
+$fact1 = Mk $bo '{"content":"Solar capacity grew by roughly 30% worldwide last year.","post_type":"fact","sources":["doi:10.1038/s41558-024-02102"]}'
+"$($ada.Substring(0,10)) $($bo.Substring(0,10)) $($cy.Substring(0,10))"      # three prefixes, not an error
+"op1=$op1"; "fact1=$fact1"                                                  # two ids, not empty
+```
+
+**You should see** (the number in the names is your `id`, and the ids differ):
+
+```text
+3 accounts marked verified
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+op1=94dd0202-8d1c-4aca-8c33-8aeee8c7833b
+fact1=bb1b71af-8729-4d83-9e4f-26bc1a537d0d
+```
+
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet.
+
+**If it differs:** an empty token or an `id` of `null` means the sign-up or the post failed: `runserver` isn't
+running, or you signed up more than 20 times in a minute. Fix that and run this step again
+from `$id = Get-Date …`.
+
+#### Step 4: Read a profile
+
+**Where:** Terminal window 2 (the same terminal as step 3).
+
+**What this does:** Reads `GET /api/v1/users/{username}/` as nobody and as other people. A profile is public; only
+`is_following` and `is_me` depend on who asks. Then four names that don't give a profile.
+
+```powershell
+Fetch "/users/$boname/" $null @('username', 'display_name', 'bio', 'avatar_url', 'counts', 'reputation', 'is_following', 'is_me', @{n='keys'; e={@($_.PSObject.Properties).Count}})   # 1: anyone, no login
+Fetch "/users/$($boname.ToUpper())/" $null @('username')                                                                  # 2: upper case works
+Fetch "/users/$boname/" $ada @('is_following', 'is_me')                                                                   # 3: ada, who doesn't follow bo yet
+Fetch "/users/$boname/" $bo @('is_following', 'is_me')                                                                    # 4: bo looking at himself
+Fetch "/users/nobody_$id/"                                                                                                # 5: no such user
+Fetch "/users/ab/"                                                                                                        # 6: too short to be a username
+Fetch "/users/$boname%00x/"                                                                                               # 7: a NUL byte in the name
+```
+
+**You should see** (seven commands, seven answers):
+
+```text
+200  {"username":"part6_bo_212733","display_name":"","bio":"","avatar_url":null,"counts":{"followers":0,"following":0,"posts":2,"verified":0,"false":0},"reputation":{"score":null,"sample":0},"is_following":false,"is_me":false,"keys":10}
+200  {"username":"part6_bo_212733"}
+200  {"is_following":false,"is_me":false}
+200  {"is_following":false,"is_me":true}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+```
+
+- The profile has exactly 10 keys and never an email or role. `posts` is 2: the opinion and the fact. A new
+  account has a blank display name, so the page shows `@username` once instead.
+- `reputation` is there already (`score` stays `null` until a person has 3 counted events, which Part 11B
+  starts counting); the page doesn't show it yet.
+- Lookup is case-insensitive (line 2). An unknown name, a name too short to be one and a name with a NUL byte
+  all give the same JSON 404, never a server error (the NUL case was a 500 until a test caught it).
+
+#### Step 5: Follow and unfollow
+
+**Where:** Terminal window 2.
+
+**What this does:** Follows and unfollows through `POST` and `DELETE /api/v1/users/{username}/follow/`, with
+every refusal. Both are idempotent. Following needs a verified email, unfollowing only a login.
+
+```powershell
+function Follow($username, $token) { $a = @(); if ($token) { $a = '-H', "Authorization: Bearer $token" }; curl.exe -s -w "  %{http_code}`n" -X POST @a "$api/users/$username/follow/" }       # Follow <username> [token]
+function Unfollow($username, $token) { $a = @(); if ($token) { $a = '-H', "Authorization: Bearer $token" }; curl.exe -s -w "  %{http_code}`n" -X DELETE @a "$api/users/$username/follow/" }   # Unfollow <username> [token]
+Follow $boname $ada                                  # 1: the first follow is 201
+Follow $boname $ada                                  # 2: again: 200, nothing changes
+Follow $boname                                       # 3: nobody logged in
+Follow $adaname $ada                                 # 4: following yourself
+Follow "nobody_$id" $ada                             # 5: no such user
+$dee = Signup "part6-dee-$id@example.test" "part6_dee_$id"    # dee never verifies the email
+Follow $boname $dee                                  # 6: an unverified account can't follow
+Fetch "/users/$boname/" $ada @(@{n='counts'; e={@{followers = $_.counts.followers}}}, 'is_following')    # 7: the count moved
+Unfollow $boname $ada                                # 8: unfollow: 204
+Unfollow $boname $ada                                # 9: again: still 204
+Unfollow $boname $dee                                # 10: an unverified account may unfollow (nothing to remove here)
+Fetch "/users/$boname/" $ada @(@{n='counts'; e={@{followers = $_.counts.followers}}}, 'is_following')    # 11: back to 0
+Follow $boname $ada                                  # 12: ada follows again for the next steps
+```
+
+**You should see** (twelve commands, twelve answers):
+
+```text
+{"is_following":true}  201
+{"is_following":true}  200
+{"detail":"Authentication credentials were not provided.","code":"not_authenticated"}  401
+{"detail":"You can't follow yourself.","code":"cannot_follow_self"}  400
+{"detail":"Not found.","code":"not_found"}  404
+{"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}  403
+200  {"counts":{"followers":1},"is_following":true}
+  204
+  204
+  204
+200  {"counts":{"followers":0},"is_following":false}
+{"is_following":true}  201
+```
+
+- 201 the first time, 200 when you already followed: the same answer, so a retry is safe. Unfollowing is 204 with
+  no body, whether or not you were following. Two simultaneous follows make one row (a test proves it).
+- Order of checks: login (401), verified email (403), then the throttle, then the name (404), then the rule
+  (400). A 401 or 403 never counts against the 100-an-hour allowance (step 9).
+
+#### Step 6: Followers, following and a person's posts
+
+**Where:** Terminal window 2.
+
+**What this does:** `cy` follows `bo` and `bo` follows `cy`; then reads both lists, one page at a time, and
+`bo`'s posts with the Facts / Opinions filter. `is_following` and `is_me` are from the point of view of whoever
+asks.
+
+```powershell
+$strip = { param($u) $u -replace '^part6_' -replace "_$id$" }    # shows "cy" instead of "part6_cy_123456"
+Follow $boname $cy                                   # cy follows bo too
+Follow $cyname $bo                                   # and bo follows cy
+$names = @{n='names'; e={@($_.results | ForEach-Object { & $strip $_.username })}}
+Fetch "/users/$boname/followers/" $cy @($names, @{n='is_following'; e={@($_.results.is_following)}}, @{n='is_me'; e={@($_.results.is_me)}}, @{n='keys'; e={@($_.results[0].PSObject.Properties).Count}}, 'next_cursor')   # 1: bo's followers, as cy
+Fetch "/users/$boname/followers/" $null @($names, @{n='is_following'; e={@($_.results.is_following)}})                  # 2: the same list as a visitor
+Fetch "/users/$boname/following/" $null @($names)                                                                         # 3: who bo follows
+Fetch "/users/$boname/followers/?page_size=1" $null @($names, @{n='more'; e={$null -ne $_.next_cursor}})                  # 4: one per page
+Fetch "/users/$boname/followers/?cursor=cD1ub3QtYS1kYXRl"                                                                 # 5: a made-up cursor (it decodes to p=not-a-date)
+Fetch "/users/$boname/posts/" $null @('pinned', @{n='kinds'; e={@($_.results.kind)}}, @{n='posts'; e={@($_.results.post | ForEach-Object { [ordered]@{type = $_.post_type; status = $_.status; is_mine = $_.is_mine} })}})   # 6: bo's posts
+Fetch "/users/$boname/posts/?post_type=fact" $null @(@{n='types'; e={@($_.results.post.post_type)}})                      # 7: facts only
+Fetch "/users/$boname/posts/?post_type=opinion" $null @(@{n='types'; e={@($_.results.post.post_type)}})                   # 8: opinions only
+Fetch "/users/$boname/posts/?post_type=both"                                                                              # 9: not a type
+```
+
+**You should see:**
+
+```text
+{"is_following":true}  201
+{"is_following":true}  201
+200  {"names":["cy","ada"],"is_following":[false,false],"is_me":[true,false],"keys":8,"next_cursor":null}
+200  {"names":["cy","ada"],"is_following":[false,false]}
+200  {"names":["cy"]}
+200  {"names":["cy"],"more":true}
+404  {"detail":"Invalid cursor","code":"not_found"}
+200  {"pinned":[],"kinds":["post","post"],"posts":[{"type":"fact","status":"pending","is_mine":false},{"type":"opinion","status":"published","is_mine":false}]}
+200  {"types":["fact"]}
+200  {"types":["opinion"]}
+400  {"post_type":["Choose fact or opinion, or leave it out."]}
+```
+
+- Followers come newest follow first (`cy`, then `ada`). A row has 8 keys: the public bits plus `bio`,
+  `reputation`, `is_following` and `is_me`; never an email. Line 1 is as `cy`, so `cy`'s own row has `is_me`
+  true; `is_following` is false everywhere because `cy` follows only `bo`.
+- Pages are 20 long (`?page_size=` up to 50); `next_cursor` is an opaque token. A made-up one is a 404, never a
+  server error. The number of database queries doesn't grow with the list (tests pin it).
+- `bo`'s posts: the same feed shape as Recent (`pinned` is always `[]` here), newest first, only what the public
+  can see; a bad `post_type` is a 400 on that field.
+
+#### Step 7: The Verified and FALSE counters
+
+**Where:** Terminal window 2, in `backend\` with the venv active.
+
+**What this does:** Gives `bo` four more fact posts and sets their status the way the pipeline (Part 9) and the
+moderators (Part 10) will: one verified, one FALSE, one verified and then **deleted by `bo`**, one **removed**. Then
+reads the counters. A deleted post's verdict still counts (so deleting can't erase a FALSE label); a removed post
+is in neither counter.
+
+```powershell
+$factA = Mk $bo '{"content":"The river authority says the bridge reopened on Monday.","post_type":"fact"}'
+$factB = Mk $bo '{"content":"The harvest was the largest ever recorded.","post_type":"fact"}'
+$factC = Mk $bo '{"content":"The ferry now runs every ten minutes.","post_type":"fact"}'
+$factD = Mk $bo '{"content":"The museum is free on Sundays.","post_type":"fact"}'
+@"
+from apps.posts.models import Post
+for pk, fields in [('$factA', dict(status='verified_true', verdict_source='pipeline', pipeline_verdict='true', confidence_score=94)),
+                   ('$factB', dict(status='verified_false', verdict_source='pipeline', pipeline_verdict='false', confidence_score=90)),
+                   ('$factC', dict(status='verified_true', verdict_source='pipeline', pipeline_verdict='true', confidence_score=91)),
+                   ('$factD', dict(status='removed'))]:
+    Post.objects.filter(pk=pk).update(**fields)
+print('4 posts set')
+"@ | python manage.py shell | Select-Object -Last 1
+Fetch "/users/$boname/" $null @('counts')                                 # 1: two verified so far, one FALSE
+curl.exe -s -o NUL -w "delete the verified post: %{http_code}`n" -X DELETE -H "Authorization: Bearer $bo" "$api/posts/$factC/"   # 2: bo deletes factC
+Fetch "/users/$boname/" $null @('counts')                                 # 3: it is hidden, but its verdict still counts
+Fetch "/users/$boname/posts/" $null @(@{n='statuses'; e={@($_.results.post.status)}})   # 4: the list: no removed, no deleted post
+```
+
+**You should see:**
+
+```text
+4 posts set
+200  {"counts":{"followers":2,"following":1,"posts":5,"verified":2,"false":1}}
+delete the verified post: 204
+200  {"counts":{"followers":2,"following":1,"posts":4,"verified":2,"false":1}}
+200  {"statuses":["verified_false","verified_true","pending","published"]}
+```
+
+- Line 1: `posts` is 5 (the opinion, the pending fact and three of the four new ones: the removed one is
+  hidden), `verified` 2, `false` 1. After the delete (line 3) `posts` falls to 4 but **`verified` stays 2**: the
+  deleted post is hidden from the list and the count of posts, yet its verdict stays on the record.
+- The list (line 4) has no removed and no deleted post, even for their author.
+
+#### Step 8: The Following feed and its cache
+
+**Where:** Terminal window 2. Needs `REDIS_URL` set in `backend\.env` (as in `.env.example`): line 3 reads the
+cache from a second process, which only works when the cache is the shared Redis, not each process's memory.
+
+**What this does:** Reads `GET /api/v1/feed/` as `ada`, who follows `bo`. Shows what is kept in the cache
+(only ids), that your own new post appears at once, that a post by someone you follow can take up to 30 seconds
+(`FEED_CACHE_SECONDS`), and that a post deleted by its author vanishes immediately because the posts themselves
+are read fresh every time. (This step waits 31 seconds.)
+
+```powershell
+$adaid = (curl.exe -s -H "Authorization: Bearer $ada" "$api/me/" | ConvertFrom-Json).id
+Fetch "/feed/"                                                            # 1: nobody logged in
+Fetch "/feed/" $ada @(@{n='contents'; e={@($_.results.post.content)}})   # 2: ada follows bo: bo's posts, newest first
+python manage.py shell -c "from django.core.cache import cache; print(cache.get('social:following-feed:v1:$adaid'))" | Select-Object -Last 1   # 3: what is cached for ada
+$mine = Mk $ada '{"content":"I think ada can see her own post at once.","post_type":"opinion"}'
+Fetch "/feed/" $ada @(@{n='content'; e={$_.results[0].post.content}}, @{n='is_mine'; e={$_.results[0].post.is_mine}})   # 4: ada's own post is first, despite the cache
+Mk $bo '{"content":"Bo posts something new right now.","post_type":"opinion"}' | Out-Null
+Fetch "/feed/" $ada @(@{n='seen'; e={@($_.results.post.content) -contains 'Bo posts something new right now.'}})   # 5: ada does not see it yet (the cache lives for 30 s)
+Start-Sleep 31
+Fetch "/feed/" $ada @(@{n='seen'; e={@($_.results.post.content) -contains 'Bo posts something new right now.'}})   # 6: after 30 seconds she does
+curl.exe -s -o NUL -w "bo deletes his tram opinion: %{http_code}`n" -X DELETE -H "Authorization: Bearer $bo" "$api/posts/$op1/"
+Fetch "/feed/" $ada @(@{n='tram'; e={@($_.results.post.content | Where-Object { $_ -like 'I think the new tram*' }).Count}})   # 7: gone at once, no waiting
+```
+
+**You should see:**
+
+```text
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+200  {"contents":["The harvest was the largest ever recorded.","The river authority says the bridge reopened on Monday.","Solar capacity grew by roughly 30% worldwide last year.","I think the new tram line will change how the city moves."]}
+{'ids': ['f44bbb89-28fc-4482-a788-f84c53c1eb09', '83f46a4f-fbb6-4160-a6ec-ddca8d9ebfd5', 'bb1b71af-8729-4d83-9e4f-26bc1a537d0d', '94dd0202-8d1c-4aca-8c33-8aeee8c7833b'], 'next': None}
+200  {"content":"I think ada can see her own post at once.","is_mine":true}
+200  {"seen":false}
+200  {"seen":true}
+bo deletes his tram opinion: 204
+200  {"tram":0}
+```
+
+- Line 3: what the cache holds for `ada` is only a list of post **ids** and the next-page cursor, never any
+  text. The posts are read again on every request, so a deleted or removed post disappears at once (line 7), and
+  likes and counts (Part 7) will never be stale.
+- The cache is cleared for you when you post (line 4), follow or unfollow. A post by someone you follow
+  reaches you after at most `FEED_CACHE_SECONDS` (30 by default; 0 turns the cache off). Only a first page asked
+  with the default size is cached.
+- The Following feed needs a login (line 1) but not a verified email: reading is allowed.
+
+#### Step 9: Following is rate limited
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes a fresh verified account, `fay`, and sends 101 follow requests as her. The limit is
+`follow`: 100 an hour per user, shared by follow and unfollow. Reading profiles is not counted.
+
+```powershell
+$fay = Signup "part6-fay-$id@example.test" "part6_fay_$id"
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email='part6-fay-$id@example.test').update(is_email_verified=True), 'account marked verified')" | Select-Object -Last 1
+1..101 | ForEach-Object { curl.exe -s -o NUL -w "%{http_code}`n" -X POST -H "Authorization: Bearer $fay" "$api/users/$boname/follow/" } | Group-Object | Sort-Object Name | ForEach-Object { "{0,6} {1}" -f $_.Count, $_.Name }
+curl.exe -s -X POST -H "Authorization: Bearer $fay" "$api/users/$boname/follow/" | ConvertFrom-Json | ConvertTo-Json -Compress
+curl.exe -s -D - -o NUL -X POST -H "Authorization: Bearer $fay" "$api/users/$boname/follow/" | Select-String -Pattern "^(HTTP|retry-after)"
+curl.exe -s -o NUL -w "reading profiles still works: %{http_code}`n" "$api/users/$boname/"
+```
+
+**You should see** (the seconds differ):
+
+```text
+1 account marked verified
+     99 200
+      1 201
+      1 429
+{"detail":"Request was throttled. Expected available in 3599 seconds.","code":"throttled"}
+HTTP/1.1 429 Too Many Requests
+Retry-After: 3599
+reading profiles still works: 200
+```
+
+- 100 requests went through (the first made the follow, the other 99 were repeats), the 101st was refused with
+  `429` and a `Retry-After` in seconds. The same limit applies to unfollowing, so someone can't flip a follow back
+  and forth all day.
+- A 401 (not logged in) or 403 (email not verified) doesn't use up the allowance.
+
+#### Step 10: What a link preview or a search crawler sees
+
+**Where:** Terminal window 2, with `runserver` (window 1) and `npm run dev` (window 3) running.
+
+**What this does:** Asks the Next.js server for a profile page with no cookies and no JavaScript, the way a
+crawler does, and picks out the head tags. The server reads the profile from Django itself.
+
+```powershell
+$page = curl.exe -s "http://localhost:3000/u/$boname" | Out-String
+[regex]::Matches($page, '<title>[^<]*</title>|(property|name)="(og:title|og:description|og:type|og:image|twitter:image|twitter:card)" content="[^"]*"|rel="canonical" href="[^"]*"') | ForEach-Object { $_.Value } | Sort-Object -Unique
+"---"
+([regex]::Matches($page, "@$boname")).Count
+curl.exe -s -o NUL -w "upper case: %{http_code} -> %{redirect_url}`n" "http://localhost:3000/u/$($boname.ToUpper())"
+curl.exe -s -o NUL -w "no such user: %{http_code}`n" "http://localhost:3000/u/nobody_$id"
+curl.exe -s -o NUL -w "not a username: %{http_code}`n" "http://localhost:3000/u/ab"
+[regex]::Matches((curl.exe -s "http://localhost:3000/u/nobody_$id" | Out-String), 'name="robots" content="[^"]*"') | ForEach-Object { $_.Value } | Sort-Object -Unique
+```
+
+**You should see** (the first compile of the page in `next dev` takes a few seconds; the name and the count of
+`@name` occurrences differ):
+
+```text
+name="twitter:card" content="summary_large_image"
+name="twitter:image" content="http://localhost:3000/twitter-image.png"
+property="og:description" content="Posts by @part6_bo_212733 on Rumor Zero."
+property="og:image" content="http://localhost:3000/opengraph-image.png"
+property="og:title" content="@part6_bo_212733 · Rumor Zero"
+property="og:type" content="profile"
+rel="canonical" href="http://localhost:3000/u/part6_bo_212733"
+<title>@part6_bo_212733 · Rumor Zero</title>
+---
+     13 @part6_bo_212733
+upper case: 307 -> http://localhost:3000/u/part6_bo_212733
+no such user: 404
+not a username: 404
+name="robots" content="noindex"
+```
+
+- The title is `Display Name (@name)`, or `@name` when there is no display name (a new account has none). The
+  description is the bio's first 160 characters, or "Posts by @name on Rumor Zero.". The share image is the
+  site's static one, set again on this page because a page's own Open Graph tags replace the site-wide ones.
+- `/u/NAME` in capitals answers `307` to the lower-case address, so there is one canonical URL. An unknown name,
+  or one that can't be a username, is a real HTTP 404 with `noindex`. (The count of `@name` only has to be
+  above zero: Next repeats it in the page and in its payload.)
+
+#### Step 11: Django Admin lists the follows
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Opens the admin list of follows, which is read-only: changes only go through the follow
+service, so the feed cache can't be left out of date.
+
+| URL | Expect |
+|---|---|
+| http://localhost:8000/admin/ | Sign in with the superuser you made in Part 0A. If it 404s, `ADMIN_URL_PATH` in `backend\.env` isn't `admin/`; use that path. |
+| http://localhost:8000/admin/social/follow/ | **Follows**: follower, following and created time, newest first, with a search box on the usernames. There is no **Add follow** button. |
+| Click a follow | A page that only shows the values: no Save and no Delete (they answer 403 if you type the address). |
+
+- Covered by `test_admin.py` (the list, the search, and 403 for add, change and delete); not opened by a person.
+
+#### Step 12: A profile in the browser
+
+**Where:** Browser, with `runserver` (window 1) and `npm run dev` (window 3) running. First give `bo` a name and a
+bio (the Settings page arrives in Part 14), in window 2:
+
+```powershell
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(username='$boname').update(display_name='Bo Stone', bio='Climate reporter. I write about energy, rivers and trams.'), 'profile updated')" | Select-Object -Last 1
+```
+
+Then log in at http://localhost:3000/login as **`cy`**, with `part6-cy-<your id>@example.test` and
+`correct-horse-battery-42` (the id from step 3).
+
+**What this does:** Opens profiles, follows and unfollows, and uses the filter chips.
+
+| Do this | Expect |
+|---|---|
+| Open `http://localhost:3000/u/part6_bo_<id>` (your id) | One white card: a round avatar with the initials **BS**, **Bo Stone** in large serif, `@part6_bo_<id>` under it in blue, the bio (two lines), `Joined <this month and year> · 4 posts`, and a pale panel with four counters: **3 FOLLOWERS**, **1 FOLLOWING**, **● 2 VERIFIED** (teal dot), **● 1 FALSE** (red dot). Top right of the card a white **Following** button (`cy` follows `bo` since step 6). No "Debunked" anywhere. |
+| Below the card | Three chips **All** (dark), **Facts**, **Opinions**, then `bo`'s posts as cards, newest first: the new opinion from step 8, a FALSE 90% card (red edge), a VERIFIED 94% card (teal edge) and a CHECKING FACTS… card with its DOI row. No removed or deleted post, and not the tram opinion `bo` deleted. |
+| Click **Facts** | The list reloads with only the three facts (the opinion is gone); **Facts** is dark. Click it again: back to **All**. |
+| Hover the **Following** button | The word becomes **Unfollow** (the button keeps its width). Click it: it turns blue **Follow** at once and **3 FOLLOWERS** becomes **2**; click it again: **Following** and **3**. |
+| Click **3 FOLLOWERS** | `/u/part6_bo_<id>/followers`: **← Back to Bo Stone (@part6_bo_<id>)**, tabs **FOLLOWERS 3** (underlined) and **FOLLOWING 1**, and three rows (`fay`, `cy`, `ada`): avatar, `@name`, a **Follow** button on `fay` and `ada`, **none on your own row** (`cy`). |
+| Click **FOLLOWING 1** | `/u/part6_bo_<id>/following`: one row, `cy`, with no button (it is your own row). |
+| Open `/u/part6_ada_<id>` and click **Follow** | **Following** at once, and the **FOLLOWERS** counter goes up by one. Click again: it goes back. |
+| Open `/u/part6_cy_<id>` (yourself) | **Edit profile** (a button that goes to `/settings`, a placeholder until Part 14) instead of Follow. |
+| Open `/u/PART6_BO_<id>` in capitals | The address changes to the lower-case one. |
+| Open `/u/nobody_here` | The "Page not found" page. |
+| Log out and open `/u/part6_bo_<id>` | The same profile with a blue **Follow** link; clicking it goes to the log-in page and back to the profile afterwards. |
+
+- Verified and FALSE count `bo`'s deleted post too, so they can be higher than the verified posts listed (step 7).
+
+#### Step 13: The Following tab on /home
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Uses the second tab of the home feed. Recent stays the first tab and the default.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home | Two tabs, **RECENT** (underlined) and **FOLLOWING**. Logged out there is only **RECENT**. Opening `/home` makes no request for Following yet (DevTools → Network). |
+| Click **FOLLOWING** | `bo`'s posts and your own, newest first, with the same cards as Recent; **You're caught up.** at the end. One request, `/api/v1/feed/`. Click **RECENT** and **FOLLOWING** again: no new request. |
+| Click **New post** and post an opinion | It appears at the top of the open tab, and in the other tab too, without a reload. |
+| Open `/u/part6_bo_<id>`, click **Following** to unfollow `bo`, then open `/home` and **FOLLOWING** | Only your own posts: `bo`'s are gone at once (the cache is cleared when you unfollow). |
+| Log in with a brand-new account (no posts, no follows) and open **FOLLOWING** | **Follow people to see their posts here** with a **See Recent** button; the button switches to **RECENT**. |
+| On a post card, click the author's name or avatar | Their profile opens. Clicking the claim text or empty space on the card still opens the post. |
+
+#### Step 14: A phone-sized window
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Checks the new pages at phone width. In Firefox or Chrome press `F12`, then the "responsive
+design" / device toolbar button, and set the width to 390.
+
+| Do this | Expect |
+|---|---|
+| Open a profile | A top bar with the logo and your avatar; the profile card with the avatar and name side by side, the **Follow** button **below** them (not squeezed beside), the counters in a 2 by 2 grid; the chips; the posts. A bottom bar (Home, Search, New post, Notifications, Profile). **No sideways scrolling.** |
+| Open `/followers` | Rows with the name truncated if long and the **Follow** button at the right. |
+| Open `/home` and **FOLLOWING** | The two tabs under the top bar, the cards with the author's name and handle on one line. |
+
+#### Step 15: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts, their posts and their follows (all go with the accounts). In window 2, in `backend\` with the
+  venv active:
+
+  ```powershell
+  python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part6-').delete())" | Select-Object -Last 1
+  ```
+
+  After one clean run of this guide it prints `(22, {'posts.Post': 8, 'social.Follow': 4, 'account.EmailAddress': 5, 'accounts.User': 5})`:
+  how many rows went in all, and per table (8 posts: seven by `bo`, six in steps 3 and 7 and one in step 8, and one by `ada` in step 8; a deleted
+  post is still a row). Your count differs if you did the browser steps (more posts and follows). Nothing else is touched.
+  (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
   wipes the whole local database, which is destructive.
 - No secret was used or printed in this part: the only values in the commands are Cloudflare's public test

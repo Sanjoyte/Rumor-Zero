@@ -27,7 +27,8 @@ export async function signUp(page: Page, prefix = "e2e", { stay = false } = {}) 
   // The test widget solves itself; the button waits for its token.
   await expect(submit).toBeEnabled({ timeout: 30_000 });
   await submit.click();
-  await expect(page).toHaveURL(/\/verify-email$/);
+  // Hashing the password (Argon2) is slow when several workers sign up at once: allow for it.
+  await expect(page).toHaveURL(/\/verify-email$/, { timeout: 30_000 });
   if (!stay) {
     await page.getByRole("link", { name: /Continue browsing read-only/ }).click();
     await expect(page).toHaveURL(/\/home$/);

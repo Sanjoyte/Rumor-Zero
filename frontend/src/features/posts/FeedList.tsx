@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -22,12 +23,15 @@ export function FeedList({
   feed,
   statusUpdates = {},
   gone,
+  empty,
 }: {
   feed: CursorFeed<FeedItem>;
   /** Polled statuses laid over the loaded posts (Part 5): a badge changes without a reload. */
   statusUpdates?: StatusOverlay;
   /** Posts the poll found deleted: they disappear. */
   gone?: ReadonlySet<string>;
+  /** What an empty list says (the Following tab and profiles word it differently). */
+  empty?: ReactNode;
 }) {
   const { phase } = feed;
   const items = gone
@@ -58,9 +62,11 @@ export function FeedList({
 
   if (items.length === 0) {
     return (
-      <EmptyState icon="forum" title="No posts yet">
-        Be the first to post something.
-      </EmptyState>
+      empty ?? (
+        <EmptyState icon="forum" title="No posts yet">
+          Be the first to post something.
+        </EmptyState>
+      )
     );
   }
 
