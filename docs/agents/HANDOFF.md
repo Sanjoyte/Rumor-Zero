@@ -6,29 +6,63 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none. **Part 4 (Posts: composer + Recent feed) is done** (2026-10-09; built 2026-10-08 to
-  2026-10-09 from the approved plan; every required test and check green; `task.md` updated).
-  Parts 0A, 0B, 0D, 0C, 1, 2, 3 and 4 are done. Part 1 CI is green (user-reported 2026-10-06);
-  **Part 2, Part 3 and Part 4 CI have not run yet.**
+- **Part:** **Part 5 (Post detail, sharing, deletion, status polling): planned and approved**
+  (2026-10-09), **not started.** Parts 0A, 0B, 0D, 0C, 1, 2, 3 and 4 are done; Part 5's only
+  dependency (Part 4) is done (`task.md`, both places, 2026-10-09; committed as `2b1fb19`). Part 1 CI
+  is green (user-reported 2026-10-06); **Part 2, Part 3 and Part 4 CI have not run yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after finishing Part 4; Part 5 is not started).
-- **Phase:** done, uncommitted. The user reviews and commits.
+- **Owner:** none (Claude stopped after saving the Part 5 plan; no code written).
+- **Phase:** plan approved, saved, uncommitted. The user commits it, then starts implementation.
 - **Approved plan:**
-  [`docs/agents/plans/part-4-posts-composer-recent-feed.md`](plans/part-4-posts-composer-recent-feed.md)
-  (status line now says IMPLEMENTED)
+  [`docs/agents/plans/part-5-post-detail-sharing-deletion-polling.md`](plans/part-5-post-detail-sharing-deletion-polling.md)
+  (status line says APPROVED; implement with Sonnet 5.5 · medium per `task.md`)
 - **Previous plans:**
+  - [`part-4-posts-composer-recent-feed.md`](plans/part-4-posts-composer-recent-feed.md),
+    implemented 2026-10-09;
   - [`part-3-continue-with-google.md`](plans/part-3-continue-with-google.md), implemented
     2026-10-08;
   - [`part-2-email-verification-reset.md`](plans/part-2-email-verification-reset.md), implemented
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-09 by Claude (Sonnet 5.5), Part 4 implementation.
+- **Last updated:** 2026-10-09 by Claude (Sonnet 5.5), Part 5 planning.
 
 ## Completed checkpoints
+
+- 2026-10-09 (Claude, Sonnet 5.5): **Part 5 planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `2b1fb19` ("Implemented Part 4: posts composer and Recent feed",
+    committed by the user), a clean tree. (The older text of this file said Part 4 was uncommitted;
+    the user committed it in between.)
+  - **Dependency check:** Part 5 depends only on Part 4 (Done 2026-10-09); its chain 1 → 0C → 0A/0B/0D
+    plus 2 and 3 is Done. Open but not blocking: Part 3 criterion 4, and CI for Parts 2 to 4.
+  - **Research:** read-only only (two Explore agents plus direct reads): the Part 4 posts backend and
+    frontend, ARCHITECTURE/ANALYSIS, Stitch b3 and c1, Next 16.3.8's metadata merge code.
+  - **Changed this session:** only the new plan file and this file. No code, no setup command, no
+    `task.md` edit, no env file read.
+  - **User decisions (2026-10-09):**
+    - A removed post shows the public the **same 23 keys with `content`, `sources`, `verdict_note`
+      (and, by default, `confidence_score` and `verdict_source`) blanked**; the author's name and the
+      post time stay visible. The author sees the full post.
+    - **A `status_poll` throttle is added now:** 120/min per client IP, on the public status endpoint.
+  - **Defaults approved with the plan:** the detail, delete and status API shapes and codes (404 for
+    deleted or malformed ids, 403 `not_author`, 204 on delete and 404 on a repeat, removed answers
+    `removed` in the poll and deleted ids are omitted); polling covers `pending` only with a 10-minute
+    budget counted in visible time (10 s × 1.5 up to 60 s); the claim text is a stretched card link
+    with `prefetch={false}`; detail claim at `text-headline-md`; absolute UTC date; the SSR fallback and
+    5 s timeout; the "Deleted by author" admin filter; all listed in the plan's "Defaults" section.
+  - **Found during planning** (all handled in the plan):
+    - `PostQuerySet.visible()` hides removed posts, so the detail needs `not_deleted()`.
+    - `verdict_note` is ungated in `PostSerializer`.
+    - A page-level `openGraph`/`twitter` replaces the root layout's whole object (Next 16.3.8
+      `resolve-metadata.js:182-191`), so `/p/[id]` must set `type`, `siteName`, `images` and the
+      title suffix itself.
+    - A public GET with a stale Bearer is a 401.
+    - A `<uuid:>` converter answers an HTML 404.
+    - The existing tests assert cards have no link.
+    - `useCursorFeed` has no patch action.
 
 - 2026-10-09 (Claude, Sonnet 5.5): **Part 4 implemented** (uncommitted). Started from HEAD `b5fb841`
   ("Plan Part 4", committed by the user), a clean tree. (HANDOFF had said the plan was uncommitted; the
@@ -275,11 +309,13 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `b5fb841` ("Plan Part 4", committed by the user). **Uncommitted:** the whole Part 4
-  implementation: 28 modified files (this file included), the new `backend/apps/posts/` folder (27
-  files), 29 new files in `frontend/src/features/posts/` and `frontend/e2e/posts.spec.ts`
-  (`git status --short -uall`).
-- Docker (Postgres 18 + Redis) is up; no dev server is running; ports 3000/8000 are free.
+- HEAD is `2b1fb19` ("Implemented Part 4: posts composer and Recent feed", committed by the user).
+  **Uncommitted:** the new plan `docs/agents/plans/part-5-post-detail-sharing-deletion-polling.md` and
+  this file (`git status --short`). Everything else is the committed Part 4 state; no Part 5 code
+  exists yet.
+- As recorded at the end of Part 4 (not re-checked in the planning session, which ran no setup
+  command): Docker (Postgres 18 + Redis) up, no dev server running, ports 3000/8000 free. Verify with
+  `docker compose ps` before testing.
 - The local database has `posts.0001_initial` applied. The guide's `part4-*` test accounts and their
   posts were deleted at the end; accounts from the E2E and screenshot runs (`post_*`, `opinion_*`, `invalid_*`,
   `unverified_*`, `phone_*`, `shot_*`, …) and their posts remain (Django Admin → Users deletes them).
@@ -493,16 +529,26 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-1. **User:** review the diff and the Part 4 section of `docs/test-command.md` (its Linux steps 4 to 11
-   take about five minutes; the browser steps 12 to 14 need a Next dev server). Then commit, and push so
-   CI runs; report the CI result (Part 2's, Part 3's and Part 4's jobs). Still open from Part 3: the
-   real-Google check (`docs/test-command.md` Part 3, steps 7 and 8).
-2. **Next part:** Part 5 (post detail, sharing, deletion, status polling), from `task.md`. Fresh session
-   (`/clear`), first `git status` and `docker compose up -d`.
+**Implement Part 5 from the approved plan**
+([`plans/part-5-post-detail-sharing-deletion-polling.md`](plans/part-5-post-detail-sharing-deletion-polling.md)).
+
+1. **User:** commit the plan and this file. Optionally push so CI runs for Parts 2 to 4 and report the
+   result. Still open from Part 3: the real-Google check (`docs/test-command.md` Part 3, steps 7 and 8).
+2. **Agent** (fresh session, `/clear`; Sonnet 5.5 · medium), prompt:
+   `Implement only the approved Part 5 plan, validate it, update task.md and HANDOFF.md, then stop.`
+   First `git status`, `git diff` and `docker compose up -d`, then follow the plan's steps in order
+   (step 1: `PostQuerySet.not_deleted()`, `shown_confidence()`, the tombstone rule in `PostSerializer`,
+   `delete_post`, `NotAuthorError`, the `status_poll` scope).
+3. `task.md` Part 5 stays `[ ] Not started` until the implementation finishes (it was deliberately not
+   edited when the plan was approved).
 
 ## Blockers or user decisions
 
 - None open.
+- User decisions for Part 5 (2026-10-09), to go into ARCHITECTURE §3/§9 when built: a removed post's
+  public view is the same 23 keys with `content`, `sources`, `verdict_note`, `confidence_score` and
+  `verdict_source` blanked (the author sees it in full); the public status endpoint gets a `status_poll`
+  throttle of 120/min per client IP.
 - User decisions for Part 4 (2026-10-08), now in ARCHITECTURE §3/§4c/§10 and ANALYSIS D7: the fact
   quota is a rolling 24 h window (deleted and removed posts count); `idna==3.20` is pinned; "optimistic
   insert" means insert on success; posting away from `/home` toasts.
