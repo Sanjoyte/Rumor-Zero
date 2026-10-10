@@ -6,24 +6,25 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none. **Part 9 (Fact-check pipeline stub + routing) is done** (2026-10-11; built from the approved plan;
-  every required test and check green; `task.md` updated). Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8 and 9 are
-  done (Part 8 committed by the user as `0d8c331`, the Part 9 plan as `56f7f34`). Part 1 CI is green (user-reported
-  2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8 and 9 CI have not been reported yet.**
+- **Part:** **Part 10 (Human review panel, Django Admin) is planned and approved** (2026-10-11); implementation
+  has not started. Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8 and 9 are done (Part 9 committed by the user as
+  `4da6514`). Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8 and 9 CI have not been
+  reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
   - **Part 17 has a launch blocker from Part 9** (your decision 2026-10-11): decide how production gets verdicts
     before deploying; the stub lets an author self-label with `#true` (ARCHITECTURE §6, `task.md` Part 17).
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after finishing Part 9; Part 10 is not started).
-- **Phase:** done, uncommitted. The user reviews and commits.
-- **Next action:** you review and commit Part 9 (and push for CI). Then the next part in `task.md` is **Part 10
-  (Human review panel)**: start a fresh session and plan it ("Plan Part 10 from task.md. Do not implement yet.").
+- **Owner:** none (Claude stopped after saving the approved Part 10 plan).
+- **Phase:** planned; implementation not started. The only change this session is the new plan file and this file
+  (uncommitted).
+- **Next action:** Implement Part 10 from the approved plan.
 - **Approved plan:**
-  [`docs/agents/plans/part-9-pipeline-stub-routing.md`](plans/part-9-pipeline-stub-routing.md) (approved 2026-10-11;
-  status line now says IMPLEMENTED)
+  [`docs/agents/plans/part-10-human-review-panel.md`](plans/part-10-human-review-panel.md) (approved 2026-10-11)
 - **Previous plans:**
+  - [`part-9-pipeline-stub-routing.md`](plans/part-9-pipeline-stub-routing.md), implemented 2026-10-11 (committed as
+    `4da6514`);
   - [`part-8-reporting-threshold.md`](plans/part-8-reporting-threshold.md), implemented 2026-10-10 (committed as
     `0d8c331`; its appendix A2 is resolved by Part 9's decision 1);
   - [`part-7b-bookmarks-reposts.md`](plans/part-7b-bookmarks-reposts.md), implemented 2026-10-10 (committed as `416fcae`);
@@ -40,9 +41,49 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-11 by Claude (Opus 5.5), Part 9 implementation.
+- **Last updated:** 2026-10-11 by Claude (Opus 5.5), Part 10 planning.
 
 ## Completed checkpoints
+
+- 2026-10-11 (Claude, Opus 5.5): **Part 10 planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `4da6514` ("Implemented Part 9…", committed by the user), a clean tree. (The older text of
+    this file said Part 9 was uncommitted; the user committed it in between.)
+  - **Dependency check:** Part 10 depends only on Part 9 (Done 2026-10-11); its chain (8, 5, 4, 1, 0C, 0A/0B/0D, plus 2,
+    3, 6, 7, 7B) is Done. Open but not blocking: Part 3 criterion 4, and CI for Parts 2 to 9.
+  - **Research:** read-only only:
+    - docs and code: ARCHITECTURE §2/§3/§4/§4a/§4b/§5/§8/§9/§11/§14, ANALYSIS, STRUCTURE, guide §3.4 and §8 (PDF text
+      extracted to the scratchpad), every `admin.py`, and Django 5.2.17's admin source;
+    - one Explore agent (the frontend Moderation link, `admin_url`, admin test patterns, templates, group creation);
+    - a Plan-agent design review that finished **before** approval (its findings are in the plan, marked "(review)").
+  - **Changed this session:** only the new plan file and this file. No code, no setup command, no `task.md` edit, no env
+    file read, `design/` untouched.
+  - **User decisions (2026-10-11):**
+    - **Moderators see moderation history only per post** (an inline on the post page). The full `moderation_actions`
+      list and Django's admin log are seniors-only.
+    - **Seniors may change `role`, suspend (`is_active`) and delete accounts**; nothing else. Never superusers or
+      themselves. Email, password, profile and `is_superuser` stay superuser-only.
+    - **The removal reason for the author is a new `moderation_actions.public_note`** (verdict notes are copied there
+      too). Remove never touches `Post.verdict_note`.
+    - **Nobody acts on their own post, except a superuser.**
+    - **A new `posts.review_started_at` column** gives the queue's "age in queue" (set on entering review, cleared when
+      a moderator ends it, with a consistency check).
+    - **"Mark email verified" (deferred from Part 2) is built now, seniors only**, as `verify_email_by_staff` (the name
+      `mark_email_verified` is taken by Part 2's signal).
+  - **Defaults approved with the plan** are in its "Defaults" section. Two change ARCHITECTURE: Escalate only works on
+    posts under review (§4 said "any"), and an account that wrote admin log entries can't be deleted, only suspended.
+    Others: account and settings changes go to Django's `LogEntry` with old → new values; act on eligible posts and skip
+    the rest; at most 100 posts per action; actions refuse posts the author deleted; no E2E test.
+  - **Found during planning** (all handled in the plan):
+    - **Admin mechanics:** the admin can't delete a user with posts (`perms_needed`); the bulk delete checks no object;
+      a read-only `password` field would show the hash; `user_change_password` only checks change permission;
+      an action's queryset is the filtered changelist (buttons post to `?queue=all`); `select_across` re-runs the
+      queryset at confirm; `LogEntry.user` cascades; History pages need only view permission; the delete page lists
+      bookmarks by `str()`.
+    - **Data and naming:** a Dismiss or Remove with a bad `pre_review_status` would break a database check; group
+      permissions are wiped by `transaction=True` flushes; `mark_email_verified` already exists.
+    - **Tests:** about 25 existing test files change on purpose (moderators gain group permissions, `under_review`
+      posts need the new column).
+    - **Frontend:** the Moderation link is already built in 0C.
 
 - 2026-10-11 (Claude, Opus 5.5): **Part 9 implemented** (uncommitted). Started from HEAD `56f7f34` ("Plan Part 9",
   committed by the user), a clean tree that matched this file (it still said the plan was uncommitted); Docker healthy,
