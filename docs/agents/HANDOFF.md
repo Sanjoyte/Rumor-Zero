@@ -6,19 +6,23 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none. **Part 6 (Profiles, follows, Following feed) is done** (2026-10-09; built from the approved
-  plan; every required test and check green; `task.md` updated). Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5 and 6
-  are done. Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5 and 6 CI have not run yet.**
+- **Part:** **7 (Likes & comments): planned and approved 2026-10-10, not started.** Parts 0A, 0B, 0D, 0C, 1, 2, 3,
+  4, 5 and 6 are done (Part 6 committed as `15c1d8a`). Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3,
+  4, 5 and 6 CI have not run yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
+- **Next action:** **Implement Part 7 from the approved plan**
+  ([`part-7-likes-comments.md`](plans/part-7-likes-comments.md)), starting at its step 0 (`git status`,
+  `docker compose up -d` and confirm healthy: Postgres and Redis were **not running** on 2026-10-10).
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after finishing Part 6; Part 7 is not started).
-- **Phase:** done, uncommitted. The user reviews and commits.
+- **Owner:** none (Claude stopped after planning).
+- **Phase:** planned and approved; no code written. The user commits the plan and this file.
 - **Approved plan:**
-  [`docs/agents/plans/part-6-profiles-follows-following-feed.md`](plans/part-6-profiles-follows-following-feed.md)
-  (status line now says IMPLEMENTED)
+  [`docs/agents/plans/part-7-likes-comments.md`](plans/part-7-likes-comments.md)
 - **Previous plans:**
+  - [`part-6-profiles-follows-following-feed.md`](plans/part-6-profiles-follows-following-feed.md),
+    implemented 2026-10-09 (committed as `15c1d8a`);
   - [`part-5-post-detail-sharing-deletion-polling.md`](plans/part-5-post-detail-sharing-deletion-polling.md),
     implemented 2026-10-09 (committed as `b5b8089`);
   - [`part-4-posts-composer-recent-feed.md`](plans/part-4-posts-composer-recent-feed.md),
@@ -29,9 +33,40 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-09 by Claude (Sonnet 5.5), Part 6 implementation.
+- **Last updated:** 2026-10-10 by Claude (Sonnet 5.5), Part 7 planning.
 
 ## Completed checkpoints
+
+- 2026-10-10 (Claude, Sonnet 5.5): **Part 7 planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `15c1d8a` ("Implementation Part 6…", committed by the user), a clean tree. (The older
+    text of this file said Part 6 was uncommitted; the user committed it in between.) `docker compose ps` showed
+    **no containers running**.
+  - **Dependency check:** Part 7 depends only on Part 5 (Done 2026-10-09); its chain 4 → 1 → 0C → 0A/0B/0D plus 2,
+    3 and 6 is Done. Open but not blocking: Part 3 criterion 4, and CI for Parts 2 to 6.
+  - **Research:** read-only only: two Explore agents (backend `apps/social` + `apps/posts`; frontend, Stitch
+    a1/b1/b3, UI primitives, E2E) plus direct reads of ARCHITECTURE §2/§3/§8/§9/§10, ANALYSIS, STRUCTURE, DESIGN.md
+    and the Part 6 plan.
+  - **Changed this session:** only the new plan file and this file. No code, no setup command, no `task.md` edit,
+    no env file read, `design/` untouched.
+  - **User decisions (2026-10-10):**
+    - **Hidden comments are Django Admin only:** the API and the page never return them to anyone, staff included,
+      and they don't count in `comment_count`.
+    - **Deleting your own comment is a soft delete** (new `deleted_at` column; changes ARCHITECTURE §2, which
+      listed none).
+    - **CommentAdmin gets Hide and Unhide actions** (task.md said only Hide).
+  - **Defaults approved with the plan** are in the plan's "Defaults" section: like 201/200/204 and `{"liked": true}`;
+    like and comment on a visible post only (deleted, removed or unknown is 404; pending and under review are
+    allowed); unlike works on a removed post; comments oldest first on `(created_at, id)`, 5-key object, `comment`
+    throttle on POST only; counts as correlated subqueries (`for_list(viewer)` is the single choke point, the
+    serializer reads them strictly); one partial index for the visible comments; `LikeButton` mirrors
+    `FollowButton` with local state; `PostCard` gets an `actions` slot; comments are client-fetched only; E2E tests
+    join `social.spec.ts` (no new sign-ups).
+  - **Found during planning** (all handled in the plan): the Following feed's `load_posts` takes no viewer;
+    `moderation_actions` doesn't exist and has no comment kind, so Hide writes Django's admin `LogEntry`; no model
+    permissions are granted to the Moderators group yet (Part 10), so Hide/Unhide are gated on
+    `social.change_comment`; `useCursorFeed` has no append or remove; DESIGN.md's glyph list names neither
+    `favorite` nor `chat_bubble` (read-only, not lint-enforced, so ANALYSIS records it); HANDOFF's "Part 6
+    uncommitted" text was stale.
 
 - 2026-10-09 (Claude, Sonnet 5.5): **Part 6 implemented** (uncommitted). Started from HEAD `a942dcb` ("plan part 6",
   committed by the user), a clean tree that matched this file (the plan file and this file were the only
@@ -436,13 +471,12 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `a942dcb` ("plan part 6", committed by the user). **Uncommitted:** the whole Part 6 implementation:
-  35 modified files (this file included) and 48 new ones: the `backend/apps/social/` app (26 files), 17 files in
-  `frontend/src/features/social/`, the two list routes under `frontend/src/app/(app)/u/[username]/` and
-  `frontend/e2e/social.spec.ts` (`git status --short -uall`).
-- Docker (Postgres 18 + Redis) is up; no dev server is running; ports 3000/8000 are free (the servers started for
-  the manual checks were stopped).
-- The local database has `social.0001_initial` applied. The guide's `part6-*` test accounts and their posts and
+- HEAD is `15c1d8a` ("Implementation Part 6: Profiles, follows, Following feed", committed by the user).
+  **Uncommitted:** only this file and the new `docs/agents/plans/part-7-likes-comments.md` (planning session
+  2026-10-10; no code).
+- **Docker (Postgres 18 + Redis) was not running on 2026-10-10** (`docker compose ps` was empty): run
+  `docker compose up -d` before any backend test. No dev server is running; ports 3000/8000 were not checked.
+- The local database has `social.0001_initial` applied (as of the end of Part 6). The guide's `part6-*` test accounts and their posts and
   follows were deleted at the end; accounts from the E2E and screenshot runs (`fan_*`, `star_*`, `post_*`,
   `opinion_*`, `unverified_*`, `phone_*`, `shot_*`, …) and their posts and follows remain (Django Admin → Users
   deletes them).
