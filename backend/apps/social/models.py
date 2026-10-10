@@ -7,7 +7,7 @@ from django.db.models.functions import Length
 from django.db.models.lookups import GreaterThanOrEqual, LessThanOrEqual
 from django.utils import timezone
 
-from apps.posts.models import MAX_CONTENT_LENGTH
+from apps.posts.models import MAX_CONTENT_LENGTH, PostStatus
 
 
 class Follow(models.Model):
@@ -120,3 +120,84 @@ class Comment(models.Model):
 
     def __str__(self):
         return f"{self.author_id} on {self.post_id}: {self.content[:30]}"
+
+
+# A post can be reposted only while it is in one of these (never FALSE, removed or deleted), so the
+# status recorded with a repost is always one of them (ARCHITECTURE §4d).
+REPOSTABLE_STATUSES = (
+    PostStatus.PENDING,
+    PostStatus.PUBLISHED,
+    PostStatus.VERIFIED_TRUE,
+    PostStatus.UNDER_REVIEW,
+)
+
+
+class Repost(models.Model):
+    """`user` reposts `post` (ARCHITECTURE §2 and §4d): a plain repost, no text, one per pair.
+
+    A repost has no status of its own: it always shows the original's live label. `status_at_repost`
+    is what the original's status was when it was reposted (Part 11B's score events read it). The
+    sort key of a repost in a feed is `(created_at, post_id, user_id)`, which is unique without the
+    row's own bigint id. Written only by `apps/social/services.py`.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="reposts_made",
+        db_index=False,
+    )
+    post = models.ForeignKey(
+        "posts.Post", on_delete=models.CASCADE, related_name="reposts", db_index=False
+    )
+    status_at_repost = models.TextField(choices=PostStatus.choices)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "post"], name="reposts_pair_unique"),
+            models.CheckConstraint(
+                condition=Q(status_at_repost__in=[s.value for s in REPOSTABLE_STATUSES]),
+                name="reposts_status_allowed",
+            ),
+        ]
+        indexes = [
+            # The count of a post's reposts, and 11D's daily stats.
+            models.Index(fields=["post", "created_at"], name="reposts_post_created_idx"),
+            # A person's reposts, newest first: the profile list, and the repost side of the
+            # Following feed (one range scan per followed person).
+            models.Index(fields=["user", "-created_at", "-post"], name="reposts_user_created_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} reposts {self.post_id}"
+
+
+class Bookmark(models.Model):
+    """`user` saved `post` (ARCHITECTURE §2 and §4d). **Private**: never shown to anyone but `user`.
+
+    The bigint id plus the unique pair mirror likes and follows. Written only by
+    `apps/social/services.py`.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="bookmarks",
+        db_index=False,
+    )
+    post = models.ForeignKey(
+        "posts.Post", on_delete=models.CASCADE, related_name="bookmarks", db_index=False
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "post"], name="bookmarks_pair_unique"),
+        ]
+        indexes = [
+            models.Index(fields=["user", "-created_at", "-id"], name="bookmarks_user_created_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} bookmarked {self.post_id}"

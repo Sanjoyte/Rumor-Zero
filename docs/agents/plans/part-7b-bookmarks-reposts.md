@@ -1,8 +1,12 @@
 # Plan: Part 7B, Bookmarks & reposts
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-10, together with the four decisions and the
-  defaults below. Saved here and linked from `HANDOFF.md`. Not implemented yet. Drafted 2026-10-10 by Claude
-  (Opus 5.5).
+  defaults below. Saved here and linked from `HANDOFF.md`. **IMPLEMENTED 2026-10-10** (Claude, Sonnet 5.5).
+  Deviations: see `task.md` Part 7B and `docs/agents/HANDOFF.md` (the third repost branch was **not** built: `EXPLAIN`
+  at 300,000 reposts showed it no faster; the repost button's visible word is "Repost", not "Reposts"; the unverified
+  hint is short and its toast long, as `LikeButton`'s; `BookmarkAdmin` has no `has_module_permission` override, which
+  was redundant; `visibleItems` and `isUnavailable` live in a new `features/posts/feed-items.ts`). Drafted 2026-10-10
+  by Claude (Opus 5.5).
 - **Implement with:** Sonnet 5.5 · high (task.md).
 - **Evidence (read-only):** HANDOFF, MEMORY, `task.md` Part 7B (+ the Part 7 record), ARCHITECTURE
   §2/§3/§4a/§4d/§8/§9/§10, ANALYSIS (D5, b1/b3/c1 rows, ActionBar row, f-4), STRUCTURE, the Part 7 plan,

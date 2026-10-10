@@ -1,5 +1,5 @@
-"""Nothing in Parts 6 and 7 reaches the network: no profile, follow, feed, like or comment call
-fetches anything."""
+"""Nothing in Parts 6, 7 and 7B reaches the network: no profile, follow, feed, like, comment,
+repost or bookmark call fetches anything."""
 
 import http.client
 import re
@@ -64,6 +64,21 @@ def test_likes_and_comments_make_no_network_request(blocked, auth_client):
     assert client.get(f"/api/v1/posts/{post.pk}/comments/").json()["results"]
     assert client.delete(f"/api/v1/comments/{created.json()['id']}/").status_code == 204
     assert client.delete(f"/api/v1/posts/{post.pk}/like/").status_code == 204
+    assert blocked == []
+
+
+def test_reposts_and_bookmarks_make_no_network_request(blocked, auth_client):
+    ada, bo = VerifiedUserFactory(username="ada"), VerifiedUserFactory(username="bob")
+    post = PostFactory(author=bo, fact=True, sources=["https://example.org/report"])
+    client = auth_client(ada)
+    assert client.post("/api/v1/users/bob/follow/").status_code == 201
+    assert client.post(f"/api/v1/posts/{post.pk}/repost/").status_code == 201
+    assert client.post(f"/api/v1/posts/{post.pk}/bookmark/").status_code == 201
+    assert client.get("/api/v1/me/bookmarks/").json()["results"]
+    assert client.get("/api/v1/feed/").json()["results"]
+    assert client.get("/api/v1/users/ada/posts/").json()["results"]
+    assert client.delete(f"/api/v1/posts/{post.pk}/repost/").status_code == 204
+    assert client.delete(f"/api/v1/posts/{post.pk}/bookmark/").status_code == 204
     assert blocked == []
 
 

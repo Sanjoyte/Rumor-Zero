@@ -88,7 +88,10 @@ rumor-zero/
 │   │   │                            engagement.py (`with_engagement`, `engagement_defaults`: the counts and `liked_by_me` on every post
 │   │   │                            list), services.py (like/unlike, add/delete comment), CommentPagination (oldest first), LikeView,
 │   │   │                            CommentListView, CommentDetailView, LikeAdmin and CommentAdmin (Hide/Unhide), tests (305 in all)
-│   │   │                        7B Bookmark, Repost, mixed Following feed
+│   │   │                        ✅ 7B Repost, Bookmark (migration 0003: the unique pairs, the `status_at_repost` check, three indexes),
+│   │   │                            timeline.py (the mixed feed's sort key, cursor token, per-page rule and union query), feed.py (cache v2:
+│   │   │                            keys, `load_entries`), RepostView, BookmarkView, BookmarkListView, RepostAdmin, BookmarkAdmin
+│   │   │                            (superuser-only), engagement.py (+ repost count, reposted and bookmarked flags), tests (695 in all)
 │   │   ├── reports/             8   Report + windowed threshold
 │   │   ├── pipeline/            9   contract.py (dataclasses), clients.py (stub/http), routing.py (pure functions; imports
 │   │   │                            is_active_emergency from apps/posts/emergency.py), processor.py (SKIP LOCKED batch),
@@ -155,9 +158,9 @@ rumor-zero/
 │       │   │   └── reset-password/[key]/    ✅ 2 ← a6 (ResetPasswordForm)
 │       │   ├── (app)/           ✅ 0C AppShell (sidebar/top bar/mobile nav) + placeholders for every nav destination
 │       │   │   ├── layout.tsx           ✅ 1 route guard (PROTECTED_PREFIXES → /login?next=), loading skeleton, Log out
-│       │   │   ├── home/                    "/home" ← b1 (4, following tab 6, reposts 7B, pinned emergencies 11C)
-│       │   │   ├── p/[id]/                  "/p/:id" ✅ 5 ← b3 (light SSR + generateMetadata; PostDetail; comments 7, repost/bookmark 7B, appeal 11, stats 11D)
-│       │   │   ├── bookmarks/               "/bookmarks" ← b1 layout (7B)
+│       │   │   ├── home/                    "/home" ← b1 (4, following tab 6, reposts ✅ 7B, pinned emergencies 11C)
+│       │   │   ├── p/[id]/                  "/p/:id" ✅ 5 ← b3 (light SSR + generateMetadata; PostDetail; comments 7, repost/bookmark ✅ 7B, appeal 11, stats 11D)
+│       │   │   ├── bookmarks/               "/bookmarks" ✅ 7B ← b1 layout + c4's heading (BookmarkList; noindex)
 │       │   │   ├── search/                  ← b4 (12)
 │       │   │   ├── u/[username]/            ✅ 6 ← c1 (light SSR + generateMetadata; ProfilePage; credibility 11B/11D)
 │       │   │   ├── u/[username]/followers/, following/   ✅ 6 ← c3 (Connections, client-rendered)
@@ -192,8 +195,9 @@ rumor-zero/
 │       │   │                        ✅ 7 LikeButton, CommentCountLink, PostActions (the card's and the post page's action bar), CommentSection,
 │       │   │                            CommentComposer, CommentList, CommentItem, DeleteCommentModal, useComments (+ `append`/`remove` in
 │       │   │                            posts/useCursorFeed);
-│       │   │                        7B RepostButton, BookmarkButton, RepostHeader, UnavailablePostCard
-│       │   ├── bookmarks/       7B   BookmarkList
+│       │   │                        ✅ 7B RepostButton, BookmarkButton, RepostHeader, UnavailablePostCard, repost-rules.ts (why a post
+│       │   │                            can't be reposted); PostActions now takes the post (posts/feed-items.ts: isUnavailable, visibleItems)
+│       │   ├── bookmarks/       ✅ 7B BookmarkList
 │       │   ├── reports/         8    ReportModal
 │       │   ├── appeals/         11   AppealModal, RemovedPostCard
 │       │   ├── reputation/      11B  CredibilityBadge; 11D CredibilityWidget, CredibilityPanel

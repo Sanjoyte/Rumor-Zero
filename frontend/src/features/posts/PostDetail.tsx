@@ -82,7 +82,7 @@ function AuthorRow({ post }: { post: Post }) {
 /**
  * `/p/[id]` (Stitch b3: claim header, author row, verdict, sources, actions). The claim and its
  * status arrive server-rendered; the rest is client-side, including the like button and the
- * discussion (Part 7). 7B adds repost and bookmark, 8 report, 11 appeal, 11D stats.
+ * discussion (Part 7), repost and bookmark (7B). 8 adds report, 11 appeal, 11D stats.
  */
 export function PostDetail({ id, initial }: { id: string; initial: Post | null }) {
   const router = useRouter();
@@ -203,13 +203,7 @@ export function PostDetail({ id, initial }: { id: string; initial: Post | null }
         </h1>
         <AuthorRow post={post} />
         <div className="flex flex-wrap items-center gap-x-space-lg gap-y-space-sm border-t border-outline-variant/30 pt-space-md">
-          <PostActions
-            variant="detail"
-            postId={post.id}
-            liked={post.liked_by_me}
-            likeCount={post.like_count}
-            commentCount={post.comment_count}
-          />
+          <PostActions variant="detail" post={post} />
           <CopyLinkButton postId={post.id} />
           {post.is_mine && (
             <Button variant="ghost" onClick={() => setConfirmDelete(true)}>

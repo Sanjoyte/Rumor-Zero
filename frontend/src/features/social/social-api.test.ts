@@ -7,8 +7,10 @@ vi.mock("@/lib/api/client", async (importOriginal) => ({
 }));
 
 import {
+  bookmarkPost,
   createComment,
   deleteComment,
+  fetchBookmarks,
   fetchComments,
   fetchConnections,
   fetchFollowingFeed,
@@ -16,8 +18,11 @@ import {
   fetchUserPosts,
   followUser,
   likePost,
+  repostPost,
+  unbookmarkPost,
   unfollowUser,
   unlikePost,
+  unrepostPost,
 } from "./social-api";
 
 beforeEach(() => {
@@ -129,5 +134,34 @@ describe("social-api", () => {
     expect(client.post).toHaveBeenCalledWith("/v1/posts/p1/comments/", { content: "Hello" });
     await deleteComment("c9");
     expect(client.del).toHaveBeenCalledWith("/v1/comments/c9/");
+  });
+
+  it("reposts and un-reposts a post, encoding the id", async () => {
+    client.post.mockResolvedValue({ reposted: true });
+    client.del.mockResolvedValue(undefined);
+    expect(await repostPost("p/1")).toEqual({ reposted: true });
+    expect(client.post).toHaveBeenCalledWith("/v1/posts/p%2F1/repost/");
+    await unrepostPost("p1");
+    expect(client.del).toHaveBeenCalledWith("/v1/posts/p1/repost/");
+  });
+
+  it("bookmarks and un-bookmarks a post", async () => {
+    client.post.mockResolvedValue({ bookmarked: true });
+    client.del.mockResolvedValue(undefined);
+    expect(await bookmarkPost("p1")).toEqual({ bookmarked: true });
+    expect(client.post).toHaveBeenCalledWith("/v1/posts/p1/bookmark/");
+    await unbookmarkPost("p1");
+    expect(client.del).toHaveBeenCalledWith("/v1/posts/p1/bookmark/");
+  });
+
+  it("reads your bookmarks with the cursor, as items and nextCursor", async () => {
+    client.get.mockResolvedValue({ pinned: [], pinned_total: 0, results: [1], next_cursor: "c2" });
+    const signal = new AbortController().signal;
+    expect(await fetchBookmarks(null, signal)).toEqual({ items: [1], nextCursor: "c2" });
+    expect(client.get).toHaveBeenCalledWith("/v1/me/bookmarks/", { signal });
+    await fetchBookmarks("a b");
+    expect(client.get).toHaveBeenLastCalledWith("/v1/me/bookmarks/?cursor=a+b", {
+      signal: undefined,
+    });
   });
 });

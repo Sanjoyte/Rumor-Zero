@@ -74,29 +74,63 @@ const python =
     ? path.join(backendDir, ".venv", "Scripts", "python.exe")
     : path.join(backendDir, ".venv", "bin", "python");
 
+const shellEnv = {
+  ...process.env,
+  REDIS_URL: "",
+  EMAIL_PROVIDER: "file",
+  GOOGLE_OAUTH_CLIENT_ID: "",
+};
+
+function runShell(code: string): string {
+  return execFileSync(python, ["manage.py", "shell", "-c", code], {
+    cwd: backendDir,
+    env: shellEnv,
+    stdio: "pipe",
+  }).toString();
+}
+
+/**
+ * Makes a post by a brand-new verified author straight in the database, and returns its id.
+ * Lets a test have a post from "a third person" (someone neither test account follows) without a
+ * sign-up: the suite is bounded by allauth's 20 sign-ups a minute. A fact starts `pending`, like
+ * any new fact. The text must be plain letters, digits and spaces.
+ */
+export function seedPost(content: string, { fact = false } = {}): string {
+  if (!/^[A-Za-z0-9 ]{1,200}$/.test(content)) throw new Error("plain text only");
+  const out = runShell(
+    [
+      "import uuid",
+      "from apps.accounts.models import User",
+      "from apps.posts.models import Post",
+      "tag = uuid.uuid4().hex[:10]",
+      "user = User.objects.create_user(email=f'seed-{tag}@example.test', username=f'seed_{tag}', is_email_verified=True)",
+      `post = Post.objects.create(author=user, content='${content}', post_type='${fact ? "fact" : "opinion"}', status='${fact ? "pending" : "published"}')`,
+      "print('POST_ID=' + str(post.pk))",
+    ].join("\n"),
+  );
+  const id = /POST_ID=([0-9a-f-]{36})/.exec(out)?.[1];
+  if (!id) throw new Error(`no post id in: ${out}`);
+  return id;
+}
+
 /**
  * Changes a post's status straight in the database, the way a moderator or the pipeline will
  * (Parts 9 and 10) and the way the manual check does it in the Django shell. Runs the backend's own
- * `manage.py shell` against the same database the E2E backend uses.
+ * `manage.py shell` against the same database the E2E backend uses. A fact post only.
  */
-export function setPostState(postId: string, state: "verified_true" | "removed") {
+export function setPostState(
+  postId: string,
+  state: "verified_true" | "verified_false" | "removed",
+) {
   if (!/^[0-9a-f-]{36}$/.test(postId)) throw new Error("not a post id");
-  const fields =
-    state === "verified_true"
-      ? "status='verified_true', verdict_source='pipeline', pipeline_verdict='true', confidence_score=94"
-      : "status='removed'";
-  execFileSync(
-    python,
-    [
-      "manage.py",
-      "shell",
-      "-c",
-      `from apps.posts.models import Post; assert Post.objects.filter(pk='${postId}').update(${fields}) == 1`,
-    ],
-    {
-      cwd: backendDir,
-      env: { ...process.env, REDIS_URL: "", EMAIL_PROVIDER: "file", GOOGLE_OAUTH_CLIENT_ID: "" },
-      stdio: "pipe",
-    },
+  const fields = {
+    verified_true:
+      "status='verified_true', verdict_source='pipeline', pipeline_verdict='true', confidence_score=94",
+    verified_false:
+      "status='verified_false', verdict_source='pipeline', pipeline_verdict='false', confidence_score=90",
+    removed: "status='removed'",
+  }[state];
+  runShell(
+    `from apps.posts.models import Post; assert Post.objects.filter(pk='${postId}').update(${fields}) == 1`,
   );
 }

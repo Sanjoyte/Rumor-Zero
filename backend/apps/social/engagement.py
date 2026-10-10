@@ -1,16 +1,17 @@
-"""Likes and comments as annotations on a post queryset (ARCHITECTURE §9).
+"""Likes, comments, reposts and bookmarks as annotations on a post queryset (ARCHITECTURE §9).
 
 `PostQuerySet.for_list(viewer)` calls `with_engagement`, so every list and the detail page get
-`like_count`, `comment_count` and `liked_by_me` in the same query as the posts: correlated
-subqueries, no N+1. `PostSerializer` reads them strictly (a list that forgot them fails loudly
-instead of showing zeros); a post that was just created has none yet, so `engagement_defaults`
-sets the zeros explicitly.
+`like_count`, `comment_count`, `repost_count`, `liked_by_me`, `reposted_by_me` and
+`bookmarked_by_me` in the same query as the posts: correlated subqueries, no N+1. `PostSerializer`
+reads them strictly (a list that forgot them fails loudly instead of showing zeros); a post that
+was just created has none yet, so `engagement_defaults` sets the zeros explicitly. Bookmarks have
+no count anywhere: only the viewer's own flag.
 """
 
 from django.db.models import Count, Exists, IntegerField, OuterRef, Subquery, Value
 from django.db.models.functions import Coalesce
 
-from apps.social.models import Comment, Like
+from apps.social.models import Bookmark, Comment, Like, Repost
 
 
 def count_subquery(queryset, key):
@@ -28,21 +29,30 @@ def shown_comments():
 
 
 def with_engagement(queryset, viewer=None):
-    """Annotate a `Post` queryset with the counts and, for a signed-in `viewer`, `liked_by_me`."""
+    """Annotate a `Post` queryset with the counts and, for a signed-in `viewer`, the three
+    `*_by_me` flags (all false for a visitor)."""
     post = OuterRef("pk")
     signed_in = viewer is not None and viewer.is_authenticated
+
+    def mine(model):
+        return Exists(model.objects.filter(post=post, user=viewer)) if signed_in else Value(False)
+
     return queryset.annotate(
         like_count=count_subquery(Like.objects.filter(post=post), "post"),
         comment_count=count_subquery(shown_comments().filter(post=post), "post"),
-        liked_by_me=(
-            Exists(Like.objects.filter(post=post, user=viewer)) if signed_in else Value(False)
-        ),
+        repost_count=count_subquery(Repost.objects.filter(post=post), "post"),
+        liked_by_me=mine(Like),
+        reposted_by_me=mine(Repost),
+        bookmarked_by_me=mine(Bookmark),
     )
 
 
 def engagement_defaults(post):
-    """A post that was just created has no likes or comments: say so on the instance."""
+    """A post that was just created has no likes, comments or reposts: say so on the instance."""
     post.like_count = 0
     post.comment_count = 0
+    post.repost_count = 0
     post.liked_by_me = False
+    post.reposted_by_me = False
+    post.bookmarked_by_me = False
     return post

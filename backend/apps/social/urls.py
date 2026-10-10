@@ -11,5 +11,8 @@ urlpatterns = [
     path("v1/users/<str:username>/follow/", views.FollowView.as_view(), name="follow"),
     path("v1/posts/<str:post_id>/like/", views.LikeView.as_view(), name="like"),
     path("v1/posts/<str:post_id>/comments/", views.CommentListView.as_view(), name="comments"),
+    path("v1/posts/<str:post_id>/repost/", views.RepostView.as_view(), name="repost"),
+    path("v1/posts/<str:post_id>/bookmark/", views.BookmarkView.as_view(), name="bookmark"),
+    path("v1/me/bookmarks/", views.BookmarkListView.as_view(), name="bookmarks"),
     path("v1/comments/<str:comment_id>/", views.CommentDetailView.as_view(), name="comment"),
 ]

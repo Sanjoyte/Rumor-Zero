@@ -92,7 +92,7 @@ not let the review expand the part's scope without user approval.
 | 5 | Post detail, sharing, deletion, status polling | 4 | [x] Done (2026-10-09) |
 | 6 | Profiles, follows, Following feed | 4 | [x] Done (2026-10-09) |
 | 7 | Likes & comments | 5 | [x] Done (2026-10-10) |
-| 7B | Bookmarks & reposts | 6, 7 | [ ] |
+| 7B | Bookmarks & reposts | 6, 7 | [x] Done (2026-10-10) |
 | 8 | Reporting & threshold | 5 | [ ] |
 | 9 | Fact-check pipeline stub + routing | 8 | [ ] |
 | 10 | Human review panel (Django Admin) | 9 | [ ] |
@@ -861,7 +861,7 @@ All three jobs run on test values only; no secrets.
 ---
 
 ## Part 7B: Bookmarks & reposts
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-10)
 **Goal:** private bookmarks and plain reposts (D5; ARCHITECTURE §4d). A repost carries the original's live label and never triggers a new check.
 **Depends on:** 6 (Following feed, profiles), 7 (action bar).
 **Stitch files to convert:**
@@ -898,13 +898,38 @@ All three jobs run on test values only; no secrets.
 **API endpoints:** the repost and bookmark endpoints above.
 
 **Acceptance criteria**
-- [ ] Repost and bookmark toggles are idempotent, and counts stay right under concurrent requests
-- [ ] Reposting your own post, a FALSE-labelled post or a removed post is refused with the right code, and the button explains why
-- [ ] A repost always shows the original's current label (change the status in the Django shell → the repost's badge updates)
-- [ ] When the original is deleted or removed, the repost shows "This post is no longer available"
-- [ ] Another user can never see your bookmarks: the API returns only your own, and there are no counts anywhere
-- [ ] The mixed Following feed never skips or duplicates items across pages while new posts and reposts arrive
-- [ ] Feed, profile and bookmark lists use a constant number of queries
+- [x] Repost and bookmark toggles are idempotent, and counts stay correct under concurrent requests (201 then 200, 204 always; `get_or_create`; threaded tests: two simultaneous reposts or bookmarks by one user make one row, six users are all counted, a repost waits for a concurrent status change and records the status at commit)
+- [x] Reposting your own post, a FALSE-labelled post or a removed post is refused with the right code, and the button explains why (409 `cannot_repost_own`, 409 `cannot_repost_false`, 404 for a removed or deleted one; `RepostButton` is `aria-disabled` with the reason as its title, hint and toast)
+- [x] A repost always shows the original's current label (change the status in the Django shell → the repost's badge updates: pending → VERIFIED 94% in the Following feed even on a cache hit, and a poll turns a repost's badge by itself)
+- [x] When the original is deleted or removed, the repost shows "This post is no longer available" (`{"id", "unavailable": true}`; `UnavailablePostCard`, with Undo repost on your own)
+- [x] Another user can never see your bookmarks: the API returns only your own, and there are no counts anywhere (no route for anyone else's, `BookmarkAdmin` is superuser-only, no bookmark count in any object)
+- [x] The mixed Following feed never skips or duplicates items across pages while new posts and reposts arrive (a keyset cursor over `(activity_at, kind, post id, reposter id)`; arrivals and changes during a walk tested; 150 seeded random walks agree with an independent reference)
+- [x] Feed, profile and bookmark lists use a constant number of queries (Following 4 on a miss / 3 on a hit with reposts, 3 / 2 with only posts; profile 3 anonymous / 4 signed in; bookmarks 3; each pinned at 3 and 20 items)
+
+**Deviations and decisions (plan approved 2026-10-10; built 2026-10-10; recorded in ARCHITECTURE §2/§3/§4d/§8/§9/§10, ANALYSIS c-39, STRUCTURE, MEMORY):**
+- **User decisions (2026-10-10):**
+  - **`BookmarkAdmin` is superuser-only** (read-only; no moderator permission opens it, even after Part 10).
+  - **A repost of a deleted or removed original can be taken back** (`DELETE …/repost/` is 204 whenever the post row exists); your own "no longer available" card has **Undo repost**.
+  - **The page hides later repeats** of a post across pages of a list (the API keeps "once per page").
+  - **Profile chips filter reposts by the original's type**, stubs included.
+- **Defaults approved with the plan:** 201/200/204 with `{"reposted": true}` and `{"bookmarked": true}`; the repost checks run not-found, existing (200), own, FALSE; `status_at_repost` is recorded under a `FOR NO KEY UPDATE` row lock and a DB check limits it to the four repostable statuses; the keyset timeline and its cursor token (integer microseconds, strict decoding, 404 for anything else), the `2 × size + 1` window, cache v2 holding keys, profile lists with no dedupe; `GET /me/bookmarks/` in the §9 envelope on `BookmarkPagination`; `RepostButton`/`BookmarkButton` mirror `LikeButton`; `PostCard`'s `header` slot, `RepostHeader`, `UnavailablePostCard`; `/bookmarks` built from the profile page's container with c4's heading; the new E2E tests join `social.spec.ts` (no new sign-up).
+- **Built differently from the plan:**
+  - The repost side of the union stays **one** branch: `EXPLAIN` at 300,000 reposts and 200 follows showed a separate `IN` branch plus a "my reposts" branch no faster (about 11 ms against 11 to 18 ms), so the plan's conditional "third branch" was not built (recorded for Part 16).
+  - The repost button's visible word is **"Repost"**, not "Reposts" (the word must be part of the accessible name "Repost 3"); its hint is short and its toast long, as `LikeButton`'s.
+  - `BookmarkAdmin` has no `has_module_permission` override: Django already hides a model with no view permission from the admin index (a mutation check showed it dead).
+  - `isUnavailable` and `visibleItems` live in a new `features/posts/feed-items.ts`; `repost-rules.ts` (`repostBlockedReason`) is new; `PostActions` takes the post instead of separate props.
+  - The E2E tests are four (two with the shared accounts, one with a visitor and the disabled reasons, one for a phone); a third person's post comes from a new `seedPost()` helper, not a sign-up.
+- **Found while building (all handled):**
+  - A bare OR cursor filter can't use an index: each side carries a redundant `created_at <= t` (a test reads the SQL).
+  - `LikeButton` repeated one constant hint id in every unverified card (now `useId`; `FollowButton` still has it).
+  - `FeedList`, `pendingPostIds` and the `gone` filter all assumed `kind: "post"`; the tests that pinned that were changed on purpose.
+  - A system `ruff` (anaconda, first on `PATH`) ran when the venv wasn't activated and reformatted three files (MEMORY).
+  - Two of my own test expectations were wrong (a repost correctly hides the original on the same page; a cached page can't show a new repost for 30 s), and one mutation survivor each on the backend (the bookmark throttle scope: equal rates) and the frontend (the zero clamp), all fixed with tests.
+- **Not done (later parts):**
+  - Score effects of reposts (11B reads `status_at_repost`), the `repost` notification (13; `social.services.repost` is the single write path), reports and the flag button (8), daily repost counts in 11D (`reposts_post_created_idx`), export and account deletion of bookmarks and reposts (14).
+  - Part 16: the `repost`/`bookmark` rates are guesses; the reposts side of the Following union is a sequential scan and a top-N sort; `FollowButton`'s constant hint id.
+  - Known limits: your new repost isn't inserted into an open list; a like, repost or bookmark made in one list isn't copied into another mounted list showing the same post; if the repost that won a page's once-per-page rule is undone, a follower's cached page has no item for that post until the TTL (30 s) ends.
+- **Verified:** see HANDOFF (backend 1875 tests, frontend 1510, E2E 36 in dev and CI mode, 38 backend and 31 frontend mutation checks, `EXPLAIN` of the feed union and the bookmark page, the Linux blocks of `docs/test-command.md` Part 7B extracted from the doc and run verbatim, a scripted-browser check of the feed, the profile, the Bookmarks page, the phone width and Django Admin). The PowerShell blocks of that section were not run on Windows. CI itself runs when you push.
 
 **Required tests:** constraints; service rules; API permissions and codes; feed union ordering, per-page dedupe and cursor stability; query counts; components (optimistic + rollback, disabled reasons, unavailable card); E2E: A reposts B's post → C (who follows A) sees "Reposted by A"; bookmark a post → it appears on /bookmarks.
 

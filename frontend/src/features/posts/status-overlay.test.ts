@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PostStatusUpdate } from "@/lib/api/types";
 import { applyStatus, pendingPostIds } from "./status-overlay";
-import { feedEntry, makePost } from "./test-helpers";
+import { feedEntry, makePost, repostEntry, unavailableEntry } from "./test-helpers";
 
 const update = (over: Partial<PostStatusUpdate> = {}): PostStatusUpdate => ({
   id: "p1",
@@ -42,19 +42,32 @@ describe("applyStatus", () => {
 });
 
 describe("pendingPostIds", () => {
+  const pendingFact = (id: string) => makePost({ id, post_type: "fact", status: "pending" });
+
   it("lists the posts loaded as pending, in order, and skips everything else", () => {
     const items = [
-      feedEntry(makePost({ id: "a", post_type: "fact", status: "pending" })),
+      feedEntry(pendingFact("a")),
       feedEntry(makePost({ id: "b" })),
       feedEntry(makePost({ id: "c", post_type: "fact", status: "verified_true" })),
-      feedEntry(makePost({ id: "d", post_type: "fact", status: "pending" })),
-      {
-        kind: "repost" as const,
-        post: makePost({ id: "e", post_type: "fact", status: "pending" }),
-        reposted_by: makePost().author,
-        activity_at: "2026-10-08T12:00:00Z",
-      },
+      feedEntry(pendingFact("d")),
     ];
     expect(pendingPostIds(items)).toEqual(["a", "d"]);
+  });
+
+  it("polls the original of a repost: it shows the original's live label", () => {
+    expect(pendingPostIds([repostEntry(pendingFact("e"))])).toEqual(["e"]);
+  });
+
+  it("skips a repost whose original is gone, and settled ones", () => {
+    const items = [
+      unavailableEntry("x"),
+      repostEntry(makePost({ id: "y", post_type: "fact", status: "verified_true" })),
+    ];
+    expect(pendingPostIds(items)).toEqual([]);
+  });
+
+  it("asks about a post once, however many items show it", () => {
+    const items = [feedEntry(pendingFact("a")), repostEntry(pendingFact("a"))];
+    expect(pendingPostIds(items)).toEqual(["a"]);
   });
 });

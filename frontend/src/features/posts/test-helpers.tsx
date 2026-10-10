@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { vi } from "vitest";
 import { ToastProvider } from "@/components/ui/Toast";
 import { ME, testSession } from "@/features/auth/test-helpers";
-import type { FactQuota, FeedItem, Me, Post } from "@/lib/api/types";
+import type { FactQuota, FeedItem, Me, Post, UserSummary } from "@/lib/api/types";
 import { AuthProvider } from "@/lib/auth/AuthProvider";
 import { ComposerProvider } from "./ComposerProvider";
 
@@ -41,6 +41,28 @@ export function makePost(overrides: Partial<Post> = {}): Post {
 
 export function feedEntry(post: Post): FeedItem {
   return { kind: "post", post, reposted_by: null, activity_at: post.created_at };
+}
+
+/** Someone who reposts (the author of `makePost` is `ada`). */
+export const BO: UserSummary = { id: "u-2", username: "bo", display_name: "Bo", avatar_url: null };
+
+/** A repost of `post` by `by`, at its own time. */
+export function repostEntry(
+  post: Post,
+  by: UserSummary = BO,
+  activityAt = "2026-10-08T13:00:00Z",
+): FeedItem {
+  return { kind: "repost", post, reposted_by: by, activity_at: activityAt };
+}
+
+/** A repost whose original is deleted or removed. */
+export function unavailableEntry(postId: string, by: UserSummary = BO): FeedItem {
+  return {
+    kind: "repost",
+    post: { id: postId, unavailable: true },
+    reposted_by: by,
+    activity_at: "2026-10-08T13:00:00Z",
+  };
 }
 
 export function makeQuota(overrides: Partial<FactQuota> = {}): FactQuota {

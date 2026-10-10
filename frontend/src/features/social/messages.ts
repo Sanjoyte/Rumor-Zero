@@ -27,6 +27,15 @@ export const SOCIAL_MESSAGES = {
   commentDeleteFailed: "Couldn't delete the comment. Check your connection and try again.",
   commentsFailed: "Couldn't load the comments. Check your connection and try again.",
   moreCommentsFailed: "Couldn't load more comments.",
+  verifyToRepost: "Verify your email to repost posts. Check your inbox for the link.",
+  repostFailed: "Couldn't repost that post. Try again.",
+  unrepostFailed: "Couldn't undo your repost. Try again.",
+  repostUndone: "Repost removed.",
+  cannotRepostOwn: "You can't repost your own post.",
+  cannotRepostFalse: "Posts labelled FALSE can't be reposted.",
+  cannotRepostRemoved: "Removed posts can't be reposted.",
+  bookmarkFailed: "Couldn't bookmark that post. Try again.",
+  unbookmarkFailed: "Couldn't remove your bookmark. Try again.",
 } as const;
 
 /** The toast after a follow or unfollow that was rolled back. */
@@ -62,6 +71,37 @@ export function likeFailureMessage(error: unknown, wasLiked: boolean): string {
     if (error.code === "backend_waking") return SOCIAL_MESSAGES.waking;
   }
   return wasLiked ? SOCIAL_MESSAGES.unlikeFailed : SOCIAL_MESSAGES.likeFailed;
+}
+
+/** The toast after a repost or undo that was rolled back. */
+export function repostFailureMessage(error: unknown, wasReposted: boolean): string {
+  if (error instanceof ApiError) {
+    if (error.code === "cannot_repost_own") return SOCIAL_MESSAGES.cannotRepostOwn;
+    if (error.code === "cannot_repost_false") return SOCIAL_MESSAGES.cannotRepostFalse;
+    if (error.code === "email_unverified") return SOCIAL_MESSAGES.verifyToRepost;
+    if (error.code === "throttled" || error.status === 429) {
+      return `You're reposting too fast. Try again ${waitText(error.retryAfter)}.`;
+    }
+    if (error.status === 404) return SOCIAL_MESSAGES.postGone;
+    if (error.status === 401) return SOCIAL_MESSAGES.signedOut;
+    if (error.code === "network_error") return SOCIAL_MESSAGES.network;
+    if (error.code === "backend_waking") return SOCIAL_MESSAGES.waking;
+  }
+  return wasReposted ? SOCIAL_MESSAGES.unrepostFailed : SOCIAL_MESSAGES.repostFailed;
+}
+
+/** The toast after a bookmark or its removal that was rolled back. */
+export function bookmarkFailureMessage(error: unknown, wasBookmarked: boolean): string {
+  if (error instanceof ApiError) {
+    if (error.code === "throttled" || error.status === 429) {
+      return `You're bookmarking too fast. Try again ${waitText(error.retryAfter)}.`;
+    }
+    if (error.status === 404) return SOCIAL_MESSAGES.postGone;
+    if (error.status === 401) return SOCIAL_MESSAGES.signedOut;
+    if (error.code === "network_error") return SOCIAL_MESSAGES.network;
+    if (error.code === "backend_waking") return SOCIAL_MESSAGES.waking;
+  }
+  return wasBookmarked ? SOCIAL_MESSAGES.unbookmarkFailed : SOCIAL_MESSAGES.bookmarkFailed;
 }
 
 /** The text shown above a comment composer after a failed send. The draft is kept. */

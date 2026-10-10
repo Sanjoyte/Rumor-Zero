@@ -44,6 +44,11 @@ export interface PostCardProps {
    * session. Its buttons sit above the stretched claim link (`relative z-10`).
    */
   actions?: ReactNode;
+  /**
+   * A line above the card's content: "Reposted by @x" (Part 7B). A node, so the card stays
+   * presentational; it must sit above the stretched claim link itself (`relative z-10`).
+   */
+  header?: ReactNode;
   /** Clock for the relative timestamp; tests and the gallery pass a fixed one. */
   now?: Date;
   className?: string;
@@ -88,6 +93,7 @@ export function PostCard({
   createdAt,
   href,
   actions,
+  header,
   now,
   className,
 }: PostCardProps) {
@@ -118,6 +124,7 @@ export function PostCard({
     <Card as="article" interactive className={className}>
       {tone && <VerdictStripe tone={tone} />}
       <div className="flex flex-col gap-space-md p-space-lg">
+        {header}
         <div className="flex flex-col gap-space-sm sm:flex-row sm:items-start sm:justify-between sm:gap-space-md">
           <div className="flex min-w-0 items-center gap-space-xs">
             <AuthorLink href={author.href}>

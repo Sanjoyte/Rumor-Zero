@@ -1,9 +1,11 @@
-"""Following, likes and comments (ARCHITECTURE §2, §9). No HTTP here: the views map the errors.
+"""Following, likes, comments, reposts and bookmarks (ARCHITECTURE §2, §4d, §9). No HTTP here: the
+views map the errors.
 
-Only this module writes `Follow`, `Like` and `Comment` rows (the admin's Hide/Unhide aside). Each
-follow change forgets the follower's cached Following feed (`feed.bust_following_feed`); the people
-you follow reach you after at most `FEED_CACHE_SECONDS`. Likes and comments need no cache bust:
-the feed caches only post ids and the counts are read fresh.
+Only this module writes `Follow`, `Like`, `Comment`, `Repost` and `Bookmark` rows (the admin's
+Hide/Unhide aside). Each follow or repost change forgets the actor's cached Following feed
+(`feed.bust_following_feed`); the people you follow reach you after at most `FEED_CACHE_SECONDS`.
+Likes, comments and bookmarks need no cache bust: the feed caches only keys and the counts are read
+fresh.
 """
 
 import re
@@ -15,7 +17,7 @@ from apps.accounts.models import User
 from apps.accounts.validators import normalize_username
 from apps.posts.models import Post, PostStatus
 from apps.social.feed import bust_following_feed
-from apps.social.models import Comment, Follow, Like
+from apps.social.models import Bookmark, Comment, Follow, Like, Repost
 
 # A longer name can't be a username (30 at most), so it is cut before it is normalised.
 MAX_LOOKUP_LENGTH = 64
@@ -150,3 +152,77 @@ def delete_comment(*, comment_id, user, now=None):
         comment.deleted_at = now
         comment.save(update_fields=["deleted_at"])
     return comment
+
+
+class CannotRepostOwn(Exception):
+    """You can't repost your own post."""
+
+
+class CannotRepostFalse(Exception):
+    """A post labelled FALSE can't be reposted."""
+
+
+def repost(*, user, post_id, now=None):
+    """Repost a post. True if this created the repost, False if it already existed.
+
+    The post row is locked (`FOR NO KEY UPDATE`: it waits for a status change and for another
+    repost of the same post, but not for the `FOR KEY SHARE` locks that likes, comments and
+    bookmarks take), so `status_at_repost` is the status at commit and two simultaneous reposts by
+    one user make one row. Order: a post the public can see (else `PostNotFound`), then an existing
+    repost (so a post that turned FALSE after you reposted it doesn't refuse you), then your own
+    post, then FALSE. A repost has no id in the API: it is always of this post, so "reposting a
+    repost" is reposting the original.
+    """
+    now = now or timezone.now()
+    with transaction.atomic():
+        post = (
+            Post.objects.visible()
+            .select_for_update(no_key=True, of=("self",))
+            .only("id", "author_id", "status")
+            .filter(pk=post_id)
+            .first()
+        )
+        if post is None:
+            raise PostNotFound
+        if Repost.objects.filter(user=user, post=post).exists():
+            created = False
+        else:
+            if post.author_id == user.pk:
+                raise CannotRepostOwn
+            if post.status == PostStatus.VERIFIED_FALSE:
+                raise CannotRepostFalse
+            _, created = Repost.objects.get_or_create(
+                user=user, post=post, defaults={"status_at_repost": post.status, "created_at": now}
+            )
+        bust_following_feed(user.pk)
+    return created
+
+
+def unrepost(*, user, post_id):
+    """Take a repost back. Quietly does nothing if there was none.
+
+    Works whatever became of the original (deleted and removed included): your own "no longer
+    available" card must always be removable. Only an unknown id is `PostNotFound`.
+    """
+    if not Post.objects.filter(pk=post_id).exists():
+        raise PostNotFound
+    Repost.objects.filter(user=user, post_id=post_id).delete()
+    bust_following_feed(user.pk)
+
+
+def bookmark(*, user, post_id):
+    """Save a post privately. True if this created the bookmark, False if it already existed.
+
+    Any post the public can see, your own and FALSE ones included; no verified email is needed.
+    """
+    post = get_visible_post(post_id)
+    _, created = Bookmark.objects.get_or_create(user=user, post=post)
+    return created
+
+
+def unbookmark(*, user, post_id):
+    """Take a bookmark back. Quietly does nothing if there was none; works on a removed post
+    (like `unlike`). Only an unknown or deleted post is `PostNotFound`."""
+    if not Post.objects.not_deleted().filter(pk=post_id).exists():
+        raise PostNotFound
+    Bookmark.objects.filter(user=user, post_id=post_id).delete()

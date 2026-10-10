@@ -1,12 +1,14 @@
-"""The profile and user-row objects (ARCHITECTURE §9)."""
+"""The profile and user-row objects and the mixed feed's items (ARCHITECTURE §9)."""
 
 from django.db.models import Exists, OuterRef, Value
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.accounts.models import User
 from apps.accounts.serializers import avatar_url, user_summary
 from apps.posts.models import Post, PostStatus
-from apps.posts.serializers import content_field, iso
+from apps.posts.serializers import PostSerializer, content_field, feed_item, iso
+from apps.social import timeline
 from apps.social.engagement import count_subquery as _count
 from apps.social.models import Follow
 
@@ -101,3 +103,28 @@ def comment_data(comment, viewer):
         "is_mine": bool(viewer and viewer.is_authenticated and comment.author_id == viewer.pk),
         "created_at": iso(comment.created_at),
     }
+
+
+def timeline_items(entries, request):
+    """The `results` of a mixed feed (§9): a post item, or a repost item.
+
+    A repost whose original is no longer visible carries `{"id", "unavailable": true}` instead of
+    a post ("This post is no longer available"). `activity_at` is the item's own time.
+    """
+    context = {"request": request, "now": timezone.now()}
+    items = []
+    for entry in entries:
+        data = PostSerializer(entry.post, context=context).data if entry.post is not None else None
+        activity_at = iso(entry.key.at)
+        if entry.key.kind == timeline.POST:
+            items.append(feed_item(data, activity_at=activity_at))
+        else:
+            items.append(
+                {
+                    "kind": "repost",
+                    "post": data or {"id": str(entry.key.ref), "unavailable": True},
+                    "reposted_by": user_summary(entry.reposter),
+                    "activity_at": activity_at,
+                }
+            )
+    return items

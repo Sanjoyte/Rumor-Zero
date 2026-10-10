@@ -96,10 +96,11 @@ def status_item(post):
 class PostSerializer(serializers.BaseSerializer):
     """The post object of ARCHITECTURE §9, for lists, the detail page and the 201 answer.
 
-    `like_count`, `comment_count` and `liked_by_me` come from `PostQuerySet.for_list(viewer)` (a
-    new post gets `engagement_defaults`); the fields later parts fill (reposts, bookmarks, reports,
-    appeals) are `0`, `false` or `null` for now. Nothing
-    internal leaks: no `flagged_reason`, pipeline fields, `report_count` or moderation fields.
+    The counts and the viewer's flags (`like_count`, `comment_count`, `repost_count`, `liked_by_me`,
+    `reposted_by_me`, `bookmarked_by_me`) come from `PostQuerySet.for_list(viewer)` (a new post gets
+    `engagement_defaults`); the fields later parts fill (reports, appeals) are `false` or `null` for
+    now. Nothing internal leaks: no `flagged_reason`, pipeline fields, `report_count` or moderation
+    fields.
     **A removed post is a tombstone for everyone but its author** (user decision 2026-10-09): the
     same keys, with `content`, `sources`, `verdict_note`, `confidence_score` and `verdict_source`
     blanked. The rule lives here so no list can ever leak a removed post's text.
@@ -129,10 +130,10 @@ class PostSerializer(serializers.BaseSerializer):
             "verdict_note": "" if tombstone else post.verdict_note,
             "like_count": post.like_count,
             "comment_count": post.comment_count,
-            "repost_count": 0,
+            "repost_count": post.repost_count,
             "liked_by_me": post.liked_by_me,
-            "reposted_by_me": False,
-            "bookmarked_by_me": False,
+            "reposted_by_me": post.reposted_by_me,
+            "bookmarked_by_me": post.bookmarked_by_me,
             "reported_by_me": False,
             "is_mine": is_mine,
             "can_appeal": False,
@@ -141,13 +142,14 @@ class PostSerializer(serializers.BaseSerializer):
         }
 
 
-def feed_item(post_data):
-    """One entry of a feed (§9). Recent only has originals; reposts arrive in Part 7B."""
+def feed_item(post_data, activity_at=None):
+    """One original post in a feed (§9). `activity_at` is the post's own time unless the list is
+    ordered by something else (a bookmark's time). Reposts are built in `social.serializers`."""
     return {
         "kind": "post",
         "post": post_data,
         "reposted_by": None,
-        "activity_at": post_data["created_at"],
+        "activity_at": activity_at or post_data["created_at"],
     }
 
 

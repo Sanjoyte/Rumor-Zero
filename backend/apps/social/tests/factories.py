@@ -1,8 +1,9 @@
 import factory
 from django.utils import timezone
 
+from apps.posts.models import PostStatus
 from apps.posts.tests.factories import PostFactory, UserFactory, VerifiedUserFactory
-from apps.social.models import Comment, Follow, Like
+from apps.social.models import Bookmark, Comment, Follow, Like, Repost
 
 
 class FollowFactory(factory.django.DjangoModelFactory):
@@ -40,11 +41,35 @@ class CommentFactory(factory.django.DjangoModelFactory):
         deleted = factory.Trait(deleted_at=factory.LazyFunction(timezone.now))
 
 
+class RepostFactory(factory.django.DjangoModelFactory):
+    """A repost by a verified user of someone else's post. Give every item in a list its own
+    `created_at` unless the test is about ties."""
+
+    class Meta:
+        model = Repost
+
+    user = factory.SubFactory(VerifiedUserFactory)
+    post = factory.SubFactory(PostFactory)
+    status_at_repost = PostStatus.PUBLISHED
+    created_at = factory.LazyFunction(timezone.now)
+
+
+class BookmarkFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Bookmark
+
+    user = factory.SubFactory(VerifiedUserFactory)
+    post = factory.SubFactory(PostFactory)
+    created_at = factory.LazyFunction(timezone.now)
+
+
 __all__ = [
+    "BookmarkFactory",
     "CommentFactory",
     "FollowFactory",
     "LikeFactory",
     "PostFactory",
+    "RepostFactory",
     "UserFactory",
     "VerifiedUserFactory",
 ]

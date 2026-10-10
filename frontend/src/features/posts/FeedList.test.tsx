@@ -1,11 +1,29 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import type { FeedItem, Post } from "@/lib/api/types";
 import { FeedList } from "./FeedList";
-import { feedEntry, makePost, renderWithSessionAndToast } from "./test-helpers";
+import {
+  BO,
+  feedEntry,
+  makePost,
+  renderWithSessionAndToast,
+  repostEntry,
+  unavailableEntry,
+} from "./test-helpers";
 import type { CursorFeed } from "./useCursorFeed";
+
+const api = vi.hoisted(() => ({ unrepostPost: vi.fn() }));
+vi.mock("@/features/social/social-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/social/social-api")>()),
+  ...api,
+}));
+
+beforeEach(() => {
+  api.unrepostPost.mockReset();
+  api.unrepostPost.mockResolvedValue(undefined);
+});
 
 const post = (id: string, overrides: Partial<Post> = {}) =>
   makePost({ id, content: `Content of ${id}`, is_mine: false, ...overrides });
@@ -113,15 +131,155 @@ describe("FeedList", () => {
     expect(screen.getByRole("button", { name: /Load more/ })).toBeInTheDocument();
   });
 
-  it("leaves reposts out (Part 7B)", () => {
-    const repost: FeedItem = {
-      kind: "repost",
-      post: post("r"),
-      reposted_by: { id: "u2", username: "bo", display_name: "Bo", avatar_url: null },
-      activity_at: "2026-10-08T12:00:00Z",
-    };
-    render(<FeedList feed={feedWith({ items: [repost, entry(post("a"))] })} />);
-    expect(screen.getAllByRole("article")).toHaveLength(1);
+  describe("reposts (Part 7B)", () => {
+    it("shows a repost as the original's card with 'Reposted by' above it", () => {
+      render(<FeedList feed={feedWith({ items: [repostEntry(post("r")), entry(post("a"))] })} />);
+      const [first, second] = screen.getAllByRole("article");
+      expect(first).toHaveTextContent("Content of r");
+      expect(first).toHaveTextContent("Reposted by");
+      expect(within(first).getByRole("link", { name: "Bo" })).toHaveAttribute("href", "/u/bo");
+      expect(second).not.toHaveTextContent("Reposted by");
+    });
+
+    it("gives a repost the original's own action bar, acting on the original", async () => {
+      render(
+        <FeedList
+          feed={feedWith({ items: [repostEntry(post("r", { repost_count: 3, like_count: 2 }))] })}
+        />,
+      );
+      expect(await screen.findByRole("button", { name: "Repost 3" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Like 2" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /Content of r/ })).toHaveAttribute("href", "/p/r");
+    });
+
+    it("shows the original's live label on a repost", () => {
+      const original = post("r", { post_type: "fact", status: "pending" });
+      render(<FeedList feed={feedWith({ items: [repostEntry(original)] })} />);
+      expect(screen.getByRole("article")).toHaveTextContent("CHECKING FACTS…");
+    });
+
+    it("lays a polled status over a repost's original", () => {
+      const original = post("r", { post_type: "fact", status: "pending" });
+      render(
+        <FeedList
+          feed={feedWith({ items: [repostEntry(original)] })}
+          statusUpdates={{
+            r: {
+              id: "r",
+              status: "verified_true",
+              confidence_score: "94.00",
+              verdict_source: "pipeline",
+            },
+          }}
+        />,
+      );
+      expect(screen.getByRole("article")).toHaveTextContent("VERIFIED 94%");
+    });
+
+    it("shows 'This post is no longer available' for a repost of a deleted or removed post", () => {
+      render(<FeedList feed={feedWith({ items: [unavailableEntry("x"), entry(post("a"))] })} />);
+      const [first] = screen.getAllByRole("article");
+      expect(first).toHaveTextContent("This post is no longer available");
+      expect(first).toHaveTextContent("Reposted by");
+      expect(within(first).queryByRole("button", { name: /Like|Repost \d|Bookmark/ })).toBeNull();
+    });
+
+    it("turns a repost into the unavailable card when the poll says its original was removed", () => {
+      const original = post("r", { post_type: "fact", status: "pending" });
+      render(
+        <FeedList
+          feed={feedWith({ items: [repostEntry(original)] })}
+          statusUpdates={{
+            r: { id: "r", status: "removed", confidence_score: null, verdict_source: null },
+          }}
+        />,
+      );
+      expect(screen.getByRole("article")).toHaveTextContent("This post is no longer available");
+      expect(screen.queryByText(/Content of r/)).toBeNull();
+    });
+
+    it("turns a repost into the unavailable card when the poll says its original is gone", () => {
+      render(
+        <FeedList feed={feedWith({ items: [repostEntry(post("r"))] })} gone={new Set(["r"])} />,
+      );
+      expect(screen.getByRole("article")).toHaveTextContent("This post is no longer available");
+    });
+
+    it("hides a post that already showed higher up: later repeats are not shown", () => {
+      const items = [repostEntry(post("a")), entry(post("b")), entry(post("a"))];
+      render(<FeedList feed={feedWith({ items })} />);
+      const cards = screen.getAllByRole("article");
+      expect(cards).toHaveLength(2);
+      expect(cards[0]).toHaveTextContent("Reposted by");
+      expect(cards[1]).toHaveTextContent("Content of b");
+    });
+
+    it("shows a post once even when two people reposted it", () => {
+      const cy = { ...BO, id: "u-9", username: "cy", display_name: "Cy" };
+      render(
+        <FeedList
+          feed={feedWith({ items: [repostEntry(post("a"), BO), repostEntry(post("a"), cy)] })}
+        />,
+      );
+      expect(screen.getAllByRole("article")).toHaveLength(1);
+      expect(screen.getByRole("link", { name: "Bo" })).toBeInTheDocument();
+    });
+
+    describe("Undo repost", () => {
+      const mine = { ...BO, id: "u-1" }; // the session's user (`ME`) is u-1
+
+      it("is offered on your own repost of a missing post, and removes the item", async () => {
+        const feed = feedWith({ items: [unavailableEntry("x", mine)] });
+        render(<FeedList feed={feed} />);
+        await userEvent.click(await screen.findByRole("button", { name: "Undo repost" }));
+        expect(api.unrepostPost).toHaveBeenCalledWith("x");
+        await waitFor(() => expect(feed.remove).toHaveBeenCalledWith("repost:u-1:x"));
+        expect(await screen.findByText("Repost removed.")).toBeInTheDocument();
+      });
+
+      it("is not offered on someone else's repost", async () => {
+        render(<FeedList feed={feedWith({ items: [unavailableEntry("x", BO)] })} />);
+        await screen.findByText("This post is no longer available");
+        expect(screen.queryByRole("button", { name: "Undo repost" })).toBeNull();
+      });
+
+      it("keeps the item and toasts when the request fails", async () => {
+        api.unrepostPost.mockRejectedValue(new ApiError({ status: 500, code: "x", detail: "x" }));
+        const feed = feedWith({ items: [unavailableEntry("x", mine)] });
+        render(<FeedList feed={feed} />);
+        await userEvent.click(await screen.findByRole("button", { name: "Undo repost" }));
+        expect(
+          await screen.findByText("Couldn't undo your repost. Try again."),
+        ).toBeInTheDocument();
+        expect(feed.remove).not.toHaveBeenCalled();
+        expect(screen.getByRole("button", { name: "Undo repost" })).toBeEnabled();
+      });
+    });
+  });
+
+  describe("an empty page with more behind it", () => {
+    it("offers Load more instead of the empty state", () => {
+      const feed = feedWith({ items: [], hasMore: true });
+      render(<FeedList feed={feed} empty={<p>Nothing here</p>} />);
+      expect(screen.queryByText("Nothing here")).toBeNull();
+      expect(screen.getByRole("button", { name: /Load more/ })).toBeInTheDocument();
+    });
+
+    it("shows the empty state when nothing more can load", () => {
+      render(<FeedList feed={feedWith({ items: [] })} empty={<p>Nothing here</p>} />);
+      expect(screen.getByText("Nothing here")).toBeInTheDocument();
+    });
+
+    it("counts posts hidden as repeats or gone: all hidden and no more = empty", () => {
+      render(
+        <FeedList
+          feed={feedWith({ items: [entry(post("a"))] })}
+          gone={new Set(["a"])}
+          empty={<p>Nothing here</p>}
+        />,
+      );
+      expect(screen.getByText("Nothing here")).toBeInTheDocument();
+    });
   });
 
   describe("polled statuses (Part 5)", () => {

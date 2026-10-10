@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -4894,6 +4894,827 @@ design" / device toolbar button, and set the width to 390.
   (more comments and likes). Nothing else is touched.
   (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
   If you made a throwaway superuser for step 16, delete that too.
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
+  token and the throwaway password of the test accounts.
+
+### Part 7B: Bookmarks & reposts
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
+`frontend/.env.local`. Part 7B adds **one migration** (`social.0003_repost_bookmark`: the reposts and bookmarks tables),
+**no dependency** and **no new variable** (the `repost` and `bookmark` rates were already in the settings). It adds the
+endpoints `POST` and `DELETE /api/v1/posts/{id}/repost/` and `…/bookmark/` and `GET /api/v1/me/bookmarks/`, fills
+`repost_count`, `reposted_by_me` and `bookmarked_by_me` in every post, and turns the Following feed and the profile
+lists into **mixed lists of posts and reposts**.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 18 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 13**: the variables and functions you set in step 3 (`id`, `ada`, `bo`, `cy`, `dee`, `api`, `op1`, `fact1`, `adapost`, `mk`, `get`, `send`, and the helpers later steps add) only live in that one terminal. If you close it, redo step 3. | 1 to 13, 19 |
+| Window 3 (frontend) | `npm run dev` in `frontend`. Leave it running. | 14 to 18 |
+| Browser | Steps 14 to 18 | 14 to 18 |
+
+Things to know first:
+
+- Steps 3 to 13 talk to the API directly with `curl` (they need `jq`: `sudo apt install jq`). Steps 14 to 18 use the
+  browser. Step 3 makes four accounts: `ada`, `bo` and `cy` are verified and `dee` never is. `bo` writes the
+  posts, `ada` reposts and bookmarks them, `cy` follows `ada` (and later `bo`) and reads the Following feed, and
+  `dee` shows what an unverified email may not do. Step 12 adds `eve` and `gus` for the two rate limits.
+- The API and page outputs below were recorded on Linux on 2026-10-10. The browser steps were checked the same
+  day with headless Chromium (screenshots at 1280 and 390 px) and Django Admin with a scripted browser, not by a
+  person at a keyboard. Ids, numbers in names, times and token prefixes differ on every run.
+- Nothing here sends an email: step 3 marks the accounts verified with a shell command, which stands in for
+  clicking the link (Part 2 shows the real flow). Steps 5, 8 and 10 set a post's status (or plant a row) the same way,
+  because the pipeline and the moderator tools that do it for real arrive in Parts 9 and 10.
+- **What Part 7B does and doesn't show:** a repost is a plain pointer to the original, never a copy: it has no text
+  and no status of its own and always shows the original's **live** label (nothing is checked again). You can't
+  repost your own post, a post labelled FALSE or a removed or deleted one; you can always take a repost back,
+  even when the original is gone. Reposting needs a verified email; bookmarks are **private**, need only a login
+  and are never counted or shown to anyone else. Recent still lists only originals; the Following feed and a
+  profile list posts **and** reposts, newest activity first. Score effects of reposts (11B), reports (8) and
+  notifications (13) come later.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies the new migration,
+confirms there is no further one, then runs the whole backend test suite, the social tests, the linter and the
+formatter check.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                            # Applying social.0003_repost_bookmark... OK
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 1875 passed
+python -m pytest apps/social -q                     # 695 passed
+ruff check . ; ruff format --check .                # All checks passed! / 154 files already formatted
+```
+
+**You should see:** `Applying social.0003_repost_bookmark... OK` (nothing to apply the second time), `No changes
+detected` and `System check identified no issues (0 silenced).`, then the full run ends with `1875 passed`, the
+social run with `695 passed`, and the last line pair is `All checks passed!` and `154 files already formatted`.
+(Counts may grow later; what matters is that nothing fails.)
+
+- The 390 new social tests: `test_models_repost_bookmark.py` (16: the unique pairs, only the four statuses a post
+  can be reposted in, cascades, the indexes), `test_services_repost_bookmark.py` (37: every refusal and their
+  order, `status_at_repost`, undoing on a gone post, the cache bust, and real races: two simultaneous reposts make
+  one row, six users are all counted, a repost waits for a concurrent status change and records the status at
+  commit), `test_api_repost.py` (26, including the real 100-an-hour limit), `test_api_bookmark.py` (17,
+  including the real 300-an-hour limit and that bookmarks don't use the like allowance),
+  `test_api_bookmark_list.py` (16: only your own, newest first, deleted and removed dropped, a cursor walk, 3
+  queries whatever the size), `test_api_feed_reposts.py` (32: mixed items, "no longer available" stubs, once per
+  page, the cache, 4 / 3 queries), `test_api_user_posts_reposts.py` (17: reposts on a profile, the Facts and
+  Opinions chips by the original's type), `test_timeline.py` (63: the page rule as a table, the cursor token and
+  every way to forge one), `test_timeline_db.py` (140: ties, the cursor filters, the per-side slice, items
+  arriving or changing during a walk, and 50 + 50 + 30 seeded random walks compared with a reference written
+  separately), `test_admin_repost_bookmark.py` (6) and more in `test_engagement_counts.py` and
+  `test_no_network.py`.
+- `PostQuerySet.for_list(viewer)` now also counts reposts and tells you whether you reposted and bookmarked each
+  post, in the same query; `PostSerializer` still refuses a post that wasn't counted.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 113 files, 1510 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 36 passed
+CI=1 npm run test:e2e                               # 36 passed (against the production build)
+cd ../backend                                       # back to backend/ for steps 3 to 13
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  113 passed (113)` and `Tests  1510 passed (1510)`. `npm run build` lists the same routes as in Part 7
+(`/bookmarks` was a placeholder before and is now the real page; it is still static). Each E2E run ends with `36 passed`:
+the 32 earlier tests and 4 new ones in `e2e/social.spec.ts`.
+
+- The new E2E tests reuse the two people that file already signs up (allauth limits sign-ups to 20 a minute per
+  address and the rest of the suite already uses most of that), so Part 7B adds **no** sign-up. A third person's
+  post is made straight in the database. They are: B reposts that post, A (who follows B) sees "Reposted by B" with
+  the post's live label, then "This post is no longer available" once it is removed, and B undoes the repost; a
+  bookmark is private (it shows on A's `/bookmarks` and is empty for everyone else); Repost is disabled with its
+  reason on your own post and on a FALSE one, and a visitor is sent to log in; and a card with four actions and the
+  Bookmarks page fit a phone.
+
+#### Step 3: Start the servers and make four accounts and three posts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 13.**
+
+**What this does:** Windows 1 and 3 run the two servers. In window 2 you sign up four accounts through the API and
+mark three of them verified (`dee` stays unverified), then `bo` posts an opinion and a fact with a DOI and `ada`
+posts an opinion. The helpers `mk` (make a post, print its id), `send` (any request, printing the status code and
+then the answer) and `get` (the same for a GET) are used by every later step.
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```bash
+cd frontend                                         # from the repo root
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend` with the venv active: steps 1 and 2 leave you there; needs `jq`). If you opened a new
+terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the addresses are new each run
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+signup() { jq -nc --arg e "$1" --arg u "$2" '{email: $e, username: $u, password: "correct-horse-battery-42", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/signup | jq -r .meta.access_token; }
+ada=$(signup "part7b-ada-$id@example.test" "part7b_ada_$id")    # $ada = ada's login token (reposts and bookmarks)
+bo=$(signup "part7b-bo-$id@example.test" "part7b_bo_$id")       # $bo = bo's login token (the author of the posts)
+cy=$(signup "part7b-cy-$id@example.test" "part7b_cy_$id")       # $cy = cy's login token (follows ada)
+dee=$(signup "part7b-dee-$id@example.test" "part7b_dee_$id")    # $dee = dee's login token (never verified)
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part7b-', email__endswith='$id@example.test').exclude(username='part7b_dee_$id').update(is_email_verified=True), 'accounts marked verified')" | tail -1
+api=http://localhost:8000/api/v1
+adaname=part7b_ada_$id; boname=part7b_bo_$id; cyname=part7b_cy_$id; deename=part7b_dee_$id
+mk() { curl -s -H "Authorization: Bearer $1" -H "Content-Type: application/json" --data-binary "$2" $api/posts/ | jq -r .id; }   # mk <token> <json>: makes a post, prints its id
+get() { local out; out=$(curl -s -w '\n%{http_code}' ${2:+-H "Authorization: Bearer $2"} "$api$1"); printf '%s  ' "${out##*$'\n'}"; printf '%s' "${out%$'\n'*}" | jq -c "${3:-.}"; }   # get <path> [token] [jq filter]: prints the status code, then the answer
+send() { local out; out=$(curl -s -w '\n%{http_code}' -X "$1" ${3:+-H "Authorization: Bearer $3"} ${4:+-H "Content-Type: application/json" --data-binary "$4"} "$api$2"); printf '%s  %s\n' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | jq -c "${5:-.}" 2>/dev/null)"; }   # send <METHOD> <path> [token] [json body] [jq filter]: prints the status code, then the answer
+op1=$(mk "$bo" '{"content":"I think the new tram line will change how the city moves.","post_type":"opinion"}')
+fact1=$(mk "$bo" '{"content":"Solar capacity grew by roughly 30% worldwide last year.","post_type":"fact","sources":["doi:10.1038/s41558-024-02102"]}')
+adapost=$(mk "$ada" '{"content":"Ada thinks trams beat buses.","post_type":"opinion"}')
+echo ${ada:0:10} ${bo:0:10} ${cy:0:10} ${dee:0:10}    # four prefixes, not an empty line
+echo "op1=$op1"; echo "fact1=$fact1"; echo "adapost=$adapost"      # three ids, not empty
+```
+
+**You should see** (the number in the names is your `id`, and the ids differ):
+
+```text
+3 accounts marked verified
+eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi
+op1=29da0351-d108-4b08-9965-626e7a05e8c9
+fact1=3c2b6ef4-bc02-4076-8ec0-8f650613e851
+adapost=ee6ff30b-0ac9-4578-a848-dd31c6019ca5
+```
+
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet.
+
+**If it differs:** an empty token or an `id` of `null` means the sign-up or the post failed: `runserver` isn't
+running, `jq` is missing, or you signed up more than 20 times in a minute. Fix that and run this step again
+from `id=$(date +%H%M%S)`.
+
+#### Step 4: Repost and undo
+
+**Where:** Terminal window 2 (the same terminal as step 3).
+
+**What this does:** Reposts and un-reposts through `POST` and `DELETE /api/v1/posts/{id}/repost/`, with the
+refusals every toggle has. Both are idempotent. Reposting needs a verified email, taking a repost back only a login.
+
+```bash
+repost() { send POST /posts/$1/repost/ "$2"; }       # repost <post id> [token]
+unrepost() { send DELETE /posts/$1/repost/ "$2"; }   # unrepost <post id> [token]
+repost $op1 "$ada"                                  # 1: the first repost is 201
+repost $op1 "$ada"                                  # 2: again: 200, nothing changes
+repost $op1                                         # 3: nobody logged in
+repost $op1 "$dee"                                  # 4: an unverified email
+repost $fact1 "$ada"                                # 5: a fact that is still "checking" can be reposted
+repost 00000000-0000-4000-8000-000000000000 "$ada"  # 6: no such post
+repost not-a-uuid "$ada"                            # 7: not even an id
+unrepost $fact1 "$ada"                              # 8: taking a repost back is 204
+unrepost $fact1 "$ada"                              # 9: and again: still 204, no error
+unrepost $fact1 "$dee"                              # 10: an unverified user may also take one back (there is none): 204
+```
+
+**You should see** (ten commands, ten answers):
+
+```text
+201  {"reposted":true}
+200  {"reposted":true}
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+403  {"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}
+201  {"reposted":true}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+204
+204
+204
+```
+
+- The first repost is `201`, the same request again is `200` and changes nothing; `DELETE` is `204` every
+  time, also when there was nothing to take back (9, 10).
+- A repost has no id of its own: `POST` and `DELETE` always name the **original** post. So "reposting a repost"
+  can only mean reposting the original, and a second repost of the same post by the same person can't exist.
+- A 401 or 403 doesn't use up the allowance of 100 reposts an hour (step 12).
+
+#### Step 5: What can't be reposted
+
+**Where:** Terminal window 2.
+
+**What this does:** Tries the three refusals of ARCHITECTURE §4d (your own post, a post labelled FALSE, a removed
+or deleted post), and shows two subtle rules: a repost you already made survives the original turning FALSE, and
+you can always take a repost back, even when the original is gone. The statuses are set with shell commands; the
+tools that do it for real come in Parts 9 and 10.
+
+```bash
+repost $adapost "$ada"                              # 1: your own post is refused
+false1=$(mk "$bo" '{"content":"The moon is made of green cheese.","post_type":"fact"}')
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$false1').update(status='verified_false', verdict_source='moderator'), 'post marked FALSE')" | tail -1
+repost $false1 "$ada"                               # 2: a post labelled FALSE is refused
+op2=$(mk "$bo" '{"content":"This opinion will be removed by a moderator.","post_type":"opinion"}')
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$op2').update(status='removed'), 'post removed')" | tail -1
+op3=$(mk "$bo" '{"content":"This opinion will be deleted by its author.","post_type":"opinion"}')
+send DELETE /posts/$op3/ "$bo"                      # bo deletes op3: 204
+repost $op2 "$ada"                                  # 3: a removed post: 404
+repost $op3 "$ada"                                  # 4: a deleted post: 404
+fact2=$(mk "$bo" '{"content":"The harbour bridge is 1,149 metres long.","post_type":"fact"}')
+repost $fact2 "$ada"                                # 5: a fact still being checked: 201
+python manage.py shell -c "from apps.social.models import Repost; print(list(Repost.objects.filter(post_id='$fact2').values_list('status_at_repost', flat=True)), 'status recorded at the time')" | tail -1
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$fact2').update(status='verified_false', verdict_source='moderator'), 'post marked FALSE')" | tail -1
+repost $fact2 "$ada"                                # 6: it turned FALSE after ada reposted it: still a quiet 200
+repost $fact2 "$cy"                                 # 7: but cy can't repost it now: 409
+python manage.py shell -c "from apps.social.models import Repost; from apps.accounts.models import User; u = User.objects.get(username='$adaname'); [Repost.objects.create(user=u, post_id=p, status_at_repost='published') for p in ('$op2', '$op3')]; print(Repost.objects.filter(post_id__in=['$op2', '$op3']).count(), 'reposts planted on the removed and the deleted post')" | tail -1
+unrepost $op2 "$ada"                                # 8: a repost of a removed post can be taken back: 204
+unrepost $op3 "$ada"                                # 9: and one of a deleted post too: 204
+python manage.py shell -c "from apps.social.models import Repost; print(Repost.objects.filter(post_id__in=['$op2', '$op3']).count(), 'reposts left on them')" | tail -1
+unrepost 00000000-0000-4000-8000-000000000000 "$ada"   # 10: an unknown post is 404
+```
+
+**You should see:**
+
+```text
+409  {"detail":"You can't repost your own post.","code":"cannot_repost_own"}
+1 post marked FALSE
+409  {"detail":"Posts labelled FALSE can't be reposted.","code":"cannot_repost_false"}
+1 post removed
+204
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+201  {"reposted":true}
+['pending'] status recorded at the time
+1 post marked FALSE
+200  {"reposted":true}
+409  {"detail":"Posts labelled FALSE can't be reposted.","code":"cannot_repost_false"}
+2 reposts planted on the removed and the deleted post
+204
+204
+0 reposts left on them
+404  {"detail":"Not found.","code":"not_found"}
+```
+
+- Your own post and a FALSE post are `409` with their own codes, which the button uses to explain itself (step 14).
+  A removed or deleted post is the same plain `404` as for a post that never existed (3, 4).
+- `status_at_repost` is the status the post had **when** it was reposted (`pending` here): Part 11B reads it to
+  decide what a verdict is worth to the reposter. The post turning FALSE later doesn't touch it (6), and doesn't
+  refuse a repost that already exists, but a new reposter is refused (7).
+- The removed and the deleted post never take a new repost, but the two reposts planted on them (a shell command
+  stands in for reposts made before the original went away) are taken back with a plain `204` (8, 9): the card
+  that says "This post is no longer available" must always have its **Undo repost** (step 15).
+
+#### Step 6: Bookmarks
+
+**Where:** Terminal window 2.
+
+**What this does:** Saves and un-saves posts through `POST` and `DELETE /api/v1/posts/{id}/bookmark/`. Bookmarks are
+private, so there is no verified-email rule and no restriction on whose or which post: only a post the public can't
+see is refused.
+
+```bash
+bookmark() { send POST /posts/$1/bookmark/ "$2"; }       # bookmark <post id> [token]
+unbookmark() { send DELETE /posts/$1/bookmark/ "$2"; }   # unbookmark <post id> [token]
+bookmark $op1 "$ada"                                # 1: the first bookmark is 201
+bookmark $op1 "$ada"                                # 2: again: 200
+bookmark $op1                                       # 3: nobody logged in
+bookmark $op1 "$dee"                                # 4: an unverified email is fine: bookmarks are private
+bookmark $adapost "$ada"                            # 5: your own post is fine
+bookmark $false1 "$ada"                             # 6: so is a post labelled FALSE
+bookmark $op2 "$ada"                                # 7: a removed post: 404
+bookmark $op3 "$ada"                                # 8: a deleted post: 404
+bookmark not-a-uuid "$ada"                          # 9: not even an id
+unbookmark $op1 "$dee"                              # 10: taking one back is 204
+unbookmark $op1 "$dee"                              # 11: and again: 204
+unbookmark $op3 "$ada"                              # 12: a deleted post is 404 even for that
+python manage.py shell -c "from apps.social.models import Bookmark; from apps.accounts.models import User; Bookmark.objects.create(user=User.objects.get(username='$adaname'), post_id='$op2'); print(Bookmark.objects.filter(post_id='$op2').count(), 'bookmark planted on the removed post')" | tail -1
+unbookmark $op2 "$ada"                              # 13: ...but a bookmark can be taken back from a removed post: 204
+python manage.py shell -c "from apps.social.models import Bookmark; print(Bookmark.objects.filter(post_id='$op2').count(), 'bookmarks left on it')" | tail -1
+```
+
+**You should see:**
+
+```text
+201  {"bookmarked":true}
+200  {"bookmarked":true}
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+201  {"bookmarked":true}
+201  {"bookmarked":true}
+201  {"bookmarked":true}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+204
+204
+404  {"detail":"Not found.","code":"not_found"}
+1 bookmark planted on the removed post
+204
+0 bookmarks left on it
+```
+
+- Like a repost, a bookmark is `201` then `200`, and `DELETE` is `204` every time (10, 11). `dee`, who may not
+  like, comment or repost, can bookmark (4).
+- Every visible post can be bookmarked, including your own (5) and a FALSE one (6). A removed or deleted post can't
+  (7, 8), and a bookmark that was already there can be taken back from a removed post (13) but not a deleted one
+  (12), exactly as with likes.
+
+#### Step 7: The counts and flags on every post
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads `repost_count`, `reposted_by_me` and `bookmarked_by_me` as nobody and as other people.
+The count is public and the same for everyone; the two flags are yours alone. **There is no bookmark count anywhere**:
+not on the post, not on a profile.
+
+```bash
+repost $op1 "$cy"                                   # cy reposts the tram post too: 201 (ada's repost is from step 4)
+f='{reposts: .repost_count, reposted_by_me, bookmarked_by_me}'
+get /posts/$op1/ "" "$f"                            # 1: nobody logged in
+get /posts/$op1/ "$ada" "$f"                        # 2: ada reposted and bookmarked it
+get /posts/$op1/ "$cy" "$f"                         # 3: cy reposted it, did not bookmark it
+get /posts/$op1/ "$bo" "$f"                         # 4: bo wrote it: sees the count, nothing of his own
+get /users/$boname/posts/ "$ada" '[.results[] | {text: .post.content[:26], reposts: .post.repost_count, reposted: .post.reposted_by_me, saved: .post.bookmarked_by_me}]'
+get /users/$adaname/ "$bo" '.counts'                # 5: a profile has no bookmark count, and no repost count either
+```
+
+**You should see:**
+
+```text
+201  {"reposted":true}
+200  {"reposts":2,"reposted_by_me":false,"bookmarked_by_me":false}
+200  {"reposts":2,"reposted_by_me":true,"bookmarked_by_me":true}
+200  {"reposts":2,"reposted_by_me":true,"bookmarked_by_me":false}
+200  {"reposts":2,"reposted_by_me":false,"bookmarked_by_me":false}
+200  [{"text":"The harbour bridge is 1,14","reposts":1,"reposted":true,"saved":false},{"text":"The moon is made of green ","reposts":0,"reposted":false,"saved":true},{"text":"Solar capacity grew by rou","reposts":0,"reposted":false,"saved":false},{"text":"I think the new tram line ","reposts":2,"reposted":true,"saved":true}]
+200  {"followers":0,"following":0,"posts":1,"verified":0,"false":0}
+```
+
+- `reposts` is 2 for everyone (`ada` and `cy`); `reposted_by_me` and `bookmarked_by_me` are `false` for a visitor and
+  for anyone who didn't do it (1, 4). `bo`, the author, sees nobody's bookmark, not even that someone saved his post (4).
+- The list is `bo`'s four visible posts (the removed and the deleted one are left out), counted in the same query as
+  the posts: a list of 20 posts costs the same number of queries as a list of 2 (tests pin it).
+- The profile's counters (5) are the ones from Part 6: still no repost count and no bookmark count.
+
+#### Step 8: The Following feed with reposts
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes `cy` follow `ada`, lets `ada` repost two facts, and reads `cy`'s Following feed. It shows
+that a repost carries the original's **live** label (a verdict changes it at once, even though the first page is
+cached), that a repost whose original was removed becomes a stub, that an undone repost leaves the page at once, that
+a **new** repost reaches a follower after at most 30 seconds (the cache), and that a post shows **once per page**.
+
+```bash
+feed() { get "/feed/${2:+?$2}" "$1" '[.results[] | {kind, by: (.reposted_by.username // null), text: ((.post.content // "-")[:24]), status: .post.status, gone: .post.unavailable}]'; }   # feed <token> [query]: cy's Following feed, one line per item
+fact3=$(mk "$bo" '{"content":"Rail ridership doubled in ten years.","post_type":"fact"}')
+send POST /users/$adaname/follow/ "$cy"             # cy follows ada: 201 (this also clears cy's cached feed)
+repost $fact1 "$ada"                                # ada reposts the solar fact (still "checking")
+repost $fact3 "$ada"                                # ...and a third fact
+feed "$cy"                                          # 1: cy's Following feed: ada's post and reposts, and cy's own repost
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$fact1').update(status='verified_true', verdict_source='pipeline', pipeline_verdict='true', confidence_score=94), 'post verified')" | tail -1
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$fact3').update(status='removed'), 'post removed')" | tail -1
+feed "$cy"                                          # 2: the label changed, the removed one is a stub: the cached page keeps only keys
+unrepost $fact1 "$ada"                              # ada takes her solar repost back: 204
+feed "$cy"                                          # 3: it is gone at once, though the page is still cached
+op5=$(mk "$bo" '{"content":"A late post from bo.","post_type":"opinion"}')
+repost $op5 "$ada"                                  # ada reposts a brand-new post
+feed "$cy"                                          # 4: cy's cached page doesn't have it yet (at most 30 s)
+sleep 31
+feed "$cy"                                          # 5: 31 seconds later it is on top
+send POST /users/$boname/follow/ "$cy"              # cy follows bo too (this clears the cache)
+get /feed/ "$cy" "[.results[] | select(.post.id == \"$op1\") | {kind, by: (.reposted_by.username // null)}]"   # 6: the tram post, by bo and reposted twice: shown once
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+201  {"is_following":true}
+201  {"reposted":true}
+201  {"reposted":true}
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"Rail ridership doubled i","status":"pending","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"Solar capacity grew by r","status":"pending","gone":null},{"kind":"repost","by":"part7b_cy_203850","text":"I think the new tram lin","status":"published","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","status":"verified_false","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","status":"published","gone":null}]
+1 post verified
+1 post removed
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"-","status":null,"gone":true},{"kind":"repost","by":"part7b_ada_203850","text":"Solar capacity grew by r","status":"verified_true","gone":null},{"kind":"repost","by":"part7b_cy_203850","text":"I think the new tram lin","status":"published","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","status":"verified_false","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","status":"published","gone":null}]
+204
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"-","status":null,"gone":true},{"kind":"repost","by":"part7b_cy_203850","text":"I think the new tram lin","status":"published","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","status":"verified_false","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","status":"published","gone":null}]
+201  {"reposted":true}
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"-","status":null,"gone":true},{"kind":"repost","by":"part7b_cy_203850","text":"I think the new tram lin","status":"published","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","status":"verified_false","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","status":"published","gone":null}]
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"A late post from bo.","status":"published","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"-","status":null,"gone":true},{"kind":"repost","by":"part7b_cy_203850","text":"I think the new tram lin","status":"published","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","status":"verified_false","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","status":"published","gone":null}]
+201  {"is_following":true}
+200  [{"kind":"repost","by":"part7b_cy_203850"}]
+```
+
+- Each item has `kind` (`post` or `repost`), `by` (who reposted it) and the original's content and status. A repost
+  has no text of its own. Newest **activity** first: a repost sorts by when it was made, a post by when it was posted.
+- Line 1 is cy's page: `ada`'s own post (the last item), her reposts of the two facts and of the harbour fact (from
+  step 5, labelled `verified_false`: a repost shows the original's label whatever it was when reposted), and `cy`'s
+  own repost of the tram post (step 7). **`ada`'s older repost of the same tram post is not there**: a post shows
+  once per page, the most recent activity wins.
+- Line 2: the solar repost says `verified_true` and the third fact's repost is a **stub** (`"gone": true`, no text,
+  no status) although the page was read from the cache a moment ago: the cache holds only the keys of the page, and the
+  posts and reposts are read fresh every time. A stub shows as "This post is no longer available" (step 15).
+- Line 3: an undone repost leaves the page at once. Line 4: a **new** repost made by someone you follow isn't there
+  yet, the same rule as a new post (Part 6): the first page is cached for 30 seconds. Line 5, 31 seconds later, it is.
+  Your **own** reposts and follows clear your own cache, so they show at once.
+- Line 6: after `cy` also follows `bo`, the tram post could show up three times (`bo`'s own post, `ada`'s repost and
+  `cy`'s repost), but only the most recent of them, `cy`'s repost, is shown.
+
+#### Step 9: Profiles with reposts, and the Facts and Opinions chips
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads `ada`'s profile list, which now holds her own posts **and** her reposts, and the two filter
+chips: a repost is filtered by the **original's** type, so a repost of a fact shows under Facts even when the fact is
+gone.
+
+```bash
+prof='[.results[] | {kind, by: (.reposted_by.username // null), text: ((.post.content // "-")[:24]), gone: .post.unavailable}]'
+get /users/$adaname/posts/ "" "$prof"               # 1: ada's profile: her own post and her reposts (the removed fact is a stub)
+get "/users/$adaname/posts/?post_type=fact" "" "$prof"      # 2: Facts: her facts, and reposts of facts (also the one that is gone)
+get "/users/$adaname/posts/?post_type=opinion" "" "$prof"   # 3: Opinions: her opinions, and reposts of opinions
+get "/users/$adaname/posts/?post_type=gossip" "" "."        # 4: anything else is a 400
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"A late post from bo.","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"-","gone":true},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"I think the new tram lin","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","gone":null}]
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"-","gone":true},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","gone":null}]
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"A late post from bo.","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"I think the new tram lin","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","gone":null}]
+400  {"post_type":["Choose fact or opinion, or leave it out."]}
+```
+
+- The profile list is public and never cached. You can't repost your own post, so a profile never shows the same
+  post twice and its pages are always full. The stub (`gone`) is `ada`'s repost of the removed fact, kept until she
+  undoes it.
+- The filter is applied to the original (2, 3): the stub is under Facts because the post it pointed at was a fact.
+
+#### Step 10: Your bookmarks list
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads `GET /api/v1/me/bookmarks/`: **only your own**, newest bookmark first, in the same
+envelope as the feeds. Deleted and removed posts are left out (the bookmark rows stay, so a post that comes back
+reappears).
+
+```bash
+python manage.py shell -c "from apps.social.models import Bookmark; from apps.accounts.models import User; u = User.objects.get(username='$adaname'); [Bookmark.objects.create(user=u, post_id=p) for p in ('$op2', '$op3')]; print(Bookmark.objects.filter(user=u).count(), 'bookmarks of ada in the table, including one on a removed and one on a deleted post')" | tail -1
+saved='[.results[] | {kind, text: .post.content[:26], saved: .post.bookmarked_by_me}]'
+get /me/bookmarks/ "$ada" "$saved"                  # 1: ada's list: newest bookmark first; the removed and the deleted post are dropped
+get /me/bookmarks/ "$bo" "$saved"                   # 2: bo saved nothing: an empty list, not ada's
+get /me/bookmarks/ "" '.code'                       # 3: nobody logged in: 401
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $bo" "$api/users/$adaname/bookmarks/"   # 4: there is no address for someone else's list: 404
+c=$(curl -s -H "Authorization: Bearer $ada" "$api/me/bookmarks/?page_size=2" | jq -r .next_cursor)
+get "/me/bookmarks/?page_size=2" "$ada" '{n: (.results | length), more: (.next_cursor != null)}'   # 5: two to a page, and a cursor
+get "/me/bookmarks/?page_size=2&cursor=$c" "$ada" '{n: (.results | length), more: (.next_cursor != null)}'   # 6: the rest
+get "/me/bookmarks/?cursor=cD1ub3QtYS1kYXRl" "$ada" '.code'   # 7: a made-up cursor is a 404
+get /me/bookmarks/ "$ada" '.results[0] | keys'      # 8: the items have the feed's four keys (activity_at is when you saved it)
+```
+
+**You should see:**
+
+```text
+5 bookmarks of ada in the table, including one on a removed and one on a deleted post
+200  [{"kind":"post","text":"The moon is made of green ","saved":true},{"kind":"post","text":"Ada thinks trams beat buse","saved":true},{"kind":"post","text":"I think the new tram line ","saved":true}]
+200  []
+401  "not_authenticated"
+404
+200  {"n":2,"more":true}
+200  {"n":1,"more":false}
+404  "not_found"
+200  ["activity_at","kind","post","reposted_by"]
+```
+
+- The order is the order she saved them in, newest first (the FALSE post, her own post, the tram post), not the order
+  of the posts. Five rows are in the table, three are shown (1).
+- `bo` gets an empty list, never `ada`'s (2), and there is no way to ask for another user's (4): the route doesn't
+  exist. Nothing counts bookmarks anywhere (step 7).
+- Every item is `kind: "post"` with `reposted_by: null`; its `activity_at` is the time of the bookmark.
+
+#### Step 11: Paging the feed while posts arrive
+
+**Where:** Terminal window 2.
+
+**What this does:** Walks `cy`'s Following feed two items at a time while a new post and a new repost arrive between
+the two pages. The mixed feed pages by a cursor over (activity time, kind, post, reposter), so nothing new can push an
+item onto the next page or pull one off it; a cursor that isn't ours is a clean `404`.
+
+```bash
+p1=$(curl -s -H "Authorization: Bearer $cy" "$api/feed/?page_size=2")
+echo "$p1" | jq -c '[.results[] | {kind, by: (.reposted_by.username // null), text: ((.post.content // "-")[:24])}]'   # 1: the first two items
+c=$(echo "$p1" | jq -r .next_cursor)
+mk "$bo" '{"content":"Posted while cy was reading.","post_type":"opinion"}' > /dev/null
+repost $(mk "$bo" '{"content":"Reposted while cy was reading.","post_type":"opinion"}') "$ada"
+get "/feed/?page_size=2&cursor=$c" "$cy" '[.results[] | {kind, by: (.reposted_by.username // null), text: ((.post.content // "-")[:24])}]'   # 2: the next two: neither new item gets in
+get "/feed/?cursor=cD1ub3QtYS1kYXRl" "$cy" '.code'  # 3: a made-up cursor is a 404
+get "/feed/?cursor=junk" "$cy" '.code'              # 4: so is any other cursor that isn't ours
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+[{"kind":"repost","by":"part7b_ada_203850","text":"A late post from bo."},{"kind":"repost","by":"part7b_ada_203850","text":"-"}]
+201  {"reposted":true}
+200  [{"kind":"repost","by":"part7b_cy_203850","text":"I think the new tram lin"},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,"}]
+404  "not_found"
+404  "not_found"
+```
+
+- Line 1 is the two newest items. The two new ones (made after it) are newer than anything on the first page, so
+  they only appear at the top of a **fresh** first page; the second page (line 3) carries on exactly where the first
+  stopped: no repeat and no gap. A page can hold fewer items than its size when some rows repeat a post that is
+  already on it; the cursor still moves past them.
+- The cursor is a bare token (never an absolute URL, which would point past the relay). The one from Part 6's feed is not
+  valid any more: the client simply starts from the top again (a test covers it).
+
+#### Step 12: Reposting and bookmarking are rate limited
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes two more verified accounts, then uses up their allowances: 100 reposts an hour (`POST` and
+`DELETE` share it) and 300 bookmarks an hour (likewise). The two buckets are separate from each other and from
+likes.
+
+```bash
+eve=$(signup "part7b-eve-$id@example.test" "part7b_eve_$id")    # $eve = a fresh account for the repost limit
+gus=$(signup "part7b-gus-$id@example.test" "part7b_gus_$id")    # $gus = a fresh account for the bookmark limit
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__in=['part7b-eve-$id@example.test', 'part7b-gus-$id@example.test']).update(is_email_verified=True), 'accounts marked verified')" | tail -1
+for i in $(seq 1 100); do curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $eve" $api/posts/$op1/repost/; done | sort | uniq -c   # 100 reposts of one post
+curl -s -i -X POST -H "Authorization: Bearer $eve" $api/posts/$op1/repost/ | grep -ioE 'HTTP/[0-9.]+ [0-9]+|retry-after: [0-9]+|"code":"[a-z_]+"'              # the 101st
+for i in $(seq 1 300); do curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $gus" $api/posts/$op1/bookmark/; done | sort | uniq -c   # 300 bookmarks of one post
+curl -s -i -X POST -H "Authorization: Bearer $gus" $api/posts/$op1/bookmark/ | grep -ioE 'HTTP/[0-9.]+ [0-9]+|retry-after: [0-9]+|"code":"[a-z_]+"'   # the 301st
+send POST /posts/$op1/like/ "$gus"                  # bookmarks have their own allowance: a like still works
+get /me/bookmarks/ "$gus" '{n: (.results | length)}'   # reading is never throttled
+```
+
+**You should see** (the seconds differ):
+
+```text
+2 accounts marked verified
+     99 200
+      1 201
+HTTP/1.1 429
+Retry-After: 3599
+"code":"throttled"
+    299 200
+      1 201
+HTTP/1.1 429
+Retry-After: 3597
+"code":"throttled"
+201  {"liked":true}
+200  {"n":1}
+```
+
+- 100 requests went through (the first made the repost, the other 99 were repeats), the 101st was refused with `429`,
+  `"code":"throttled"` and a `Retry-After` in seconds. Likewise 300 bookmarks, then the 301st.
+- A 401 or 403 doesn't use up an allowance (tests cover it, and that a refusal like `409` does count). Using up the
+  bookmark allowance leaves a like working (201), so the buckets really are separate.
+
+#### Step 13: The indexes are used
+
+**Where:** Terminal window 2.
+
+**What this does:** In a transaction that is thrown away at the end, makes 300 users, 20,000 posts, 3,000 reposts, 50
+follows and 2,000 bookmarks, then asks the database how it would run the Following feed's query (a first page and a deep
+page) and the bookmark page, and prints the plan lines. Nothing is saved.
+
+```bash
+python manage.py shell <<'PYEOF' 2>&1 | grep -E "^---|Scan|Sort|rolled back"
+import random
+from datetime import timedelta
+from django.db import connection, transaction
+from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.posts.models import Post, PostStatus
+from apps.social import feed, timeline
+from apps.social.models import Bookmark, Follow, Repost
+
+class Rollback(Exception):
+    pass
+
+rng = random.Random(1)
+try:
+    with transaction.atomic():   # everything below is thrown away at the end
+        users = User.objects.bulk_create([User(username=f"xq_{i:03d}", email=f"xq{i}@example.test") for i in range(301)])
+        me, others = users[0], users[1:]
+        now = timezone.now()
+        Follow.objects.bulk_create([Follow(follower=me, following=u) for u in others[:50]])
+        posts = Post.objects.bulk_create([Post(author=others[i % 300], content=f"p{i}", post_type="opinion", status="published", created_at=now - timedelta(seconds=3 * i)) for i in range(20000)])
+        pairs = {}
+        while len(pairs) < 3000:
+            u, p = rng.choice(others), rng.choice(posts)
+            if p.author_id != u.pk:
+                pairs[(u.pk, p.pk)] = Repost(user=u, post=p, status_at_repost="published", created_at=now - timedelta(seconds=rng.randint(0, 60000)))
+        Repost.objects.bulk_create(list(pairs.values()))
+        Bookmark.objects.bulk_create([Bookmark(user=me, post=p, created_at=now - timedelta(seconds=i)) for i, p in enumerate(posts[:2000])])
+        with connection.cursor() as c:
+            for table in ("posts_post", "social_repost", "social_follow", "social_bookmark"):
+                c.execute(f"ANALYZE {table}")
+        deep = timeline.Key(now - timedelta(seconds=30000), 0, timeline.ZERO_UUID, timeline.ZERO_UUID)
+        for label, cursor in (("--- Following feed, first page", None), ("--- Following feed, a deep page", deep)):
+            with CaptureQueriesContext(connection) as q:
+                timeline.page(feed.following_posts(me), feed.following_reposts(me), size=20, cursor=cursor, dedupe=True)
+            print(label)
+            with connection.cursor() as c:
+                c.execute("EXPLAIN (COSTS OFF) " + q.captured_queries[-1]["sql"])
+                for row in c.fetchall():
+                    print(row[0])
+        rows = Bookmark.objects.filter(user=me, post__deleted_at__isnull=True).exclude(post__status=PostStatus.REMOVED).order_by("-created_at", "-id").values("id", "created_at", "post_id")[:21]
+        sql, params = rows.query.sql_with_params()
+        print("--- bookmark page")
+        with connection.cursor() as c:
+            c.execute("EXPLAIN (COSTS OFF) " + sql, params)
+            for row in c.fetchall():
+                print(row[0])
+        raise Rollback
+except Rollback:
+    print("rolled back: nothing was saved")
+PYEOF
+```
+
+**You should see:**
+
+```text
+--- Following feed, first page
+  ->  Incremental Sort
+        Sort Key: posts_post.created_at DESC, (0) DESC, posts_post.id DESC, ('00000000-0000-0000-0000-000000000000'::uuid) DESC
+              Sort Key: posts_post.created_at DESC, posts_post.id DESC
+                    ->  Index Scan using posts_recent_idx on posts_post
+                            ->  Seq Scan on social_follow u0
+                    ->  Sort
+                          Sort Key: social_repost.created_at DESC, social_repost.post_id DESC, social_repost.user_id DESC
+                          ->  Seq Scan on social_repost
+                                  ->  Seq Scan on social_follow u0_1
+--- Following feed, a deep page
+  ->  Incremental Sort
+        Sort Key: posts_post.created_at DESC, (0) DESC, posts_post.id DESC, ('00000000-0000-0000-0000-000000000000'::uuid) DESC
+              Sort Key: posts_post.created_at DESC, posts_post.id DESC
+                    ->  Index Scan using posts_recent_idx on posts_post
+                            ->  Seq Scan on social_follow u0
+                    ->  Sort
+                          Sort Key: social_repost.created_at DESC, social_repost.post_id DESC, social_repost.user_id DESC
+                          ->  Seq Scan on social_repost
+                                  ->  Seq Scan on social_follow u0_1
+--- bookmark page
+        ->  Index Scan using bookmarks_user_created_idx on social_bookmark
+        ->  Index Scan using posts_post_pkey on posts_post
+rolled back: nothing was saved
+```
+
+- The Following feed is one query: the posts side walks `posts_recent_idx` newest first and stops after enough rows (the
+  same plan at the first page and at a deep one: that is what the plain `created_at <=` in the filter is for), the
+  reposts side takes the reposts of the people you follow, sorts them and keeps the newest few, and the two are merged.
+  Each side is cut to at most 41 rows (twice the page plus one).
+- The reposts side is a sequential scan and a sort. At 3,000 reposts that is nothing; measured separately with
+  300,000 reposts and 200 follows it took about 11 to 18 ms. Splitting it into a separate query per group of
+  people (a variant that was tried) took about the same time, so it is recorded for Part 16 rather than built now.
+- The bookmark page walks `bookmarks_user_created_idx` in order and looks each post up by its primary key: 21 rows, no sort.
+
+#### Step 14: Reposts and bookmarks on the cards
+
+**Where:** Browser, with `runserver` (window 1) and `npm run dev` (window 3) running. Log in at
+http://localhost:3000/login as `part7b-cy-<id>@example.test` (use the `id` from step 3: `echo $id`) with the password `correct-horse-battery-42` (`cy` was verified in step 3).
+
+**What this does:** Looks at the two new buttons and the "Reposted by" line, as four kinds of visitor.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home and click the **Following** tab | Cards from `bo` and `ada`. A repost has a small line **"↻ Reposted by @part7b_ada_<id>"** above the author row, in the same grey small type as a timestamp; the card itself is the original's, with the original's author. Every card ends with a hairline, then (left) a **heart**, a **speech bubble** and a **two-arrow repost glyph**, each with its count, and (right, alone) a small **bookmark** glyph. |
+| Click the repost glyph on a card that isn't yours and isn't FALSE | The glyph turns **blue** and the count goes up by one **at once**, before the server answers. Click again: back to grey and the old count. |
+| Click the bookmark glyph | It turns into a filled **blue** bookmark at once; click again to take it back. There is no number beside it, ever. |
+| Log in as `ada` in a second window. On her own post ("Ada thinks trams beat buses.") look at its repost glyph | It is dimmed. Hover it: the tooltip says "You can't repost your own post." A click shows the same words as a toast and sends nothing. |
+| As `ada`, on "The moon is made of green cheese." (FALSE) look at the repost glyph | Dimmed, with the tooltip and toast "Posts labelled FALSE can't be reposted." Its bookmark still works. |
+| Reload the page | The glyphs and counts are what the server says: the state survived. |
+| Open a private window and go to /home (a visitor) | The same cards and counts. The repost and bookmark glyphs are **links**: they point to `/login?next=%2Fp%2F<id>`. |
+| In another window log in as `dee` (`part7b-dee-<id>@example.test`, same password: never verified) and click a repost glyph | It looks dimmed and nothing is sent; a toast says "Verify your email to repost posts. Check your inbox for the link." The bookmark glyph **works**: bookmarks are private. |
+
+- Covered by `RepostButton.test.tsx` (flip before the answer, rollback and a toast per kind of failure, one request for
+  two clicks in one tick, the disabled reasons, enabled to undo, the visitor and unverified states, a unique hint per
+  button), `BookmarkButton.test.tsx`, `RepostHeader.test.tsx`, `PostActions.test.tsx`, `FeedList.test.tsx` and the new E2E tests.
+- Every button sits above the card's big invisible link, so it never opens the post by accident. A repost's buttons
+  act on the **original** (a repost has no id of its own), so reposting a card that already says "Reposted by" reposts
+  the original post.
+
+#### Step 15: "This post is no longer available", and Undo repost
+
+**Where:** Browser, logged in as `ada` (`part7b-ada-<id>@example.test`) in one window and as `cy` in another.
+
+**What this does:** Looks at what a repost becomes when its original disappears (the stub from step 8) and removes it.
+
+| Do this | Expect |
+|---|---|
+| As `cy`: open /home, click **Following** | One card has the line "↻ Reposted by @part7b_ada_<id>" and, below it, a shorter card body with a **no-entry glyph** and **"This post is no longer available"**: no text, no buttons. It is the third fact's repost, whose original was removed in step 8. There is no **Undo repost** button for `cy`. |
+| As `ada`: open http://localhost:3000/u/part7b_ada_`<id>` (Profile in the rail) | The same card in her list, **with a ghost "Undo repost" button** at its right. Her other reposts have "Reposted by" lines and the normal buttons, and her repost glyphs are blue. |
+| Still as `ada`, click the **Facts** chip, then **Opinions** | The stub is listed under **Facts** (its original was a fact) and not under **Opinions**. |
+| Click **Undo repost** | The card disappears and a toast says "Repost removed." Reload: it is still gone, and `cy`'s Following tab no longer shows it. |
+
+- The server answers `204` to an undo whatever became of the original (step 5), so a stub can always be removed.
+- Covered by `UnavailablePostCard.test.tsx`, the Undo cases in `FeedList.test.tsx` and the E2E test.
+
+#### Step 16: The Bookmarks page and the post page
+
+**Where:** Browser, logged in as `ada`, with both servers running.
+
+**What this does:** Opens the page that lists your bookmarks and the post page's action row.
+
+| Do this | Expect |
+|---|---|
+| Click **Bookmarks** in the left rail (http://localhost:3000/bookmarks) | A heading **Bookmarks** and your saved posts, newest bookmark first: the FALSE moon post, `ada`'s own post, the tram post. Each card has its bookmark **filled and blue**; the moon post's and her own post's repost glyphs are dimmed, the tram post's is blue. The list ends with "You're caught up." |
+| Click a filled bookmark | It turns outline at once (the card stays until the next load, as an unfollowed row does). Reload: it is gone from the list. |
+| Log in as `bo` (never saved anything) and open /bookmarks | An empty state with a bookmark glyph: **"No bookmarks yet"** and "Posts you bookmark appear here. Only you can see them." |
+| Log out and open /bookmarks | You are sent to `/login?next=%2Fbookmarks` and come back here after logging in. |
+| Open a post's own page (click its text) | The claim card's action row reads **Like, Comments, Repost** with words beside the glyphs (from 640 px up), then the **bookmark** glyph and **Copy link**. The repost and bookmark work as on a card. |
+
+- The list is fetched by the page after it loads (not server-rendered, never indexed), and only after the session is
+  known, so the first request carries your token. A pending fact in the list still changes its badge by itself.
+- Covered by `BookmarkList.test.tsx` (including the StrictMode case), `BookmarkButton.test.tsx` and the E2E test.
+
+#### Step 17: A phone-sized window
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Checks the new parts at phone width. In Firefox or Chrome press `F12`, then the "responsive
+design" / device toolbar button, and set the width to 390.
+
+| Do this | Expect |
+|---|---|
+| Open /home and click **Following** | Each card's bar (heart, count, bubble, count, repost, count, and the bookmark at the right) fits on one line under the claim; a repost's "Reposted by" line fits above the author row. **No sideways scrolling.** |
+| Open /bookmarks | The heading and the cards fit; **no sideways scrolling.** |
+| Open a post's page | The action row holds the glyphs with their counts only (the words are hidden below 640 px), the bookmark and **Copy link**, wrapping to a second line if needed. |
+
+- Measured with headless Chromium at 390 px: 0 px of horizontal overflow on `/home`, on the Following tab and on
+  `/bookmarks`.
+
+#### Step 18: Django Admin: reposts, and bookmarks for superusers only
+
+**Where:** Browser, while `runserver` is running in window 1. For the moderator check, first make one in window 2:
+
+```bash
+python manage.py shell -c "from django.contrib.auth.models import Permission; from apps.accounts.models import User, Role; mod = User.objects.create_user(email='part7b-mod-$id@example.test', username='part7b_mod_$id', password='correct-horse-battery-42', role=Role.MODERATOR, is_email_verified=True); mod.user_permissions.set(Permission.objects.filter(codename__in=['view_repost', 'view_bookmark', 'change_bookmark', 'delete_bookmark', 'add_bookmark'])); print('moderator made')" | tail -1
+```
+
+**What this does:** Opens the two new admin lists as a superuser, then as a moderator who holds **every bookmark
+permission** (a moderator gets no permissions at all until Part 10; this one is given them by hand to prove they don't
+matter).
+
+| URL / action | Expect |
+|---|---|
+| http://localhost:8000/admin/ (superuser from Part 0A; if it 404s, `ADMIN_URL_PATH` in `backend/.env` isn't `admin/`: use that path) | **Bookmarks** and **Reposts** are listed under Social. |
+| http://localhost:8000/admin/social/repost/ | **Reposts**: user, post, **Status at repost** and **Created at**, newest first, a search box (username) and a **By status at repost** filter. No **Add repost** button; a repost's page only shows the values (no Save, no Delete: they answer 403 if you type the address). |
+| http://localhost:8000/admin/social/bookmark/ | **Bookmarks**: user, post and **Created at**, read-only like the follows. This list exists for the superuser's own housekeeping; nothing else in the product ever shows it. |
+| Log out, log in as `part7b-mod-<id>@example.test` (password above) and open http://localhost:8000/admin/ | **Reposts** is listed (read-only). **Bookmarks is not listed at all.** |
+| As the moderator open http://localhost:8000/admin/social/bookmark/ and `…/bookmark/add/` | **403** for both, although this account has `view`, `add`, `change` and `delete` for bookmarks: nobody but a superuser can open the list (user decision 2026-10-10). |
+
+- Reposts are read-only because a repost changes only through the service (it must clear the reposter's cached feed
+  and respect the rules). Bookmarks are private by design (ARCHITECTURE §4d): no moderator permission, now or after Part
+  10, opens them.
+- Covered by `test_admin_repost_bookmark.py` (including a moderator holding all five bookmark permissions) and, for these
+  clicks, a scripted browser run; not clicked by a person.
+
+#### Step 19: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts, their posts, follows, likes, reposts and bookmarks (all go with the accounts). In window 2, in `backend/` with the
+  venv active:
+
+  ```bash
+  python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part7b-').delete())" | tail -1
+  ```
+
+  After one clean run of steps 3 to 13 of this guide it prints `(39, {'social.Like': 1, 'social.Repost': 7, 'social.Bookmark': 6, 'social.Follow': 2, 'account.EmailAddress': 6, 'posts.Post': 11, 'accounts.User': 6})`:
+  how many rows went in all, and per table (11 posts: ten by `bo`, among them the removed one, the deleted one (still a
+  row) and the two made while `cy` was reading, and `ada`'s own; 7 reposts: `ada` still holds the tram post, the
+  harbour fact, the third fact, the late post and the one made while `cy` was reading, `cy` the tram post and `eve` the
+  same one (the solar repost was undone and the two planted ones were taken back); 6 bookmarks: `ada`'s five (the tram
+  post, her own, the FALSE one and the two planted on the removed and the deleted post) and `gus`'s; 1 like, `gus`'s; 2
+  follows, `cy` of `ada` and of `bo`). Your count differs if you did the browser steps (more reposts, bookmarks and
+  likes) or step 18 (one more account, with its permissions). Nothing else is touched.
+  (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
+  If you made a throwaway moderator for step 18, that goes too (same prefix).
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
   wipes the whole local database, which is destructive.
 - No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
@@ -9927,6 +10748,864 @@ design" / device toolbar button, and set the width to 390.
   (more comments and likes). Nothing else is touched.
   (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
   If you made a throwaway superuser for step 16, delete that too.
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
+  token and the throwaway password of the test accounts.
+
+### Part 7B: Bookmarks & reposts
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
+`frontend\.env.local`. Part 7B adds **one migration** (`social.0003_repost_bookmark`: the reposts and bookmarks tables),
+**no dependency** and **no new variable** (the `repost` and `bookmark` rates were already in the settings). It adds the
+endpoints `POST` and `DELETE /api/v1/posts/{id}/repost/` and `…/bookmark/` and `GET /api/v1/me/bookmarks/`, fills
+`repost_count`, `reposted_by_me` and `bookmarked_by_me` in every post, and turns the Following feed and the profile
+lists into **mixed lists of posts and reposts**.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 18 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for steps 3 to 13**: the variables and functions you set in step 3 (`$id`, `$ada`, `$bo`, `$cy`, `$dee`, `$api`, `$op1`, `$fact1`, `$adapost`, `Mk`, `Send`, `Fetch`, `Cut`, and the helpers later steps add) only live in that one terminal. If you close it, redo step 3. | 1 to 13, 19 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 14 to 18 |
+| Browser | Steps 14 to 18 | 14 to 18 |
+
+Things to know first:
+
+- Steps 3 to 13 talk to the API directly with `curl.exe` (with `.exe`: in PowerShell 5.1 plain `curl` is a different command). Steps 14 to 18 use the
+  browser. Step 3 makes four accounts: `ada`, `bo` and `cy` are verified and `dee` never is. `bo` writes the
+  posts, `ada` reposts and bookmarks them, `cy` follows `ada` (and later `bo`) and reads the Following feed, and
+  `dee` shows what an unverified email may not do. Step 12 adds `eve` and `gus` for the two rate limits.
+- **The PowerShell blocks below were not run on Windows.** The agent works on the Linux PC; it ran the bash twin of every command in the Linux guide on 2026-10-10, and the outputs below are those. The PowerShell commands follow the patterns Parts 1 to 7 proved on Windows (JSON written to a file and sent with `--data-binary "@file"`, `curl.exe`, no `&&`). If one behaves differently, tell the agent which.
+- The API and page outputs below were recorded on Linux on 2026-10-10. The browser steps were checked the same
+  day with headless Chromium (screenshots at 1280 and 390 px) and Django Admin with a scripted browser, not by a
+  person at a keyboard. Ids, numbers in names, times and token prefixes differ on every run.
+- Nothing here sends an email: step 3 marks the accounts verified with a shell command, which stands in for
+  clicking the link (Part 2 shows the real flow). Steps 5, 8 and 10 set a post's status (or plant a row) the same way,
+  because the pipeline and the moderator tools that do it for real arrive in Parts 9 and 10.
+- **What Part 7B does and doesn't show:** a repost is a plain pointer to the original, never a copy: it has no text
+  and no status of its own and always shows the original's **live** label (nothing is checked again). You can't
+  repost your own post, a post labelled FALSE or a removed or deleted one; you can always take a repost back,
+  even when the original is gone. Reposting needs a verified email; bookmarks are **private**, need only a login
+  and are never counted or shown to anyone else. Recent still lists only originals; the Following feed and a
+  profile list posts **and** reposts, newest activity first. Score effects of reposts (11B), reports (8) and
+  notifications (13) come later.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies the new migration,
+confirms there is no further one, then runs the whole backend test suite, the social tests, the linter and the
+formatter check.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                            # Applying social.0003_repost_bookmark... OK
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 1875 passed
+python -m pytest apps/social -q                     # 695 passed
+ruff check . ; ruff format --check .                # All checks passed! / 154 files already formatted
+```
+
+**You should see:** `Applying social.0003_repost_bookmark... OK` (nothing to apply the second time), `No changes
+detected` and `System check identified no issues (0 silenced).`, then the full run ends with `1875 passed`, the
+social run with `695 passed`, and the last line pair is `All checks passed!` and `154 files already formatted`.
+(Counts may grow later; what matters is that nothing fails.)
+
+- The 390 new social tests: `test_models_repost_bookmark.py` (16: the unique pairs, only the four statuses a post
+  can be reposted in, cascades, the indexes), `test_services_repost_bookmark.py` (37: every refusal and their
+  order, `status_at_repost`, undoing on a gone post, the cache bust, and real races: two simultaneous reposts make
+  one row, six users are all counted, a repost waits for a concurrent status change and records the status at
+  commit), `test_api_repost.py` (26, including the real 100-an-hour limit), `test_api_bookmark.py` (17,
+  including the real 300-an-hour limit and that bookmarks don't use the like allowance),
+  `test_api_bookmark_list.py` (16: only your own, newest first, deleted and removed dropped, a cursor walk, 3
+  queries whatever the size), `test_api_feed_reposts.py` (32: mixed items, "no longer available" stubs, once per
+  page, the cache, 4 / 3 queries), `test_api_user_posts_reposts.py` (17: reposts on a profile, the Facts and
+  Opinions chips by the original's type), `test_timeline.py` (63: the page rule as a table, the cursor token and
+  every way to forge one), `test_timeline_db.py` (140: ties, the cursor filters, the per-side slice, items
+  arriving or changing during a walk, and 50 + 50 + 30 seeded random walks compared with a reference written
+  separately), `test_admin_repost_bookmark.py` (6) and more in `test_engagement_counts.py` and
+  `test_no_network.py`.
+- `PostQuerySet.for_list(viewer)` now also counts reposts and tells you whether you reposted and bookmarked each
+  post, in the same query; `PostSerializer` still refuses a post that wasn't counted.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 113 files, 1510 tests passed
+npm run build
+npm run test:e2e                                    # 36 passed
+$env:CI = "1" ; npm run test:e2e ; Remove-Item Env:CI   # 36 passed (against the production build)
+cd ..\backend                                       # back to backend\ for steps 3 to 13
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  113 passed (113)` and `Tests  1510 passed (1510)`. `npm run build` lists the same routes as in Part 7
+(`/bookmarks` was a placeholder before and is now the real page; it is still static). Each E2E run ends with `36 passed`:
+the 32 earlier tests and 4 new ones in `e2e/social.spec.ts`.
+
+- On Windows `npm run build` can't blank `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (PowerShell's `$env:NAME = ""` *deletes* the
+  variable), so a `frontend\.env.local` with your real client ID is baked into that build and the CI-mode run is less
+  representative than on Linux. The default run pins an empty client ID for both servers, so it is unaffected.
+- The new E2E tests reuse the two people that file already signs up (allauth limits sign-ups to 20 a minute per
+  address and the rest of the suite already uses most of that), so Part 7B adds **no** sign-up. A third person's
+  post is made straight in the database. They are: B reposts that post, A (who follows B) sees "Reposted by B" with
+  the post's live label, then "This post is no longer available" once it is removed, and B undoes the repost; a
+  bookmark is private (it shows on A's `/bookmarks` and is empty for everyone else); Repost is disabled with its
+  reason on your own post and on a FALSE one, and a visitor is sent to log in; and a card with four actions and the
+  Bookmarks page fit a phone.
+
+#### Step 3: Start the servers and make four accounts and three posts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 13.**
+
+**What this does:** Windows 1 and 3 run the two servers. In window 2 you sign up four accounts through the API and
+mark three of them verified (`dee` stays unverified), then `bo` posts an opinion and a fact with a DOI and `ada`
+posts an opinion. The helpers `Mk` (make a post, print its id), `Send` (any request, printing the status code and
+then the answer), `Fetch` (the same for a GET) and `Cut` (the first characters of a text) are used by every later step.
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 and 2 leave you there). If you opened a new
+terminal, first run `cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the addresses are new each run
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+function Signup($email, $username) {
+@"
+{"email": "$email", "username": "$username", "password": "correct-horse-battery-42", "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-signup.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-signup.json" http://localhost:8000/api/auth/app/v1/auth/signup | ConvertFrom-Json).meta.access_token
+}
+$ada = Signup "part7b-ada-$id@example.test" "part7b_ada_$id"    # $ada = ada's login token (reposts and bookmarks)
+$bo = Signup "part7b-bo-$id@example.test" "part7b_bo_$id"       # $bo = bo's login token (the author of the posts)
+$cy = Signup "part7b-cy-$id@example.test" "part7b_cy_$id"       # $cy = cy's login token (follows ada)
+$dee = Signup "part7b-dee-$id@example.test" "part7b_dee_$id"    # $dee = dee's login token (never verified)
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part7b-', email__endswith='$id@example.test').exclude(username='part7b_dee_$id').update(is_email_verified=True), 'accounts marked verified')" | Select-Object -Last 1
+$api = 'http://localhost:8000/api/v1'
+$adaname = "part7b_ada_$id"; $boname = "part7b_bo_$id"; $cyname = "part7b_cy_$id"; $deename = "part7b_dee_$id"
+# Mk <token> <json>: makes a post, prints its id
+function Mk($token, $json) {
+  $json | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+  (curl.exe -s -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | ConvertFrom-Json).id
+}
+# Send <METHOD> <path> [token] [json body] [fields]: prints the HTTP status, then the answer. `fields` is a list
+# of property names to keep, or a script block `{ param($r) ... }` that picks what to show from the answer.
+function Send($method, $path, $token, $json, $show) {
+  $a = @()
+  if ($token) { $a += '-H', "Authorization: Bearer $token" }
+  if ($json) {
+    $json | Set-Content -Encoding ascii $env:TEMP\rz-body.json
+    $a += '-H', 'Content-Type: application/json', '--data-binary', "@$env:TEMP\rz-body.json"
+  }
+  $out = curl.exe -s -w "`n%{http_code}" -X $method @a "$api$path"
+  $body = if ($out.Count -gt 1) { $out[0..($out.Count - 2)] -join '' } else { '' }
+  if ($show -and $body) {
+    $r = $body | ConvertFrom-Json
+    $shown = if ($show -is [scriptblock]) { & $show $r } else { $r | Select-Object $show }
+    $body = ConvertTo-Json -InputObject $shown -Depth 5 -Compress
+  }
+  "$($out[-1])  $body"
+}
+function Fetch($path, $token, $show) { Send GET $path $token $null $show }   # Fetch <path> [token] [fields]
+# Cut <text> <n>: the first n characters, or "-" when there is no text (a "no longer available" stub has none)
+function Cut($s, $n) { if ($s) { $s.Substring(0, [Math]::Min($n, $s.Length)) } else { '-' } }
+$op1 = Mk $bo '{"content":"I think the new tram line will change how the city moves.","post_type":"opinion"}'
+$fact1 = Mk $bo '{"content":"Solar capacity grew by roughly 30% worldwide last year.","post_type":"fact","sources":["doi:10.1038/s41558-024-02102"]}'
+$adapost = Mk $ada '{"content":"Ada thinks trams beat buses.","post_type":"opinion"}'
+"$($ada.Substring(0,10)) $($bo.Substring(0,10)) $($cy.Substring(0,10)) $($dee.Substring(0,10))"      # four prefixes, not an error
+"op1=$op1"; "fact1=$fact1"; "adapost=$adapost"                              # three ids, not empty
+```
+
+**You should see** (the number in the names is your `id`, and the ids differ):
+
+```text
+3 accounts marked verified
+eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi
+op1=29da0351-d108-4b08-9965-626e7a05e8c9
+fact1=3c2b6ef4-bc02-4076-8ec0-8f650613e851
+adapost=ee6ff30b-0ac9-4578-a848-dd31c6019ca5
+```
+
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet.
+
+**If it differs:** an empty token or an `id` of `null` means the sign-up or the post failed: `runserver` isn't
+running, or you signed up more than 20 times in a minute. Fix that and run this step again
+from `$id = Get-Date …`.
+
+#### Step 4: Repost and undo
+
+**Where:** Terminal window 2 (the same terminal as step 3).
+
+**What this does:** Reposts and un-reposts through `POST` and `DELETE /api/v1/posts/{id}/repost/`, with the
+refusals every toggle has. Both are idempotent. Reposting needs a verified email, taking a repost back only a login.
+
+```powershell
+function Repost($post, $token) { Send POST "/posts/$post/repost/" $token }          # Repost <post id> [token]
+function Unrepost($post, $token) { Send DELETE "/posts/$post/repost/" $token }       # Unrepost <post id> [token]
+Repost $op1 $ada                                    # 1: the first repost is 201
+Repost $op1 $ada                                    # 2: again: 200, nothing changes
+Repost $op1                                         # 3: nobody logged in
+Repost $op1 $dee                                    # 4: an unverified email
+Repost $fact1 $ada                                  # 5: a fact that is still "checking" can be reposted
+Repost 00000000-0000-4000-8000-000000000000 $ada    # 6: no such post
+Repost not-a-uuid $ada                              # 7: not even an id
+Unrepost $fact1 $ada                                # 8: taking a repost back is 204
+Unrepost $fact1 $ada                                # 9: and again: still 204, no error
+Unrepost $fact1 $dee                                # 10: an unverified user may also take one back (there is none): 204
+```
+
+**You should see** (ten commands, ten answers):
+
+```text
+201  {"reposted":true}
+200  {"reposted":true}
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+403  {"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}
+201  {"reposted":true}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+204
+204
+204
+```
+
+- The first repost is `201`, the same request again is `200` and changes nothing; `DELETE` is `204` every
+  time, also when there was nothing to take back (9, 10).
+- A repost has no id of its own: `POST` and `DELETE` always name the **original** post. So "reposting a repost"
+  can only mean reposting the original, and a second repost of the same post by the same person can't exist.
+- A 401 or 403 doesn't use up the allowance of 100 reposts an hour (step 12).
+
+#### Step 5: What can't be reposted
+
+**Where:** Terminal window 2.
+
+**What this does:** Tries the three refusals of ARCHITECTURE §4d (your own post, a post labelled FALSE, a removed
+or deleted post), and shows two subtle rules: a repost you already made survives the original turning FALSE, and
+you can always take a repost back, even when the original is gone. The statuses are set with shell commands; the
+tools that do it for real come in Parts 9 and 10.
+
+```powershell
+Repost $adapost $ada                                # 1: your own post is refused
+$false1 = Mk $bo '{"content":"The moon is made of green cheese.","post_type":"fact"}'
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$false1').update(status='verified_false', verdict_source='moderator'), 'post marked FALSE')" | Select-Object -Last 1
+Repost $false1 $ada                                 # 2: a post labelled FALSE is refused
+$op2 = Mk $bo '{"content":"This opinion will be removed by a moderator.","post_type":"opinion"}'
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$op2').update(status='removed'), 'post removed')" | Select-Object -Last 1
+$op3 = Mk $bo '{"content":"This opinion will be deleted by its author.","post_type":"opinion"}'
+Send DELETE "/posts/$op3/" $bo                      # bo deletes op3: 204
+Repost $op2 $ada                                    # 3: a removed post: 404
+Repost $op3 $ada                                    # 4: a deleted post: 404
+$fact2 = Mk $bo '{"content":"The harbour bridge is 1,149 metres long.","post_type":"fact"}'
+Repost $fact2 $ada                                  # 5: a fact still being checked: 201
+python manage.py shell -c "from apps.social.models import Repost; print(list(Repost.objects.filter(post_id='$fact2').values_list('status_at_repost', flat=True)), 'status recorded at the time')" | Select-Object -Last 1
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$fact2').update(status='verified_false', verdict_source='moderator'), 'post marked FALSE')" | Select-Object -Last 1
+Repost $fact2 $ada                                  # 6: it turned FALSE after ada reposted it: still a quiet 200
+Repost $fact2 $cy                                   # 7: but cy can't repost it now: 409
+python manage.py shell -c "from apps.social.models import Repost; from apps.accounts.models import User; u = User.objects.get(username='$adaname'); [Repost.objects.create(user=u, post_id=p, status_at_repost='published') for p in ('$op2', '$op3')]; print(Repost.objects.filter(post_id__in=['$op2', '$op3']).count(), 'reposts planted on the removed and the deleted post')" | Select-Object -Last 1
+Unrepost $op2 $ada                                  # 8: a repost of a removed post can be taken back: 204
+Unrepost $op3 $ada                                  # 9: and one of a deleted post too: 204
+python manage.py shell -c "from apps.social.models import Repost; print(Repost.objects.filter(post_id__in=['$op2', '$op3']).count(), 'reposts left on them')" | Select-Object -Last 1
+Unrepost 00000000-0000-4000-8000-000000000000 $ada  # 10: an unknown post is 404
+```
+
+**You should see:**
+
+```text
+409  {"detail":"You can't repost your own post.","code":"cannot_repost_own"}
+1 post marked FALSE
+409  {"detail":"Posts labelled FALSE can't be reposted.","code":"cannot_repost_false"}
+1 post removed
+204
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+201  {"reposted":true}
+['pending'] status recorded at the time
+1 post marked FALSE
+200  {"reposted":true}
+409  {"detail":"Posts labelled FALSE can't be reposted.","code":"cannot_repost_false"}
+2 reposts planted on the removed and the deleted post
+204
+204
+0 reposts left on them
+404  {"detail":"Not found.","code":"not_found"}
+```
+
+- Your own post and a FALSE post are `409` with their own codes, which the button uses to explain itself (step 14).
+  A removed or deleted post is the same plain `404` as for a post that never existed (3, 4).
+- `status_at_repost` is the status the post had **when** it was reposted (`pending` here): Part 11B reads it to
+  decide what a verdict is worth to the reposter. The post turning FALSE later doesn't touch it (6), and doesn't
+  refuse a repost that already exists, but a new reposter is refused (7).
+- The removed and the deleted post never take a new repost, but the two reposts planted on them (a shell command
+  stands in for reposts made before the original went away) are taken back with a plain `204` (8, 9): the card
+  that says "This post is no longer available" must always have its **Undo repost** (step 15).
+
+#### Step 6: Bookmarks
+
+**Where:** Terminal window 2.
+
+**What this does:** Saves and un-saves posts through `POST` and `DELETE /api/v1/posts/{id}/bookmark/`. Bookmarks are
+private, so there is no verified-email rule and no restriction on whose or which post: only a post the public can't
+see is refused.
+
+```powershell
+function Bookmark($post, $token) { Send POST "/posts/$post/bookmark/" $token }       # Bookmark <post id> [token]
+function Unbookmark($post, $token) { Send DELETE "/posts/$post/bookmark/" $token }    # Unbookmark <post id> [token]
+Bookmark $op1 $ada                                  # 1: the first bookmark is 201
+Bookmark $op1 $ada                                  # 2: again: 200
+Bookmark $op1                                       # 3: nobody logged in
+Bookmark $op1 $dee                                  # 4: an unverified email is fine: bookmarks are private
+Bookmark $adapost $ada                              # 5: your own post is fine
+Bookmark $false1 $ada                               # 6: so is a post labelled FALSE
+Bookmark $op2 $ada                                  # 7: a removed post: 404
+Bookmark $op3 $ada                                  # 8: a deleted post: 404
+Bookmark not-a-uuid $ada                            # 9: not even an id
+Unbookmark $op1 $dee                                # 10: taking one back is 204
+Unbookmark $op1 $dee                                # 11: and again: 204
+Unbookmark $op3 $ada                                # 12: a deleted post is 404 even for that
+python manage.py shell -c "from apps.social.models import Bookmark; from apps.accounts.models import User; Bookmark.objects.create(user=User.objects.get(username='$adaname'), post_id='$op2'); print(Bookmark.objects.filter(post_id='$op2').count(), 'bookmark planted on the removed post')" | Select-Object -Last 1
+Unbookmark $op2 $ada                                # 13: ...but a bookmark can be taken back from a removed post: 204
+python manage.py shell -c "from apps.social.models import Bookmark; print(Bookmark.objects.filter(post_id='$op2').count(), 'bookmarks left on it')" | Select-Object -Last 1
+```
+
+**You should see:**
+
+```text
+201  {"bookmarked":true}
+200  {"bookmarked":true}
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+201  {"bookmarked":true}
+201  {"bookmarked":true}
+201  {"bookmarked":true}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+204
+204
+404  {"detail":"Not found.","code":"not_found"}
+1 bookmark planted on the removed post
+204
+0 bookmarks left on it
+```
+
+- Like a repost, a bookmark is `201` then `200`, and `DELETE` is `204` every time (10, 11). `dee`, who may not
+  like, comment or repost, can bookmark (4).
+- Every visible post can be bookmarked, including your own (5) and a FALSE one (6). A removed or deleted post can't
+  (7, 8), and a bookmark that was already there can be taken back from a removed post (13) but not a deleted one
+  (12), exactly as with likes.
+
+#### Step 7: The counts and flags on every post
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads `repost_count`, `reposted_by_me` and `bookmarked_by_me` as nobody and as other people.
+The count is public and the same for everyone; the two flags are yours alone. **There is no bookmark count anywhere**:
+not on the post, not on a profile.
+
+```powershell
+Repost $op1 $cy                                     # cy reposts the tram post too: 201 (ada's repost is from step 4)
+$f = { param($r) [pscustomobject]@{ reposts = $r.repost_count; reposted_by_me = $r.reposted_by_me; bookmarked_by_me = $r.bookmarked_by_me } }
+Fetch "/posts/$op1/" $null $f                       # 1: nobody logged in
+Fetch "/posts/$op1/" $ada $f                        # 2: ada reposted and bookmarked it
+Fetch "/posts/$op1/" $cy $f                         # 3: cy reposted it, did not bookmark it
+Fetch "/posts/$op1/" $bo $f                         # 4: bo wrote it: sees the count, nothing of his own
+Fetch "/users/$boname/posts/" $ada { param($r) @($r.results | ForEach-Object { [pscustomobject]@{ text = (Cut $_.post.content 26); reposts = $_.post.repost_count; reposted = $_.post.reposted_by_me; saved = $_.post.bookmarked_by_me } }) }
+Fetch "/users/$adaname/" $bo { param($r) $r.counts }    # 5: a profile has no bookmark count, and no repost count either
+```
+
+**You should see:**
+
+```text
+201  {"reposted":true}
+200  {"reposts":2,"reposted_by_me":false,"bookmarked_by_me":false}
+200  {"reposts":2,"reposted_by_me":true,"bookmarked_by_me":true}
+200  {"reposts":2,"reposted_by_me":true,"bookmarked_by_me":false}
+200  {"reposts":2,"reposted_by_me":false,"bookmarked_by_me":false}
+200  [{"text":"The harbour bridge is 1,14","reposts":1,"reposted":true,"saved":false},{"text":"The moon is made of green ","reposts":0,"reposted":false,"saved":true},{"text":"Solar capacity grew by rou","reposts":0,"reposted":false,"saved":false},{"text":"I think the new tram line ","reposts":2,"reposted":true,"saved":true}]
+200  {"followers":0,"following":0,"posts":1,"verified":0,"false":0}
+```
+
+- `reposts` is 2 for everyone (`ada` and `cy`); `reposted_by_me` and `bookmarked_by_me` are `false` for a visitor and
+  for anyone who didn't do it (1, 4). `bo`, the author, sees nobody's bookmark, not even that someone saved his post (4).
+- The list is `bo`'s four visible posts (the removed and the deleted one are left out), counted in the same query as
+  the posts: a list of 20 posts costs the same number of queries as a list of 2 (tests pin it).
+- The profile's counters (5) are the ones from Part 6: still no repost count and no bookmark count.
+
+#### Step 8: The Following feed with reposts
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes `cy` follow `ada`, lets `ada` repost two facts, and reads `cy`'s Following feed. It shows
+that a repost carries the original's **live** label (a verdict changes it at once, even though the first page is
+cached), that a repost whose original was removed becomes a stub, that an undone repost leaves the page at once, that
+a **new** repost reaches a follower after at most 30 seconds (the cache), and that a post shows **once per page**.
+
+```powershell
+function Feed($token, $query) {                 # Feed <token> [query]: cy's Following feed, one line per item
+  $path = if ($query) { "/feed/?$query" } else { '/feed/' }
+  Fetch $path $token { param($r) @($r.results | ForEach-Object { [pscustomobject]@{ kind = $_.kind; by = $(if ($_.reposted_by) { $_.reposted_by.username } else { $null }); text = (Cut $_.post.content 24); status = $_.post.status; gone = $_.post.unavailable } }) }
+}
+$fact3 = Mk $bo '{"content":"Rail ridership doubled in ten years.","post_type":"fact"}'
+Send POST "/users/$adaname/follow/" $cy             # cy follows ada: 201 (this also clears cy's cached feed)
+Repost $fact1 $ada                                  # ada reposts the solar fact (still "checking")
+Repost $fact3 $ada                                  # ...and a third fact
+Feed $cy                                            # 1: cy's Following feed: ada's post and reposts, and cy's own repost
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$fact1').update(status='verified_true', verdict_source='pipeline', pipeline_verdict='true', confidence_score=94), 'post verified')" | Select-Object -Last 1
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$fact3').update(status='removed'), 'post removed')" | Select-Object -Last 1
+Feed $cy                                            # 2: the label changed, the removed one is a stub: the cached page keeps only keys
+Unrepost $fact1 $ada                                # ada takes her solar repost back: 204
+Feed $cy                                            # 3: it is gone at once, though the page is still cached
+$op5 = Mk $bo '{"content":"A late post from bo.","post_type":"opinion"}'
+Repost $op5 $ada                                    # ada reposts a brand-new post
+Feed $cy                                            # 4: cy's cached page doesn't have it yet (at most 30 s)
+Start-Sleep -Seconds 31
+Feed $cy                                            # 5: 31 seconds later it is on top
+Send POST "/users/$boname/follow/" $cy              # cy follows bo too (this clears the cache)
+Fetch "/feed/" $cy { param($r) @($r.results | Where-Object { $_.post.id -eq $op1 } | ForEach-Object { [pscustomobject]@{ kind = $_.kind; by = $_.reposted_by.username } }) }   # 6: the tram post, by bo and reposted twice: shown once
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+201  {"is_following":true}
+201  {"reposted":true}
+201  {"reposted":true}
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"Rail ridership doubled i","status":"pending","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"Solar capacity grew by r","status":"pending","gone":null},{"kind":"repost","by":"part7b_cy_203850","text":"I think the new tram lin","status":"published","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","status":"verified_false","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","status":"published","gone":null}]
+1 post verified
+1 post removed
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"-","status":null,"gone":true},{"kind":"repost","by":"part7b_ada_203850","text":"Solar capacity grew by r","status":"verified_true","gone":null},{"kind":"repost","by":"part7b_cy_203850","text":"I think the new tram lin","status":"published","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","status":"verified_false","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","status":"published","gone":null}]
+204
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"-","status":null,"gone":true},{"kind":"repost","by":"part7b_cy_203850","text":"I think the new tram lin","status":"published","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","status":"verified_false","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","status":"published","gone":null}]
+201  {"reposted":true}
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"-","status":null,"gone":true},{"kind":"repost","by":"part7b_cy_203850","text":"I think the new tram lin","status":"published","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","status":"verified_false","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","status":"published","gone":null}]
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"A late post from bo.","status":"published","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"-","status":null,"gone":true},{"kind":"repost","by":"part7b_cy_203850","text":"I think the new tram lin","status":"published","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","status":"verified_false","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","status":"published","gone":null}]
+201  {"is_following":true}
+200  [{"kind":"repost","by":"part7b_cy_203850"}]
+```
+
+- Each item has `kind` (`post` or `repost`), `by` (who reposted it) and the original's content and status. A repost
+  has no text of its own. Newest **activity** first: a repost sorts by when it was made, a post by when it was posted.
+- Line 1 is cy's page: `ada`'s own post (the last item), her reposts of the two facts and of the harbour fact (from
+  step 5, labelled `verified_false`: a repost shows the original's label whatever it was when reposted), and `cy`'s
+  own repost of the tram post (step 7). **`ada`'s older repost of the same tram post is not there**: a post shows
+  once per page, the most recent activity wins.
+- Line 2: the solar repost says `verified_true` and the third fact's repost is a **stub** (`"gone": true`, no text,
+  no status) although the page was read from the cache a moment ago: the cache holds only the keys of the page, and the
+  posts and reposts are read fresh every time. A stub shows as "This post is no longer available" (step 15).
+- Line 3: an undone repost leaves the page at once. Line 4: a **new** repost made by someone you follow isn't there
+  yet, the same rule as a new post (Part 6): the first page is cached for 30 seconds. Line 5, 31 seconds later, it is.
+  Your **own** reposts and follows clear your own cache, so they show at once.
+- Line 6: after `cy` also follows `bo`, the tram post could show up three times (`bo`'s own post, `ada`'s repost and
+  `cy`'s repost), but only the most recent of them, `cy`'s repost, is shown.
+
+#### Step 9: Profiles with reposts, and the Facts and Opinions chips
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads `ada`'s profile list, which now holds her own posts **and** her reposts, and the two filter
+chips: a repost is filtered by the **original's** type, so a repost of a fact shows under Facts even when the fact is
+gone.
+
+```powershell
+$prof = { param($r) @($r.results | ForEach-Object { [pscustomobject]@{ kind = $_.kind; by = $(if ($_.reposted_by) { $_.reposted_by.username } else { $null }); text = (Cut $_.post.content 24); gone = $_.post.unavailable } }) }
+Fetch "/users/$adaname/posts/" $null $prof          # 1: ada's profile: her own post and her reposts (the removed fact is a stub)
+Fetch "/users/$adaname/posts/?post_type=fact" $null $prof       # 2: Facts: her facts, and reposts of facts (also the one that is gone)
+Fetch "/users/$adaname/posts/?post_type=opinion" $null $prof    # 3: Opinions: her opinions, and reposts of opinions
+Fetch "/users/$adaname/posts/?post_type=gossip"     # 4: anything else is a 400
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"A late post from bo.","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"-","gone":true},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"I think the new tram lin","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","gone":null}]
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"-","gone":true},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,","gone":null}]
+200  [{"kind":"repost","by":"part7b_ada_203850","text":"A late post from bo.","gone":null},{"kind":"repost","by":"part7b_ada_203850","text":"I think the new tram lin","gone":null},{"kind":"post","by":null,"text":"Ada thinks trams beat bu","gone":null}]
+400  {"post_type":["Choose fact or opinion, or leave it out."]}
+```
+
+- The profile list is public and never cached. You can't repost your own post, so a profile never shows the same
+  post twice and its pages are always full. The stub (`gone`) is `ada`'s repost of the removed fact, kept until she
+  undoes it.
+- The filter is applied to the original (2, 3): the stub is under Facts because the post it pointed at was a fact.
+
+#### Step 10: Your bookmarks list
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads `GET /api/v1/me/bookmarks/`: **only your own**, newest bookmark first, in the same
+envelope as the feeds. Deleted and removed posts are left out (the bookmark rows stay, so a post that comes back
+reappears).
+
+```powershell
+python manage.py shell -c "from apps.social.models import Bookmark; from apps.accounts.models import User; u = User.objects.get(username='$adaname'); [Bookmark.objects.create(user=u, post_id=p) for p in ('$op2', '$op3')]; print(Bookmark.objects.filter(user=u).count(), 'bookmarks of ada in the table, including one on a removed and one on a deleted post')" | Select-Object -Last 1
+$saved = { param($r) @($r.results | ForEach-Object { [pscustomobject]@{ kind = $_.kind; text = (Cut $_.post.content 26); saved = $_.post.bookmarked_by_me } }) }
+Fetch "/me/bookmarks/" $ada $saved                  # 1: ada's list: newest bookmark first; the removed and the deleted post are dropped
+Fetch "/me/bookmarks/" $bo $saved                   # 2: bo saved nothing: an empty list, not ada's
+Fetch "/me/bookmarks/" $null { param($r) $r.code }  # 3: nobody logged in: 401
+curl.exe -s -o NUL -w "%{http_code}`n" -H "Authorization: Bearer $bo" "$api/users/$adaname/bookmarks/"   # 4: there is no address for someone else's list: 404
+$c = (curl.exe -s -H "Authorization: Bearer $ada" "$api/me/bookmarks/?page_size=2" | ConvertFrom-Json).next_cursor
+$paging = { param($r) [pscustomobject]@{ n = @($r.results).Count; more = ($null -ne $r.next_cursor) } }
+Fetch "/me/bookmarks/?page_size=2" $ada $paging     # 5: two to a page, and a cursor
+Fetch "/me/bookmarks/?page_size=2&cursor=$c" $ada $paging   # 6: the rest
+Fetch "/me/bookmarks/?cursor=cD1ub3QtYS1kYXRl" $ada { param($r) $r.code }   # 7: a made-up cursor is a 404
+Fetch "/me/bookmarks/" $ada { param($r) @($r.results[0].PSObject.Properties.Name | Sort-Object) }   # 8: the items have the feed's four keys (activity_at is when you saved it)
+```
+
+**You should see:**
+
+```text
+5 bookmarks of ada in the table, including one on a removed and one on a deleted post
+200  [{"kind":"post","text":"The moon is made of green ","saved":true},{"kind":"post","text":"Ada thinks trams beat buse","saved":true},{"kind":"post","text":"I think the new tram line ","saved":true}]
+200  []
+401  "not_authenticated"
+404
+200  {"n":2,"more":true}
+200  {"n":1,"more":false}
+404  "not_found"
+200  ["activity_at","kind","post","reposted_by"]
+```
+
+- The order is the order she saved them in, newest first (the FALSE post, her own post, the tram post), not the order
+  of the posts. Five rows are in the table, three are shown (1).
+- `bo` gets an empty list, never `ada`'s (2), and there is no way to ask for another user's (4): the route doesn't
+  exist. Nothing counts bookmarks anywhere (step 7).
+- Every item is `kind: "post"` with `reposted_by: null`; its `activity_at` is the time of the bookmark.
+
+#### Step 11: Paging the feed while posts arrive
+
+**Where:** Terminal window 2.
+
+**What this does:** Walks `cy`'s Following feed two items at a time while a new post and a new repost arrive between
+the two pages. The mixed feed pages by a cursor over (activity time, kind, post, reposter), so nothing new can push an
+item onto the next page or pull one off it; a cursor that isn't ours is a clean `404`.
+
+```powershell
+$cards = { param($r) @($r.results | ForEach-Object { [pscustomobject]@{ kind = $_.kind; by = $(if ($_.reposted_by) { $_.reposted_by.username } else { $null }); text = (Cut $_.post.content 24) } }) }
+$p1 = curl.exe -s -H "Authorization: Bearer $cy" "$api/feed/?page_size=2" | ConvertFrom-Json
+ConvertTo-Json -InputObject (& $cards $p1) -Compress    # 1: the first two items
+$c = $p1.next_cursor
+$null = Mk $bo '{"content":"Posted while cy was reading.","post_type":"opinion"}'
+Repost (Mk $bo '{"content":"Reposted while cy was reading.","post_type":"opinion"}') $ada
+Fetch "/feed/?page_size=2&cursor=$c" $cy $cards    # 2: the next two: neither new item gets in
+Fetch "/feed/?cursor=cD1ub3QtYS1kYXRl" $cy { param($r) $r.code }   # 3: a made-up cursor is a 404
+Fetch "/feed/?cursor=junk" $cy { param($r) $r.code }               # 4: so is any other cursor that isn't ours
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+[{"kind":"repost","by":"part7b_ada_203850","text":"A late post from bo."},{"kind":"repost","by":"part7b_ada_203850","text":"-"}]
+201  {"reposted":true}
+200  [{"kind":"repost","by":"part7b_cy_203850","text":"I think the new tram lin"},{"kind":"repost","by":"part7b_ada_203850","text":"The harbour bridge is 1,"}]
+404  "not_found"
+404  "not_found"
+```
+
+- Line 1 is the two newest items. The two new ones (made after it) are newer than anything on the first page, so
+  they only appear at the top of a **fresh** first page; the second page (line 3) carries on exactly where the first
+  stopped: no repeat and no gap. A page can hold fewer items than its size when some rows repeat a post that is
+  already on it; the cursor still moves past them.
+- The cursor is a bare token (never an absolute URL, which would point past the relay). The one from Part 6's feed is not
+  valid any more: the client simply starts from the top again (a test covers it).
+
+#### Step 12: Reposting and bookmarking are rate limited
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes two more verified accounts, then uses up their allowances: 100 reposts an hour (`POST` and
+`DELETE` share it) and 300 bookmarks an hour (likewise). The two buckets are separate from each other and from
+likes.
+
+```powershell
+$eve = Signup "part7b-eve-$id@example.test" "part7b_eve_$id"    # $eve = a fresh account for the repost limit
+$gus = Signup "part7b-gus-$id@example.test" "part7b_gus_$id"    # $gus = a fresh account for the bookmark limit
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__in=['part7b-eve-$id@example.test', 'part7b-gus-$id@example.test']).update(is_email_verified=True), 'accounts marked verified')" | Select-Object -Last 1
+1..100 | ForEach-Object { curl.exe -s -o NUL -w "%{http_code}`n" -X POST -H "Authorization: Bearer $eve" "$api/posts/$op1/repost/" } | Group-Object | Sort-Object Name | ForEach-Object { "{0,7} {1}" -f $_.Count, $_.Name }   # 100 reposts of one post
+curl.exe -s -i -X POST -H "Authorization: Bearer $eve" "$api/posts/$op1/repost/" | Select-String -Pattern 'HTTP/[0-9.]+ [0-9]+|retry-after: [0-9]+|"code":"[a-z_]+"' -AllMatches | ForEach-Object { $_.Matches.Value }   # the 101st
+1..300 | ForEach-Object { curl.exe -s -o NUL -w "%{http_code}`n" -X POST -H "Authorization: Bearer $gus" "$api/posts/$op1/bookmark/" } | Group-Object | Sort-Object Name | ForEach-Object { "{0,7} {1}" -f $_.Count, $_.Name }   # 300 bookmarks of one post
+curl.exe -s -i -X POST -H "Authorization: Bearer $gus" "$api/posts/$op1/bookmark/" | Select-String -Pattern 'HTTP/[0-9.]+ [0-9]+|retry-after: [0-9]+|"code":"[a-z_]+"' -AllMatches | ForEach-Object { $_.Matches.Value }   # the 301st
+Send POST "/posts/$op1/like/" $gus                  # bookmarks have their own allowance: a like still works
+Fetch "/me/bookmarks/" $gus { param($r) [pscustomobject]@{ n = @($r.results).Count } }   # reading is never throttled
+```
+
+**You should see** (the seconds differ):
+
+```text
+2 accounts marked verified
+     99 200
+      1 201
+HTTP/1.1 429
+Retry-After: 3599
+"code":"throttled"
+    299 200
+      1 201
+HTTP/1.1 429
+Retry-After: 3597
+"code":"throttled"
+201  {"liked":true}
+200  {"n":1}
+```
+
+- 100 requests went through (the first made the repost, the other 99 were repeats), the 101st was refused with `429`,
+  `"code":"throttled"` and a `Retry-After` in seconds. Likewise 300 bookmarks, then the 301st.
+- A 401 or 403 doesn't use up an allowance (tests cover it, and that a refusal like `409` does count). Using up the
+  bookmark allowance leaves a like working (201), so the buckets really are separate.
+
+#### Step 13: The indexes are used
+
+**Where:** Terminal window 2.
+
+**What this does:** In a transaction that is thrown away at the end, makes 300 users, 20,000 posts, 3,000 reposts, 50
+follows and 2,000 bookmarks, then asks the database how it would run the Following feed's query (a first page and a deep
+page) and the bookmark page, and prints the plan lines. Nothing is saved.
+
+```powershell
+@'
+import random
+from datetime import timedelta
+from django.db import connection, transaction
+from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.posts.models import Post, PostStatus
+from apps.social import feed, timeline
+from apps.social.models import Bookmark, Follow, Repost
+
+class Rollback(Exception):
+    pass
+
+rng = random.Random(1)
+try:
+    with transaction.atomic():   # everything below is thrown away at the end
+        users = User.objects.bulk_create([User(username=f"xq_{i:03d}", email=f"xq{i}@example.test") for i in range(301)])
+        me, others = users[0], users[1:]
+        now = timezone.now()
+        Follow.objects.bulk_create([Follow(follower=me, following=u) for u in others[:50]])
+        posts = Post.objects.bulk_create([Post(author=others[i % 300], content=f"p{i}", post_type="opinion", status="published", created_at=now - timedelta(seconds=3 * i)) for i in range(20000)])
+        pairs = {}
+        while len(pairs) < 3000:
+            u, p = rng.choice(others), rng.choice(posts)
+            if p.author_id != u.pk:
+                pairs[(u.pk, p.pk)] = Repost(user=u, post=p, status_at_repost="published", created_at=now - timedelta(seconds=rng.randint(0, 60000)))
+        Repost.objects.bulk_create(list(pairs.values()))
+        Bookmark.objects.bulk_create([Bookmark(user=me, post=p, created_at=now - timedelta(seconds=i)) for i, p in enumerate(posts[:2000])])
+        with connection.cursor() as c:
+            for table in ("posts_post", "social_repost", "social_follow", "social_bookmark"):
+                c.execute(f"ANALYZE {table}")
+        deep = timeline.Key(now - timedelta(seconds=30000), 0, timeline.ZERO_UUID, timeline.ZERO_UUID)
+        for label, cursor in (("--- Following feed, first page", None), ("--- Following feed, a deep page", deep)):
+            with CaptureQueriesContext(connection) as q:
+                timeline.page(feed.following_posts(me), feed.following_reposts(me), size=20, cursor=cursor, dedupe=True)
+            print(label)
+            with connection.cursor() as c:
+                c.execute("EXPLAIN (COSTS OFF) " + q.captured_queries[-1]["sql"])
+                for row in c.fetchall():
+                    print(row[0])
+        rows = Bookmark.objects.filter(user=me, post__deleted_at__isnull=True).exclude(post__status=PostStatus.REMOVED).order_by("-created_at", "-id").values("id", "created_at", "post_id")[:21]
+        sql, params = rows.query.sql_with_params()
+        print("--- bookmark page")
+        with connection.cursor() as c:
+            c.execute("EXPLAIN (COSTS OFF) " + sql, params)
+            for row in c.fetchall():
+                print(row[0])
+        raise Rollback
+except Rollback:
+    print("rolled back: nothing was saved")
+'@ | python manage.py shell 2>&1 | Select-String -Pattern '^---|Scan|Sort|rolled back' | ForEach-Object { $_.Line }
+```
+
+**You should see:**
+
+```text
+--- Following feed, first page
+  ->  Incremental Sort
+        Sort Key: posts_post.created_at DESC, (0) DESC, posts_post.id DESC, ('00000000-0000-0000-0000-000000000000'::uuid) DESC
+              Sort Key: posts_post.created_at DESC, posts_post.id DESC
+                    ->  Index Scan using posts_recent_idx on posts_post
+                            ->  Seq Scan on social_follow u0
+                    ->  Sort
+                          Sort Key: social_repost.created_at DESC, social_repost.post_id DESC, social_repost.user_id DESC
+                          ->  Seq Scan on social_repost
+                                  ->  Seq Scan on social_follow u0_1
+--- Following feed, a deep page
+  ->  Incremental Sort
+        Sort Key: posts_post.created_at DESC, (0) DESC, posts_post.id DESC, ('00000000-0000-0000-0000-000000000000'::uuid) DESC
+              Sort Key: posts_post.created_at DESC, posts_post.id DESC
+                    ->  Index Scan using posts_recent_idx on posts_post
+                            ->  Seq Scan on social_follow u0
+                    ->  Sort
+                          Sort Key: social_repost.created_at DESC, social_repost.post_id DESC, social_repost.user_id DESC
+                          ->  Seq Scan on social_repost
+                                  ->  Seq Scan on social_follow u0_1
+--- bookmark page
+        ->  Index Scan using bookmarks_user_created_idx on social_bookmark
+        ->  Index Scan using posts_post_pkey on posts_post
+rolled back: nothing was saved
+```
+
+- The Following feed is one query: the posts side walks `posts_recent_idx` newest first and stops after enough rows (the
+  same plan at the first page and at a deep one: that is what the plain `created_at <=` in the filter is for), the
+  reposts side takes the reposts of the people you follow, sorts them and keeps the newest few, and the two are merged.
+  Each side is cut to at most 41 rows (twice the page plus one).
+- The reposts side is a sequential scan and a sort. At 3,000 reposts that is nothing; measured separately with
+  300,000 reposts and 200 follows it took about 11 to 18 ms. Splitting it into a separate query per group of
+  people (a variant that was tried) took about the same time, so it is recorded for Part 16 rather than built now.
+- The bookmark page walks `bookmarks_user_created_idx` in order and looks each post up by its primary key: 21 rows, no sort.
+
+#### Step 14: Reposts and bookmarks on the cards
+
+**Where:** Browser, with `runserver` (window 1) and `npm run dev` (window 3) running. Log in at
+http://localhost:3000/login as `part7b-cy-<id>@example.test` (use the `id` from step 3: `echo $id`) with the password `correct-horse-battery-42` (`cy` was verified in step 3).
+
+**What this does:** Looks at the two new buttons and the "Reposted by" line, as four kinds of visitor.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home and click the **Following** tab | Cards from `bo` and `ada`. A repost has a small line **"↻ Reposted by @part7b_ada_<id>"** above the author row, in the same grey small type as a timestamp; the card itself is the original's, with the original's author. Every card ends with a hairline, then (left) a **heart**, a **speech bubble** and a **two-arrow repost glyph**, each with its count, and (right, alone) a small **bookmark** glyph. |
+| Click the repost glyph on a card that isn't yours and isn't FALSE | The glyph turns **blue** and the count goes up by one **at once**, before the server answers. Click again: back to grey and the old count. |
+| Click the bookmark glyph | It turns into a filled **blue** bookmark at once; click again to take it back. There is no number beside it, ever. |
+| Log in as `ada` in a second window. On her own post ("Ada thinks trams beat buses.") look at its repost glyph | It is dimmed. Hover it: the tooltip says "You can't repost your own post." A click shows the same words as a toast and sends nothing. |
+| As `ada`, on "The moon is made of green cheese." (FALSE) look at the repost glyph | Dimmed, with the tooltip and toast "Posts labelled FALSE can't be reposted." Its bookmark still works. |
+| Reload the page | The glyphs and counts are what the server says: the state survived. |
+| Open a private window and go to /home (a visitor) | The same cards and counts. The repost and bookmark glyphs are **links**: they point to `/login?next=%2Fp%2F<id>`. |
+| In another window log in as `dee` (`part7b-dee-<id>@example.test`, same password: never verified) and click a repost glyph | It looks dimmed and nothing is sent; a toast says "Verify your email to repost posts. Check your inbox for the link." The bookmark glyph **works**: bookmarks are private. |
+
+- Covered by `RepostButton.test.tsx` (flip before the answer, rollback and a toast per kind of failure, one request for
+  two clicks in one tick, the disabled reasons, enabled to undo, the visitor and unverified states, a unique hint per
+  button), `BookmarkButton.test.tsx`, `RepostHeader.test.tsx`, `PostActions.test.tsx`, `FeedList.test.tsx` and the new E2E tests.
+- Every button sits above the card's big invisible link, so it never opens the post by accident. A repost's buttons
+  act on the **original** (a repost has no id of its own), so reposting a card that already says "Reposted by" reposts
+  the original post.
+
+#### Step 15: "This post is no longer available", and Undo repost
+
+**Where:** Browser, logged in as `ada` (`part7b-ada-<id>@example.test`) in one window and as `cy` in another.
+
+**What this does:** Looks at what a repost becomes when its original disappears (the stub from step 8) and removes it.
+
+| Do this | Expect |
+|---|---|
+| As `cy`: open /home, click **Following** | One card has the line "↻ Reposted by @part7b_ada_<id>" and, below it, a shorter card body with a **no-entry glyph** and **"This post is no longer available"**: no text, no buttons. It is the third fact's repost, whose original was removed in step 8. There is no **Undo repost** button for `cy`. |
+| As `ada`: open http://localhost:3000/u/part7b_ada_`<id>` (Profile in the rail) | The same card in her list, **with a ghost "Undo repost" button** at its right. Her other reposts have "Reposted by" lines and the normal buttons, and her repost glyphs are blue. |
+| Still as `ada`, click the **Facts** chip, then **Opinions** | The stub is listed under **Facts** (its original was a fact) and not under **Opinions**. |
+| Click **Undo repost** | The card disappears and a toast says "Repost removed." Reload: it is still gone, and `cy`'s Following tab no longer shows it. |
+
+- The server answers `204` to an undo whatever became of the original (step 5), so a stub can always be removed.
+- Covered by `UnavailablePostCard.test.tsx`, the Undo cases in `FeedList.test.tsx` and the E2E test.
+
+#### Step 16: The Bookmarks page and the post page
+
+**Where:** Browser, logged in as `ada`, with both servers running.
+
+**What this does:** Opens the page that lists your bookmarks and the post page's action row.
+
+| Do this | Expect |
+|---|---|
+| Click **Bookmarks** in the left rail (http://localhost:3000/bookmarks) | A heading **Bookmarks** and your saved posts, newest bookmark first: the FALSE moon post, `ada`'s own post, the tram post. Each card has its bookmark **filled and blue**; the moon post's and her own post's repost glyphs are dimmed, the tram post's is blue. The list ends with "You're caught up." |
+| Click a filled bookmark | It turns outline at once (the card stays until the next load, as an unfollowed row does). Reload: it is gone from the list. |
+| Log in as `bo` (never saved anything) and open /bookmarks | An empty state with a bookmark glyph: **"No bookmarks yet"** and "Posts you bookmark appear here. Only you can see them." |
+| Log out and open /bookmarks | You are sent to `/login?next=%2Fbookmarks` and come back here after logging in. |
+| Open a post's own page (click its text) | The claim card's action row reads **Like, Comments, Repost** with words beside the glyphs (from 640 px up), then the **bookmark** glyph and **Copy link**. The repost and bookmark work as on a card. |
+
+- The list is fetched by the page after it loads (not server-rendered, never indexed), and only after the session is
+  known, so the first request carries your token. A pending fact in the list still changes its badge by itself.
+- Covered by `BookmarkList.test.tsx` (including the StrictMode case), `BookmarkButton.test.tsx` and the E2E test.
+
+#### Step 17: A phone-sized window
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Checks the new parts at phone width. In Firefox or Chrome press `F12`, then the "responsive
+design" / device toolbar button, and set the width to 390.
+
+| Do this | Expect |
+|---|---|
+| Open /home and click **Following** | Each card's bar (heart, count, bubble, count, repost, count, and the bookmark at the right) fits on one line under the claim; a repost's "Reposted by" line fits above the author row. **No sideways scrolling.** |
+| Open /bookmarks | The heading and the cards fit; **no sideways scrolling.** |
+| Open a post's page | The action row holds the glyphs with their counts only (the words are hidden below 640 px), the bookmark and **Copy link**, wrapping to a second line if needed. |
+
+- Measured with headless Chromium at 390 px: 0 px of horizontal overflow on `/home`, on the Following tab and on
+  `/bookmarks`.
+
+#### Step 18: Django Admin: reposts, and bookmarks for superusers only
+
+**Where:** Browser, while `runserver` is running in window 1. For the moderator check, first make one in window 2:
+
+```powershell
+python manage.py shell -c "from django.contrib.auth.models import Permission; from apps.accounts.models import User, Role; mod = User.objects.create_user(email='part7b-mod-$id@example.test', username='part7b_mod_$id', password='correct-horse-battery-42', role=Role.MODERATOR, is_email_verified=True); mod.user_permissions.set(Permission.objects.filter(codename__in=['view_repost', 'view_bookmark', 'change_bookmark', 'delete_bookmark', 'add_bookmark'])); print('moderator made')" | Select-Object -Last 1
+```
+
+**What this does:** Opens the two new admin lists as a superuser, then as a moderator who holds **every bookmark
+permission** (a moderator gets no permissions at all until Part 10; this one is given them by hand to prove they don't
+matter).
+
+| URL / action | Expect |
+|---|---|
+| http://localhost:8000/admin/ (superuser from Part 0A; if it 404s, `ADMIN_URL_PATH` in `backend\.env` isn't `admin/`: use that path) | **Bookmarks** and **Reposts** are listed under Social. |
+| http://localhost:8000/admin/social/repost/ | **Reposts**: user, post, **Status at repost** and **Created at**, newest first, a search box (username) and a **By status at repost** filter. No **Add repost** button; a repost's page only shows the values (no Save, no Delete: they answer 403 if you type the address). |
+| http://localhost:8000/admin/social/bookmark/ | **Bookmarks**: user, post and **Created at**, read-only like the follows. This list exists for the superuser's own housekeeping; nothing else in the product ever shows it. |
+| Log out, log in as `part7b-mod-<id>@example.test` (password above) and open http://localhost:8000/admin/ | **Reposts** is listed (read-only). **Bookmarks is not listed at all.** |
+| As the moderator open http://localhost:8000/admin/social/bookmark/ and `…/bookmark/add/` | **403** for both, although this account has `view`, `add`, `change` and `delete` for bookmarks: nobody but a superuser can open the list (user decision 2026-10-10). |
+
+- Reposts are read-only because a repost changes only through the service (it must clear the reposter's cached feed
+  and respect the rules). Bookmarks are private by design (ARCHITECTURE §4d): no moderator permission, now or after Part
+  10, opens them.
+- Covered by `test_admin_repost_bookmark.py` (including a moderator holding all five bookmark permissions) and, for these
+  clicks, a scripted browser run; not clicked by a person.
+
+#### Step 19: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts, their posts, follows, likes, reposts and bookmarks (all go with the accounts). In window 2, in `backend\` with the
+  venv active:
+
+  ```powershell
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part7b-').delete())" | Select-Object -Last 1
+```
+
+  After one clean run of steps 3 to 13 of this guide it prints `(39, {'social.Like': 1, 'social.Repost': 7, 'social.Bookmark': 6, 'social.Follow': 2, 'account.EmailAddress': 6, 'posts.Post': 11, 'accounts.User': 6})`:
+  how many rows went in all, and per table (11 posts: ten by `bo`, among them the removed one, the deleted one (still a
+  row) and the two made while `cy` was reading, and `ada`'s own; 7 reposts: `ada` still holds the tram post, the
+  harbour fact, the third fact, the late post and the one made while `cy` was reading, `cy` the tram post and `eve` the
+  same one (the solar repost was undone and the two planted ones were taken back); 6 bookmarks: `ada`'s five (the tram
+  post, her own, the FALSE one and the two planted on the removed and the deleted post) and `gus`'s; 1 like, `gus`'s; 2
+  follows, `cy` of `ada` and of `bo`). Your count differs if you did the browser steps (more reposts, bookmarks and
+  likes) or step 18 (one more account, with its permissions). Nothing else is touched.
+  (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
+  If you made a throwaway moderator for step 18, that goes too (same prefix).
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
   wipes the whole local database, which is destructive.
 - No secret was used or printed in this part: the only values in the commands are Cloudflare's public test

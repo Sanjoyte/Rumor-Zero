@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useId, useRef, useState } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { useToast } from "@/components/ui/Toast";
 import { useAuth } from "@/lib/auth/AuthProvider";
@@ -10,8 +10,6 @@ import { cn } from "@/lib/cn";
 import { formatCompactNumber } from "@/lib/format";
 import { likeFailureMessage, SOCIAL_MESSAGES } from "./messages";
 import { likePost, unlikePost } from "./social-api";
-
-const HINT_ID = "like-hint";
 
 /** The b1/a1 action-bar button: glyph and count, above the card's stretched claim link. */
 export const ACTION_CLASSES =
@@ -78,6 +76,8 @@ export function LikeButton({
 }: LikeButtonProps) {
   const { status, user } = useAuth();
   const toast = useToast();
+  // One id per button: a feed of unverified viewers has many.
+  const hintId = useId();
   const [state, setState] = useState({ liked: initialLiked, count: initialCount });
   const [seen, setSeen] = useState({ liked: initialLiked, count: initialCount });
   const inFlight = useRef(false);
@@ -111,13 +111,13 @@ export function LikeButton({
         <button
           type="button"
           aria-disabled="true"
-          aria-describedby={HINT_ID}
+          aria-describedby={hintId}
           onClick={() => toast.show(SOCIAL_MESSAGES.verifyToLike)}
           className={cn(classes, "cursor-not-allowed opacity-60")}
         >
           {face}
         </button>
-        <span id={HINT_ID} className="sr-only">
+        <span id={hintId} className="sr-only">
           Verify your email to like posts.
         </span>
       </>

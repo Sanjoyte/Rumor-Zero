@@ -10,19 +10,24 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsEmailVerified
 from apps.posts.exceptions import NotAuthorError
-from apps.posts.models import Post, PostType
+from apps.posts.models import Post, PostStatus, PostType
 from apps.posts.pagination import FeedPagination
-from apps.posts.serializers import PostSerializer, feed_item
+from apps.posts.serializers import PostSerializer, feed_item, iso
 from apps.posts.views import parse_post_id
-from apps.social import feed, services
-from apps.social.exceptions import CannotFollowSelfError
-from apps.social.models import Comment, Follow
-from apps.social.pagination import CommentPagination, UserListPagination
+from apps.social import feed, services, timeline
+from apps.social.exceptions import (
+    CannotFollowSelfError,
+    CannotRepostFalseError,
+    CannotRepostOwnError,
+)
+from apps.social.models import Bookmark, Comment, Follow, Repost
+from apps.social.pagination import BookmarkPagination, CommentPagination, UserListPagination
 from apps.social.serializers import (
     CommentCreateSerializer,
     comment_data,
     profile_data,
     profile_queryset,
+    timeline_items,
     user_row,
 )
 
@@ -52,24 +57,33 @@ class ProfileView(APIView):
 
 @method_decorator(never_cache, name="dispatch")
 class UserPostsView(APIView):
-    """`GET /api/v1/users/{username}/posts/`: the author's posts the public can see (§9 shape)."""
+    """`GET /api/v1/users/{username}/posts/`: the author's posts the public can see, and their
+    reposts, newest activity first (§9 shape; `social.timeline`).
+
+    You can't repost your own post, so a profile never repeats a post and its pages are full.
+    `?post_type=` filters a repost by its original's type, deleted or removed originals included.
+    """
 
     permission_classes = [AllowAny]
 
     def get(self, request, username):
         target = _target_or_404(username)
-        queryset = Post.objects.visible().filter(author=target).for_list(request.user)
+        posts = Post.objects.visible().filter(author=target)
+        reposts = Repost.objects.filter(user=target)
         post_type = request.query_params.get("post_type")
         if post_type:
             if post_type not in PostType.values:
                 raise serializers.ValidationError(
                     {"post_type": ["Choose fact or opinion, or leave it out."]}
                 )
-            queryset = queryset.filter(post_type=post_type)
-        paginator = FeedPagination()
-        page = paginator.paginate_queryset(queryset, request, view=self)
-        posts = PostSerializer(page, many=True, context={"request": request}).data
-        return paginator.get_paginated_response([feed_item(data) for data in posts])
+            posts = posts.filter(post_type=post_type)
+            reposts = reposts.filter(post__post_type=post_type)
+        size, cursor = timeline.page_request(request)
+        keys, next_key = timeline.page(posts, reposts, size=size, cursor=cursor, dedupe=False)
+        entries = feed.load_entries(keys, request.user, reposter=target)
+        return FeedPagination.envelope(
+            timeline_items(entries, request), next_key.token() if next_key else None
+        )
 
 
 class UserListView(APIView):
@@ -153,19 +167,18 @@ class FollowView(APIView):
 
 @method_decorator(never_cache, name="dispatch")
 class FeedView(APIView):
-    """`GET /api/v1/feed/`: posts by the people you follow and by you, newest first (§9).
+    """`GET /api/v1/feed/`: posts and reposts by the people you follow and by you, newest activity
+    first (§9; `social.timeline`).
 
-    The first page is cached per user as a list of ids (`social.feed`); the posts themselves are
-    read fresh every time.
+    The first page is cached per user as a list of keys (`social.feed`); the posts and reposts
+    themselves are read fresh every time.
     """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        paginator = FeedPagination()
-        posts, next_cursor = feed.following_page(request, self, request.user, paginator)
-        data = PostSerializer(posts, many=True, context={"request": request}).data
-        return paginator.envelope([feed_item(item) for item in data], next_cursor)
+        entries, next_cursor = feed.following_page(request, request.user)
+        return FeedPagination.envelope(timeline_items(entries, request), next_cursor)
 
 
 @method_decorator(never_cache, name="dispatch")
@@ -274,3 +287,104 @@ class CommentDetailView(APIView):
         except services.NotCommentAuthor:
             raise NotAuthorError from None
         return Response(status=204)
+
+
+@method_decorator(never_cache, name="dispatch")
+class RepostView(APIView):
+    """`POST` / `DELETE /api/v1/posts/{id}/repost/`: idempotent.
+
+    Reposting needs a verified email (ARCHITECTURE §7); taking a repost back only a login. Both
+    share the `repost` throttle. Order: authentication, permissions (a 401 or 403 never counts),
+    the throttle, then the lookup, the existing repost (200), your own post (409) and a FALSE one
+    (409). A malformed id is a JSON 404.
+    """
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "repost"
+
+    def get_permissions(self):
+        if self.request.method == "POST":
+            return [IsAuthenticated(), IsEmailVerified()]
+        return [IsAuthenticated()]
+
+    def post(self, request, post_id):
+        pk = parse_post_id(post_id)
+        if pk is None:
+            raise NotFound
+        try:
+            created = services.repost(user=request.user, post_id=pk)
+        except services.PostNotFound:
+            raise NotFound from None
+        except services.CannotRepostOwn:
+            raise CannotRepostOwnError from None
+        except services.CannotRepostFalse:
+            raise CannotRepostFalseError from None
+        return Response({"reposted": True}, status=201 if created else 200)
+
+    def delete(self, request, post_id):
+        pk = parse_post_id(post_id)
+        if pk is None:
+            raise NotFound
+        try:
+            services.unrepost(user=request.user, post_id=pk)
+        except services.PostNotFound:
+            raise NotFound from None
+        return Response(status=204)
+
+
+@method_decorator(never_cache, name="dispatch")
+class BookmarkView(APIView):
+    """`POST` / `DELETE /api/v1/posts/{id}/bookmark/`: idempotent and private.
+
+    Any signed-in user (no verified email: bookmarks are private), sharing the `bookmark`
+    throttle. Nothing about a bookmark is ever shown to anyone else, and there is no count.
+    """
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "bookmark"
+
+    def post(self, request, post_id):
+        pk = parse_post_id(post_id)
+        if pk is None:
+            raise NotFound
+        try:
+            created = services.bookmark(user=request.user, post_id=pk)
+        except services.PostNotFound:
+            raise NotFound from None
+        return Response({"bookmarked": True}, status=201 if created else 200)
+
+    def delete(self, request, post_id):
+        pk = parse_post_id(post_id)
+        if pk is None:
+            raise NotFound
+        try:
+            services.unbookmark(user=request.user, post_id=pk)
+        except services.PostNotFound:
+            raise NotFound from None
+        return Response(status=204)
+
+
+@method_decorator(never_cache, name="dispatch")
+class BookmarkListView(APIView):
+    """`GET /api/v1/me/bookmarks/`: your own bookmarks, newest bookmark first (§9 envelope).
+
+    Deleted and removed posts are dropped in the bookmark query itself, so pages stay full. Each
+    item is a plain post whose `activity_at` is when you saved it. Never anyone else's.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        rows = (
+            Bookmark.objects.filter(user=request.user, post__deleted_at__isnull=True)
+            .exclude(post__status=PostStatus.REMOVED)
+            .values("id", "created_at", "post_id")
+        )
+        paginator = BookmarkPagination()
+        page = paginator.paginate_queryset(rows, request, view=self)
+        saved_at = {str(row["post_id"]): row["created_at"] for row in page}
+        posts = feed.load_posts(list(saved_at), request.user)
+        data = PostSerializer(posts, many=True, context={"request": request}).data
+        results = [feed_item(item, activity_at=iso(saved_at[item["id"]])) for item in data]
+        return FeedPagination.envelope(results, paginator.get_next_link())

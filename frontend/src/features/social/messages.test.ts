@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import {
+  bookmarkFailureMessage,
   commentFailureMessage,
   commentsErrorMessage,
   followFailureMessage,
   likeFailureMessage,
   listErrorMessage,
+  repostFailureMessage,
   SOCIAL_MESSAGES,
 } from "./messages";
 
@@ -94,5 +96,61 @@ describe("commentsErrorMessage", () => {
   it("says the server is waking up on a 503, else the generic text", () => {
     expect(commentsErrorMessage(err(503, "backend_waking"))).toBe(SOCIAL_MESSAGES.waking);
     expect(commentsErrorMessage(err(500, "server_error"))).toBe(SOCIAL_MESSAGES.commentsFailed);
+  });
+});
+
+describe("repostFailureMessage", () => {
+  it("maps each known failure", () => {
+    expect(repostFailureMessage(err(409, "cannot_repost_own"), false)).toBe(
+      SOCIAL_MESSAGES.cannotRepostOwn,
+    );
+    expect(repostFailureMessage(err(409, "cannot_repost_false"), false)).toBe(
+      SOCIAL_MESSAGES.cannotRepostFalse,
+    );
+    expect(repostFailureMessage(err(403, "email_unverified"), false)).toBe(
+      SOCIAL_MESSAGES.verifyToRepost,
+    );
+    expect(repostFailureMessage(err(404, "not_found"), false)).toBe(SOCIAL_MESSAGES.postGone);
+    expect(repostFailureMessage(err(401, "not_authenticated"), true)).toBe(
+      SOCIAL_MESSAGES.signedOut,
+    );
+    expect(repostFailureMessage(err(0, "network_error"), true)).toBe(SOCIAL_MESSAGES.network);
+    expect(repostFailureMessage(err(503, "backend_waking"), true)).toBe(SOCIAL_MESSAGES.waking);
+  });
+
+  it("says how long to wait when throttled", () => {
+    expect(repostFailureMessage(err(429, "throttled", 1800), false)).toContain("about 30 minutes");
+  });
+
+  it("falls back to a message for the direction", () => {
+    expect(repostFailureMessage(err(500, "server_error"), false)).toBe(
+      SOCIAL_MESSAGES.repostFailed,
+    );
+    expect(repostFailureMessage(new Error("boom"), true)).toBe(SOCIAL_MESSAGES.unrepostFailed);
+  });
+});
+
+describe("bookmarkFailureMessage", () => {
+  it("maps each known failure", () => {
+    expect(bookmarkFailureMessage(err(404, "not_found"), false)).toBe(SOCIAL_MESSAGES.postGone);
+    expect(bookmarkFailureMessage(err(401, "not_authenticated"), true)).toBe(
+      SOCIAL_MESSAGES.signedOut,
+    );
+    expect(bookmarkFailureMessage(err(0, "network_error"), true)).toBe(SOCIAL_MESSAGES.network);
+    expect(bookmarkFailureMessage(err(503, "backend_waking"), true)).toBe(SOCIAL_MESSAGES.waking);
+    expect(bookmarkFailureMessage(err(429, "throttled", 1800), false)).toContain(
+      "about 30 minutes",
+    );
+  });
+
+  it("has no verified-email message: bookmarks are private", () => {
+    expect(bookmarkFailureMessage(err(403, "email_unverified"), false)).toBe(
+      SOCIAL_MESSAGES.bookmarkFailed,
+    );
+  });
+
+  it("falls back to a message for the direction", () => {
+    expect(bookmarkFailureMessage(err(500, "x"), false)).toBe(SOCIAL_MESSAGES.bookmarkFailed);
+    expect(bookmarkFailureMessage(new Error("boom"), true)).toBe(SOCIAL_MESSAGES.unbookmarkFailed);
   });
 });

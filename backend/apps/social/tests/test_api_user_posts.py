@@ -165,4 +165,5 @@ def test_the_query_count_is_constant(api_client, auth_client, ada):
     posts_of(ada, 17, base=timezone.now() - timedelta(hours=1), verified_pipeline=True)
     FollowFactory(following=ada)
     large = (queries(api_client), queries(viewer))
-    assert small == large == (2, 3)
+    # the lookup, the page's keys (a union), the posts; and the viewer's own row when signed in
+    assert small == large == (3, 4)

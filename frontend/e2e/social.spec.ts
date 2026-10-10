@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
-import { marker, signUpVerified } from "./helpers";
+import { marker, seedPost, setPostState, signUpVerified } from "./helpers";
 
 /**
  * Two people, signed up once for the whole file: allauth limits sign-ups to 20 a minute per
@@ -284,5 +284,200 @@ test("the post page and its discussion fit a phone", async () => {
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(0);
+  await page.setViewportSize({ width: 1280, height: 900 });
+});
+
+// ---------- reposts and bookmarks (Part 7B) ----------
+
+const followingTab = (page: Page) => page.getByRole("tab", { name: "Following" });
+
+test("B reposts a third person's post; A, who follows B, sees it with the live label, then 'no longer available'", async () => {
+  const text = `Rain is wet ${marker("repost")}`;
+  const postId = seedPost(text, { fact: true });
+
+  // B finds the post in Recent and reposts it from the card; the button flips at once.
+  await star.page.goto("/home");
+  const original = star.page.getByRole("article").filter({ hasText: text });
+  await expect(original).toBeVisible(NAVIGATION);
+  await original.getByRole("button", { name: "Repost 0" }).click();
+  await expect(original.getByRole("button", { name: "Repost 1" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  // The post's own page agrees after a reload: one repost, and it is B's.
+  await star.page.goto(`/p/${postId}`);
+  await expect(star.page.getByRole("button", { name: "Repost 1" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+    NAVIGATION,
+  );
+
+  // A follows B (which also clears A's cached Following page) and sees "Reposted by B".
+  await fan.page.goto(`/u/${star.username}`);
+  await fan.page.getByRole("button", { name: "Follow", exact: true }).click();
+  await expect(fan.page.getByRole("button", { name: "Following" })).toBeVisible();
+  await fan.page.goto("/home");
+  await followingTab(fan.page).click();
+  const reposted = fan.page.getByRole("article").filter({ hasText: text });
+  await expect(reposted).toBeVisible(NAVIGATION);
+  await expect(reposted).toContainText("Reposted by");
+  await expect(reposted.getByRole("link", { name: `@${star.username}` })).toBeVisible();
+  await expect(reposted).toContainText("CHECKING FACTS…");
+  // A repost shows the original's live label: the moderator's verdict reaches it with no new check.
+  setPostState(postId, "verified_true");
+  await fan.page.reload();
+  await followingTab(fan.page).click();
+  await expect(
+    fan.page.getByRole("article").filter({ hasText: text }).getByText("VERIFIED 94%"),
+  ).toBeVisible(NAVIGATION);
+
+  // The original is removed: the repost stays, the text goes.
+  setPostState(postId, "removed");
+  await fan.page.reload();
+  await followingTab(fan.page).click();
+  const gone = fan.page
+    .getByRole("article")
+    .filter({ hasText: "This post is no longer available" });
+  await expect(gone.first()).toBeVisible(NAVIGATION);
+  await expect(gone.first()).toContainText("Reposted by");
+  await expect(fan.page.getByText(text)).toHaveCount(0);
+  // A cannot undo B's repost.
+  await expect(gone.first().getByRole("button", { name: "Undo repost" })).toHaveCount(0);
+
+  // B undoes it from their own profile, though the original is gone.
+  await star.page.goto(`/u/${star.username}`);
+  const mine = star.page
+    .getByRole("article")
+    .filter({ hasText: "This post is no longer available" });
+  await expect(mine).toHaveCount(1, NAVIGATION);
+  await mine.getByRole("button", { name: "Undo repost" }).click();
+  await expect(star.page.getByText("Repost removed.", { exact: true })).toBeVisible();
+  await expect(mine).toHaveCount(0);
+
+  // A unfollows B again (the follow is left as found), and B's repost is gone from A's feed.
+  await fan.page.goto(`/u/${star.username}`);
+  await fan.page.getByRole("button", { name: "Following" }).click();
+  await expect(fan.page.getByRole("button", { name: "Follow", exact: true })).toBeVisible();
+});
+
+test("a bookmark is private: it appears on /bookmarks for its owner and for nobody else", async () => {
+  const text = `I think ${marker("bookmark")}`;
+  await postOpinion(star.page, text);
+
+  await fan.page.goto("/home");
+  const card = fan.page.getByRole("article").filter({ hasText: text });
+  await expect(card).toBeVisible(NAVIGATION);
+  await card.getByRole("button", { name: "Bookmark" }).click();
+  await expect(card.getByRole("button", { name: "Bookmark" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  // On /bookmarks (from the rail) the post is there, with its bookmark on, and survives a reload.
+  await fan.page.getByRole("complementary").getByRole("link", { name: "Bookmarks" }).click();
+  await expect(fan.page).toHaveURL(/\/bookmarks$/, NAVIGATION);
+  await expect(fan.page.getByRole("heading", { level: 1, name: "Bookmarks" })).toBeVisible();
+  const saved = fan.page.getByRole("article").filter({ hasText: text });
+  await expect(saved).toBeVisible(NAVIGATION);
+  await fan.page.reload();
+  await expect(
+    fan.page
+      .getByRole("article")
+      .filter({ hasText: text })
+      .getByRole("button", { name: "Bookmark" }),
+  ).toHaveAttribute("aria-pressed", "true", NAVIGATION);
+
+  // The author's own list is empty: nobody sees anyone else's bookmarks, and nothing counts them.
+  await star.page.goto("/bookmarks");
+  await expect(star.page.getByText("No bookmarks yet")).toBeVisible(NAVIGATION);
+  await expect(
+    star.page.getByText("Posts you bookmark appear here. Only you can see them."),
+  ).toBeVisible();
+  await star.page.goto("/home");
+  const theirs = star.page.getByRole("article").filter({ hasText: text });
+  await expect(theirs.getByRole("button", { name: "Bookmark" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+    NAVIGATION,
+  );
+
+  // B takes it off the list; after a reload it is gone and the empty state is back.
+  await saved.getByRole("button", { name: "Bookmark" }).click();
+  await expect(saved.getByRole("button", { name: "Bookmark" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+  await fan.page.reload();
+  await expect(fan.page.getByText("No bookmarks yet")).toBeVisible(NAVIGATION);
+});
+
+test("Repost is disabled, with the reason, on your own post and on a FALSE one; visitors are sent to log in", async ({
+  page,
+}) => {
+  const own = `I think ${marker("own")}`;
+  await postOpinion(star.page, own);
+  const falseText = `Cats fly ${marker("false")}`;
+  const falseId = seedPost(falseText, { fact: true });
+  setPostState(falseId, "verified_false");
+
+  await star.page.goto("/home");
+  const mine = star.page.getByRole("article").filter({ hasText: own });
+  await expect(mine).toBeVisible(NAVIGATION);
+  const ownButton = mine.getByRole("button", { name: "Repost 0" });
+  await expect(ownButton).toHaveAttribute("aria-disabled", "true");
+  await expect(ownButton).toHaveAttribute("title", "You can't repost your own post.");
+  await ownButton.click({ force: true });
+  await expect(star.page.getByText("You can't repost your own post.").first()).toBeVisible();
+  // Nothing was sent: the count is still 0 after a reload.
+  await star.page.reload();
+  await expect(
+    star.page
+      .getByRole("article")
+      .filter({ hasText: own })
+      .getByRole("button", { name: "Repost 0" }),
+  ).toBeVisible(NAVIGATION);
+
+  await fan.page.goto("/home");
+  const falseCard = fan.page.getByRole("article").filter({ hasText: falseText });
+  await expect(falseCard).toBeVisible(NAVIGATION);
+  await expect(falseCard.getByRole("button", { name: "Repost 0" })).toHaveAttribute(
+    "title",
+    "Posts labelled FALSE can't be reposted.",
+  );
+  // It can still be bookmarked (private, any state).
+  await expect(falseCard.getByRole("button", { name: "Bookmark" })).not.toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+
+  // A visitor reads the counts and is sent to log in.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/home");
+  const visitorCard = page.getByRole("article").filter({ hasText: own });
+  await expect(visitorCard).toBeVisible(NAVIGATION);
+  const next = /^\/login\?next=%2Fp%2F[0-9a-f-]{36}$/;
+  await expect(visitorCard.getByRole("link", { name: "Repost 0" })).toHaveAttribute("href", next);
+  await expect(visitorCard.getByRole("link", { name: "Bookmark" })).toHaveAttribute("href", next);
+  await page.goto("/bookmarks");
+  await expect(page).toHaveURL(/\/login\?next=%2Fbookmarks$/, NAVIGATION);
+});
+
+test("a card with four actions and the bookmarks page fit a phone", async () => {
+  const page = fan.page;
+  await page.setViewportSize({ width: 390, height: 844 });
+  const text = `I think ${marker("phone-actions")}`;
+  await postOpinion(star.page, text);
+  await page.goto("/home");
+  const card = page.getByRole("article").filter({ hasText: text });
+  await expect(card.getByRole("button", { name: "Repost 0" })).toBeVisible(NAVIGATION);
+  await expect(card.getByRole("button", { name: "Bookmark" })).toBeVisible();
+  for (const path of ["/home", "/bookmarks"]) {
+    await page.goto(path);
+    await expect(page.getByRole("heading", { level: 1 })).toBeAttached(NAVIGATION);
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow, path).toBeLessThanOrEqual(0);
+  }
   await page.setViewportSize({ width: 1280, height: 900 });
 });

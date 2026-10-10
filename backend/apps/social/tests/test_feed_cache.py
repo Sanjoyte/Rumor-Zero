@@ -65,14 +65,21 @@ def test_the_first_request_fills_the_cache_and_the_second_reads_it(auth_client, 
     assert contents(client.get(URL)) == ["hello"]
 
 
-def test_the_cache_holds_only_ids_and_the_next_cursor(auth_client, me, bo):
+def test_the_cache_holds_only_keys_and_the_next_cursor(auth_client, me, bo):
     for i in range(3):
         post(bo, f"secret text {i}", i + 1)
     auth_client(me).get(URL, {})
     stored = cache.get(feed.cache_key(me.pk))
-    assert set(stored) == {"ids", "next"}
+    assert set(stored) == {"items", "next"}
     assert stored["next"] is None
-    assert [str(p.pk) for p in Post.objects.order_by("-created_at")] == stored["ids"]
+    # [microseconds, kind, post id, reposter id]: a post is kind 0 with the zero reposter
+    assert [row[2] for row in stored["items"]] == [
+        str(p.pk) for p in Post.objects.order_by("-created_at")
+    ]
+    assert {(row[1], row[3]) for row in stored["items"]} == {
+        (0, "0" * 8 + "-0000-0000-0000-" + "0" * 12)
+    }
+    assert all(isinstance(row[0], int) for row in stored["items"])
     assert "secret text" not in repr(stored)
 
 
@@ -227,35 +234,54 @@ def test_zero_turns_the_cache_off(auth_client, me, bo, settings):
     assert contents(client.get(URL)) == ["again", "hi"]
 
 
+ZERO = "00000000-0000-0000-0000-000000000000"
+SOME = "abcdef12-0000-4000-8000-000000000000"
+
+
 @pytest.mark.parametrize(
     "junk",
     [
         "text",
-        {"ids": "x", "next": None},
-        {"ids": ["not-a-uuid"], "next": None},
-        {"ids": [1], "next": None},
-        {"ids": [], "next": 5},
+        {"items": "x", "next": None},
+        {"items": [[1, 0, "not-a-uuid", ZERO]], "next": None},
+        {"items": [[1, 0, SOME]], "next": None},  # three values, not four
+        {"items": [[1, 0, SOME, ZERO, 9]], "next": None},
+        {"items": [[1, 2, SOME, ZERO]], "next": None},  # a kind that doesn't exist
+        {"items": [[True, 0, SOME, ZERO]], "next": None},
+        {"items": [[-1, 0, SOME, ZERO]], "next": None},
+        {"items": [[1.5, 0, SOME, ZERO]], "next": None},
+        {"items": [[1, 0, SOME, SOME]], "next": None},  # a post item with a reposter
+        {"items": [[1, 0, SOME.upper(), ZERO]], "next": None},  # not the canonical form
+        {"items": [[1, 0, 7, ZERO]], "next": None},
+        {"items": [], "next": 5},
         {"next": None},
+        {"ids": [SOME], "next": None},  # the pre-7B shape
     ],
 )
 def test_a_malformed_cache_value_is_treated_as_a_miss(auth_client, me, bo, junk):
     post(bo, "hi")
     cache.set(feed.cache_key(me.pk), junk, 60)
     assert contents(auth_client(me).get(URL)) == ["hi"]
+    stored = cache.get(feed.cache_key(me.pk))  # and the miss refilled it with a real value
+    assert feed._read_entry(stored) is not None
 
 
-def test_a_cached_id_in_the_wrong_case_is_a_miss_not_a_match(me, bo):
-    entry = {"ids": ["ABCDEF12-0000-4000-8000-000000000000"], "next": None}
-    assert feed._is_entry(entry) is False
+def test_read_entry_accepts_what_the_cache_writes_and_nothing_else():
+    micros = 1_760_000_000_123_456
+    ok = {"items": [[micros, 1, SOME, "fedcba98-0000-4000-8000-000000000000"]], "next": "abc"}
+    keys, nxt = feed._read_entry(ok)
+    assert nxt == "abc" and keys[0].micros() == micros and keys[0].kind == 1
+    assert feed._read_entry({"items": [], "next": None}) == ([], None)
+    assert feed._read_entry(None) is None
 
 
 def test_bust_forgets_now_and_after_commit(me, django_capture_on_commit_callbacks):
     key = feed.cache_key(me.pk)
-    cache.set(key, {"ids": [], "next": None}, 60)
+    cache.set(key, {"items": [], "next": None}, 60)
     with django_capture_on_commit_callbacks(execute=False) as callbacks:
         feed.bust_following_feed(me.pk)
     assert cache.get(key) is None  # forgotten immediately
-    cache.set(key, {"ids": [], "next": None}, 60)  # a reader refills it mid-transaction
+    cache.set(key, {"items": [], "next": None}, 60)  # a reader refills it mid-transaction
     for callback in callbacks:
         callback()
     assert cache.get(key) is None  # and again at commit

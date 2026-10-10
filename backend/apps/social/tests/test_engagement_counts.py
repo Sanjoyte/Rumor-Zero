@@ -9,12 +9,15 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from apps.posts.serializers import PostSerializer
+from apps.social.engagement import engagement_defaults
 from apps.social.models import Follow
 from apps.social.tests.factories import (
+    BookmarkFactory,
     CommentFactory,
     FollowFactory,
     LikeFactory,
     PostFactory,
+    RepostFactory,
     VerifiedUserFactory,
 )
 
@@ -110,8 +113,20 @@ def test_a_viewers_like_on_a_removed_post_is_still_reported_to_that_viewer(auth_
     assert body["liked_by_me"] is True
 
 
-def test_the_serializer_refuses_a_post_that_was_not_annotated():
-    post = PostFactory()
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "like_count",
+        "comment_count",
+        "repost_count",
+        "liked_by_me",
+        "reposted_by_me",
+        "bookmarked_by_me",
+    ],
+)
+def test_the_serializer_refuses_a_post_that_was_not_annotated(missing):
+    post = engagement_defaults(PostFactory())
+    delattr(post, missing)
     with pytest.raises(AttributeError):
         PostSerializer(post, context={}).data  # noqa: B018  (a list that forgot for_list(viewer))
 
@@ -125,12 +140,14 @@ def count_queries(client, path):
     return len(captured)
 
 
-def add_posts(author, n, *, hours):
+def add_posts(author, n, *, hours, saver=None):
     base = timezone.now() - timedelta(hours=hours)
     for i in range(n):
         post = PostFactory(author=author, created_at=base - timedelta(seconds=2 * i))
         LikeFactory.create_batch(2, post=post)
         CommentFactory(post=post, created_at=base)
+        if saver is not None:
+            BookmarkFactory(user=saver, post=post, created_at=base - timedelta(seconds=2 * i))
 
 
 def test_every_list_keeps_a_constant_number_of_queries(api_client, auth_client, ada, settings):
@@ -141,8 +158,9 @@ def test_every_list_keeps_a_constant_number_of_queries(api_client, auth_client, 
     # path -> the expected (anonymous, signed-in) counts; the Following feed has no anonymous view
     expected = {
         "/api/v1/posts/": (1, 2),
-        "/api/v1/users/writer/posts/": (2, 3),
+        "/api/v1/users/writer/posts/": (3, 4),
         "/api/v1/feed/": (None, 3),
+        "/api/v1/me/bookmarks/": (None, 3),
     }
 
     def measure():
@@ -152,7 +170,62 @@ def test_every_list_keeps_a_constant_number_of_queries(api_client, auth_client, 
             for path, want in expected.items()
         }
 
-    add_posts(author, 3, hours=2)
+    add_posts(author, 3, hours=2, saver=ada)
     small = measure()
-    add_posts(author, 17, hours=1)
+    add_posts(author, 17, hours=1, saver=ada)
     assert measure() == small == expected
+
+
+# ---------- reposts and bookmarks (Part 7B) ----------
+
+
+def flags(post_json):
+    return post_json["repost_count"], post_json["reposted_by_me"], post_json["bookmarked_by_me"]
+
+
+def test_a_post_with_nothing_has_no_reposts_or_bookmarks(api_client):
+    assert flags(api_client.get(f"/api/v1/posts/{PostFactory().pk}/").json()) == (0, False, False)
+
+
+def test_repost_count_counts_every_repost_and_the_flags_follow_the_viewer(
+    api_client, auth_client, ada
+):
+    post = PostFactory()
+    RepostFactory(user=ada, post=post)
+    RepostFactory.create_batch(2, post=post)
+    BookmarkFactory(user=ada, post=post)
+    BookmarkFactory.create_batch(3, post=post)  # other people's bookmarks are invisible
+    mine = auth_client(ada).get(f"/api/v1/posts/{post.pk}/").json()
+    assert flags(mine) == (3, True, True)
+    someone = auth_client(VerifiedUserFactory()).get(f"/api/v1/posts/{post.pk}/").json()
+    assert flags(someone) == (3, False, False)
+    assert flags(api_client.get(f"/api/v1/posts/{post.pk}/").json()) == (3, False, False)
+
+
+def test_every_list_shows_the_new_counts(api_client, auth_client, ada):
+    author = VerifiedUserFactory(username="writer")
+    post = PostFactory(author=author)
+    RepostFactory(user=ada, post=post)
+    BookmarkFactory(user=ada, post=post)
+    client = auth_client(ada)
+    for path in ("/api/v1/posts/", "/api/v1/users/writer/posts/"):
+        body = client.get(path).json()["results"][0]["post"]
+        assert flags(body) == (1, True, True), path
+    saved = client.get("/api/v1/me/bookmarks/").json()["results"][0]["post"]
+    assert flags(saved) == (1, True, True)
+
+
+def test_a_removed_posts_tombstone_keeps_its_repost_count(api_client):
+    removed = PostFactory(removed=True)
+    RepostFactory.create_batch(2, post=removed)
+    body = api_client.get(f"/api/v1/posts/{removed.pk}/").json()
+    assert body["content"] == "" and body["repost_count"] == 2
+
+
+def test_the_create_answer_has_explicit_zeros(auth_client, ada):
+    body = (
+        auth_client(ada)
+        .post("/api/v1/posts/", {"content": "hello", "post_type": "opinion"}, format="json")
+        .json()
+    )
+    assert flags(body) == (0, False, False)

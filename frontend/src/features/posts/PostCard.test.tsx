@@ -296,4 +296,24 @@ describe("PostCard action bar (Part 7)", () => {
     render(<PostCard {...BASE} status="removed" actions={<div data-testid="bar">bar</div>} />);
     expect(screen.queryByTestId("bar")).toBeNull();
   });
+
+  it("puts a header node first inside the card, before the author row", () => {
+    render(<PostCard {...BASE} header={<p>Reposted by Bo</p>} />);
+    const card = screen.getByRole("article");
+    const header = screen.getByText("Reposted by Bo");
+    expect(card).toContainElement(header);
+    expect(header.compareDocumentPosition(screen.getByText("Ada Lovelace"))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it("has no header unless given one", () => {
+    render(<PostCard {...BASE} />);
+    expect(screen.queryByText(/Reposted by/)).toBeNull();
+  });
+
+  it("does not show the header on the removed tombstone", () => {
+    render(<PostCard {...BASE} status="removed" header={<p>Reposted by Bo</p>} />);
+    expect(screen.queryByText("Reposted by Bo")).toBeNull();
+  });
 });

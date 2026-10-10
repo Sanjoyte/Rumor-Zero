@@ -181,4 +181,20 @@ describe("LikeButton", () => {
     renderButton("verified", { showLabel: true });
     expect(await screen.findByText("Like", { selector: "[aria-hidden]" })).toHaveClass("sm:inline");
   });
+
+  it("gives each disabled like its own hint id (a feed of unverified viewers has many)", async () => {
+    renderWithSessionAndToast(
+      <>
+        <LikeButton postId="a" initialLiked={false} initialCount={0} />
+        <LikeButton postId="b" initialLiked={false} initialCount={0} />
+      </>,
+      "unverified",
+    );
+    const [first, second] = await screen.findAllByRole("button");
+    expect(first.getAttribute("aria-describedby")).not.toBe(
+      second.getAttribute("aria-describedby"),
+    );
+    expect(first).toHaveAccessibleDescription("Verify your email to like posts.");
+    expect(second).toHaveAccessibleDescription("Verify your email to like posts.");
+  });
 });

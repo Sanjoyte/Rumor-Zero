@@ -6,18 +6,18 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **7B (Bookmarks & reposts): planned and approved, not implemented.** Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4,
-  5, 6 and 7 are done (Part 7 committed by the user as `c562e70`). Part 1 CI is green (user-reported 2026-10-06);
-  **Part 2, 3, 4, 5, 6 and 7 CI have not run yet.**
+- **Part:** none. **Part 7B (Bookmarks & reposts) is done** (2026-10-10; built from the approved plan; every required
+  test and check green; `task.md` updated). Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7 and 7B are done. Part 1 CI is
+  green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7 and 7B CI have not run yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after saving the Part 7B plan).
-- **Phase:** plan approved; implementation not started. No code written.
+- **Owner:** none (Claude stopped after finishing Part 7B; Part 8 is not started).
+- **Phase:** done, uncommitted. The user reviews and commits.
 - **Approved plan:**
   [`docs/agents/plans/part-7b-bookmarks-reposts.md`](plans/part-7b-bookmarks-reposts.md)
-  (approved 2026-10-10; implement with Sonnet 5.5 · high, per `task.md`)
+  (status line now says IMPLEMENTED)
 - **Previous plans:**
   - [`part-7-likes-comments.md`](plans/part-7-likes-comments.md), implemented 2026-10-10 (committed as `c562e70`);
   - [`part-6-profiles-follows-following-feed.md`](plans/part-6-profiles-follows-following-feed.md),
@@ -32,9 +32,50 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-10 by Claude (Opus 5.5), Part 7B planning.
+- **Last updated:** 2026-10-10 by Claude (Sonnet 5.5), Part 7B implementation.
 
 ## Completed checkpoints
+
+- 2026-10-10 (Claude, Sonnet 5.5): **Part 7B implemented** (uncommitted). Started from HEAD `753c3ff` ("Plan Part 7B",
+  committed by the user), a clean tree that matched this file; Docker was already healthy, ports free.
+  - **Backend** (`backend/`):
+    - New: `apps/social/timeline.py` (the mixed feed's key, cursor token, per-page rule and union query),
+      `migrations/0003_repost_bookmark.py`, and 10 test files (`test_models_repost_bookmark`, `test_services_repost_bookmark`,
+      `test_timeline`, `test_timeline_db`, `test_api_repost`, `test_api_bookmark`, `test_api_bookmark_list`,
+      `test_api_feed_reposts`, `test_api_user_posts_reposts`, `test_admin_repost_bookmark`).
+    - Changed: `apps/social/{models,services,engagement,feed,views,urls,serializers,pagination,exceptions,admin}.py`
+      (`Repost`, `Bookmark`; repost, unrepost, bookmark, unbookmark; the three counts in `with_engagement`; cache v2 and
+      `load_entries`; `RepostView`, `BookmarkView`, `BookmarkListView`, the feed and profile views on the timeline;
+      `BookmarkPagination`; the two 409 errors; `RepostAdmin` and the superuser-only `BookmarkAdmin`),
+      `apps/posts/serializers.py` (strict reads of the three new fields; `feed_item(…, activity_at)`), and tests
+      (`factories`, `test_feed_cache`, `test_services`, `test_api_user_posts`, `test_engagement_counts`, `test_no_network`).
+  - **Frontend** (`frontend/`):
+    - New: `features/social/{RepostButton,BookmarkButton,RepostHeader,UnavailablePostCard,repost-rules}`,
+      `features/posts/feed-items.ts`, `features/bookmarks/BookmarkList.tsx` and a test for each.
+    - Changed: `features/social/{PostActions,LikeButton,social-api,messages}`, `features/posts/{FeedList,PostCard,PostDetail,
+      status-overlay,test-helpers}`, `app/(app)/bookmarks/page.tsx` (the placeholder is now the page), `e2e/{helpers,social.spec}.ts`
+      (+4 tests, `seedPost`, a `verified_false` state), and their unit tests.
+  - **Docs:** ARCHITECTURE §2/§3/§4d/§8/§9/§10, ANALYSIS c-39, STRUCTURE, MEMORY (2 entries and one bullet), `task.md` (criteria,
+    deviations, both status spots), the plan's status line, and `docs/test-command.md`: a "Part 7B" section in **both** guides
+    (19 steps each) and one number in its intro line; nothing else touched.
+  - One migration (`social.0003_repost_bookmark`), no new dependency, service or env variable; no env file was read or edited;
+    `design/` untouched.
+  - **User decisions and defaults** are in `task.md` Part 7B and the plan.
+  - **Found and fixed on the way:** a bare OR cursor filter can't use an index (a redundant `created_at <= t` per side; a test
+    reads the SQL); `LikeButton` repeated one hint id per card (`useId`); the visible word must be in the button's name
+    ("Repost"); a mutation survivor each side (the bookmark scope: equal rates; the zero clamp); a redundant admin override was
+    removed; a system `ruff` ran when the venv wasn't activated (MEMORY).
+  - **Test-command notes:**
+    - The section is `### Part 7B` inside each guide.
+    - The file has **no comment marker** at its bottom (as in Parts 3 to 7): it ends with the last bullet of the Windows
+      Part 7B section. (The brief for this part asked to keep one; there is none to keep.)
+    - The Linux bash blocks of steps 3 to 13 were **extracted from the finished doc by script and run verbatim** against live
+      Django (and `next dev`); their output was diffed against the doc's expected-output blocks (uuids, numbers in names and
+      `Retry-After` seconds normalised): **all eleven steps matched** (one expected line was fixed first: step 8's last line
+      had an extra key). The cleanup command printed `(39, {'social.Like': 1, 'social.Repost': 7, 'social.Bookmark': 6,
+      'social.Follow': 2, 'account.EmailAddress': 6, 'posts.Post': 11, 'accounts.User': 6})` after that run. The browser steps 14
+      to 17 were checked with headless Chromium scripts (screenshots at 1280 and 390 px) and Django Admin (step 18) with a
+      scripted browser, plus the E2E suite, not by a person. The **PowerShell blocks were not run** (no PowerShell here).
 
 - 2026-10-10 (Claude, Opus 5.5): **Part 7B planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `c562e70` ("Implemented Part 7: Likes & comments", committed by the user), a clean tree.
@@ -541,16 +582,72 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `c562e70` ("Implemented Part 7: Likes & comments", committed by the user). **Uncommitted:** this file and
-  the new `docs/agents/plans/part-7b-bookmarks-reposts.md` only.
-- Docker (Postgres 18 + Redis) is up and healthy; no dev server was started in the planning session.
-- The local database has `social.0002_like_comment` applied. The guide's `part7-*` test accounts (and the throwaway
-  `part7_admin` superuser) with their posts, likes, follows and comments were deleted at the end; accounts from the
-  E2E runs (`fan_*`, `star_*`, `post_*`, …) and their data remain (Django Admin → Users deletes them).
+- HEAD is `753c3ff` ("Plan Part 7B", committed by the user). **Uncommitted:** the whole Part 7B implementation: 43 modified
+  files (this file included) and 25 new ones: `backend/apps/social/timeline.py`, the `0003` migration, 10 backend test files,
+  `frontend/src/features/bookmarks/`, `features/posts/feed-items{,.test}.ts` and 10 files in `frontend/src/features/social/`
+  (`git status --short`).
+- Docker (Postgres 18 + Redis) is up; no dev server is running (the ones started for the checks were stopped); ports
+  3000/8000 are free.
+- The local database has `social.0003_repost_bookmark` applied. The guide's `part7b-*` test accounts (and the throwaway
+  admin and moderator) with their posts, reposts, bookmarks and follows were deleted at the end; so were Part 7's; accounts from the
+  E2E runs (`fan_*`, `star_*`, `post_*`, `seed_*` (the new `seedPost()` helper's third authors), …) and their data remain (Django Admin → Users deletes them).
 - Ignored artifacts from the checks: `backend/tmp/mail/*.log`, `frontend/test-results/`,
   `frontend/playwright-report/`, and a production build in `frontend/.next/` made with an empty Google client ID
   (the last `npm run build` before the CI-mode E2E runs). Scratch scripts and screenshots are in the session's
   scratchpad, not the repo.
+
+## Validation of Part 7B (2026-10-10)
+
+- **Backend** (`backend/`, venv, Postgres + Redis up), each exit 0:
+  - `python -m pytest` → **1875 passed** (was 1485); `pytest apps/social` → **695 passed** (was 305): `test_models_repost_bookmark`
+    16, `test_services_repost_bookmark` 37, `test_timeline` 63, `test_timeline_db` 140 (50 + 50 seeded walks against an independent
+    reference, 30 more through the API with the cache on and off), `test_api_repost` 26, `test_api_bookmark` 17,
+    `test_api_bookmark_list` 16, `test_api_feed_reposts` 32, `test_api_user_posts_reposts` 17, `test_admin_repost_bookmark` 6,
+    `test_engagement_counts` 21 (+10), `test_no_network` 4 (+1); `test_feed_cache` and `test_services` were rewritten for v2.
+  - `ruff check .` → "All checks passed!"; `ruff format --check .` → "154 files already formatted".
+  - `makemigrations --check --dry-run` → "No changes detected"; `manage.py check` → no issues; `sqlmigrate social 0003` reviewed (both
+    unique pairs, the `reposts_status_allowed` check, the three indexes with `DESC`).
+  - **Mutation checks** (a rule removed by hand, a test must fail), **38 + 2 re-runs, all caught after two fixes**: the own and FALSE
+    checks, their order, removed posts allowed, the row lock, the lock plus `get_or_create` (race), `status_at_repost`, unrepost on a
+    deleted post, both cache busts, the bookmark verification rule, three throttle scopes, every branch of both cursor filters and
+    the redundant `<=`, `take_page` (no dedupe, window, probe, the cursor row), the token (zero reposter, canonical form), the stub
+    flag, the repost re-read and its time match, the cache shape check, the `post_type` join, the bookmark owner and removed filters,
+    the viewer flags, the repost count, the admin gate, page size. Two survived the first pass: the bookmark throttle scope
+    (both 300/h: now a test that one bucket doesn't use the other) and `has_module_permission` (dead: removed).
+  - **EXPLAIN** (a rolled-back transaction): 300 users, 20,000 posts, 3,000 reposts, 50 follows: the post side is an index scan of
+    `posts_recent_idx` at the first page and at a deep one, the reposts side a sequential scan and a top-N sort, the bookmark page
+    `bookmarks_user_created_idx` + a primary-key lookup. At **300,000 reposts and 200 follows** the union took 11 to 18 ms; a variant
+    with an `IN` branch plus a "my reposts" branch took about 11 ms, so it was not built (MEMORY).
+- **Frontend** (`frontend/`), each exit 0: `npm run lint`, `lint:tokens`, `typecheck`, `format:check`; `npm test` → **113 files, 1510
+  tests passed** (was 106 / 1410); `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` (the same routes; `/bookmarks` is still `○`).
+  - **Mutation checks**, **31 run, 30 caught at once**: no optimistic flip, no rollback, no toast, no single-flight, an unverified user
+    able to repost, the blocked reason ignored, an undo blocked, a visitor button, `aria-pressed`, the name changing with the state,
+    the bookmark needing a verified email, a bookmark count, an unfilled saved glyph, the constant hint id, each reason in
+    `repostBlockedReason`, the blocked reason not passed, the bookmark on the wrong side or missing, the wrong post id, the header link
+    and its `z-10`, Undo for everyone, Undo not removing the item or sending nothing, no failure toast, repeats not hidden, a gone
+    post kept, no header, a polled-removed or gone original, the empty state while more can load, reposts not polled, an unavailable
+    repost polled, `/bookmarks` asking before the session, its empty text, the two API paths, the own-post code, the header slot.
+    The survivor (the zero clamp) got a test.
+- **E2E:** `npm run test:e2e` → **36 passed** (dev mode; 32 old + 4 new), five runs in a row, and `CI=1 npm run test:e2e` after the build
+  → 36 passed twice (against `next start`).
+- **Manual, recorded in `docs/test-command.md` Part 7B** (the doc's Linux blocks of steps 3 to 13, extracted and run verbatim; the diff
+  against the doc's expected output was empty after one fixed line): repost 201 → 200 → 204 and every refusal (401, 403, 404, 409
+  own, 409 FALSE, the quiet 200 after a post turned FALSE, `status_at_repost`, undo on a removed and a deleted post), bookmarks 201 /
+  200 / 204 (unverified allowed, own and FALSE allowed, 404 for removed and deleted), the counts and flags per viewer (no bookmark
+  count anywhere), the Following feed with reposts (live label on a cache hit, a stub, an undone repost gone at once, a new repost
+  after 31 s, once per page), profile lists and both chips, the bookmark list (only your own, removed and deleted dropped, a cursor,
+  a crafted cursor 404, no route for another user's), a cursor walk while posts arrive, 100 + 1 reposts and 300 + 1 bookmarks with
+  `Retry-After`, and the three `EXPLAIN` plans.
+  - Headless Chromium (screenshots at 1280 and 390 px next to Stitch b1/b3): the repost header line, the four-action bar with the
+    bookmark at the right, the stub card and a real Undo repost click, `/bookmarks` with its filled bookmarks, the post page's action
+    row; **0 px horizontal overflow** on `/home`, the Following tab and `/bookmarks` at 390 px. Django Admin with a scripted browser:
+    a superuser sees both read-only lists; a moderator holding every bookmark permission gets 403 and no "Bookmarks" entry.
+- **Not run:**
+  - **The Windows (PowerShell) blocks** of the new section (written from the Part 1 to 7 patterns; no PowerShell on this machine), and CI
+    on GitHub (the user pushes).
+  - A person at a keyboard: the browser steps were driven by scripts. A pixel comparison with Stitch b1/b3 (layout and classes compared
+    by eye); a Workers CPU measurement of the feed (Part 18).
+  - `npm run build` was run with an empty Google client ID as in CI; the OpenNext/Workers build was not (Linux CI does that).
 
 ## Validation of Part 7 (2026-10-10)
 
@@ -914,25 +1011,21 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-**Implement Part 7B from the approved plan**
-([`docs/agents/plans/part-7b-bookmarks-reposts.md`](plans/part-7b-bookmarks-reposts.md)).
-
-1. **User (optional, before implementing):** commit the plan file and this file. Push so CI runs, and report the
-   result (Part 2's to Part 7's jobs). Still open from Part 3: the real-Google check (`docs/test-command.md` Part 3,
-   steps 7 and 8).
-2. **Implementing agent** (Sonnet 5.5 · high per `task.md`; a fresh session): start at the plan's step 0. Run
-   `git status` (expect HEAD `c562e70` plus the plan and this file, or a later commit of them) and `docker compose ps`
-   (start the containers with `docker compose up -d` if they are down), and check that ports 3000/8000 are free. Then
-   follow steps 1 to 9 in order. The first code edit is step 1: `Repost` and `Bookmark` in
-   `backend/apps/social/models.py`, then `python manage.py makemigrations social` → `0003_repost_bookmark`.
+1. **User:** review the diff and the Part 7B section of `docs/test-command.md` (its Linux steps 3 to 13 take about six minutes, one
+   of them a 31-second wait; the browser steps 14 to 17 need a Next dev server, and step 18 needs your own superuser from Part 0A).
+   Then commit, and push so CI runs; report the CI result (Part 2's to Part 7B's jobs). Still open from Part 3: the real-Google check
+   (`docs/test-command.md` Part 3, steps 7 and 8).
+2. **Next part:** Part 8 (reporting and the threshold), from `task.md` (it depends on Part 5, done). Fresh session (`/clear`), first
+   `git status` and `docker compose ps` (start the containers with `docker compose up -d` if they are down). Part 8 must decide
+   whether `counts_toward_threshold` ("≥1 post or comment") counts a soft-deleted comment (the principle used for posts says it does,
+   see the Part 7 follow-ups), and it adds the flag button to the action bar (`PostActions`, right group beside the bookmark).
 
 ## Blockers or user decisions
 
 - None open.
-- User decisions for Part 7B (2026-10-10), to go into ARCHITECTURE §8/§9/§10 and ANALYSIS (a new c-39) when built:
-  `BookmarkAdmin` superuser-only; a repost of a deleted or removed original can be undone (204, and Undo repost on
-  your own unavailable card); the page hides later repeats of a post across Following pages; profile chips filter
-  reposts by the original's type.
+- User decisions for Part 7B (2026-10-10), now in ARCHITECTURE §4d/§8/§9/§10 and ANALYSIS c-39: `BookmarkAdmin` is
+  superuser-only; a repost of a deleted or removed original can be undone (204, and Undo repost on your own unavailable card); the
+  page hides later repeats of a post across the pages of a list; profile chips filter reposts by the original's type.
 - User decisions for Part 7 (2026-10-10), now in ARCHITECTURE §2/§8/§9/§10 and ANALYSIS c-38: hidden comments are Django
   Admin only (not in the API for staff either); deleting your own comment is a soft delete (`deleted_at`); CommentAdmin
   has Hide **and Unhide**.
@@ -953,6 +1046,27 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
   (createsuperuser + backfill migration); Turnstile fails closed; the `rz_session=1` hint cookie.
 - User decisions for 0C (2026-10-01), in ARCHITECTURE §10: the reduced logged-out shell; phones get a
   top bar plus five bottom tabs with an account sheet; marketing links only to existing pages.
+
+## Follow-ups noted during Part 7B (still open)
+
+- **Part 8:** the flag button joins the action bar's right group; decide whether a soft-deleted comment counts toward
+  `counts_toward_threshold` (Part 7's follow-up).
+- **Part 10:** moderators get no permission on `social.Bookmark` (and never will: it is superuser-only); `social.view_repost` is theirs to
+  grant if wanted. The Hide/Unhide permission is Part 7's.
+- **Part 11B:** repost score events read `status_at_repost` (always one of `pending`, `published`, `verified_true`, `under_review`); an
+  undone repost after the verdict doesn't undo the event; a re-label reverses the events of every reposter (`reposts` by post).
+- **Part 11D:** daily repost counts use `reposts_post_created_idx`; comment counts must use the partial index's predicate (Part 7).
+- **Part 13:** the `repost` notification hooks into `social.services.repost` (de-duplicated per (recipient, actor, type, post); no
+  notification for your own repost; none when the repost already existed: the service returns `created`).
+- **Part 14:** export and account deletion include bookmarks and reposts (both cascade); a deleted account's reposts leave other people's
+  feeds on the next page load (hydration drops a repost whose user row is gone).
+- **Part 16:** the `repost` and `bookmark` rates are guesses; the reposts side of the Following union is a sequential scan and a top-N sort
+  (11 to 18 ms at 300,000 reposts and 200 follows); `FollowButton` still uses a constant hint id; a stored repost counter if a post reaches
+  many thousands of reposts (like likes).
+- **Known limits:** your new repost isn't inserted into an open list; a like, repost or bookmark made in one list isn't copied into
+  another mounted list showing the same post (Recent and Following on `/home`); if the repost that won a page's once-per-page rule is
+  undone, a follower's cached page has no item for that post until the TTL (30 s) ends; a bookmark you remove on `/bookmarks` stays until
+  the next load.
 
 ## Follow-ups noted during Part 7 (still open)
 

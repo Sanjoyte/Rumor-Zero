@@ -4,6 +4,7 @@
  * the merged post.
  */
 import type { FeedItem, Post, PostStatusUpdate } from "@/lib/api/types";
+import { isUnavailable } from "./feed-items";
 
 export type StatusOverlay = Readonly<Record<string, PostStatusUpdate>>;
 
@@ -26,11 +27,14 @@ export function applyStatus(post: Post, overlay: StatusOverlay): Post {
   };
 }
 
-/** The ids of the posts that were loaded as `pending`: the ones worth polling. */
+/**
+ * The ids of the posts that were loaded as `pending`: the ones worth polling. A repost shows its
+ * original's live label, so the original of a repost counts too; each id once, whoever shows it.
+ */
 export function pendingPostIds(items: readonly FeedItem[]): string[] {
-  const ids: string[] = [];
-  for (const item of items) {
-    if (item.kind === "post" && item.post.status === "pending") ids.push(item.post.id);
+  const ids = new Set<string>();
+  for (const { post } of items) {
+    if (!isUnavailable(post) && post.status === "pending") ids.add(post.id);
   }
-  return ids;
+  return [...ids];
 }

@@ -61,10 +61,10 @@ def test_two_simultaneous_follows_make_one_row_and_no_error():
 def test_follow_and_unfollow_forget_the_followers_cached_feed():
     ada, bo = VerifiedUserFactory(), VerifiedUserFactory()
     key = feed.cache_key(ada.pk)
-    cache.set(key, {"ids": [], "next": None}, 60)
+    cache.set(key, {"items": [], "next": None}, 60)
     services.follow(follower=ada, target=bo)
     assert cache.get(key) is None
-    cache.set(key, {"ids": [], "next": None}, 60)
+    cache.set(key, {"items": [], "next": None}, 60)
     services.unfollow(follower=ada, target=bo)
     assert cache.get(key) is None
 
@@ -72,7 +72,7 @@ def test_follow_and_unfollow_forget_the_followers_cached_feed():
 def test_a_refused_self_follow_leaves_the_cache_alone():
     ada = VerifiedUserFactory()
     key = feed.cache_key(ada.pk)
-    cache.set(key, {"ids": [], "next": None}, 60)
+    cache.set(key, {"items": [], "next": None}, 60)
     with pytest.raises(services.SelfFollow):
         services.follow(follower=ada, target=ada)
     assert cache.get(key) is not None

@@ -18,3 +18,9 @@ class CommentPagination(TimestampCursorMixin, CursorPagination):
     """
 
     ordering = ("created_at", "id")
+
+
+class BookmarkPagination(TimestampCursorMixin, CursorPagination):
+    """Your bookmarks, the newest bookmark first (`{results, next_cursor}`, §9 envelope)."""
+
+    ordering = ("-created_at", "-id")

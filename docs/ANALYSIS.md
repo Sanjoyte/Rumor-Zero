@@ -103,7 +103,7 @@ Each decision has a default. The rest of the docs (ARCHITECTURE, task.md) alread
 | `StatusBadge` (glyph + label + optional %) | root, a1, b1, b3, b4, c1, c4, d2 | See the status table in b-2 |
 | `CategoryChip` (FACT / OPINION) | a1, b1, b3, b4, c1 | Neutral chip |
 | `ActionBar` (like, comment, repost, bookmark, report, copy link) | a1, b1, b3 | Stitch never shows a real like toggle (b1 uses `fact_check` for the first counter). Define the liked state as a filled glyph in `secondary`. Repost = `cached` + count; bookmark = `bookmark_border`, filled `bookmark` when saved (7B). |
-| `RepostButton`, `BookmarkButton`, `RepostHeader`, `UnavailablePostCard` | a1, b1, b3, c1 | Part 7B |
+| `RepostButton`, `BookmarkButton`, `RepostHeader`, `UnavailablePostCard` | a1, b1, b3, c1 | ✅ Part 7B (c-39: no Stitch screen for the header, the stub or `/bookmarks`) |
 | `EmergencyChip` + violet stripe, `PinnedEmergencies` (banner) | b1, b2, c1 | Part 11C (`tertiary` family, `bolt` glyph) |
 | `SourceLink` | b1, b2, b3 | Part 4: one line with the first source's host or DOI, then "+N more" |
 | `SourceList` | b3 | Part 5: numbered list of every source (01, 02 …), full value, open-in-new link |
@@ -438,6 +438,15 @@ The original default was "drop all". Since 2026-09-29 the seven features you nam
     - Likes and comments are allowed on every post the public can see (pending and under review included, ANALYSIS c1); a removed or deleted post is a 404 for both, its author too. A like can still be taken back from a removed post.
     - **Icons:** the liked state is a filled `favorite` glyph in `secondary`, the comment count uses `chat_bubble`. DESIGN.md's "one glyph per concept" list names neither, and `design/` is read-only (the user supplies design changes); `lint-tokens` checks only icon *sizes*, so they are used and recorded here.
     - Stitch's comment row loses Reply, the `#C-xxx` id, the role chip and the per-comment `thumb_up`; the composer loses the attach buttons and gains a 500-character counter and Ctrl+Enter ("Dispatches", "Remark" and "Counter-Evidence" become "Comments" and "Comment", as in the naming table).
+
+39. **Part 7B decisions (user, 2026-10-10)** on points the guide, Stitch and `task.md` leave open:
+    - **`BookmarkAdmin` is superuser-only** (registered read-only, but `has_view_permission` is `is_superuser`, so no moderator permission, now or after Part 10, opens it). AGENTS.md says every model is registered in the admin; bookmarks are private (f-4), so the registration is the exception that stays out of reach. A superuser can already read the database, so it adds no reach.
+    - **A repost of a deleted or removed original can always be taken back** (`DELETE …/repost/` is 204 whenever the post row exists): a profile's "This post is no longer available" card would otherwise be stuck there for good. The card gets an **Undo repost** button on your own reposts.
+    - **A post shows once per list on the page.** The API promises "once per page" (`task.md`, ARCHITECTURE §9); the page also hides an older activity of a post that comes back on a later page (the original after its repost, a second reposter), which keeps the like, repost and bookmark buttons of one post from drifting apart.
+    - **The Facts and Opinions chips filter a repost by its original's type**, a stub included (the original's type is still on the row).
+    - **The cursor key** `(activity_at, kind, post id, reposter id)` replaces `task.md`'s "(activity_at, item id)": post ids are uuids and repost ids bigints, so no single id column exists, and the key is unique without the repost's own id. The token carries the time as an integer of microseconds, not ISO text.
+    - **Repost checks run in this order:** not found, an existing repost (200, so a post that turned FALSE doesn't refuse someone who already reposted it), your own post, FALSE. `status_at_repost` is the status when the repost committed (the post row is locked with `FOR NO KEY UPDATE`).
+    - **Icons and screens Stitch doesn't have:** the repost counter is `cached` (b1/b3, "Citations" renamed "Reposts", f-4) and the label reads "Repost" so the visible word is part of the button's name; the saved state is a filled `bookmark` in `secondary` (Stitch only draws `bookmark_border`, and DESIGN.md's glyph list names neither); there is no Stitch screen for the "Reposted by" line, the "no longer available" card or `/bookmarks`, so they borrow the card's label type, the removed-post tombstone's look and the profile page's container with c4's page heading.
 
 ---
 

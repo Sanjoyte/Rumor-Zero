@@ -1,7 +1,7 @@
 from django.contrib import admin, messages
 from django.utils.text import Truncator
 
-from apps.social.models import Comment, Follow, Like
+from apps.social.models import Bookmark, Comment, Follow, Like, Repost
 
 
 @admin.register(Follow)
@@ -103,3 +103,52 @@ class CommentAdmin(admin.ModelAdmin):
     @admin.action(description="Unhide selected comments", permissions=["hide"])
     def unhide_comments(self, request, queryset):
         self._set_hidden(request, queryset, False)
+
+
+@admin.register(Repost)
+class RepostAdmin(admin.ModelAdmin):
+    """Read-only: reposts change only through `social.services`, so the feed cache stays right."""
+
+    list_display = ("user", "post", "status_at_repost", "created_at")
+    list_filter = ("status_at_repost",)
+    search_fields = ("user__username",)
+    list_select_related = ("user", "post")
+    show_full_result_count = False
+    ordering = ("-created_at",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Bookmark)
+class BookmarkAdmin(admin.ModelAdmin):
+    """Read-only and **superusers only** (user decision 2026-10-10).
+
+    Bookmarks are private (ARCHITECTURE §4d): no moderator, whatever permissions Part 10 grants,
+    can open the list. A superuser can already read the database, so this adds no new reach.
+    """
+
+    list_display = ("user", "post", "created_at")
+    search_fields = ("user__username",)
+    list_select_related = ("user", "post")
+    show_full_result_count = False
+    ordering = ("-created_at",)
+
+    def has_view_permission(self, request, obj=None):
+        # With no view permission Django also leaves the model off the admin index.
+        return request.user.is_superuser
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
