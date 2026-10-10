@@ -8,3 +8,13 @@ class UserListPagination(TimestampCursorMixin, CursorPagination):
     """
 
     ordering = ("-created_at", "-id")
+
+
+class CommentPagination(TimestampCursorMixin, CursorPagination):
+    """Comments on a post, **oldest first** (`{results, next_cursor}`).
+
+    Ascending, so DRF filters on `created_at > position`; the mixin checks the position as for
+    the descending lists, and the id breaks ties.
+    """
+
+    ordering = ("created_at", "id")

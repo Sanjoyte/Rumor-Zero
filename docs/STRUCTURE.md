@@ -84,7 +84,11 @@ rumor-zero/
 │   │   │                            feed.py (Following feed: ids-only first-page cache, `bust_following_feed`), serializers.py (profile and
 │   │   │                            user-row objects), pagination.py (UserListPagination), exceptions.py (`cannot_follow_self`), views.py,
 │   │   │                            urls.py, read-only admin, tests (160)
-│   │   │                        7 Like, Comment; 7B Bookmark, Repost, mixed Following feed
+│   │   │                        ✅ 7 Like, Comment (migration 0002: the unique like pair, `deleted_at`, the partial `comments_post_visible_idx`),
+│   │   │                            engagement.py (`with_engagement`, `engagement_defaults`: the counts and `liked_by_me` on every post
+│   │   │                            list), services.py (like/unlike, add/delete comment), CommentPagination (oldest first), LikeView,
+│   │   │                            CommentListView, CommentDetailView, LikeAdmin and CommentAdmin (Hide/Unhide), tests (305 in all)
+│   │   │                        7B Bookmark, Repost, mixed Following feed
 │   │   ├── reports/             8   Report + windowed threshold
 │   │   ├── pipeline/            9   contract.py (dataclasses), clients.py (stub/http), routing.py (pure functions; imports
 │   │   │                            is_active_emergency from apps/posts/emergency.py), processor.py (SKIP LOCKED batch),
@@ -185,7 +189,9 @@ rumor-zero/
 │       │   │                        11C EmergencyChip, PinnedEmergencies; 11D PostStats
 │       │   ├── social/          ✅ 6 FollowButton, UserRow, ProfileHeader, ProfilePage, ProfilePosts, Connections, useProfile,
 │       │   │                        social-api.ts, profile-metadata.ts, messages.ts (+ test-helpers.tsx);
-│       │   │                        7 LikeButton, CommentList, CommentComposer;
+│       │   │                        ✅ 7 LikeButton, CommentCountLink, PostActions (the card's and the post page's action bar), CommentSection,
+│       │   │                            CommentComposer, CommentList, CommentItem, DeleteCommentModal, useComments (+ `append`/`remove` in
+│       │   │                            posts/useCursorFeed);
 │       │   │                        7B RepostButton, BookmarkButton, RepostHeader, UnavailablePostCard
 │       │   ├── bookmarks/       7B   BookmarkList
 │       │   ├── reports/         8    ReportModal

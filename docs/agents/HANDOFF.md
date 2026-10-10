@@ -6,20 +6,18 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **7 (Likes & comments): planned and approved 2026-10-10, not started.** Parts 0A, 0B, 0D, 0C, 1, 2, 3,
-  4, 5 and 6 are done (Part 6 committed as `15c1d8a`). Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3,
-  4, 5 and 6 CI have not run yet.**
+- **Part:** none. **Part 7 (Likes & comments) is done** (2026-10-10; built from the approved plan; every required
+  test and check green; `task.md` updated). Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6 and 7 are done. Part 1 CI is
+  green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6 and 7 CI have not run yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
-- **Next action:** **Implement Part 7 from the approved plan**
-  ([`part-7-likes-comments.md`](plans/part-7-likes-comments.md)), starting at its step 0 (`git status`,
-  `docker compose up -d` and confirm healthy: Postgres and Redis were **not running** on 2026-10-10).
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after planning).
-- **Phase:** planned and approved; no code written. The user commits the plan and this file.
+- **Owner:** none (Claude stopped after finishing Part 7; Part 7B is not started).
+- **Phase:** done, uncommitted. The user reviews and commits.
 - **Approved plan:**
   [`docs/agents/plans/part-7-likes-comments.md`](plans/part-7-likes-comments.md)
+  (status line now says IMPLEMENTED)
 - **Previous plans:**
   - [`part-6-profiles-follows-following-feed.md`](plans/part-6-profiles-follows-following-feed.md),
     implemented 2026-10-09 (committed as `15c1d8a`);
@@ -33,10 +31,51 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-10 by Claude (Sonnet 5.5), Part 7 planning.
+- **Last updated:** 2026-10-10 by Claude (Sonnet 5.5), Part 7 implementation.
 
 ## Completed checkpoints
 
+- 2026-10-10 (Claude, Sonnet 5.5): **Part 7 implemented** (uncommitted). Started from HEAD `3f8e174` ("Plan Part 7",
+  committed by the user), a clean tree that matched this file; Docker was already healthy, ports free.
+  - **Backend** (`backend/`):
+    - New: `apps/social/engagement.py` (`with_engagement`, `engagement_defaults`, `count_subquery`),
+      `migrations/0002_like_comment.py`, and 8 test files (`test_models_engagement`, `test_services_engagement`,
+      `test_api_like`, `test_api_comments`, `test_api_comment_create`, `test_api_comment_delete`,
+      `test_engagement_counts`, `test_admin_engagement`).
+    - Changed: `apps/social/{models,services,views,urls,serializers,pagination,feed,admin}.py` (`Like`, `Comment`; like,
+      comment and delete services; three views; `CommentPagination`; `load_posts(ids, viewer)`; `LikeAdmin`,
+      `CommentAdmin` with Hide/Unhide), `apps/posts/{models,serializers,views}.py` (`for_list(viewer)`, strict counts,
+      zeros on the 201, the shared `content_field()`), `apps/core/pagination.py` (docstring), tests
+      (`social/tests/factories.py`, `test_no_network.py`, `core/tests/test_pagination.py`).
+  - **Frontend** (`frontend/`):
+    - New in `src/features/social/`: `LikeButton`, `CommentCountLink`, `PostActions`, `CommentSection`, `CommentComposer`,
+      `CommentList`, `CommentItem`, `DeleteCommentModal`, `useComments` and a test for each (but the two thin ones).
+    - Changed: `social-api` (+`messages`) and their tests, `social/test-helpers`, `lib/api/types.ts` (`Comment`),
+      `features/posts/{PostCard,FeedList,PostDetail,useCursorFeed,test-helpers}` and their tests, `e2e/social.spec.ts`
+      (+3 tests), `e2e/posts.spec.ts` (three links on a card).
+  - **Docs:** ARCHITECTURE §2/§3/§8/§9/§10, ANALYSIS c-38, STRUCTURE, MEMORY (2 entries), `task.md` (criteria,
+    deviations, both status spots), the plan's status line, and `docs/test-command.md`: a "Part 7" section in
+    **both** guides (17 steps each) and one number in its intro line; nothing else touched.
+  - One migration (`social.0002_like_comment`), no new dependency, service or env variable; no env file was read
+    or edited; `design/` untouched.
+  - **User decisions and defaults** are in `task.md` Part 7 and the plan: hidden comments Django Admin only; own
+    comments soft-deleted (`deleted_at`); Hide **and Unhide**.
+  - **Found and fixed on the way:** `User.save` derives `is_staff` from `role` (a "staff can't hide" test passed for the
+    wrong reason); focus after posting needs an effect (a disabled fieldset drops it); adjacent inline spans make the
+    accessible name "Like3"; two mutation checks showed dead code (a redundant status test and a like patch that
+    nothing read), which was removed; a stray `verify_out.txt` and `verify_run.sh` from my own check script were
+    written to the repo root and deleted.
+  - **Test-command notes:**
+    - The section is `### Part 7` inside each guide.
+    - The file has **no comment marker** at its bottom (as in Parts 3 to 6): it ends with the last bullet of the
+      Windows Part 7 section. (The brief for this part asked to keep one; there is none to keep.)
+    - The Linux bash blocks of steps 3 to 12 were **extracted from the finished doc by script and run verbatim**
+      against live Django and `next dev`; their output was diffed against the doc's expected-output blocks (ids,
+      numbers in names and `Retry-After` seconds normalised): **all ten steps matched**. The cleanup command printed
+      `(86, {'social.Like': 4, 'social.Comment': 64, 'social.Follow': 1, 'account.EmailAddress': 6, 'posts.Post': 5,
+      'accounts.User': 6})` after each of two runs. The browser steps 13 to 16 were checked with headless Chromium
+      scripts (screenshots at 1280 and 390 px) and Django Admin with a scripted browser, plus the E2E suite, not by a
+      person.
 - 2026-10-10 (Claude, Sonnet 5.5): **Part 7 planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `15c1d8a` ("Implementation Part 6…", committed by the user), a clean tree. (The older
     text of this file said Part 6 was uncommitted; the user committed it in between.) `docker compose ps` showed
@@ -471,18 +510,74 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `15c1d8a` ("Implementation Part 6: Profiles, follows, Following feed", committed by the user).
-  **Uncommitted:** only this file and the new `docs/agents/plans/part-7-likes-comments.md` (planning session
-  2026-10-10; no code).
-- **Docker (Postgres 18 + Redis) was not running on 2026-10-10** (`docker compose ps` was empty): run
-  `docker compose up -d` before any backend test. No dev server is running; ports 3000/8000 were not checked.
-- The local database has `social.0001_initial` applied (as of the end of Part 6). The guide's `part6-*` test accounts and their posts and
-  follows were deleted at the end; accounts from the E2E and screenshot runs (`fan_*`, `star_*`, `post_*`,
-  `opinion_*`, `unverified_*`, `phone_*`, `shot_*`, …) and their posts and follows remain (Django Admin → Users
-  deletes them).
+- HEAD is `3f8e174` ("Plan Part 7", committed by the user). **Uncommitted:** the whole Part 7 implementation: 40
+  modified files (this file included) and 26 new ones: `backend/apps/social/engagement.py`, the `0002` migration, 8
+  backend test files and 16 files in `frontend/src/features/social/` (`git status --short -uall`).
+- Docker (Postgres 18 + Redis) is up; no dev server is running; ports 3000/8000 are free (the servers started for
+  the manual checks were stopped).
+- The local database has `social.0002_like_comment` applied. The guide's `part7-*` test accounts (and the throwaway
+  `part7_admin` superuser) with their posts, likes, follows and comments were deleted at the end; accounts from the
+  E2E runs (`fan_*`, `star_*`, `post_*`, …) and their data remain (Django Admin → Users deletes them).
 - Ignored artifacts from the checks: `backend/tmp/mail/*.log`, `frontend/test-results/`,
-  `frontend/playwright-report/`, and a production build in `frontend/.next/` made with an empty Google
-  client ID (the last `npm run build` before the CI-mode E2E run).
+  `frontend/playwright-report/`, and a production build in `frontend/.next/` made with an empty Google client ID
+  (the last `npm run build` before the CI-mode E2E runs). Scratch scripts and screenshots are in the session's
+  scratchpad, not the repo.
+
+## Validation of Part 7 (2026-10-10)
+
+- **Backend** (`backend/`, venv, Postgres + Redis up), each exit 0:
+  - `python -m pytest` → **1485 passed** (was 1336); `pytest apps/social` → **305 passed** (was 160): `test_models_engagement`
+    13, `test_services_engagement` 26, `test_api_like` 21, `test_api_comments` 22, `test_api_comment_create` 25,
+    `test_api_comment_delete` 13, `test_engagement_counts` 11, `test_admin_engagement` 13, `test_no_network` 3 (+1); the rest
+    unchanged. `apps/core/tests/test_pagination.py` +4 (an ascending list under `TimestampCursorMixin`).
+  - `ruff check .` → "All checks passed!"; `ruff format --check .` → "142 files already formatted".
+  - `makemigrations --check --dry-run` → "No changes detected"; `manage.py check` → no issues; `sqlmigrate social 0002`
+    reviewed (the check constraint, the unique pair, `comments_post_visible_idx` with `WHERE ("deleted_at" IS NULL AND NOT
+    "is_hidden")`, `likes_post_created_idx`, the author index).
+  - **Mutation checks** (a rule removed by hand, a test must fail), **23, all caught**: create instead of
+    `get_or_create`, the visible-post filter letting removed and deleted through, unlike skipping the deleted check, no
+    row lock on delete, hidden comments deletable, no author check, hidden and deleted comments counted, `liked_by_me`
+    ignoring the viewer, hidden and deleted comments listed, a comment POST without the verified-email permission, no
+    post visibility check on the list, the comment throttle on GET, the like throttle scope, newest-first order, `is_mine`
+    always false, the content limit at 501, the Hide permission always true, the Following feed ignoring the viewer, no
+    defaults on the 201, the detail ignoring the viewer.
+  - **EXPLAIN** (a rolled-back transaction, 300 users, 2,000 posts, 40,000 comments, 30,000 likes): the comment list is an
+    index-only scan of `comments_post_visible_idx`, the comment count a bitmap scan of it, the like count a bitmap scan of
+    `likes_post_created_idx`; a Recent page of 20 annotated posts reads both indexes 20 times (MEMORY).
+- **Frontend** (`frontend/`), each exit 0: `npm run lint`, `lint:tokens`, `typecheck`, `format:check`;
+  `npm test` → **106 files, 1410 tests passed** (was 99 / 1320); `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` (the same
+  routes; `/home` still `○`).
+  - **Mutation checks**, **34 run, 32 caught at once**: no optimistic flip, no rollback state or `onChange`, no
+    single-flight, an unverified user able to like, an unfilled liked glyph, no `aria-pressed`, no re-sync with the server,
+    the wrong failure toast, blank text allowed, UTF-16 counting, Cmd+Enter and Ctrl+Enter ignored, the draft not cleared
+    or lost on failure, no single-flight in the composer, untrimmed text, an unverified composer not locked, Delete on
+    everyone's comments, the count not raised or lowered, a deleted comment staying, a new comment not appended, fetching
+    before the session is known, appended before the pages, removals ignored, a 404 shown as an error on delete, the
+    wrong detail link, buttons below the stretched link, the wrong request body, the discussion on a removed post, the
+    bar showing the wrong liked state. The two survivors were equivalent (a redundant `status` test in `LikeButton` and a
+    like patch in `PostDetail` that nothing read): both were removed.
+- **E2E:** `npm run test:e2e` → **32 passed** (dev mode; 29 old + 3 new), five runs in a row, and `CI=1 npm run test:e2e`
+  after the build → 32 passed twice (against `next start`).
+- **Manual, recorded in `docs/test-command.md` Part 7** (the doc's Linux blocks of steps 3 to 12, extracted and run
+  verbatim; the diff against the doc's expected output was empty): likes (201 → 200, 401, 403 `email_unverified`, 404 for
+  unknown, malformed, removed and deleted posts, 204 every time, unlike on a removed post), the counts on the post page and
+  in Recent, profile posts and the Following feed (fresh on a cache hit), comments (201 with five keys, trimmed, 400 for
+  blank and 501, 500 emoji accepted, 401/403/404), the list (oldest first, `is_mine`, a page of two and the cursor, a
+  made-up cursor → 404, no list for a removed or deleted post), delete (401, 403 `not_author`, 204, 404, the row kept with
+  `deleted_at`), hide and unhide (gone from list and count, also for its author), 300 + 1 likes and 60 + 1 comments with
+  `Retry-After`, and the three EXPLAIN plans.
+  - Headless Chromium (screenshots at 1280 and 390 px): the heart and the count on a card (flip, rollback tested in
+    unit tests), the comment link, the post page's action row and discussion (post with Ctrl+Enter, delete with the
+    dialog, blank and 501 errors), an unverified user (dimmed heart and its toast, a locked composer), a visitor (login
+    links), **0 px horizontal overflow** on `/home`, on a post's page and with 300 characters typed at 390 px, and Django
+    Admin (the Comments list with its filters and actions, no Add button, Hide and Unhide with their banners and the public
+    list changing).
+- **Not run:**
+  - **The Windows (PowerShell) blocks** of the new section (written from the Part 1 to 6 patterns; no PowerShell on this
+    machine), and CI on GitHub (the user pushes).
+  - A person at a keyboard: the browser steps were driven by scripts. A pixel comparison with Stitch b1/b3 (layout and
+    classes compared by eye); a Workers CPU measurement of `/p/[id]` with the discussion (Part 18; it is client-only).
+  - `npm run build` was run with an empty Google client ID as in CI; the OpenNext/Workers build was not (Linux CI does that).
 
 ## Validation of Part 6 (2026-10-09)
 
@@ -790,17 +885,22 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-1. **User:** review the diff and the Part 6 section of `docs/test-command.md` (its Linux steps 3 to 10 take about
-   five minutes plus a 31 s wait in step 8; the browser steps 11 to 14 need a Next dev server, and the Following
-   cache check in step 8 needs `REDIS_URL` set). Then commit, and push so CI runs; report the CI result (Part 2's
-   to Part 6's jobs). Still open from Part 3: the real-Google check (`docs/test-command.md` Part 3, steps 7 and 8).
-2. **Next part:** Part 7 (likes and comments), from `task.md`. Fresh session (`/clear`), first `git status` and
-   `docker compose up -d`. It adds the counts and `*_by_me` to `PostSerializer` (the Following cache holds only ids,
-   so they will be fresh), the action bar on `PostCard` and `PostDetail`, and comments below the Sources list.
+1. **User:** review the diff and the Part 7 section of `docs/test-command.md` (its Linux steps 3 to 12 take about
+   five minutes; the browser steps 13 to 16 need a Next dev server, and step 16 needs your own superuser from Part
+   0A). Then commit, and push so CI runs; report the CI result (Part 2's to Part 7's jobs). Still open from Part 3:
+   the real-Google check (`docs/test-command.md` Part 3, steps 7 and 8).
+2. **Next part:** Part 7B (bookmarks and reposts), from `task.md` (it depends on Parts 6 and 7, both done). Fresh
+   session (`/clear`), first `git status` and `docker compose ps` (start the containers with
+   `docker compose up -d` if they are down). It adds `repost_count`, `reposted_by_me` and `bookmarked_by_me` to the same
+   `with_engagement` annotations (`apps/social/engagement.py`), the repost and bookmark buttons to `PostActions`, and
+   turns the Following cursor into `(activity_at, item id)`.
 
 ## Blockers or user decisions
 
 - None open.
+- User decisions for Part 7 (2026-10-10), now in ARCHITECTURE §2/§8/§9/§10 and ANALYSIS c-38: hidden comments are Django
+  Admin only (not in the API for staff either); deleting your own comment is a soft delete (`deleted_at`); CommentAdmin
+  has Hide **and Unhide**.
 - User decisions for Part 6 (2026-10-09), now in ARCHITECTURE §3/§9/§10 and ANALYSIS c-37: Recent is the first
   and default `/home` tab, Following the second (signed-in only); the Following cache holds only ids; `verified`
   and `FALSE` counters include deleted posts (not removed ones); author names and avatars link to profiles.
@@ -818,6 +918,28 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
   (createsuperuser + backfill migration); Turnstile fails closed; the `rz_session=1` hint cookie.
 - User decisions for 0C (2026-10-01), in ARCHITECTURE §10: the reduced logged-out shell; phones get a
   top bar plus five bottom tabs with an account sheet; marketing links only to existing pages.
+
+## Follow-ups noted during Part 7 (still open)
+
+- **Part 7B:** `repost_count`, `reposted_by_me` and `bookmarked_by_me` join `with_engagement` (`apps/social/engagement.py`;
+  `PostSerializer` reads them strictly like the like counts, and `engagement_defaults` sets their zeros); `PostActions`
+  gets the two buttons; the like button's local state means a repost made in one list isn't copied into another mounted
+  list either (same limit, same repair: a refetch).
+- **Part 8:** decide whether `counts_toward_threshold` ("≥1 post or comment") counts a soft-deleted comment (the
+  principle used for posts and the fact quota says it does; MEMORY).
+- **Part 10:** grant `social.change_comment` to the Moderators group (Hide/Unhide are already gated on it); the review
+  queues skip deleted comments; `moderation_actions` has no comment kind, so Hide/Unhide stay in Django's admin log
+  unless Part 10 adds one.
+- **Part 11D:** daily comment counts use the predicate of `comments_post_visible_idx` (not hidden, not deleted).
+- **Part 13:** `like` and `comment` notifications go in `social.services.like` / `add_comment` (the single write
+  paths); a deleted or hidden comment must not notify; `like` is de-duplicated per (recipient, actor, post).
+- **Part 14:** the data export includes comments (soft-deleted ones too?); account deletion cascades them (the author FK
+  has its own index).
+- **Part 16:** the `like` (300/h) and `comment` (60/h) rates are guesses; the counts are correlated subqueries (a stored
+  counter if a post reaches many thousands of likes); the cursor guard for any list still on the bare core pagination.
+- **Part 18:** a Workers CPU check of `/p/[id]` (the discussion is client-only, so the server side is unchanged).
+- **Minor:** a comment you add while older pages are unloaded stays last until they load; comment drafts aren't kept
+  across navigation; comments don't update live.
 
 ## Follow-ups noted during Part 6 (still open)
 

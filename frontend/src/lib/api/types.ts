@@ -63,6 +63,15 @@ export interface Post {
   created_at: string;
 }
 
+/** A comment on a post (ARCHITECTURE §9, Part 7): five keys, nothing about moderation. */
+export interface Comment {
+  id: string;
+  author: UserSummary;
+  content: string;
+  is_mine: boolean;
+  created_at: string;
+}
+
 /** A repost whose original was deleted or removed: "This post is no longer available". */
 export interface UnavailablePost {
   id: string;

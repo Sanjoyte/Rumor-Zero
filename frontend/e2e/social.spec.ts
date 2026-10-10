@@ -181,3 +181,108 @@ test("your own post shows in your Following tab at once, and your own profile ha
   await page.getByRole("button", { name: "Opinions" }).click();
   await expect(page.getByRole("article").filter({ hasText: text })).toBeVisible();
 });
+
+test("B likes and comments on A's post; counts survive a reload; B takes both back", async () => {
+  const text = `I think ${marker("engage")}`;
+  const remark = `Well put ${marker("remark")}`;
+  await postOpinion(star.page, text);
+
+  // B finds the post in Recent and likes it from the card; the glyph and count flip at once.
+  await fan.page.goto("/home");
+  const card = fan.page.getByRole("article").filter({ hasText: text });
+  await expect(card).toBeVisible(NAVIGATION);
+  await card.getByRole("button", { name: "Like 0" }).click();
+  await expect(card.getByRole("button", { name: "Like 1" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  // A reload brings the server's numbers: the like stuck, and it is B's.
+  await fan.page.reload();
+  const reloaded = fan.page.getByRole("article").filter({ hasText: text });
+  await expect(reloaded.getByRole("button", { name: "Like 1" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  // A sees one like on their own post, not marked as theirs.
+  await star.page.goto("/home");
+  const own = star.page.getByRole("article").filter({ hasText: text });
+  await expect(own.getByRole("button", { name: "Like 1" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+
+  // B opens the post and comments (Ctrl+Enter), then the heading and counts follow.
+  await reloaded.getByRole("link", { name: "Comments 0" }).click();
+  await expect(fan.page).toHaveURL(/\/p\/[0-9a-f-]{36}#comments$/, NAVIGATION);
+  await expect(fan.page.getByRole("heading", { name: "Comments (0)" })).toBeVisible(NAVIGATION);
+  await expect(fan.page.getByText("No comments yet")).toBeVisible();
+  const box = fan.page.getByRole("textbox", { name: "Add a comment" });
+  await box.fill(remark);
+  await box.press("Control+Enter");
+  await expect(fan.page.getByRole("heading", { name: "Comments (1)" })).toBeVisible();
+  const mine = fan.page.getByRole("article").filter({ hasText: remark });
+  await expect(mine).toBeVisible();
+  await expect(box).toHaveValue("");
+
+  // A opens the same post: B's comment is there, with no Delete button for A.
+  await star.page.goto(fan.page.url().replace(/#.*/, ""));
+  const theirs = star.page.getByRole("article").filter({ hasText: remark });
+  await expect(theirs).toBeVisible(NAVIGATION);
+  await expect(theirs.getByRole("button", { name: "Delete" })).toHaveCount(0);
+
+  // B deletes the comment after a confirmation; it is gone for A too after a reload.
+  await mine.getByRole("button", { name: "Delete" }).click();
+  await fan.page
+    .getByRole("dialog", { name: "Delete this comment?" })
+    .getByRole("button", { name: "Delete comment" })
+    .click();
+  await expect(fan.page.getByRole("heading", { name: "Comments (0)" })).toBeVisible();
+  await expect(fan.page.getByText(remark)).toHaveCount(0);
+  await star.page.reload();
+  await expect(star.page.getByRole("heading", { name: "Comments (0)" })).toBeVisible(NAVIGATION);
+  await expect(star.page.getByText(remark)).toHaveCount(0);
+
+  // B takes the like back from the post page.
+  await fan.page.getByRole("button", { name: "Like 1" }).click();
+  await expect(fan.page.getByRole("button", { name: "Like 0" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+});
+
+test("a visitor sees the counts and is sent to log in to like or comment", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  const text = `I think ${marker("visitor-like")}`;
+  await postOpinion(star.page, text);
+  await page.goto("/home");
+  const card = page.getByRole("article").filter({ hasText: text });
+  await expect(card).toBeVisible(NAVIGATION);
+  await expect(card.getByRole("link", { name: "Like 0" })).toHaveAttribute(
+    "href",
+    /^\/login\?next=%2Fp%2F[0-9a-f-]{36}$/,
+  );
+  await card.getByRole("link", { name: "Comments 0" }).click();
+  await expect(page.getByRole("heading", { name: "Comments (0)" })).toBeVisible(NAVIGATION);
+  await expect(page.getByRole("link", { name: "Log in to comment" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Add a comment" })).toHaveCount(0);
+});
+
+test("the post page and its discussion fit a phone", async () => {
+  const page = fan.page;
+  await page.setViewportSize({ width: 390, height: 844 });
+  const text = `I think ${marker("phone-like")}`;
+  await postOpinion(star.page, text);
+  await page.goto("/home");
+  await page
+    .getByRole("article")
+    .filter({ hasText: text })
+    .getByRole("link", { name: "Comments 0" })
+    .click();
+  await expect(page.getByRole("heading", { name: "Comments (0)" })).toBeVisible(NAVIGATION);
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
+  await page.setViewportSize({ width: 1280, height: 900 });
+});

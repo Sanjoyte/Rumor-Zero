@@ -35,6 +35,13 @@ export interface CursorFeed<T> {
   retry: () => void;
   /** Put an item at the top (a post just created). Kept apart from the loaded pages. */
   prepend: (item: T) => void;
+  /**
+   * Put an item at the end (a comment just made: the newest of an oldest-first list). Kept apart
+   * from the loaded pages; when a later page brings the same item, that copy wins its place.
+   */
+  append: (item: T) => void;
+  /** Drop the item with this key (a comment just deleted) until the next fresh load. */
+  remove: (key: string) => void;
 }
 
 interface State<T> {
@@ -44,6 +51,10 @@ interface State<T> {
   pages: T[];
   /** Items added at the top; kept apart so one made while page 1 loads survives its arrival. */
   prepended: T[];
+  /** Items added at the end; kept apart for the same reason. */
+  appended: T[];
+  /** Keys dropped by `remove`; cleared by every fresh load, whose answer already leaves them out. */
+  removed: string[];
   nextCursor: string | null;
   loadingMore: boolean;
   moreError: unknown;
@@ -56,7 +67,9 @@ type Action<T> =
   | { type: "more-start"; generation: number }
   | { type: "more-loaded"; generation: number; page: CursorPage<T> }
   | { type: "more-failed"; generation: number; error: unknown }
-  | { type: "prepend"; item: T };
+  | { type: "prepend"; item: T }
+  | { type: "append"; item: T }
+  | { type: "remove"; key: string };
 
 function initialState<T>(): State<T> {
   return {
@@ -65,6 +78,8 @@ function initialState<T>(): State<T> {
     error: null,
     pages: [],
     prepended: [],
+    appended: [],
+    removed: [],
     nextCursor: null,
     loadingMore: false,
     moreError: null,
@@ -79,9 +94,14 @@ function reducer<T>(state: State<T>, action: Action<T>): State<T> {
         generation: action.generation,
         phase: "loading",
         prepended: action.clearPrepended ? [] : state.prepended,
+        appended: action.clearPrepended ? [] : state.appended,
       };
     case "prepend":
       return { ...state, prepended: [action.item, ...state.prepended] };
+    case "append":
+      return { ...state, appended: [...state.appended, action.item] };
+    case "remove":
+      return { ...state, removed: [...state.removed, action.key] };
     default:
   }
   // Everything else answers a request: ignore it if a newer load has started since.
@@ -113,7 +133,8 @@ function reducer<T>(state: State<T>, action: Action<T>): State<T> {
 /**
  * A cursor-paginated list with Load more (ARCHITECTURE §9): the first page loads when the session
  * is known, later pages append, and an item added at the top (a post just created) is never
- * repeated or lost, whatever order things arrive in. Never loads two pages at once.
+ * repeated or lost, whatever order things arrive in; the same goes for one added at the end or
+ * removed. Never loads two pages at once.
  */
 export function useCursorFeed<T>(options: UseCursorFeedOptions<T>): CursorFeed<T> {
   const { enabled, resetKey } = options;
@@ -177,18 +198,20 @@ export function useCursorFeed<T>(options: UseCursorFeedOptions<T>): CursorFeed<T
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   const prepend = useCallback((item: T) => dispatch({ type: "prepend", item }), []);
+  const append = useCallback((item: T) => dispatch({ type: "append", item }), []);
+  const remove = useCallback((key: string) => dispatch({ type: "remove", key }), []);
 
   const items = useMemo(() => {
-    const seen = new Set<string>();
+    const seen = new Set<string>(state.removed);
     const out: T[] = [];
-    for (const item of [...state.prepended, ...state.pages]) {
+    for (const item of [...state.prepended, ...state.pages, ...state.appended]) {
       const key = keyOf(item);
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(item);
     }
     return out;
-  }, [state.prepended, state.pages, keyOf]);
+  }, [state.prepended, state.pages, state.appended, state.removed, keyOf]);
 
   return {
     items,
@@ -200,5 +223,7 @@ export function useCursorFeed<T>(options: UseCursorFeedOptions<T>): CursorFeed<T
     loadMore,
     retry,
     prepend,
+    append,
+    remove,
   };
 }

@@ -7,12 +7,17 @@ vi.mock("@/lib/api/client", async (importOriginal) => ({
 }));
 
 import {
+  createComment,
+  deleteComment,
+  fetchComments,
   fetchConnections,
   fetchFollowingFeed,
   fetchProfile,
   fetchUserPosts,
   followUser,
+  likePost,
   unfollowUser,
+  unlikePost,
 } from "./social-api";
 
 beforeEach(() => {
@@ -93,5 +98,36 @@ describe("social-api", () => {
     ]) {
       expect(JSON.stringify(call)).not.toContain("token");
     }
+  });
+
+  it("likes and unlikes a post, encoding the id", async () => {
+    client.post.mockResolvedValue({ liked: true });
+    client.del.mockResolvedValue(undefined);
+    expect(await likePost("p/1")).toEqual({ liked: true });
+    expect(client.post).toHaveBeenCalledWith("/v1/posts/p%2F1/like/");
+    await unlikePost("p1");
+    expect(client.del).toHaveBeenCalledWith("/v1/posts/p1/like/");
+  });
+
+  it("reads a post's comments with the cursor, as items and nextCursor", async () => {
+    client.get.mockResolvedValue({ results: [{ id: "c1" }], next_cursor: "n2" });
+    const signal = new AbortController().signal;
+    expect(await fetchComments("p1", null, signal)).toEqual({
+      items: [{ id: "c1" }],
+      nextCursor: "n2",
+    });
+    expect(client.get).toHaveBeenCalledWith("/v1/posts/p1/comments/", { signal });
+    await fetchComments("p1", "a b");
+    expect(client.get).toHaveBeenLastCalledWith("/v1/posts/p1/comments/?cursor=a+b", {
+      signal: undefined,
+    });
+  });
+
+  it("creates a comment with its text and deletes one by id", async () => {
+    client.post.mockResolvedValue({ id: "c9" });
+    expect(await createComment("p1", "Hello")).toEqual({ id: "c9" });
+    expect(client.post).toHaveBeenCalledWith("/v1/posts/p1/comments/", { content: "Hello" });
+    await deleteComment("c9");
+    expect(client.del).toHaveBeenCalledWith("/v1/comments/c9/");
   });
 });

@@ -36,10 +36,9 @@ class SourcesField(serializers.Field):
         return [{"value": item, "kind": source_kind(item)} for item in value]
 
 
-class PostCreateSerializer(serializers.Serializer):
-    """`POST /api/v1/posts/`. Undeclared fields (`status`, `author`, …) are ignored."""
-
-    content = serializers.CharField(
+def content_field():
+    """The text of a post or a comment: trimmed, 1 to 500 code points, with one set of messages."""
+    return serializers.CharField(
         max_length=MAX_CONTENT_LENGTH,
         error_messages={
             "required": "Write something first.",
@@ -48,6 +47,12 @@ class PostCreateSerializer(serializers.Serializer):
             "max_length": f"Keep it to {MAX_CONTENT_LENGTH} characters.",
         },
     )
+
+
+class PostCreateSerializer(serializers.Serializer):
+    """`POST /api/v1/posts/`. Undeclared fields (`status`, `author`, …) are ignored."""
+
+    content = content_field()
     post_type = serializers.ChoiceField(
         choices=PostType.choices,
         error_messages={
@@ -91,7 +96,9 @@ def status_item(post):
 class PostSerializer(serializers.BaseSerializer):
     """The post object of ARCHITECTURE §9, for lists, the detail page and the 201 answer.
 
-    Fields later parts fill (counts, `*_by_me`, appeals) are `0`, `false` or `null` for now. Nothing
+    `like_count`, `comment_count` and `liked_by_me` come from `PostQuerySet.for_list(viewer)` (a
+    new post gets `engagement_defaults`); the fields later parts fill (reposts, bookmarks, reports,
+    appeals) are `0`, `false` or `null` for now. Nothing
     internal leaks: no `flagged_reason`, pipeline fields, `report_count` or moderation fields.
     **A removed post is a tombstone for everyone but its author** (user decision 2026-10-09): the
     same keys, with `content`, `sources`, `verdict_note`, `confidence_score` and `verdict_source`
@@ -120,10 +127,10 @@ class PostSerializer(serializers.BaseSerializer):
             "confidence_score": None if tombstone else shown_confidence(post),
             "verdict_source": None if tombstone else post.verdict_source,
             "verdict_note": "" if tombstone else post.verdict_note,
-            "like_count": 0,
-            "comment_count": 0,
+            "like_count": post.like_count,
+            "comment_count": post.comment_count,
             "repost_count": 0,
-            "liked_by_me": False,
+            "liked_by_me": post.liked_by_me,
             "reposted_by_me": False,
             "bookmarked_by_me": False,
             "reported_by_me": False,

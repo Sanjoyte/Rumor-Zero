@@ -1,15 +1,18 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import type { FeedItem, Post } from "@/lib/api/types";
 import { FeedList } from "./FeedList";
-import { feedEntry, makePost } from "./test-helpers";
+import { feedEntry, makePost, renderWithSessionAndToast } from "./test-helpers";
 import type { CursorFeed } from "./useCursorFeed";
 
 const post = (id: string, overrides: Partial<Post> = {}) =>
   makePost({ id, content: `Content of ${id}`, is_mine: false, ...overrides });
 const entry = feedEntry;
+
+// The cards carry like buttons (Part 7), which need the session and the toast region.
+const render = (ui: React.ReactElement) => renderWithSessionAndToast(ui, "verified");
 
 function feedWith(overrides: Partial<CursorFeed<FeedItem>> = {}): CursorFeed<FeedItem> {
   return {
@@ -22,6 +25,8 @@ function feedWith(overrides: Partial<CursorFeed<FeedItem>> = {}): CursorFeed<Fee
     loadMore: vi.fn(),
     retry: vi.fn(),
     prepend: vi.fn(),
+    append: vi.fn(),
+    remove: vi.fn(),
     ...overrides,
   };
 }
@@ -190,5 +195,35 @@ describe("FeedList", () => {
     );
     expect(screen.queryByText("Follow people first")).toBeNull();
     expect(screen.getByText(/Content of a/)).toBeInTheDocument();
+  });
+});
+
+describe("FeedList action bars (Part 7)", () => {
+  it("puts a like button and a comment link, with the real counts, on each post card", async () => {
+    const items = [
+      entry(post("a", { like_count: 3, comment_count: 7, liked_by_me: true })),
+      entry(post("b")),
+    ];
+    render(<FeedList feed={feedWith({ items })} />);
+    expect(await screen.findByRole("button", { name: "Like 3" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("link", { name: "Comments 7" })).toHaveAttribute(
+      "href",
+      "/p/a#comments",
+    );
+    expect(screen.getByRole("button", { name: "Like 0" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("link", { name: "Comments 0" })).toHaveAttribute(
+      "href",
+      "/p/b#comments",
+    );
+  });
+
+  it("has no bar on a removed post's tombstone card", () => {
+    const items = [entry(post("a", { status: "removed", like_count: 9 }))];
+    render(<FeedList feed={feedWith({ items })} />);
+    expect(screen.queryByRole("button", { name: /Like/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Comments/ })).toBeNull();
   });
 });

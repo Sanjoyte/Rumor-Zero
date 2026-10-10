@@ -18,6 +18,8 @@ import type { Post } from "@/lib/api/types";
 import { cn } from "@/lib/cn";
 import { formatFullDateTime } from "@/lib/format";
 import { stripeTone } from "@/lib/post-display";
+import { CommentSection } from "@/features/social/CommentSection";
+import { PostActions } from "@/features/social/PostActions";
 import { CopyLinkButton } from "./CopyLinkButton";
 import { DeletePostModal } from "./DeletePostModal";
 import { SourceList } from "./SourceList";
@@ -79,8 +81,8 @@ function AuthorRow({ post }: { post: Post }) {
 
 /**
  * `/p/[id]` (Stitch b3: claim header, author row, verdict, sources, actions). The claim and its
- * status arrive server-rendered; the rest is client-side. Part 7 adds comments, 7B repost and
- * bookmark, 8 report, 11 appeal, 11D stats.
+ * status arrive server-rendered; the rest is client-side, including the like button and the
+ * discussion (Part 7). 7B adds repost and bookmark, 8 report, 11 appeal, 11D stats.
  */
 export function PostDetail({ id, initial }: { id: string; initial: Post | null }) {
   const router = useRouter();
@@ -200,7 +202,14 @@ export function PostDetail({ id, initial }: { id: string; initial: Post | null }
           {"”"}
         </h1>
         <AuthorRow post={post} />
-        <div className="flex flex-wrap items-center gap-space-sm border-t border-outline-variant/30 pt-space-md">
+        <div className="flex flex-wrap items-center gap-x-space-lg gap-y-space-sm border-t border-outline-variant/30 pt-space-md">
+          <PostActions
+            variant="detail"
+            postId={post.id}
+            liked={post.liked_by_me}
+            likeCount={post.like_count}
+            commentCount={post.comment_count}
+          />
           <CopyLinkButton postId={post.id} />
           {post.is_mine && (
             <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
@@ -212,6 +221,15 @@ export function PostDetail({ id, initial }: { id: string; initial: Post | null }
       </Card>
       <VerdictBlock post={post} />
       {isFact && <SourceList sources={post.sources} />}
+      {post.status !== "removed" && (
+        // A removed post has no discussion (its API answers 404), even for its author.
+        <CommentSection
+          key={post.id}
+          postId={post.id}
+          count={post.comment_count}
+          onCountChange={(count) => patch({ comment_count: count })}
+        />
+      )}
       {post.is_mine && (
         <DeletePostModal
           open={confirmDelete}

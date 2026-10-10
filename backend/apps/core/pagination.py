@@ -61,7 +61,8 @@ class CursorPagination(pagination.CursorPagination):
 
 
 class TimestampCursorMixin:
-    """For a list ordered by a timestamp first (`-created_at`): check the cursor's position.
+    """For a list ordered by a timestamp first (`-created_at`, or `created_at` for comments):
+    check the cursor's position.
 
     DRF passes the position straight into a `created_at__lt=…` filter, so a crafted cursor would
     raise Django's ValidationError and answer 500. Put it before `CursorPagination` in the bases.

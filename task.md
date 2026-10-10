@@ -91,7 +91,7 @@ not let the review expand the part's scope without user approval.
 | 4 | Posts: composer + Recent feed | 1 | [x] Done (2026-10-09) |
 | 5 | Post detail, sharing, deletion, status polling | 4 | [x] Done (2026-10-09) |
 | 6 | Profiles, follows, Following feed | 4 | [x] Done (2026-10-09) |
-| 7 | Likes & comments | 5 | [ ] |
+| 7 | Likes & comments | 5 | [x] Done (2026-10-10) |
 | 7B | Bookmarks & reposts | 6, 7 | [ ] |
 | 8 | Reporting & threshold | 5 | [ ] |
 | 9 | Fact-check pipeline stub + routing | 8 | [ ] |
@@ -803,7 +803,7 @@ All three jobs run on test values only; no secrets.
 ---
 
 ## Part 7: Likes & comments
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-10)
 **Goal:** likes with DB-enforced uniqueness and flat comments (guide §3.3, §9).
 **Depends on:** 5.
 **Stitch files to convert:** `b3_post_detail_forensic_proof` (discussion section: composer + list; no Reply, no comment IDs or likes); action bars in `b1_home_feed` and `a1_logged_out_home` (like and comment here; repost and bookmark in 7B).
@@ -822,10 +822,35 @@ All three jobs run on test values only; no secrets.
 **API endpoints:** the like and comment endpoints above.
 
 **Acceptance criteria**
-- [ ] Like toggling is idempotent and counts stay correct under concurrent requests
-- [ ] Unverified users get 403; comments over 500 chars are rejected
-- [ ] Hidden comments disappear for everyone but staff
-- [ ] Feed queries stay constant with annotations
+- [x] Like toggling is idempotent and counts stay correct under concurrent requests (201 then 200, 204 always; `get_or_create`; threaded tests: two simultaneous likes by one user make one row, six users are all counted, two simultaneous comment deletes give one success)
+- [x] Unverified users get 403; comments over 500 chars are rejected (403 `email_unverified` for likes and comments, 400 "Keep it to 500 characters." for 501 code points; an emoji counts as one)
+- [x] Hidden comments disappear for everyone but staff (in no API list and no count for anyone, staff included; staff see them in Django Admin, where Hide and Unhide are actions; user decision 2026-10-10)
+- [x] Feed queries stay constant with annotations (Recent 1 anonymous / 2 signed in, profile posts 2 / 3, the Following feed 3 on a miss, the comment list 2 / 3, each pinned at 3 and 20 rows)
+
+**Deviations and decisions (plan approved 2026-10-10; built 2026-10-10; recorded in ARCHITECTURE §2/§3/§8/§9/§10, ANALYSIS c-38, STRUCTURE, MEMORY):**
+- **User decisions (2026-10-10):**
+  - **Hidden comments are Django Admin only** (not in the API for staff either).
+  - **Deleting your own comment is a soft delete**: a new `comments.deleted_at` column (ARCHITECTURE §2 had none), like posts (D6).
+  - **CommentAdmin has Hide and Unhide** (this part said only "Hide").
+- **Defaults approved with the plan:** like is 201 / 200 / 204 with `{"liked": true}`; likes and comments need a post the public can see (removed, deleted, unknown and malformed ids are a JSON 404; pending and under review are allowed); unlike works on a removed post; comments are oldest first on `(created_at, id)`, five keys, `comment` throttle on POST only; the counts are correlated subqueries added by `PostQuerySet.for_list(viewer)`; one partial index `comments_post_visible_idx` replaces §2's plain `(post, created_at)`; `LikeButton` mirrors `FollowButton` with local state; `PostCard` takes an `actions` node; comments are fetched by the page, not server-rendered; the new E2E tests join `social.spec.ts` (no new sign-up).
+- **Built differently from the plan:**
+  - `PostActions` has no `onLikeChange` prop and `PostDetail` doesn't mirror the like into its post: a mutation check showed nothing read it (the button keeps its own state). `LikeButton`'s own `onChange` stays, tested, for callers that need it.
+  - `LikeButton` tests `!user` only (the `anonymous` status check was redundant, found by a mutation check).
+  - The accessible name is one `sr-only` span ("Like 3"); the visible label and count are `aria-hidden` (adjacent inline spans read "Like3").
+  - `_count` moved from `social/serializers.py` into `social/engagement.py` (`count_subquery`), and `content_field()` was extracted from `PostCreateSerializer` so comments share the posts' messages.
+  - The composer is a plain `Textarea` with a counter, not Stitch's box with the textarea inside it (the field already has the secondary focus border).
+  - Test helper `renderWithSessionAndToast` was added (`FeedList` cards now need the session and the toast region).
+- **Found while building (all handled):**
+  - `User.save` derives `is_staff` from `role`, so a test user made with `is_staff=True` was silently not staff (the "staff can't hide" test passed for the wrong reason until it used `role=Role.MODERATOR`).
+  - After posting, focus must be restored in an effect: a disabled `fieldset` drops it and `finally` runs while the DOM is still disabled.
+  - The accessible-name trap above; Playwright's `getByText` matches a textarea holding that text (MEMORY).
+  - The icon glyphs `favorite` and `chat_bubble` are not in DESIGN.md's "one glyph per concept" list (ANALYSIS c-38).
+- **Not done (later parts):**
+  - Reposts, bookmarks (7B; `repost_count` and the other `*_by_me` stay 0 / false), reports (8), notifications for likes and comments (13; the services are the single write path to hook into, and a deleted or hidden comment must not notify).
+  - Part 8 must decide whether `counts_toward_threshold` ("≥1 post or comment") counts a soft-deleted comment (the principle used for posts says it does). Part 10 grants `social.change_comment` to the Moderators group (Hide and Unhide are already gated on it) and its review queues skip deleted comments. 11D's daily comment counts must use the same predicate as the partial index.
+  - Part 16: the `like` and `comment` rates are guesses; the counts are correlated subqueries (a stored counter if a post reaches many thousands of likes); the cursor guard for any list still on the bare core pagination. Part 18: a Workers CPU check of `/p/[id]` (the discussion is client-only, so the server side is unchanged).
+  - Known limits: a like made in one list isn't copied into another mounted list showing the same post (Recent and Following on `/home`; every route change refetches); comment drafts aren't kept across navigation; comments don't update live; a comment you add while older pages are unloaded stays last until they load.
+- **Verified:** see HANDOFF (backend 1485 tests, frontend 1410, E2E 32 in dev and CI mode, 23 backend and 34 frontend mutation checks, an EXPLAIN of the comment and like queries, the Linux blocks of `docs/test-command.md` Part 7 extracted from the doc and run verbatim, a scripted-browser check of the feed, the post page, the phone width and Django Admin). The PowerShell blocks of that section were not run on Windows. CI itself runs when you push.
 
 **Required tests:** constraint and race tests, API permissions, query counts, frontend components; E2E: like + comment on a post.
 

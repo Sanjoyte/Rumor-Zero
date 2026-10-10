@@ -1,8 +1,11 @@
 # Plan: Part 7, Likes & comments
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-10, together with the three decisions and the
-  defaults below. Saved here and linked from `HANDOFF.md`. Not yet implemented. Drafted 2026-10-10 by Claude
-  (Sonnet 5.5).
+  defaults below. Saved here and linked from `HANDOFF.md`. **IMPLEMENTED 2026-10-10** (Claude, Sonnet 5.5).
+  Deviations: see `task.md` Part 7 and `docs/agents/HANDOFF.md` (`PostActions` has no `onLikeChange` and `PostDetail`
+  doesn't mirror the like; `LikeButton` tests `!user` only; the accessible name is one `sr-only` span;
+  `count_subquery` moved into `engagement.py` and `content_field()` was shared; a plain `Textarea` instead of Stitch's
+  boxed composer; `renderWithSessionAndToast` added). Drafted 2026-10-10 by Claude (Sonnet 5.5).
 - **Implement with:** Sonnet 5.5 · medium (task.md).
 - **Evidence (read-only):** HANDOFF, MEMORY, `task.md` Part 7, ARCHITECTURE §2/§3/§7/§8/§9/§10, ANALYSIS (b3/b1/a1
   rows, "Like", "Comments"), STRUCTURE, Stitch a1/b1/b3, DESIGN.md, and two Explore passes over the backend

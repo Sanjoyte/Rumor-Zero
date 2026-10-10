@@ -18,6 +18,17 @@ vi.mock("./posts-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./posts-api")>()),
   ...api,
 }));
+const social = vi.hoisted(() => ({
+  fetchComments: vi.fn(),
+  likePost: vi.fn(),
+  unlikePost: vi.fn(),
+  createComment: vi.fn(),
+  deleteComment: vi.fn(),
+}));
+vi.mock("@/features/social/social-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/social/social-api")>()),
+  ...social,
+}));
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => "/p/x" }));
 
@@ -46,6 +57,9 @@ beforeEach(() => {
     next_slot_at: null,
   });
   api.fetchStatuses.mockResolvedValue([]);
+  social.fetchComments.mockResolvedValue({ items: [], nextCursor: null });
+  social.likePost.mockResolvedValue({ liked: true });
+  social.unlikePost.mockResolvedValue(undefined);
 });
 
 function renderDetail(initial: ReturnType<typeof fact> | null, kind: SessionKind = "anonymous") {
@@ -341,5 +355,76 @@ describe("PostDetail author link (Part 6)", () => {
   it("links the author on a removed post's tombstone too (the author is public)", () => {
     renderDetail(fact({ status: "removed", content: "", sources: [] }));
     expect(screen.getByRole("link", { name: /Ada/ })).toHaveAttribute("href", "/u/ada");
+  });
+});
+
+describe("PostDetail likes and comments (Part 7)", () => {
+  const comment = (overrides = {}) => ({
+    id: "c-1",
+    author: { id: "u-3", username: "cy", display_name: "Cy Lane", avatar_url: null },
+    content: "A fair point.",
+    is_mine: false,
+    created_at: "2026-10-08T11:00:00Z",
+    ...overrides,
+  });
+
+  it("shows the like button and comment link in the action row, and the discussion below the sources", async () => {
+    social.fetchComments.mockResolvedValue({ items: [comment()], nextCursor: null });
+    renderDetail(fact({ like_count: 4, comment_count: 1 }), "anonymous");
+    expect(screen.getByRole("link", { name: "Like 4" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Comments 1" })).toHaveAttribute("href", "#comments");
+    expect(screen.getByRole("heading", { name: "Comments (1)" })).toBeInTheDocument();
+    expect(await screen.findByText("A fair point.")).toBeInTheDocument();
+    const sources = screen.getByRole("heading", { name: "Sources (2)" });
+    const comments = screen.getByRole("heading", { name: "Comments (1)" });
+    expect(
+      sources.compareDocumentPosition(comments) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("likes from the page, and the heading and button follow", async () => {
+    api.fetchPost.mockResolvedValue(fact({ is_mine: false, like_count: 4 }));
+    renderDetail(fact({ like_count: 4 }), "verified");
+    await userEvent.click(await screen.findByRole("button", { name: "Like 4" }));
+    expect(social.likePost).toHaveBeenCalledWith(ID);
+    expect(await screen.findByRole("button", { name: "Like 5" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("takes the signed-in view's liked state when the personal fetch lands", async () => {
+    api.fetchPost.mockResolvedValue(fact({ like_count: 4, liked_by_me: true }));
+    renderDetail(fact({ like_count: 4 }), "verified");
+    expect(await screen.findByRole("button", { name: "Like 4" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("counts a new comment in the heading and the action row, and a deleted one back out", async () => {
+    social.createComment.mockResolvedValue(comment({ id: "mine", content: "Mine", is_mine: true }));
+    social.deleteComment.mockResolvedValue(undefined);
+    api.fetchPost.mockResolvedValue(fact());
+    renderDetail(fact(), "verified");
+    await userEvent.type(await screen.findByRole("textbox", { name: "Add a comment" }), "Mine");
+    await userEvent.click(screen.getByRole("button", { name: "Comment" }));
+    expect(await screen.findByRole("heading", { name: "Comments (1)" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Comments 1" })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Delete comment" }));
+    expect(await screen.findByRole("heading", { name: "Comments (0)" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Comments 0" })).toBeInTheDocument();
+  });
+
+  it("has no discussion on a removed post's tombstone, and none for its author either", async () => {
+    const removed = fact({ status: "removed", content: "" });
+    renderDetail(removed, "anonymous");
+    expect(screen.queryByRole("heading", { name: /Comments/ })).toBeNull();
+    api.fetchPost.mockResolvedValue(fact({ status: "removed", is_mine: true }));
+    renderDetail(removed, "verified");
+    await screen.findByText(/Only you can see this text/);
+    expect(screen.queryByRole("heading", { name: /Comments/ })).toBeNull();
+    expect(social.fetchComments).not.toHaveBeenCalled();
   });
 });

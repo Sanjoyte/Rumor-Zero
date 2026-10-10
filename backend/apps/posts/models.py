@@ -62,9 +62,16 @@ class PostQuerySet(models.QuerySet):
         """What every public list shows: not deleted by the author, not removed by a moderator."""
         return self.not_deleted().exclude(status=PostStatus.REMOVED)
 
-    def for_list(self):
-        """One query for a list of cards: the author joined in, the raw pipeline blob left out."""
-        return self.select_related("author").defer("pipeline_result")
+    def for_list(self, viewer=None):
+        """One query for a list of cards: the author joined in, the raw pipeline blob left out,
+        and the likes and comments counted (`liked_by_me` for a signed-in `viewer`).
+
+        Every list goes through here, so none can forget the counts. The import is local because
+        `social` depends on `posts` (its models point at `Post`); this is the one way back.
+        """
+        from apps.social.engagement import with_engagement
+
+        return with_engagement(self.select_related("author").defer("pipeline_result"), viewer)
 
 
 def _in_or_null(field, choices):

@@ -107,7 +107,12 @@ test("post an opinion → OPINION in italic serif, no status badge and no source
   await expect(card.getByRole("blockquote")).toHaveClass(/italic/);
   await expect(card.getByText("CHECKING FACTS…")).toHaveCount(0);
   // Part 5: the claim links to the post's own page. Part 6: the author links to their profile.
-  await expect(card.getByRole("link")).toHaveCount(2);
+  // Part 7: the comment count links to its discussion.
+  await expect(card.getByRole("link")).toHaveCount(3);
+  await expect(card.getByRole("link", { name: "Comments 0" })).toHaveAttribute(
+    "href",
+    /^\/p\/[0-9a-f-]{36}#comments$/,
+  );
   await expect(card.getByRole("link", { name: /I think/ })).toHaveAttribute(
     "href",
     /^\/p\/[0-9a-f-]{36}$/,

@@ -5,7 +5,8 @@ import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { LoadMore } from "@/components/ui/LoadMore";
-import type { FeedItem } from "@/lib/api/types";
+import type { FeedItem, Post } from "@/lib/api/types";
+import { PostActions } from "@/features/social/PostActions";
 import { PostCard } from "./PostCard";
 import { PostCardSkeleton } from "./PostCardSkeleton";
 import { feedErrorMessage, POST_MESSAGES } from "./messages";
@@ -13,6 +14,24 @@ import { toPostCardProps } from "./post-card-props";
 import { applyStatus, type StatusOverlay } from "./status-overlay";
 import { feedItemKey } from "./posts-api";
 import type { CursorFeed } from "./useCursorFeed";
+
+/** One card with its like and comment bar (Part 7). */
+function FeedCard({ post, overlay }: { post: Post; overlay: StatusOverlay }) {
+  const shown = applyStatus(post, overlay);
+  return (
+    <PostCard
+      {...toPostCardProps(shown)}
+      actions={
+        <PostActions
+          postId={shown.id}
+          liked={shown.liked_by_me}
+          likeCount={shown.like_count}
+          commentCount={shown.comment_count}
+        />
+      }
+    />
+  );
+}
 
 /**
  * A feed of post cards (b1): skeletons while the first page loads, an error with "Try again", an
@@ -75,10 +94,7 @@ export function FeedList({
       {items.map((item) =>
         // Reposts arrive in Part 7B (Following and profiles; never in Recent).
         item.kind === "post" ? (
-          <PostCard
-            key={feedItemKey(item)}
-            {...toPostCardProps(applyStatus(item.post, statusUpdates))}
-          />
+          <FeedCard key={feedItemKey(item)} post={item.post} overlay={statusUpdates} />
         ) : null,
       )}
       {feed.moreError !== null && <Alert tone="error">{POST_MESSAGES.moreFailed} Try again.</Alert>}

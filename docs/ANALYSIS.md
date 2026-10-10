@@ -431,6 +431,14 @@ The original default was "drop all". Since 2026-09-29 the seven features you nam
     - **Author links:** the avatar and name on post cards and the post page link to `/u/<username>` (otherwise profiles are reachable only by URL, the rail, and the follower lists until search in Part 12).
     - `task.md`'s "no self-follow check" was read as "no self-follow *is allowed*": a DB check constraint plus a 400, as ARCHITECTURE §2 and the acceptance criteria say.
 
+38. **Part 7 decisions (user, 2026-10-10)** on points the guide, Stitch and `task.md` leave open:
+    - **Hidden comments are Django Admin only:** the API and the page never return a hidden comment to anyone, staff included, and it doesn't count in `comment_count`. (`task.md`: "Hidden comments disappear for everyone but staff".)
+    - **Deleting your own comment is a soft delete** (a new `comments.deleted_at` column, like posts in D6): the row stays for the audit trail and the admin, and the comment leaves every list and count. ARCHITECTURE §2 had no such column.
+    - **CommentAdmin has Hide and Unhide** (`task.md` said only Hide): a wrongly hidden comment needs an undo. Unhide doesn't undelete what its author deleted.
+    - Likes and comments are allowed on every post the public can see (pending and under review included, ANALYSIS c1); a removed or deleted post is a 404 for both, its author too. A like can still be taken back from a removed post.
+    - **Icons:** the liked state is a filled `favorite` glyph in `secondary`, the comment count uses `chat_bubble`. DESIGN.md's "one glyph per concept" list names neither, and `design/` is read-only (the user supplies design changes); `lint-tokens` checks only icon *sizes*, so they are used and recorded here.
+    - Stitch's comment row loses Reply, the `#C-xxx` id, the role chip and the per-comment `thumb_up`; the composer loses the attach buttons and gains a 500-character counter and Ctrl+Enter ("Dispatches", "Remark" and "Counter-Evidence" become "Comments" and "Comment", as in the naming table).
+
 ---
 
 ## d) Deployment topology (no owned domain)

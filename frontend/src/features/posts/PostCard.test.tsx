@@ -269,3 +269,31 @@ describe("PostCard author link (Part 6)", () => {
     expect(screen.queryByRole("link")).toBeNull();
   });
 });
+
+describe("PostCard action bar (Part 7)", () => {
+  it("renders the actions node under the claim and the sources", () => {
+    render(
+      <PostCard
+        {...BASE}
+        sources={[{ value: "10.1038/x", kind: "doi" }]}
+        actions={<div data-testid="bar">bar</div>}
+      />,
+    );
+    const claim = screen.getByText(/Solar capacity grew/);
+    const bar = screen.getByTestId("bar");
+    expect(claim.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText(/10\.1038\/x/).compareDocumentPosition(bar)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it("has no bar unless one is given", () => {
+    render(<PostCard {...BASE} />);
+    expect(screen.queryByTestId("bar")).toBeNull();
+  });
+
+  it("never shows the bar on the removed tombstone", () => {
+    render(<PostCard {...BASE} status="removed" actions={<div data-testid="bar">bar</div>} />);
+    expect(screen.queryByTestId("bar")).toBeNull();
+  });
+});

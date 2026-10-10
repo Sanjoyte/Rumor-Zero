@@ -27,6 +27,7 @@ from apps.posts.serializers import (
     feed_item,
     status_item,
 )
+from apps.social.engagement import engagement_defaults
 
 # `GET /api/v1/posts/status/?ids=` takes at most this many posts (ARCHITECTURE §9).
 MAX_STATUS_IDS = 50
@@ -64,7 +65,9 @@ class PostListView(APIView):
 
     def get(self, request):
         paginator = FeedPagination()
-        page = paginator.paginate_queryset(Post.objects.visible().for_list(), request, view=self)
+        page = paginator.paginate_queryset(
+            Post.objects.visible().for_list(request.user), request, view=self
+        )
         posts = PostSerializer(page, many=True, context={"request": request}).data
         return paginator.get_paginated_response([feed_item(data) for data in posts])
 
@@ -91,7 +94,7 @@ class PostListView(APIView):
                 limit=exc.limit, next_slot_at=exc.next_slot_at, now=now
             ) from None
         context = {"request": request, "now": now}
-        return Response(PostSerializer(post, context=context).data, status=201)
+        return Response(PostSerializer(engagement_defaults(post), context=context).data, status=201)
 
 
 @method_decorator(never_cache, name="dispatch")
@@ -118,7 +121,11 @@ class PostDetailView(APIView):
 
     def get(self, request, post_id):
         pk = parse_post_id(post_id)
-        post = None if pk is None else Post.objects.not_deleted().for_list().filter(pk=pk).first()
+        post = (
+            None
+            if pk is None
+            else Post.objects.not_deleted().for_list(request.user).filter(pk=pk).first()
+        )
         if post is None:
             raise NotFound
         return Response(PostSerializer(post, context={"request": request}).data)

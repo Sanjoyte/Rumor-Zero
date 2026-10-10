@@ -217,4 +217,66 @@ describe("useCursorFeed", () => {
     await waitFor(() => expect(result.current.phase).toBe("ready"));
     expect(result.current.error).toBeNull();
   });
+
+  describe("append and remove (Part 7, an oldest-first list)", () => {
+    it("puts an appended item after the loaded pages", async () => {
+      const { result } = setup(vi.fn().mockResolvedValue(page(["a", "b"])));
+      await waitFor(() => expect(result.current.phase).toBe("ready"));
+      act(() => result.current.append(item("new")));
+      expect(ids(result.current.items)).toEqual(["a", "b", "new"]);
+    });
+
+    it("does not repeat an appended item that a later page brings, and keeps that page's spot", async () => {
+      const fetchPage = vi
+        .fn()
+        .mockResolvedValueOnce(page(["a"], "c2"))
+        .mockResolvedValueOnce(page(["b", "mine"]));
+      const { result } = setup(fetchPage);
+      await waitFor(() => expect(result.current.phase).toBe("ready"));
+      act(() => result.current.append(item("mine")));
+      expect(ids(result.current.items)).toEqual(["a", "mine"]);
+      act(() => result.current.loadMore());
+      await waitFor(() => expect(ids(result.current.items)).toEqual(["a", "b", "mine"]));
+    });
+
+    it("keeps an item appended while the first page was loading", async () => {
+      const first = deferred<CursorPage<Item>>();
+      const { result } = setup(vi.fn().mockReturnValue(first.promise));
+      act(() => result.current.append(item("early")));
+      await act(async () => first.resolve(page(["a"])));
+      expect(ids(result.current.items)).toEqual(["a", "early"]);
+    });
+
+    it("drops a removed item, whether it was loaded or appended", async () => {
+      const { result } = setup(vi.fn().mockResolvedValue(page(["a", "b"])));
+      await waitFor(() => expect(result.current.phase).toBe("ready"));
+      act(() => result.current.append(item("c")));
+      act(() => result.current.remove("a"));
+      act(() => result.current.remove("c"));
+      expect(ids(result.current.items)).toEqual(["b"]);
+    });
+
+    it("forgets removals on a fresh load, whose answer already leaves them out", async () => {
+      const fetchPage = vi
+        .fn()
+        .mockResolvedValueOnce(page(["a", "b"]))
+        .mockResolvedValueOnce(page(["a", "b"]));
+      const { result } = setup(fetchPage);
+      await waitFor(() => expect(result.current.phase).toBe("ready"));
+      act(() => result.current.remove("a"));
+      expect(ids(result.current.items)).toEqual(["b"]);
+      act(() => result.current.retry());
+      await waitFor(() => expect(ids(result.current.items)).toEqual(["a", "b"]));
+    });
+
+    it("drops appended items when the signed-in user changes", async () => {
+      const fetchPage = vi.fn().mockResolvedValue(page(["a"]));
+      const { result, rerender } = setup(fetchPage);
+      await waitFor(() => expect(result.current.phase).toBe("ready"));
+      act(() => result.current.append(item("mine")));
+      rerender({ enabled: true, resetKey: "u2" });
+      await waitFor(() => expect(fetchPage).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(ids(result.current.items)).toEqual(["a"]));
+    });
+  });
 });

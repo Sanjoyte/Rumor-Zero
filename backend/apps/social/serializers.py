@@ -1,23 +1,18 @@
 """The profile and user-row objects (ARCHITECTURE §9)."""
 
-from django.db.models import Count, Exists, IntegerField, OuterRef, Subquery, Value
-from django.db.models.functions import Coalesce
+from django.db.models import Exists, OuterRef, Value
+from rest_framework import serializers
 
 from apps.accounts.models import User
-from apps.accounts.serializers import avatar_url
+from apps.accounts.serializers import avatar_url, user_summary
 from apps.posts.models import Post, PostStatus
-from apps.posts.serializers import iso
+from apps.posts.serializers import content_field, iso
+from apps.social.engagement import count_subquery as _count
 from apps.social.models import Follow
 
 # The credibility score is public only after this many counted events (ARCHITECTURE §4a). Nothing
 # writes `reputation_sample` before Part 11B, so `score` is null until then.
 MIN_PUBLIC_SAMPLE = 3
-
-
-def _count(queryset, key):
-    """A correlated `COUNT(*)` of `queryset` (already filtered on `OuterRef`), 0 when empty."""
-    grouped = queryset.order_by().values(key).annotate(n=Count("pk")).values("n")
-    return Coalesce(Subquery(grouped, output_field=IntegerField()), 0)
 
 
 def _by_status(author, status):
@@ -87,4 +82,22 @@ def user_row(user, *, is_following, viewer):
         "reputation": reputation_block(user),
         "is_following": is_following,
         "is_me": bool(viewer is not None and viewer.is_authenticated and viewer.pk == user.pk),
+    }
+
+
+class CommentCreateSerializer(serializers.Serializer):
+    """`POST /api/v1/posts/{id}/comments/`. The text rules are the posts' (trimmed, 1 to 500 code
+    points, the same messages); undeclared fields are ignored."""
+
+    content = content_field()
+
+
+def comment_data(comment, viewer):
+    """A comment object (ARCHITECTURE §9): five keys, and nothing about moderation."""
+    return {
+        "id": str(comment.pk),
+        "author": user_summary(comment.author),
+        "content": comment.content,
+        "is_mine": bool(viewer and viewer.is_authenticated and comment.author_id == viewer.pk),
+        "created_at": iso(comment.created_at),
     }

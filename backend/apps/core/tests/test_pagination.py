@@ -83,8 +83,15 @@ class GuardedList(UserList):
         ordering = ("-created_at", "-id")
 
 
-def guarded_page(cursor):
-    response = GuardedList.as_view()(APIRequestFactory().get("/", {"cursor": cursor}))
+class OldestFirstList(GuardedList):
+    """Comments (Part 7) page the other way: `created_at` ascending."""
+
+    class pagination_class(GuardedList.pagination_class):
+        ordering = ("created_at", "id")
+
+
+def guarded_page(cursor, view=GuardedList):
+    response = view.as_view()(APIRequestFactory().get("/", {"cursor": cursor}))
     response.render()
     return response
 
@@ -103,6 +110,17 @@ def encoded(**tokens):
 def test_the_mixin_turns_a_crafted_position_into_a_404(position):
     UserFactory.create_batch(3)
     assert guarded_page(encoded(p=position)).status_code == 404
+
+
+@pytest.mark.parametrize("position", ["not a date", "2026-01-01T00:00:00", ""])
+def test_the_mixin_guards_an_ascending_list_too(position):
+    UserFactory.create_batch(3)
+    assert guarded_page(encoded(p=position), OldestFirstList).status_code == 404
+
+
+def test_the_mixin_lets_a_real_position_through_on_an_ascending_list():
+    UserFactory.create_batch(3)
+    assert guarded_page(encoded(p="2000-01-01T00:00:00+00:00"), OldestFirstList).status_code == 200
 
 
 def test_the_mixin_lets_a_real_position_through():

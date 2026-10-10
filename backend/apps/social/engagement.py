@@ -1,0 +1,48 @@
+"""Likes and comments as annotations on a post queryset (ARCHITECTURE §9).
+
+`PostQuerySet.for_list(viewer)` calls `with_engagement`, so every list and the detail page get
+`like_count`, `comment_count` and `liked_by_me` in the same query as the posts: correlated
+subqueries, no N+1. `PostSerializer` reads them strictly (a list that forgot them fails loudly
+instead of showing zeros); a post that was just created has none yet, so `engagement_defaults`
+sets the zeros explicitly.
+"""
+
+from django.db.models import Count, Exists, IntegerField, OuterRef, Subquery, Value
+from django.db.models.functions import Coalesce
+
+from apps.social.models import Comment, Like
+
+
+def count_subquery(queryset, key):
+    """A correlated `COUNT(*)` of `queryset` (already filtered on `OuterRef`), 0 when empty."""
+    grouped = queryset.order_by().values(key).annotate(n=Count("pk")).values("n")
+    return Coalesce(Subquery(grouped, output_field=IntegerField()), 0)
+
+
+def shown_comments():
+    """The comments the public sees: neither hidden by a moderator nor deleted by their author.
+
+    This is the predicate of `comments_post_visible_idx`; keep the two in step.
+    """
+    return Comment.objects.filter(is_hidden=False, deleted_at__isnull=True)
+
+
+def with_engagement(queryset, viewer=None):
+    """Annotate a `Post` queryset with the counts and, for a signed-in `viewer`, `liked_by_me`."""
+    post = OuterRef("pk")
+    signed_in = viewer is not None and viewer.is_authenticated
+    return queryset.annotate(
+        like_count=count_subquery(Like.objects.filter(post=post), "post"),
+        comment_count=count_subquery(shown_comments().filter(post=post), "post"),
+        liked_by_me=(
+            Exists(Like.objects.filter(post=post, user=viewer)) if signed_in else Value(False)
+        ),
+    )
+
+
+def engagement_defaults(post):
+    """A post that was just created has no likes or comments: say so on the instance."""
+    post.like_count = 0
+    post.comment_count = 0
+    post.liked_by_me = False
+    return post

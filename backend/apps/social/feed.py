@@ -36,9 +36,11 @@ def following_queryset(user):
     return Post.objects.visible().filter(Q(author_id=user.pk) | Q(author_id__in=followed))
 
 
-def load_posts(ids):
-    """The posts for `ids`, in that order. One that is no longer visible is dropped."""
-    posts = {str(post.pk): post for post in Post.objects.visible().for_list().filter(pk__in=ids)}
+def load_posts(ids, viewer):
+    """The posts for `ids`, in that order, with the counts and `viewer`'s likes. One that is no
+    longer visible is dropped."""
+    queryset = Post.objects.visible().for_list(viewer).filter(pk__in=ids)
+    posts = {str(post.pk): post for post in queryset}
     return [posts[i] for i in ids if i in posts]
 
 
@@ -65,7 +67,7 @@ def following_page(request, view, user, paginator):
     if cacheable:
         entry = cache.get(key)
         if _is_entry(entry):
-            return load_posts(entry["ids"]), entry["next"]
+            return load_posts(entry["ids"], user), entry["next"]
     rows = paginator.paginate_queryset(
         following_queryset(user).values("id", "created_at"), request, view=view
     )
@@ -73,4 +75,4 @@ def following_page(request, view, user, paginator):
     next_cursor = paginator.get_next_link()
     if cacheable:
         cache.set(key, {"ids": ids, "next": next_cursor}, ttl)
-    return load_posts(ids), next_cursor
+    return load_posts(ids, user), next_cursor

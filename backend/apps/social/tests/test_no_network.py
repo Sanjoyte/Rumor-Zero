@@ -1,4 +1,5 @@
-"""Nothing in Part 6 reaches the network: no profile, follow or feed call fetches anything."""
+"""Nothing in Parts 6 and 7 reaches the network: no profile, follow, feed, like or comment call
+fetches anything."""
 
 import http.client
 import re
@@ -46,6 +47,23 @@ def test_profiles_follows_lists_and_the_feed_make_no_network_request(blocked, au
     assert client.get("/api/v1/users/ada/following/").status_code == 200
     assert client.get("/api/v1/feed/").json()["results"]
     assert client.delete("/api/v1/users/bob/follow/").status_code == 204
+    assert blocked == []
+
+
+def test_likes_and_comments_make_no_network_request(blocked, auth_client):
+    ada = VerifiedUserFactory(username="ada")
+    post = PostFactory(fact=True, sources=["https://example.org/report"])
+    client = auth_client(ada)
+    assert client.post(f"/api/v1/posts/{post.pk}/like/").status_code == 201
+    created = client.post(
+        f"/api/v1/posts/{post.pk}/comments/",
+        {"content": "See https://example.org/x"},
+        format="json",
+    )
+    assert created.status_code == 201
+    assert client.get(f"/api/v1/posts/{post.pk}/comments/").json()["results"]
+    assert client.delete(f"/api/v1/comments/{created.json()['id']}/").status_code == 204
+    assert client.delete(f"/api/v1/posts/{post.pk}/like/").status_code == 204
     assert blocked == []
 
 

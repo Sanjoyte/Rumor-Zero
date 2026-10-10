@@ -39,6 +39,11 @@ export interface PostCardProps {
    * inert (the gallery, previews).
    */
   href?: string;
+  /**
+   * The action bar (like, comment; Part 7): a node, so the card stays presentational and needs no
+   * session. Its buttons sit above the stretched claim link (`relative z-10`).
+   */
+  actions?: ReactNode;
   /** Clock for the relative timestamp; tests and the gallery pass a fixed one. */
   now?: Date;
   className?: string;
@@ -66,8 +71,9 @@ function AuthorLink({ href, children }: { href?: string; children: ReactNode }) 
 }
 
 /**
- * Presentational post card (Stitch b1), with the one-line source row under a fact claim (Part 4).
- * Parts 7 and 7B add the action bar. A blank display name shows `@username` once, in bold.
+ * Presentational post card (Stitch b1), with the one-line source row under a fact claim (Part 4)
+ * and an action-bar slot (Part 7; 7B adds repost and bookmark). A blank display name shows
+ * `@username` once, in bold.
  */
 export function PostCard({
   author,
@@ -81,6 +87,7 @@ export function PostCard({
   sources = [],
   createdAt,
   href,
+  actions,
   now,
   className,
 }: PostCardProps) {
@@ -175,6 +182,7 @@ export function PostCard({
         {postType === "fact" && (
           <SourceLink sources={sources} moreHref={href ? `${href}#sources` : undefined} />
         )}
+        {actions}
       </div>
     </Card>
   );

@@ -88,3 +88,21 @@ export function renderWithComposer(
   );
   return { ...view, ...session };
 }
+
+/**
+ * The auth session and the toast region around `ui`, without the composer (no router needed).
+ * `rerender` keeps the providers, so a test can change props without losing the session.
+ */
+export function renderWithSessionAndToast(
+  ui: ReactNode,
+  kind: SessionKind = "verified",
+  { session = sessionOf(kind) } = {},
+) {
+  const wrap = (node: ReactNode) => (
+    <AuthProvider session={session.session}>
+      <ToastProvider>{node}</ToastProvider>
+    </AuthProvider>
+  );
+  const view = render(wrap(ui));
+  return { ...view, ...session, rerender: (next: ReactNode) => view.rerender(wrap(next)) };
+}

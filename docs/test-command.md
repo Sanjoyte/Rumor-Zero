@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -4233,6 +4233,667 @@ design" / device toolbar button, and set the width to 390.
   how many rows went in all, and per table (8 posts: seven by `bo`, six in steps 3 and 7 and one in step 8, and one by `ada` in step 8; a deleted
   post is still a row). Your count differs if you did the browser steps (more posts and follows). Nothing else is touched.
   (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
+  token and the throwaway password of the test accounts.
+
+### Part 7: Likes & comments
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
+`frontend/.env.local`. Part 7 adds **one migration** (`social.0002_like_comment`: the likes and comments tables), **no
+dependency** and **no new variable** (the `like` and `comment` rates were already in the settings). It adds the
+endpoints `POST` and `DELETE /api/v1/posts/{id}/like/`, `GET` and `POST /api/v1/posts/{id}/comments/` and
+`DELETE /api/v1/comments/{id}/`, and fills `like_count`, `comment_count` and `liked_by_me` in every post.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 16 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 12**: the variables and functions you set in step 3 (`id`, `ada`, `bo`, `cy`, `dee`, `api`, `op1`, `fact1`, `mk`, `get`, `send`, and the helpers steps 4 and 7 add) only live in that one terminal. If you close it, redo step 3. | 1 to 12, 17 |
+| Window 3 (frontend) | `npm run dev` in `frontend`. Leave it running. | 13 to 16 |
+| Browser | Steps 13 to 16 | 13 to 16 |
+
+Things to know first:
+
+- Steps 3 to 12 talk to the API directly with `curl` (they need `jq`: `sudo apt install jq`). Steps 13 to 16 use the
+  browser. Step 3 makes four accounts: `ada`, `bo` and `cy` are verified and `dee` never is. `bo` writes the
+  posts, `ada` and `cy` like and comment, and `dee` shows what an unverified email may not do. Step 11 adds `eve` and
+  `gus` for the two rate limits.
+- The API and page outputs below were recorded on Linux on 2026-10-10. The browser steps were checked the same
+  day with headless Chromium (screenshots at 1280 and 390 px) and Django Admin with a scripted browser, not by a
+  person at a keyboard. Ids, numbers in names, times and token prefixes differ on every run.
+- Nothing here sends an email: step 3 marks the accounts verified with a shell command, which stands in for
+  clicking the link (Part 2 shows the real flow). Steps 5, 9 and 10 set a post's status or hide a comment the same
+  way, because the pipeline and the moderator tools that do it for real arrive in Parts 9 and 10 (step 16 uses
+  the admin's own Hide action).
+- **What Part 7 does and doesn't show:** likes and comments are allowed on every post the public can see
+  (a fact that is still being checked included), never on a removed or deleted one; liking and commenting need a
+  verified email, taking a like back or deleting your own comment only a login; a **hidden** comment (a
+  moderator, in Django Admin) is in no list and no count, and deleting your own comment is a **soft delete**, so
+  the row stays. Reposts and bookmarks (7B), reports (8) and notifications (13) come later.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies the new migration,
+confirms there is no further one, then runs the whole backend test suite, the social tests, the linter and the
+formatter check.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                            # Applying social.0002_like_comment... OK
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 1485 passed
+python -m pytest apps/social -q                     # 305 passed
+ruff check . ; ruff format --check .                # All checks passed! / 142 files already formatted
+```
+
+**You should see:** `Applying social.0002_like_comment... OK` (nothing to apply the second time), `No changes detected`
+and `System check identified no issues (0 silenced).`, then the full run ends with `1485 passed`, the social run
+with `305 passed`, and the last line pair is `All checks passed!` and `142 files already formatted`. (Counts may
+grow later; what matters is that nothing fails.)
+
+- The 145 new social tests: `test_models_engagement.py` (13: the unique like pair, a comment is 1 to 500 characters
+  and an emoji is one, both indexes), `test_services_engagement.py` (26: idempotent like, who can like or comment
+  on what, two simultaneous likes make one row, N simultaneous likes are all counted, two simultaneous deletes give
+  one success), `test_api_like.py` (21, including the real 300-requests-an-hour limit), `test_api_comments.py` (22:
+  oldest first, cursor walk, a comment arriving between pages, crafted cursors, constant query counts),
+  `test_api_comment_create.py` (25, including the real 60-an-hour limit and that reading never uses it up),
+  `test_api_comment_delete.py` (13), `test_engagement_counts.py` (11: real counts in Recent, the post page, a
+  profile and the Following feed, also on a cache hit; constant queries), `test_admin_engagement.py` (13: Hide and
+  Unhide, the permission, the admin log) and one more in `test_no_network.py`.
+- Outside `apps/social`: the cursor check is tested for an oldest-first list too (`apps/core/tests/test_pagination.py`,
+  4 new). `PostQuerySet.for_list(viewer)` now counts likes and comments, and `PostSerializer` refuses a post
+  that was not counted (the 201 answer of a new post gets explicit zeros), so no list can show silent zeros.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 106 files, 1410 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 32 passed
+CI=1 npm run test:e2e                               # 32 passed (against the production build)
+cd ../backend                                       # back to backend/ for steps 3 to 12
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  106 passed (106)` and `Tests  1410 passed (1410)`. `npm run build` lists the same routes as in Part 6
+(Part 7 adds no page: the discussion is part of `/p/[id]`). Each E2E run ends with `32 passed`: the 29 earlier tests
+and 3 new ones in `e2e/social.spec.ts`.
+
+- The new E2E tests reuse the two people that file already signs up (allauth limits sign-ups to 20 a minute per
+  address and the rest of the suite already uses most of that), so Part 7 adds **no** sign-up. They are: B likes
+  A's post from the feed (the heart fills and the count moves at once, the like survives a reload, A sees one like
+  that isn't theirs), B opens the post, comments with Ctrl+Enter, A sees the comment with no Delete button, B
+  deletes it after a confirmation and takes the like back; a visitor sees the counts and is sent to log in; and the
+  post page with its discussion fits a phone with no sideways scroll.
+- `posts.spec.ts` now expects three links on a card (the author, the claim and the comment count).
+
+#### Step 3: Start the servers and make four accounts and two posts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 12.**
+
+**What this does:** Windows 1 and 3 run the two servers. In window 2 you sign up four accounts through the API and
+mark three of them verified (`dee` stays unverified), then `bo` posts an opinion and a fact with a DOI. The helpers
+`mk` (make a post, print its id), `send` (any request, printing the status code and then the answer) and `get` (the same for a GET) are used by every later step.
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```bash
+cd frontend                                         # from the repo root
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend` with the venv active: steps 1 and 2 leave you there; needs `jq`). If you opened a new
+terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the addresses are new each run
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+signup() { jq -nc --arg e "$1" --arg u "$2" '{email: $e, username: $u, password: "correct-horse-battery-42", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/signup | jq -r .meta.access_token; }
+ada=$(signup "part7-ada-$id@example.test" "part7_ada_$id")      # $ada = ada's login token (likes and comments)
+bo=$(signup "part7-bo-$id@example.test" "part7_bo_$id")         # $bo = bo's login token (the author of the posts)
+cy=$(signup "part7-cy-$id@example.test" "part7_cy_$id")         # $cy = cy's login token (kept for the browser)
+dee=$(signup "part7-dee-$id@example.test" "part7_dee_$id")      # $dee = dee's login token (never verified)
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part7-', email__endswith='$id@example.test').exclude(username='part7_dee_$id').update(is_email_verified=True), 'accounts marked verified')" | tail -1
+api=http://localhost:8000/api/v1
+adaname=part7_ada_$id; boname=part7_bo_$id; cyname=part7_cy_$id; deename=part7_dee_$id
+mk() { curl -s -H "Authorization: Bearer $1" -H "Content-Type: application/json" --data-binary "$2" $api/posts/ | jq -r .id; }   # mk <token> <json>: makes a post, prints its id
+get() { local out; out=$(curl -s -w '\n%{http_code}' ${2:+-H "Authorization: Bearer $2"} "$api$1"); printf '%s  ' "${out##*$'\n'}"; printf '%s' "${out%$'\n'*}" | jq -c "${3:-.}"; }   # get <path> [token] [jq filter]: prints the status code, then the answer
+send() { local out; out=$(curl -s -w '\n%{http_code}' -X "$1" ${3:+-H "Authorization: Bearer $3"} ${4:+-H "Content-Type: application/json" --data-binary "$4"} "$api$2"); printf '%s  %s\n' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | jq -c "${5:-.}" 2>/dev/null)"; }   # send <METHOD> <path> [token] [json body] [jq filter]: prints the status code, then the answer
+op1=$(mk "$bo" '{"content":"I think the new tram line will change how the city moves.","post_type":"opinion"}')
+fact1=$(mk "$bo" '{"content":"Solar capacity grew by roughly 30% worldwide last year.","post_type":"fact","sources":["doi:10.1038/s41558-024-02102"]}')
+echo ${ada:0:10} ${bo:0:10} ${cy:0:10} ${dee:0:10}    # four prefixes, not an empty line
+echo "op1=$op1"; echo "fact1=$fact1"                 # two ids, not empty
+```
+
+**You should see** (the number in the names is your `id`, and the ids differ):
+
+```text
+3 accounts marked verified
+eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi
+op1=c4cd330c-ef91-4ef8-a888-f016ae6e4905
+fact1=ba591060-ab33-405d-b077-0ef99a789ebe
+```
+
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet.
+
+**If it differs:** an empty token or an `id` of `null` means the sign-up or the post failed: `runserver` isn't
+running, `jq` is missing, or you signed up more than 20 times in a minute. Fix that and run this step again
+from `id=$(date +%H%M%S)`.
+
+#### Step 4: Like and unlike
+
+**Where:** Terminal window 2 (the same terminal as step 3).
+
+**What this does:** Likes and unlikes through `POST` and `DELETE /api/v1/posts/{id}/like/`, with every refusal.
+Both are idempotent. Liking needs a verified email, taking a like back only a login.
+
+```bash
+like() { send POST /posts/$1/like/ "$2"; }          # like <post id> [token]
+unlike() { send DELETE /posts/$1/like/ "$2"; }      # unlike <post id> [token]
+like $op1 "$ada"                                    # 1: the first like is 201
+like $op1 "$ada"                                    # 2: again: 200, nothing changes
+like $op1                                           # 3: nobody logged in
+like $op1 "$dee"                                    # 4: an unverified email
+like $op1 "$bo"                                     # 5: your own post is fine
+like $fact1 "$ada"                                  # 6: a fact that is still "checking" can be liked
+like 00000000-0000-4000-8000-000000000000 "$ada"    # 7: no such post
+like not-a-uuid "$ada"                              # 8: not even an id
+unlike $op1 "$bo"                                   # 9: taking your like back is 204
+unlike $op1 "$bo"                                   # 10: and again: still 204, no error
+unlike $op1 "$dee"                                  # 11: an unverified user may also take one back (there is none): 204
+```
+
+**You should see** (eleven commands, eleven answers):
+
+```text
+201  {"liked":true}
+200  {"liked":true}
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+403  {"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}
+201  {"liked":true}
+201  {"liked":true}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+204
+204
+204
+```
+
+- The first like is `201`, the same request again is `200` and changes nothing; `DELETE` is `204` every
+  time, also when there was nothing to take back (10, 11). A user can like their own post (5).
+- A fact post still labelled "checking facts" can be liked (6), like an opinion or a post under review: only a
+  removed or deleted post can't (step 5). An unknown or malformed id is the same JSON 404 (7, 8), never an HTML page.
+- A 401 or 403 doesn't use up the allowance of 300 likes an hour (step 11).
+
+#### Step 5: Removed and deleted posts
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes two more posts, one a moderator removes (set with a shell command: the moderator tools
+come in Part 10) and one its author deletes, and shows that neither can be liked.
+
+```bash
+op2=$(mk "$bo" '{"content":"This opinion will be removed by a moderator.","post_type":"opinion"}')
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$op2').update(status='removed'), 'post removed')" | tail -1
+op3=$(mk "$bo" '{"content":"This opinion will be deleted by its author.","post_type":"opinion"}')
+send DELETE /posts/$op3/ "$bo"                      # bo deletes op3: 204
+like $op2 "$ada"                                    # 1: a removed post can't be liked
+like $op3 "$ada"                                    # 2: a deleted post can't either
+python manage.py shell -c "from apps.social.models import Like; from apps.accounts.models import User; Like.objects.create(user=User.objects.get(username='$adaname'), post_id='$op2'); print(Like.objects.filter(post_id='$op2').count(), 'like row planted on the removed post')" | tail -1
+unlike $op2 "$ada"                                  # 3: ...but a like can still be taken back from it: 204
+python manage.py shell -c "from apps.social.models import Like; print(Like.objects.filter(post_id='$op2').count(), 'like rows left on it')" | tail -1
+unlike $op3 "$ada"                                  # 4: a deleted post is 404 even for that
+```
+
+**You should see:**
+
+```text
+1 post removed
+204
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+1 like row planted on the removed post
+204
+0 like rows left on it
+404  {"detail":"Not found.","code":"not_found"}
+```
+
+- `post removed` is the shell command; `204` is `bo` deleting `op3`; then the two refusals (1, 2) are plain
+  `404`s, the same answer as for a post that never existed, so nothing says whether a post once existed.
+- A like that was already on a post can always be taken back, even if the post was removed meanwhile (3 to
+  the `0 like rows left` line), but a deleted post is `404` for that too (4).
+
+#### Step 6: The counts on every post
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads `like_count`, `comment_count` and `liked_by_me` as nobody and as other people, on the post
+page and in three lists. The counts are counted in the same query as the posts, so a list of 20 posts costs the same
+number of queries as a list of 2. The last three commands show the Following feed, whose first page is cached for
+30 seconds as a list of ids only: a new like still shows at once.
+
+```bash
+get /posts/$op1/ "" '{like_count, comment_count, liked_by_me}'      # 1: a visitor: ada's like counts, "mine" is false
+get /posts/$op1/ "$ada" '{like_count, comment_count, liked_by_me}'  # 2: ada: she liked it
+get /posts/$op1/ "$cy" '{like_count, comment_count, liked_by_me}'   # 3: cy: someone else liked it, he didn't
+get "/posts/?page_size=2" "$ada" '[.results[].post | {content: .content[0:24], like_count, liked_by_me}]'   # 4: the Recent feed: the same numbers
+get "/users/$boname/posts/?page_size=2" "$ada" '[.results[].post | {content: .content[0:24], like_count, liked_by_me}]'   # 5: bo's profile posts
+send POST /users/$boname/follow/ "$ada" '' '.'      # 6: ada follows bo, so the Following feed has bo's posts
+get /feed/ "$ada" '[.results[].post | {content: .content[0:24], like_count}] | .[0:2]'     # 7: the Following feed: page 1 is now cached (ids only)
+like $op1 "$cy"                                     # 8: one more like arrives
+get /feed/ "$ada" '[.results[].post | {content: .content[0:24], like_count}] | .[0:2]'     # 9: still cached, but the count is fresh
+```
+
+**You should see:**
+
+```text
+200  {"like_count":1,"comment_count":0,"liked_by_me":false}
+200  {"like_count":1,"comment_count":0,"liked_by_me":true}
+200  {"like_count":1,"comment_count":0,"liked_by_me":false}
+200  [{"content":"Solar capacity grew by r","like_count":1,"liked_by_me":true},{"content":"I think the new tram lin","like_count":1,"liked_by_me":true}]
+200  [{"content":"Solar capacity grew by r","like_count":1,"liked_by_me":true},{"content":"I think the new tram lin","like_count":1,"liked_by_me":true}]
+201  {"is_following":true}
+200  [{"content":"Solar capacity grew by r","like_count":1},{"content":"I think the new tram lin","like_count":1}]
+201  {"liked":true}
+200  [{"content":"Solar capacity grew by r","like_count":1},{"content":"I think the new tram lin","like_count":2}]
+```
+
+- `liked_by_me` is `false` for a visitor and for everyone who didn't like the post (1, 3), `true` for `ada` (2).
+  `like_count` is the same for everyone.
+- Lines 4 and 5 list the two newest posts, the fact and the opinion `bo` made in step 3 (the removed and the deleted
+  one are left out): both show `ada`'s like. Hidden and deleted comments are never counted in `comment_count`
+  (step 10).
+- Line 7 is the Following feed, now cached for `ada`; line 9 is the same page a moment later: the cache keeps the
+  post ids, not the posts, so the count rose from 1 to 2.
+
+#### Step 7: Write comments
+
+**Where:** Terminal window 2.
+
+**What this does:** Writes comments through `POST /api/v1/posts/{id}/comments/` and tries everything that is
+refused. A comment is 1 to 500 characters (an emoji counts as one), trimmed, and needs a verified email.
+
+```bash
+comment() { send POST /posts/$1/comments/ "$2" "$(jq -nc --arg c "$3" '{content: $c}')" "${4:-.}"; }   # comment <post id> <token> <text> [jq filter]
+comment $op1 "$ada" "  A fair point.  " '{content, is_mine, author: .author.username, keys: keys}'   # 1: 201, the text is trimmed
+comment $op1 "$bo" "Thanks, ada." '{content, is_mine}'    # 2: the post's own author may comment
+comment $op1 "$cy" "Third." '.content'                    # 3: a third comment
+comment $op1 "" "Hi" '.'                                  # 4: nobody logged in
+comment $op1 "$dee" "Hi" '.'                              # 5: an unverified email
+comment $op1 "$ada" "" '.'                                # 6: nothing written
+comment $op1 "$ada" "   " '.'                             # 7: only spaces
+comment $op1 "$ada" "$(head -c 501 /dev/zero | tr '\0' x)" '.'                  # 8: 501 characters
+comment $fact1 "$ada" "$(printf '😀%.0s' $(seq 500))" '.content | length'      # 9: 500 emoji = 500 characters: fine, on a fact still being checked
+comment $op2 "$ada" "Hi" '.'                              # 10: a removed post has no discussion
+comment 00000000-0000-4000-8000-000000000000 "$ada" "Hi" '.'                    # 11: no such post
+```
+
+**You should see** (eleven commands, eleven answers):
+
+```text
+201  {"content":"A fair point.","is_mine":true,"author":"part7_ada_190101","keys":["author","content","created_at","id","is_mine"]}
+201  {"content":"Thanks, ada.","is_mine":true}
+201  "Third."
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+403  {"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}
+400  {"content":["Write something first."]}
+400  {"content":["Write something first."]}
+400  {"content":["Keep it to 500 characters."]}
+201  500
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+```
+
+- A comment has exactly five keys: `id`, `author`, `content`, `is_mine` and `created_at`. Nothing about moderation
+  ever shows. The spaces around the text are gone (1).
+- `400` answers come per field in the same words as a post's: "Write something first." for nothing or only
+  spaces (6, 7) and "Keep it to 500 characters." for 501 (8). 500 emoji is 500 characters, not 1000 (9).
+- The refusals for nobody logged in, an unverified email, a removed post and no such post are the same as for likes.
+
+#### Step 8: Read the comments
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads `GET /api/v1/posts/{id}/comments/`: public, **oldest first**, 20 to a page (`?page_size=`
+up to 50), with a cursor to carry on.
+
+```bash
+get /posts/$op1/comments/ "" '{order: [.results[].content], keys: (.results[0] | keys), next_cursor}'   # 1: anyone can read; oldest first
+get /posts/$op1/comments/ "$ada" '[.results[] | {content, is_mine}]'                                     # 2: ada's own comment says so
+cur=$(curl -s "$api/posts/$op1/comments/?page_size=2" | jq -r .next_cursor)
+get "/posts/$op1/comments/?page_size=2" "" '[.results[].content, (.next_cursor != null)]'                 # 3: a page of two, and a way on
+get "/posts/$op1/comments/?page_size=2&cursor=$cur" "" '[.results[].content, .next_cursor]'               # 4: the last one, then no cursor
+get "/posts/$op1/comments/?cursor=cD1ub3QtYS1kYXRl" "" .                                                  # 5: a made-up cursor
+get /posts/$op2/comments/ "" .                                                                           # 6: removed post
+get /posts/$op3/comments/ "" .                                                                           # 7: deleted post
+get /posts/$op1/ "" '{comment_count, like_count}'                                                        # 8: the counts on the post
+```
+
+**You should see** (eight commands, eight answers):
+
+```text
+200  {"order":["A fair point.","Thanks, ada.","Third."],"keys":["author","content","created_at","id","is_mine"],"next_cursor":null}
+200  [{"content":"A fair point.","is_mine":true},{"content":"Thanks, ada.","is_mine":false},{"content":"Third.","is_mine":false}]
+200  ["A fair point.","Thanks, ada.",true]
+200  ["Third.",null]
+404  {"detail":"Invalid cursor","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+200  {"comment_count":3,"like_count":2}
+```
+
+- Anyone can read (1). The order is the order they were written. Only `ada`'s own comment says `is_mine: true`
+  when she asks (2).
+- Line 3 is a page of two and `true`: there is more; line 4 follows the cursor and gets the last comment, then
+  `null`. A comment that arrives between two pages is neither skipped nor repeated (a test covers it).
+- A made-up cursor is a clean `404 "Invalid cursor"`, never a server error. A removed or deleted post has no
+  comment list at all (6, 7), not even for its author.
+
+#### Step 9: Delete your own comment
+
+**Where:** Terminal window 2.
+
+**What this does:** Deletes a comment through `DELETE /api/v1/comments/{id}/`. It is a **soft delete**: the comment
+leaves every list and count, but the row stays in the database (the last command shows it).
+
+```bash
+cid=$(curl -s $api/posts/$op1/comments/ | jq -r '.results[1].id')    # bo's comment (the second one)
+send DELETE /comments/$cid/ ""                      # 1: nobody logged in
+send DELETE /comments/$cid/ "$ada"                  # 2: someone else's comment
+send DELETE /comments/$cid/ "$bo"                   # 3: its author: 204
+send DELETE /comments/$cid/ "$bo"                   # 4: again: it is gone, 404
+get /posts/$op1/ "" '{comment_count}'               # 5: the count dropped
+get /posts/$op1/comments/ "" '[.results[].content]' # 6: and so did the list
+python manage.py shell -c "from apps.social.models import Comment; c = Comment.objects.get(pk='$cid'); print(repr(c.content), '| deleted_at set:', c.deleted_at is not None, '| hidden:', c.is_hidden)" | tail -1   # 7: the row is still there
+```
+
+**You should see:**
+
+```text
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+403  {"detail":"Only the author can do that.","code":"not_author"}
+204
+404  {"detail":"Not found.","code":"not_found"}
+200  {"comment_count":2}
+200  ["A fair point.","Third."]
+'Thanks, ada.' | deleted_at set: True | hidden: False
+```
+
+- Only the author can delete: someone else gets `403 not_author` (2), and so does the author of the *post*.
+  Deleting needs no verified email. The second delete is `404` (4), as for posts.
+- The count and the list lose the comment at once (5, 6), and the row is still there with `deleted_at` set (7),
+  like a deleted post.
+
+#### Step 10: What a moderator's Hide does
+
+**Where:** Terminal window 2.
+
+**What this does:** Hides one comment with a shell command, which is what the admin's **Hide** action does (step 16
+uses the real one), and shows that a hidden comment is gone for everyone, its author included, and not counted.
+
+```bash
+aid=$(curl -s $api/posts/$op1/comments/ | jq -r '.results[0].id')    # ada's comment (now the first)
+python manage.py shell -c "from apps.social.models import Comment; print(Comment.objects.filter(pk='$aid').update(is_hidden=True), 'comment hidden')" | tail -1   # what the admin's Hide action does
+get /posts/$op1/comments/ "$ada" '[.results[].content]'     # 1: gone from the list, even for its own author
+get /posts/$op1/ "" '{comment_count}'                       # 2: and not counted
+send DELETE /comments/$aid/ "$ada"                          # 3: its author can't delete it any more
+python manage.py shell -c "from apps.social.models import Comment; print(Comment.objects.filter(pk='$aid').update(is_hidden=False), 'comment unhidden')" | tail -1   # Unhide
+get /posts/$op1/comments/ "" '[.results[].content]'         # 4: back in its place
+get /posts/$op1/ "" '{comment_count}'                       # 5: and counted again
+```
+
+**You should see:**
+
+```text
+1 comment hidden
+200  ["Third."]
+200  {"comment_count":1}
+404  {"detail":"Not found.","code":"not_found"}
+1 comment unhidden
+200  ["A fair point.","Third."]
+200  {"comment_count":2}
+```
+
+- Hidden means in no list and no count, for everyone (1, 2); staff see it only in Django Admin. Its author
+  can't delete it any more (3): to them it no longer exists.
+- Unhiding puts it back in its place, and the count goes back up (4, 5).
+
+#### Step 11: Liking and commenting are rate limited
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes two more verified accounts and a post, then uses up their allowances: 300 likes an hour
+(`POST` and `DELETE` share it) and 60 comments an hour (only `POST` counts; reading never does).
+
+```bash
+eve=$(signup "part7-eve-$id@example.test" "part7_eve_$id")      # $eve = a fresh account for the like limit
+gus=$(signup "part7-gus-$id@example.test" "part7_gus_$id")      # $gus = a fresh account for the comment limit
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__in=['part7-eve-$id@example.test', 'part7-gus-$id@example.test']).update(is_email_verified=True), 'accounts marked verified')" | tail -1
+op4=$(mk "$bo" '{"content":"A post for the limits to chew on.","post_type":"opinion"}')
+for i in $(seq 1 300); do curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "Authorization: Bearer $eve" $api/posts/$op4/like/; done | sort | uniq -c   # 300 likes of one post
+curl -s -i -X POST -H "Authorization: Bearer $eve" $api/posts/$op4/like/ | grep -ioE 'HTTP/[0-9.]+ [0-9]+|retry-after: [0-9]+|"code":"[a-z_]+"'              # the 301st
+for i in $(seq 1 60); do curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $gus" -H "Content-Type: application/json" --data-binary "{\"content\":\"Limit test $i\"}" $api/posts/$op4/comments/; done | sort | uniq -c   # 60 comments
+curl -s -i -H "Authorization: Bearer $gus" -H "Content-Type: application/json" --data-binary '{"content":"One too many"}' $api/posts/$op4/comments/ | grep -ioE 'HTTP/[0-9.]+ [0-9]+|retry-after: [0-9]+|"code":"[a-z_]+"'   # the 61st
+get /posts/$op4/comments/ "$gus" '{n: (.results | length)}'                  # reading is never throttled
+```
+
+**You should see** (the seconds differ):
+
+```text
+2 accounts marked verified
+    299 200
+      1 201
+HTTP/1.1 429
+Retry-After: 3597
+"code":"throttled"
+     60 201
+HTTP/1.1 429
+Retry-After: 3600
+"code":"throttled"
+200  {"n":20}
+```
+
+- 300 requests went through (the first made the like, the other 299 were repeats), the 301st was refused with `429`,
+  `"code":"throttled"` and a `Retry-After` in seconds. Likewise 60 comments, then the 61st.
+- A 401 or 403 doesn't use up an allowance, but a `400` for a bad comment does (tests cover both).
+- Reading the comments still works while the comment allowance is spent: the last answer shows the page of 20.
+
+#### Step 12: The indexes are used
+
+**Where:** Terminal window 2.
+
+**What this does:** In a transaction that is thrown away at the end, makes 300 users, 2,000 posts, 40,000 comments and
+30,000 likes, asks the database how it would run the three queries behind every card and prints the plan lines. Nothing is
+saved.
+
+```bash
+python manage.py shell <<'EOF' 2>&1 | grep -E "^---|Scan|rolled back"
+from datetime import timedelta
+from django.db import connection, transaction
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.posts.models import Post
+from apps.social.models import Comment, Like
+
+class Rollback(Exception):
+    pass
+
+try:
+    with transaction.atomic():   # everything below is thrown away at the end
+        users = User.objects.bulk_create([User(username=f"xp_{i:03d}", email=f"xp{i}@example.test") for i in range(300)])
+        now = timezone.now()
+        posts = Post.objects.bulk_create([Post(author=users[i % 300], content=f"p{i}", post_type="opinion", status="published", created_at=now - timedelta(seconds=i)) for i in range(2000)])
+        Comment.objects.bulk_create([Comment(post=posts[n % 200], author=users[n % 300], content="c", created_at=now - timedelta(seconds=n), is_hidden=(n % 50 == 0), deleted_at=(now if n % 70 == 0 else None)) for n in range(40000)])
+        Like.objects.bulk_create([Like(user=users[n % 300], post=posts[(n // 300) % 2000]) for n in range(30000)], ignore_conflicts=True)
+        with connection.cursor() as c:
+            for table in ("social_comment", "social_like", "posts_post"):
+                c.execute(f"ANALYZE {table}")
+            target = str(posts[7].pk)
+            for label, sql in {
+                "--- comment list, first page": "SELECT id FROM social_comment WHERE post_id = %s AND NOT is_hidden AND deleted_at IS NULL ORDER BY created_at, id LIMIT 21",
+                "--- comment count": "SELECT COUNT(*) FROM social_comment WHERE post_id = %s AND NOT is_hidden AND deleted_at IS NULL",
+                "--- like count": "SELECT COUNT(*) FROM social_like WHERE post_id = %s",
+            }.items():
+                c.execute("EXPLAIN " + sql, [target])
+                print(label)
+                for row in c.fetchall():
+                    print(row[0])
+        raise Rollback
+except Rollback:
+    print("rolled back: nothing was saved")
+EOF
+```
+
+**You should see** (the cost numbers differ a little):
+
+```text
+--- comment list, first page
+  ->  Index Only Scan using comments_post_visible_idx on social_comment  (cost=0.41..595.39 rows=170 width=24)
+--- comment count
+  ->  Bitmap Heap Scan on social_comment  (cost=17.73..353.09 rows=170 width=0)
+        ->  Bitmap Index Scan on comments_post_visible_idx  (cost=0.00..17.69 rows=170 width=0)
+--- like count
+  ->  Bitmap Heap Scan on social_like  (cost=22.61..319.28 rows=300 width=0)
+        ->  Bitmap Index Scan on likes_post_created_idx  (cost=0.00..22.54 rows=300 width=0)
+rolled back: nothing was saved
+```
+
+- The comment list reads `comments_post_visible_idx` straight in order (an index-only scan): that index only holds
+  comments that are shown (not hidden, not deleted), and the count uses it too. The like count uses
+  `likes_post_created_idx`.
+- Each post card counts its own likes and comments with these two queries; a count costs about as many index entries
+  as the post has comments, which is fine for now. (A post with many thousands of likes would want a stored counter:
+  recorded for Part 16.)
+
+#### Step 13: Likes on the cards
+
+**Where:** Browser, with `runserver` (window 1) and `npm run dev` (window 3) running. Log in at
+http://localhost:3000/login as `part7-cy-<id>@example.test` (use the `id` from step 3: `echo $id`) with the password `correct-horse-battery-42` (`cy` was verified in step 3).
+
+**What this does:** Looks at the like and comment buttons on the Recent feed, as three kinds of visitor.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home and look at the posts `bo` made | Every card ends with a hairline and two small buttons: a **heart** with the like count and a **speech bubble** with the comment count. The solar fact card shows `1` and `1`; "A post for the limits to chew on." shows `1` and `60` (step 11); the tram opinion shows a **filled blue heart** and `2` (`cy` liked it in step 6) and `2` comments. Counts of 1,000 and more print as `1.4K`. |
+| Click the filled heart on the tram card | It turns into an outline heart and the count goes `2` to `1` **at once**, before the server answers. Click again: filled, `2`. |
+| Press `Tab` until a heart has the focus, then `Enter` or `Space` | The same toggle. A focused button has a thin blue ring. |
+| Reload the page | The heart and the numbers are what the server says: the state survived. |
+| Click the speech bubble | The post's own page opens, scrolled to the **Comments** section (`/p/<id>#comments`). Clicking the claim text opens the same page from the top. |
+| Open a private window and go to /home (a visitor) | The same cards with the same counts. The hearts are **links**: they point to `/login?next=%2Fp%2F<id>`, and after you log in you land on that post's page. |
+| In another window log in as `dee` (`part7-dee-<id>@example.test`, same password: never verified) and click a heart | The heart looks dimmed and nothing is sent; a toast says "Verify your email to like posts. Check your inbox for the link." |
+
+- Covered by `LikeButton.test.tsx` (flip before the answer, rollback and toast on every kind of failure, one
+  request for two clicks in one tick, all four visitor states) and the new E2E tests.
+- The heart on a card is always above the card's big invisible link, so it never opens the post by accident.
+
+#### Step 14: The discussion on a post's page
+
+**Where:** Browser, logged in as `cy`, with both servers running.
+
+**What this does:** Opens the tram post and uses the Comments section.
+
+| Do this | Expect |
+|---|---|
+| Open the tram post (click its text on /home) and scroll below the verdict | The heading **Comments (2)** with OLDEST FIRST at the right, a box "Add a comment…" with `0 / 500 characters`, the hint "Ctrl + Enter to post" and a blue **Comment** button; below it `ada`'s "A fair point." and then `cy`'s "Third.". Only `cy`'s own comment has a small **DELETE**. (`bo`'s was deleted in step 9.) |
+| Look at the row next to **Copy link** | The heart and the speech bubble with the words "Like" and "Comments" beside their counts (the words show from 640 px up). Clicking "Comments" jumps down to the section. |
+| Type a line (the counter moves), then press `Ctrl+Enter` (`Cmd+Enter` on a Mac) | Your comment appears at the **end** of the list with "now", the heading says **Comments (3)**, the box is empty and keeps the focus, and a toast says "Comment posted." |
+| Click **Comment** with the box empty, or only spaces | "Write something first." under the box; nothing is sent. |
+| Paste a text of 501 characters, then click **Comment** | The counter turns red (`501 / 500 characters`) and the message is "Keep it to 500 characters."; nothing is sent. |
+| Click **DELETE** under your own comment | A dialog "Delete this comment?" says "It disappears from the discussion right away. This can't be undone." **Cancel** closes it and nothing happens. **Delete comment** removes the row, the heading goes back to **Comments (2)** and a toast says "Comment deleted." |
+| Open the same page in a private window (a visitor) | The comments are readable, there is no box, and a link says "Log in to comment" (to join the discussion). |
+| Log in as `dee` (unverified) and open the page | The box is greyed out and locked, with the note "Verify your email to comment." |
+| Open a removed post's page (not available from the UI: try `/p/<op2>`) | The tombstone with no discussion at all, for anyone, its author too. |
+
+- Covered by `CommentComposer.test.tsx`, `CommentSection.test.tsx` (including the StrictMode case that once hid
+  the author's Delete button on posts), `CommentList.test.tsx`, `DeleteCommentModal.test.tsx` and the E2E tests.
+- The comments are fetched by the page after it loads (not server-rendered): `curl` of `/p/<id>` still gets the
+  claim, the tags and the counts, but not the comment texts.
+
+#### Step 15: A phone-sized window
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Checks the new parts at phone width. In Firefox or Chrome press `F12`, then the "responsive
+design" / device toolbar button, and set the width to 390.
+
+| Do this | Expect |
+|---|---|
+| Open /home | Each card's bar (heart, count, bubble, count) fits on one line under the claim. **No sideways scrolling.** |
+| Open a post's page | The claim card's action row holds the heart and the speech bubble with their counts only (the words are hidden below 640 px) and **Copy link** beside them; the comment box is full width with the counter under it and the **Comment** button at the right; each comment is a card with the name, the time, the text and **DELETE**. |
+| Type 300 characters into the box | Still **no sideways scrolling.** |
+
+- Measured with headless Chromium at 390 px: 0 px of horizontal overflow on `/home`, on a post's page and with 300
+  characters typed.
+
+#### Step 16: Django Admin hides and unhides comments
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Opens the admin list of comments and uses the two new actions, the way a moderator will.
+
+| URL / action | Expect |
+|---|---|
+| http://localhost:8000/admin/ | Sign in with the superuser you made in Part 0A. If it 404s, `ADMIN_URL_PATH` in `backend/.env` isn't `admin/`; use that path. |
+| http://localhost:8000/admin/social/comment/ | **Comments**: the text (shortened), author, post, **Is hidden**, **Deleted at** and **Created at**, newest first, with a search box (text and username), the filters **By is hidden**, **By deleted at** and **By created at**, and the **Action** menu with "Hide selected comments" and "Unhide selected comments". There is no **Add comment** button. The comments you deleted in the browser are there with a date in **Deleted at**: the rows survived. |
+| Click a comment | A page that only shows the values: no Save and no Delete (they answer 403 if you type the address). |
+| Tick one comment of the tram post, choose **Hide selected comments**, click **Go** | A banner says "Hidden: 1 comment." Reload the tram post's page: the comment is gone from the list and the heading is one lower; the public list from step 8 no longer has it either. |
+| Open the filter **By is hidden → Yes**, tick it, choose **Unhide selected comments**, click **Go** | "Unhidden: 1 comment." The comment is back in the discussion. Ticking one that is already in that state changes nothing ("Hidden: 0 comments."). |
+| http://localhost:8000/admin/social/like/ | **Likes**: user, post and time, read-only like the follows. |
+
+- Both actions need the `social.change_comment` permission. Today only a superuser has it; Part 10 gives it to the
+  Moderators group. A staff member without it sees the list but is not offered the actions (a test covers that).
+- Each change is written to Django's own admin log (the comment, who and "Hidden" or "Unhidden"): the moderation
+  actions table arrives in Part 10 and has no comment kind. **Unhide** doesn't undelete a comment its author deleted.
+- Covered by `test_admin_engagement.py` and, for these clicks, a scripted browser run; not clicked by a person.
+
+#### Step 17: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts, their posts, follows, likes and comments (all go with the accounts). In window 2, in `backend` with the
+  venv active:
+
+  ```bash
+  python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part7-').delete())" | tail -1
+  ```
+
+  After one clean run of steps 3 to 12 of this guide it prints `(86, {'social.Like': 4, 'social.Comment': 64, 'social.Follow': 1, 'account.EmailAddress': 6, 'posts.Post': 5, 'accounts.User': 6})`:
+  how many rows went in all, and per table (5 posts by `bo`: the tram opinion, the fact, the removed one, the
+  deleted one and the limits post, and a deleted post is still a row; 64 comments: 3 on the tram post, 1 on the fact
+  and 60 on the limits post, the deleted and the hidden-then-unhidden one included; 4 likes: `ada` and `cy` on
+  the tram post, `ada` on the fact and `eve` on the limits post, `bo`'s was taken back). Your count differs if you did the browser steps
+  (more comments and likes). Nothing else is touched.
+  (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
+  If you made a throwaway superuser for step 16, delete that too.
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
   wipes the whole local database, which is destructive.
 - No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
@@ -8565,6 +9226,707 @@ design" / device toolbar button, and set the width to 390.
   how many rows went in all, and per table (8 posts: seven by `bo`, six in steps 3 and 7 and one in step 8, and one by `ada` in step 8; a deleted
   post is still a row). Your count differs if you did the browser steps (more posts and follows). Nothing else is touched.
   (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
+  token and the throwaway password of the test accounts.
+
+### Part 7: Likes & comments
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
+`frontend\.env.local`. Part 7 adds **one migration** (`social.0002_like_comment`: the likes and comments tables), **no
+dependency** and **no new variable** (the `like` and `comment` rates were already in the settings). It adds the
+endpoints `POST` and `DELETE /api/v1/posts/{id}/like/`, `GET` and `POST /api/v1/posts/{id}/comments/` and
+`DELETE /api/v1/comments/{id}/`, and fills `like_count`, `comment_count` and `liked_by_me` in every post.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 16 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for steps 3 to 12**: the variables and functions you set in step 3 (`$id`, `$ada`, `$bo`, `$cy`, `$dee`, `$api`, `$op1`, `$fact1`, `Mk`, `Send`, `Fetch`, and the helpers steps 4 and 7 add) only live in that one terminal. If you close it, redo step 3. | 1 to 12, 17 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 13 to 16 |
+| Browser | Steps 13 to 16 | 13 to 16 |
+
+Things to know first:
+
+- Steps 3 to 12 talk to the API directly with `curl.exe` (with `.exe`: in PowerShell 5.1 plain `curl` is a different command). Steps 13 to 16 use the
+  browser. Step 3 makes four accounts: `ada`, `bo` and `cy` are verified and `dee` never is. `bo` writes the
+  posts, `ada` and `cy` like and comment, and `dee` shows what an unverified email may not do. Step 11 adds `eve` and
+  `gus` for the two rate limits.
+- **The PowerShell blocks below were not run on Windows.** The agent works on the Linux PC; it ran the bash twin of every command in the Linux guide on 2026-10-10, and the outputs below are those. The PowerShell commands follow the patterns Parts 1 to 6 proved on Windows (JSON written to a file and sent with `--data-binary "@file"`, `curl.exe`, no `&&`). Two differences are deliberate: the 500-emoji comment in step 7 is sent as JSON escapes (PowerShell 5.1 turns real emoji in a file into `?`), and step 11's 60 comments all carry the same text. If one behaves differently, tell the agent which.
+- The API and page outputs below were recorded on Linux on 2026-10-10. The browser steps were checked the same
+  day with headless Chromium (screenshots at 1280 and 390 px) and Django Admin with a scripted browser, not by a
+  person at a keyboard. Ids, numbers in names, times and token prefixes differ on every run.
+- Nothing here sends an email: step 3 marks the accounts verified with a shell command, which stands in for
+  clicking the link (Part 2 shows the real flow). Steps 5, 9 and 10 set a post's status or hide a comment the same
+  way, because the pipeline and the moderator tools that do it for real arrive in Parts 9 and 10 (step 16 uses
+  the admin's own Hide action).
+- **What Part 7 does and doesn't show:** likes and comments are allowed on every post the public can see
+  (a fact that is still being checked included), never on a removed or deleted one; liking and commenting need a
+  verified email, taking a like back or deleting your own comment only a login; a **hidden** comment (a
+  moderator, in Django Admin) is in no list and no count, and deleting your own comment is a **soft delete**, so
+  the row stays. Reposts and bookmarks (7B), reports (8) and notifications (13) come later.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies the new migration,
+confirms there is no further one, then runs the whole backend test suite, the social tests, the linter and the
+formatter check.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                            # Applying social.0002_like_comment... OK
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 1485 passed
+python -m pytest apps/social -q                     # 305 passed
+ruff check . ; ruff format --check .                # All checks passed! / 142 files already formatted
+```
+
+**You should see:** `Applying social.0002_like_comment... OK` (nothing to apply the second time), `No changes detected`
+and `System check identified no issues (0 silenced).`, then the full run ends with `1485 passed`, the social run
+with `305 passed`, and the last line pair is `All checks passed!` and `142 files already formatted`. (Counts may
+grow later; what matters is that nothing fails.)
+
+- The 145 new social tests: `test_models_engagement.py` (13: the unique like pair, a comment is 1 to 500 characters
+  and an emoji is one, both indexes), `test_services_engagement.py` (26: idempotent like, who can like or comment
+  on what, two simultaneous likes make one row, N simultaneous likes are all counted, two simultaneous deletes give
+  one success), `test_api_like.py` (21, including the real 300-requests-an-hour limit), `test_api_comments.py` (22:
+  oldest first, cursor walk, a comment arriving between pages, crafted cursors, constant query counts),
+  `test_api_comment_create.py` (25, including the real 60-an-hour limit and that reading never uses it up),
+  `test_api_comment_delete.py` (13), `test_engagement_counts.py` (11: real counts in Recent, the post page, a
+  profile and the Following feed, also on a cache hit; constant queries), `test_admin_engagement.py` (13: Hide and
+  Unhide, the permission, the admin log) and one more in `test_no_network.py`.
+- Outside `apps/social`: the cursor check is tested for an oldest-first list too (`apps/core/tests/test_pagination.py`,
+  4 new). `PostQuerySet.for_list(viewer)` now counts likes and comments, and `PostSerializer` refuses a post
+  that was not counted (the 201 answer of a new post gets explicit zeros), so no list can show silent zeros.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 106 files, 1410 tests passed
+npm run build
+npm run test:e2e                                    # 32 passed
+$env:CI = "1" ; npm run test:e2e ; Remove-Item Env:CI   # 32 passed (against the production build)
+cd ..\backend                                       # back to backend\ for steps 3 to 12
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  106 passed (106)` and `Tests  1410 passed (1410)`. `npm run build` lists the same routes as in Part 6
+(Part 7 adds no page: the discussion is part of `/p/[id]`). Each E2E run ends with `32 passed`: the 29 earlier tests
+and 3 new ones in `e2e/social.spec.ts`.
+
+- The new E2E tests reuse the two people that file already signs up (allauth limits sign-ups to 20 a minute per
+  address and the rest of the suite already uses most of that), so Part 7 adds **no** sign-up. They are: B likes
+  A's post from the feed (the heart fills and the count moves at once, the like survives a reload, A sees one like
+  that isn't theirs), B opens the post, comments with Ctrl+Enter, A sees the comment with no Delete button, B
+  deletes it after a confirmation and takes the like back; a visitor sees the counts and is sent to log in; and the
+  post page with its discussion fits a phone with no sideways scroll.
+- `posts.spec.ts` now expects three links on a card (the author, the claim and the comment count).
+
+- On Windows `npm run build` can't blank `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (PowerShell's `$env:NAME = ""` *deletes* the
+  variable), so a `frontend\.env.local` with your real client ID is baked into that build and the CI-mode run is less
+  representative than on Linux. The default run pins an empty client ID for both servers, so it is unaffected.
+
+#### Step 3: Start the servers and make four accounts and two posts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 12.**
+
+**What this does:** Windows 1 and 3 run the two servers. In window 2 you sign up four accounts through the API and
+mark three of them verified (`dee` stays unverified), then `bo` posts an opinion and a fact with a DOI. The helpers
+`Mk` (make a post, print its id), `Send` (any request, printing the status code and then the answer) and `Fetch` (the same for a GET) are used by every later step.
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 and 2 leave you there). If you opened a new
+terminal, first run `cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the addresses are new each run
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+function Signup($email, $username) {
+@"
+{"email": "$email", "username": "$username", "password": "correct-horse-battery-42", "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-signup.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-signup.json" http://localhost:8000/api/auth/app/v1/auth/signup | ConvertFrom-Json).meta.access_token
+}
+$ada = Signup "part7-ada-$id@example.test" "part7_ada_$id"      # $ada = ada's login token (likes and comments)
+$bo = Signup "part7-bo-$id@example.test" "part7_bo_$id"         # $bo = bo's login token (the author of the posts)
+$cy = Signup "part7-cy-$id@example.test" "part7_cy_$id"         # $cy = cy's login token (kept for the browser)
+$dee = Signup "part7-dee-$id@example.test" "part7_dee_$id"      # $dee = dee's login token (never verified)
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part7-', email__endswith='$id@example.test').exclude(username='part7_dee_$id').update(is_email_verified=True), 'accounts marked verified')" | Select-Object -Last 1
+$api = 'http://localhost:8000/api/v1'
+$adaname = "part7_ada_$id"; $boname = "part7_bo_$id"; $cyname = "part7_cy_$id"; $deename = "part7_dee_$id"
+# Mk <token> <json>: makes a post, prints its id
+function Mk($token, $json) {
+  $json | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+  (curl.exe -s -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | ConvertFrom-Json).id
+}
+# Send <METHOD> <path> [token] [json body] [fields]: prints the HTTP status, then the answer. `fields` is a list
+# of property names to keep, or a script block `{ param($r) ... }` that picks what to show from the answer.
+function Send($method, $path, $token, $json, $show) {
+  $a = @()
+  if ($token) { $a += '-H', "Authorization: Bearer $token" }
+  if ($json) {
+    $json | Set-Content -Encoding ascii $env:TEMP\rz-body.json
+    $a += '-H', 'Content-Type: application/json', '--data-binary', "@$env:TEMP\rz-body.json"
+  }
+  $out = curl.exe -s -w "`n%{http_code}" -X $method @a "$api$path"
+  $body = if ($out.Count -gt 1) { $out[0..($out.Count - 2)] -join '' } else { '' }
+  if ($show -and $body) {
+    $r = $body | ConvertFrom-Json
+    $shown = if ($show -is [scriptblock]) { & $show $r } else { $r | Select-Object $show }
+    $body = ConvertTo-Json -InputObject $shown -Depth 5 -Compress
+  }
+  "$($out[-1])  $body"
+}
+function Fetch($path, $token, $show) { Send GET $path $token $null $show }   # Fetch <path> [token] [fields]
+$op1 = Mk $bo '{"content":"I think the new tram line will change how the city moves.","post_type":"opinion"}'
+$fact1 = Mk $bo '{"content":"Solar capacity grew by roughly 30% worldwide last year.","post_type":"fact","sources":["doi:10.1038/s41558-024-02102"]}'
+"$($ada.Substring(0,10)) $($bo.Substring(0,10)) $($cy.Substring(0,10)) $($dee.Substring(0,10))"      # four prefixes, not an error
+"op1=$op1"; "fact1=$fact1"                                                  # two ids, not empty
+```
+
+**You should see** (the number in the names is your `id`, and the ids differ):
+
+```text
+3 accounts marked verified
+eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi
+op1=c4cd330c-ef91-4ef8-a888-f016ae6e4905
+fact1=ba591060-ab33-405d-b077-0ef99a789ebe
+```
+
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet.
+
+**If it differs:** an empty token or an `id` of `null` means the sign-up or the post failed: `runserver` isn't
+running, or you signed up more than 20 times in a minute. Fix that and run this step again
+from `$id = Get-Date …`.
+
+#### Step 4: Like and unlike
+
+**Where:** Terminal window 2 (the same terminal as step 3).
+
+**What this does:** Likes and unlikes through `POST` and `DELETE /api/v1/posts/{id}/like/`, with every refusal.
+Both are idempotent. Liking needs a verified email, taking a like back only a login.
+
+```powershell
+function Like($post, $token) { Send POST "/posts/$post/like/" $token }          # Like <post id> [token]
+function Unlike($post, $token) { Send DELETE "/posts/$post/like/" $token }       # Unlike <post id> [token]
+Like $op1 $ada                                      # 1: the first like is 201
+Like $op1 $ada                                      # 2: again: 200, nothing changes
+Like $op1                                           # 3: nobody logged in
+Like $op1 $dee                                      # 4: an unverified email
+Like $op1 $bo                                       # 5: your own post is fine
+Like $fact1 $ada                                    # 6: a fact that is still "checking" can be liked
+Like 00000000-0000-4000-8000-000000000000 $ada      # 7: no such post
+Like not-a-uuid $ada                                # 8: not even an id
+Unlike $op1 $bo                                     # 9: taking your like back is 204
+Unlike $op1 $bo                                     # 10: and again: still 204, no error
+Unlike $op1 $dee                                    # 11: an unverified user may also take one back (there is none): 204
+```
+
+**You should see** (eleven commands, eleven answers):
+
+```text
+201  {"liked":true}
+200  {"liked":true}
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+403  {"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}
+201  {"liked":true}
+201  {"liked":true}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+204
+204
+204
+```
+
+- The first like is `201`, the same request again is `200` and changes nothing; `DELETE` is `204` every
+  time, also when there was nothing to take back (10, 11). A user can like their own post (5).
+- A fact post still labelled "checking facts" can be liked (6), like an opinion or a post under review: only a
+  removed or deleted post can't (step 5). An unknown or malformed id is the same JSON 404 (7, 8), never an HTML page.
+- A 401 or 403 doesn't use up the allowance of 300 likes an hour (step 11).
+
+#### Step 5: Removed and deleted posts
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes two more posts, one a moderator removes (set with a shell command: the moderator tools
+come in Part 10) and one its author deletes, and shows that neither can be liked.
+
+```powershell
+$op2 = Mk $bo '{"content":"This opinion will be removed by a moderator.","post_type":"opinion"}'
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$op2').update(status='removed'), 'post removed')" | Select-Object -Last 1
+$op3 = Mk $bo '{"content":"This opinion will be deleted by its author.","post_type":"opinion"}'
+Send DELETE "/posts/$op3/" $bo                      # bo deletes op3: 204
+Like $op2 $ada                                      # 1: a removed post can't be liked
+Like $op3 $ada                                      # 2: a deleted post can't either
+python manage.py shell -c "from apps.social.models import Like; from apps.accounts.models import User; Like.objects.create(user=User.objects.get(username='$adaname'), post_id='$op2'); print(Like.objects.filter(post_id='$op2').count(), 'like row planted on the removed post')" | Select-Object -Last 1
+Unlike $op2 $ada                                    # 3: ...but a like can still be taken back from it: 204
+python manage.py shell -c "from apps.social.models import Like; print(Like.objects.filter(post_id='$op2').count(), 'like rows left on it')" | Select-Object -Last 1
+Unlike $op3 $ada                                    # 4: a deleted post is 404 even for that
+```
+
+**You should see:**
+
+```text
+1 post removed
+204
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+1 like row planted on the removed post
+204
+0 like rows left on it
+404  {"detail":"Not found.","code":"not_found"}
+```
+
+- `post removed` is the shell command; `204` is `bo` deleting `op3`; then the two refusals (1, 2) are plain
+  `404`s, the same answer as for a post that never existed, so nothing says whether a post once existed.
+- A like that was already on a post can always be taken back, even if the post was removed meanwhile (3 to
+  the `0 like rows left` line), but a deleted post is `404` for that too (4).
+
+#### Step 6: The counts on every post
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads `like_count`, `comment_count` and `liked_by_me` as nobody and as other people, on the post
+page and in three lists. The counts are counted in the same query as the posts, so a list of 20 posts costs the same
+number of queries as a list of 2. The last three commands show the Following feed, whose first page is cached for
+30 seconds as a list of ids only: a new like still shows at once.
+
+```powershell
+$counts = @('like_count', 'comment_count', 'liked_by_me')
+$cards = { param($r) @($r.results | ForEach-Object { $p = if ($_.post) { $_.post } else { $_ }; [pscustomobject]@{ content = $p.content.Substring(0, 24); like_count = $p.like_count; liked_by_me = $p.liked_by_me } }) }
+$feedCards = { param($r) @($r.results | Select-Object -First 2 | ForEach-Object { [pscustomobject]@{ content = $_.post.content.Substring(0, 24); like_count = $_.post.like_count } }) }
+Fetch "/posts/$op1/" $null $counts                  # 1: a visitor: ada's like counts, "mine" is false
+Fetch "/posts/$op1/" $ada $counts                   # 2: ada: she liked it
+Fetch "/posts/$op1/" $cy $counts                    # 3: cy: someone else liked it, he didn't
+Fetch "/posts/?page_size=2" $ada $cards             # 4: the Recent feed: the same numbers
+Fetch "/users/$boname/posts/?page_size=2" $ada $cards   # 5: bo's profile posts
+Send POST "/users/$boname/follow/" $ada             # 6: ada follows bo, so the Following feed has bo's posts
+Fetch "/feed/" $ada $feedCards                      # 7: the Following feed: page 1 is now cached (ids only)
+Like $op1 $cy                                       # 8: one more like arrives
+Fetch "/feed/" $ada $feedCards                      # 9: still cached, but the count is fresh
+```
+
+**You should see:**
+
+```text
+200  {"like_count":1,"comment_count":0,"liked_by_me":false}
+200  {"like_count":1,"comment_count":0,"liked_by_me":true}
+200  {"like_count":1,"comment_count":0,"liked_by_me":false}
+200  [{"content":"Solar capacity grew by r","like_count":1,"liked_by_me":true},{"content":"I think the new tram lin","like_count":1,"liked_by_me":true}]
+200  [{"content":"Solar capacity grew by r","like_count":1,"liked_by_me":true},{"content":"I think the new tram lin","like_count":1,"liked_by_me":true}]
+201  {"is_following":true}
+200  [{"content":"Solar capacity grew by r","like_count":1},{"content":"I think the new tram lin","like_count":1}]
+201  {"liked":true}
+200  [{"content":"Solar capacity grew by r","like_count":1},{"content":"I think the new tram lin","like_count":2}]
+```
+
+- `liked_by_me` is `false` for a visitor and for everyone who didn't like the post (1, 3), `true` for `ada` (2).
+  `like_count` is the same for everyone.
+- Lines 4 and 5 list the two newest posts, the fact and the opinion `bo` made in step 3 (the removed and the deleted
+  one are left out): both show `ada`'s like. Hidden and deleted comments are never counted in `comment_count`
+  (step 10).
+- Line 7 is the Following feed, now cached for `ada`; line 9 is the same page a moment later: the cache keeps the
+  post ids, not the posts, so the count rose from 1 to 2.
+
+#### Step 7: Write comments
+
+**Where:** Terminal window 2.
+
+**What this does:** Writes comments through `POST /api/v1/posts/{id}/comments/` and tries everything that is
+refused. A comment is 1 to 500 characters (an emoji counts as one), trimmed, and needs a verified email.
+
+```powershell
+# Comment <post id> <token> <text> [fields]: the text goes into the JSON for you
+function Comment($post, $token, $text, $show) { Send POST "/posts/$post/comments/" $token (@{ content = $text } | ConvertTo-Json -Compress) $show }
+Comment $op1 $ada "  A fair point.  " { param($r) [pscustomobject]@{ content = $r.content; is_mine = $r.is_mine; author = $r.author.username; keys = @($r.PSObject.Properties.Name | Sort-Object) } }   # 1: 201, the text is trimmed
+Comment $op1 $bo "Thanks, ada." @('content', 'is_mine')        # 2: the post's own author may comment
+Comment $op1 $cy "Third." { param($r) $r.content }              # 3: a third comment
+Comment $op1 $null "Hi"                             # 4: nobody logged in
+Comment $op1 $dee "Hi"                              # 5: an unverified email
+Comment $op1 $ada ""                                # 6: nothing written
+Comment $op1 $ada "   "                             # 7: only spaces
+Comment $op1 $ada ('x' * 501)                       # 8: 501 characters
+# 9: 500 emoji = 500 characters: fine, on a fact still being checked. Sent as JSON escapes (ASCII), because PowerShell 5.1 would turn real emoji in a file into "?".
+Send POST "/posts/$fact1/comments/" $ada ('{"content":"' + ('\ud83d\ude00' * 500) + '"}') { param($r) (New-Object System.Globalization.StringInfo $r.content).LengthInTextElements }
+Comment $op2 $ada "Hi"                              # 10: a removed post has no discussion
+Comment 00000000-0000-4000-8000-000000000000 $ada "Hi"     # 11: no such post
+```
+
+**You should see** (eleven commands, eleven answers):
+
+```text
+201  {"content":"A fair point.","is_mine":true,"author":"part7_ada_190101","keys":["author","content","created_at","id","is_mine"]}
+201  {"content":"Thanks, ada.","is_mine":true}
+201  "Third."
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+403  {"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}
+400  {"content":["Write something first."]}
+400  {"content":["Write something first."]}
+400  {"content":["Keep it to 500 characters."]}
+201  500
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+```
+
+- A comment has exactly five keys: `id`, `author`, `content`, `is_mine` and `created_at`. Nothing about moderation
+  ever shows. The spaces around the text are gone (1).
+- `400` answers come per field in the same words as a post's: "Write something first." for nothing or only
+  spaces (6, 7) and "Keep it to 500 characters." for 501 (8). 500 emoji is 500 characters, not 1000 (9).
+- The refusals for nobody logged in, an unverified email, a removed post and no such post are the same as for likes.
+
+#### Step 8: Read the comments
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads `GET /api/v1/posts/{id}/comments/`: public, **oldest first**, 20 to a page (`?page_size=`
+up to 50), with a cursor to carry on.
+
+```powershell
+$list = { param($r) [pscustomobject]@{ order = @($r.results | ForEach-Object content); keys = @($r.results[0].PSObject.Properties.Name | Sort-Object); next_cursor = $r.next_cursor } }
+$mine = { param($r) @($r.results | ForEach-Object { [pscustomobject]@{ content = $_.content; is_mine = $_.is_mine } }) }
+Fetch "/posts/$op1/comments/" $null $list                                  # 1: anyone can read; oldest first
+Fetch "/posts/$op1/comments/" $ada $mine                                   # 2: ada's own comment says so
+$cur = (curl.exe -s "$api/posts/$op1/comments/?page_size=2" | ConvertFrom-Json).next_cursor
+Fetch "/posts/$op1/comments/?page_size=2" $null { param($r) @($r.results | ForEach-Object content) + @([bool]$r.next_cursor) }                    # 3: a page of two, and a way on
+Fetch "/posts/$op1/comments/?page_size=2&cursor=$cur" $null { param($r) @($r.results | ForEach-Object content) + @($r.next_cursor) }                # 4: the last one, then no cursor
+Fetch "/posts/$op1/comments/?cursor=cD1ub3QtYS1kYXRl"                      # 5: a made-up cursor
+Fetch "/posts/$op2/comments/"                                              # 6: removed post
+Fetch "/posts/$op3/comments/"                                              # 7: deleted post
+Fetch "/posts/$op1/" $null @('comment_count', 'like_count')                # 8: the counts on the post
+```
+
+**You should see** (eight commands, eight answers):
+
+```text
+200  {"order":["A fair point.","Thanks, ada.","Third."],"keys":["author","content","created_at","id","is_mine"],"next_cursor":null}
+200  [{"content":"A fair point.","is_mine":true},{"content":"Thanks, ada.","is_mine":false},{"content":"Third.","is_mine":false}]
+200  ["A fair point.","Thanks, ada.",true]
+200  ["Third.",null]
+404  {"detail":"Invalid cursor","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+200  {"comment_count":3,"like_count":2}
+```
+
+- Anyone can read (1). The order is the order they were written. Only `ada`'s own comment says `is_mine: true`
+  when she asks (2).
+- Line 3 is a page of two and `true`: there is more; line 4 follows the cursor and gets the last comment, then
+  `null`. A comment that arrives between two pages is neither skipped nor repeated (a test covers it).
+- A made-up cursor is a clean `404 "Invalid cursor"`, never a server error. A removed or deleted post has no
+  comment list at all (6, 7), not even for its author.
+
+#### Step 9: Delete your own comment
+
+**Where:** Terminal window 2.
+
+**What this does:** Deletes a comment through `DELETE /api/v1/comments/{id}/`. It is a **soft delete**: the comment
+leaves every list and count, but the row stays in the database (the last command shows it).
+
+```powershell
+$cid = ((curl.exe -s "$api/posts/$op1/comments/") | ConvertFrom-Json).results[1].id    # bo's comment (the second one)
+Send DELETE "/comments/$cid/"                       # 1: nobody logged in
+Send DELETE "/comments/$cid/" $ada                  # 2: someone else's comment
+Send DELETE "/comments/$cid/" $bo                   # 3: its author: 204
+Send DELETE "/comments/$cid/" $bo                   # 4: again: it is gone, 404
+Fetch "/posts/$op1/" $null @('comment_count')       # 5: the count dropped
+Fetch "/posts/$op1/comments/" $null { param($r) @($r.results | ForEach-Object content) }   # 6: and so did the list
+python manage.py shell -c "from apps.social.models import Comment; c = Comment.objects.get(pk='$cid'); print(repr(c.content), '| deleted_at set:', c.deleted_at is not None, '| hidden:', c.is_hidden)" | Select-Object -Last 1   # 7: the row is still there
+```
+
+**You should see:**
+
+```text
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+403  {"detail":"Only the author can do that.","code":"not_author"}
+204
+404  {"detail":"Not found.","code":"not_found"}
+200  {"comment_count":2}
+200  ["A fair point.","Third."]
+'Thanks, ada.' | deleted_at set: True | hidden: False
+```
+
+- Only the author can delete: someone else gets `403 not_author` (2), and so does the author of the *post*.
+  Deleting needs no verified email. The second delete is `404` (4), as for posts.
+- The count and the list lose the comment at once (5, 6), and the row is still there with `deleted_at` set (7),
+  like a deleted post.
+
+#### Step 10: What a moderator's Hide does
+
+**Where:** Terminal window 2.
+
+**What this does:** Hides one comment with a shell command, which is what the admin's **Hide** action does (step 16
+uses the real one), and shows that a hidden comment is gone for everyone, its author included, and not counted.
+
+```powershell
+$aid = ((curl.exe -s "$api/posts/$op1/comments/") | ConvertFrom-Json).results[0].id    # ada's comment (now the first)
+$texts = { param($r) @($r.results | ForEach-Object content) }
+python manage.py shell -c "from apps.social.models import Comment; print(Comment.objects.filter(pk='$aid').update(is_hidden=True), 'comment hidden')" | Select-Object -Last 1   # what the admin's Hide action does
+Fetch "/posts/$op1/comments/" $ada $texts           # 1: gone from the list, even for its own author
+Fetch "/posts/$op1/" $null @('comment_count')       # 2: and not counted
+Send DELETE "/comments/$aid/" $ada                  # 3: its author can't delete it any more
+python manage.py shell -c "from apps.social.models import Comment; print(Comment.objects.filter(pk='$aid').update(is_hidden=False), 'comment unhidden')" | Select-Object -Last 1   # Unhide
+Fetch "/posts/$op1/comments/" $null $texts          # 4: back in its place
+Fetch "/posts/$op1/" $null @('comment_count')       # 5: and counted again
+```
+
+**You should see:**
+
+```text
+1 comment hidden
+200  ["Third."]
+200  {"comment_count":1}
+404  {"detail":"Not found.","code":"not_found"}
+1 comment unhidden
+200  ["A fair point.","Third."]
+200  {"comment_count":2}
+```
+
+- Hidden means in no list and no count, for everyone (1, 2); staff see it only in Django Admin. Its author
+  can't delete it any more (3): to them it no longer exists.
+- Unhiding puts it back in its place, and the count goes back up (4, 5).
+
+#### Step 11: Liking and commenting are rate limited
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes two more verified accounts and a post, then uses up their allowances: 300 likes an hour
+(`POST` and `DELETE` share it) and 60 comments an hour (only `POST` counts; reading never does).
+
+```powershell
+$eve = Signup "part7-eve-$id@example.test" "part7_eve_$id"      # $eve = a fresh account for the like limit
+$gus = Signup "part7-gus-$id@example.test" "part7_gus_$id"      # $gus = a fresh account for the comment limit
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__in=['part7-eve-$id@example.test', 'part7-gus-$id@example.test']).update(is_email_verified=True), 'accounts marked verified')" | Select-Object -Last 1
+$op4 = Mk $bo '{"content":"A post for the limits to chew on.","post_type":"opinion"}'
+1..300 | ForEach-Object { curl.exe -s -o NUL -w "%{http_code}`n" -X POST -H "Authorization: Bearer $eve" "$api/posts/$op4/like/" } | Group-Object | Sort-Object Name | ForEach-Object { "{0,7} {1}" -f $_.Count, $_.Name }   # 300 likes of one post
+curl.exe -s -i -X POST -H "Authorization: Bearer $eve" "$api/posts/$op4/like/" | Select-String -Pattern 'HTTP/[0-9.]+ [0-9]+|retry-after: [0-9]+|"code":"[a-z_]+"' -AllMatches | ForEach-Object { $_.Matches.Value }   # the 301st
+'{"content":"Limit test"}' | Set-Content -Encoding ascii $env:TEMP\rz-limit.json
+1..60 | ForEach-Object { curl.exe -s -o NUL -w "%{http_code}`n" -H "Authorization: Bearer $gus" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-limit.json" "$api/posts/$op4/comments/" } | Group-Object | Sort-Object Name | ForEach-Object { "{0,7} {1}" -f $_.Count, $_.Name }   # 60 comments
+curl.exe -s -i -H "Authorization: Bearer $gus" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-limit.json" "$api/posts/$op4/comments/" | Select-String -Pattern 'HTTP/[0-9.]+ [0-9]+|retry-after: [0-9]+|"code":"[a-z_]+"' -AllMatches | ForEach-Object { $_.Matches.Value }   # the 61st
+Fetch "/posts/$op4/comments/" $gus { param($r) [pscustomobject]@{ n = @($r.results).Count } }   # reading is never throttled
+```
+
+**You should see** (the seconds differ):
+
+```text
+2 accounts marked verified
+    299 200
+      1 201
+HTTP/1.1 429
+Retry-After: 3597
+"code":"throttled"
+     60 201
+HTTP/1.1 429
+Retry-After: 3600
+"code":"throttled"
+200  {"n":20}
+```
+
+- 300 requests went through (the first made the like, the other 299 were repeats), the 301st was refused with `429`,
+  `"code":"throttled"` and a `Retry-After` in seconds. Likewise 60 comments, then the 61st.
+- A 401 or 403 doesn't use up an allowance, but a `400` for a bad comment does (tests cover both).
+- Reading the comments still works while the comment allowance is spent: the last answer shows the page of 20.
+
+#### Step 12: The indexes are used
+
+**Where:** Terminal window 2.
+
+**What this does:** In a transaction that is thrown away at the end, makes 300 users, 2,000 posts, 40,000 comments and
+30,000 likes, asks the database how it would run the three queries behind every card and prints the plan lines. Nothing is
+saved.
+
+```powershell
+@'
+from datetime import timedelta
+from django.db import connection, transaction
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.posts.models import Post
+from apps.social.models import Comment, Like
+
+class Rollback(Exception):
+    pass
+
+try:
+    with transaction.atomic():   # everything below is thrown away at the end
+        users = User.objects.bulk_create([User(username=f"xp_{i:03d}", email=f"xp{i}@example.test") for i in range(300)])
+        now = timezone.now()
+        posts = Post.objects.bulk_create([Post(author=users[i % 300], content=f"p{i}", post_type="opinion", status="published", created_at=now - timedelta(seconds=i)) for i in range(2000)])
+        Comment.objects.bulk_create([Comment(post=posts[n % 200], author=users[n % 300], content="c", created_at=now - timedelta(seconds=n), is_hidden=(n % 50 == 0), deleted_at=(now if n % 70 == 0 else None)) for n in range(40000)])
+        Like.objects.bulk_create([Like(user=users[n % 300], post=posts[(n // 300) % 2000]) for n in range(30000)], ignore_conflicts=True)
+        with connection.cursor() as c:
+            for table in ("social_comment", "social_like", "posts_post"):
+                c.execute(f"ANALYZE {table}")
+            target = str(posts[7].pk)
+            for label, sql in {
+                "--- comment list, first page": "SELECT id FROM social_comment WHERE post_id = %s AND NOT is_hidden AND deleted_at IS NULL ORDER BY created_at, id LIMIT 21",
+                "--- comment count": "SELECT COUNT(*) FROM social_comment WHERE post_id = %s AND NOT is_hidden AND deleted_at IS NULL",
+                "--- like count": "SELECT COUNT(*) FROM social_like WHERE post_id = %s",
+            }.items():
+                c.execute("EXPLAIN " + sql, [target])
+                print(label)
+                for row in c.fetchall():
+                    print(row[0])
+        raise Rollback
+except Rollback:
+    print("rolled back: nothing was saved")
+'@ | python manage.py shell 2>&1 | Select-String -Pattern '^---|Scan|rolled back' | ForEach-Object { $_.Line }
+```
+
+**You should see** (the cost numbers differ a little):
+
+```text
+--- comment list, first page
+  ->  Index Only Scan using comments_post_visible_idx on social_comment  (cost=0.41..595.39 rows=170 width=24)
+--- comment count
+  ->  Bitmap Heap Scan on social_comment  (cost=17.73..353.09 rows=170 width=0)
+        ->  Bitmap Index Scan on comments_post_visible_idx  (cost=0.00..17.69 rows=170 width=0)
+--- like count
+  ->  Bitmap Heap Scan on social_like  (cost=22.61..319.28 rows=300 width=0)
+        ->  Bitmap Index Scan on likes_post_created_idx  (cost=0.00..22.54 rows=300 width=0)
+rolled back: nothing was saved
+```
+
+- The comment list reads `comments_post_visible_idx` straight in order (an index-only scan): that index only holds
+  comments that are shown (not hidden, not deleted), and the count uses it too. The like count uses
+  `likes_post_created_idx`.
+- Each post card counts its own likes and comments with these two queries; a count costs about as many index entries
+  as the post has comments, which is fine for now. (A post with many thousands of likes would want a stored counter:
+  recorded for Part 16.)
+
+#### Step 13: Likes on the cards
+
+**Where:** Browser, with `runserver` (window 1) and `npm run dev` (window 3) running. Log in at
+http://localhost:3000/login as `part7-cy-<id>@example.test` (use the `$id` from step 3) with the password `correct-horse-battery-42` (`cy` was verified in step 3).
+
+**What this does:** Looks at the like and comment buttons on the Recent feed, as three kinds of visitor.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home and look at the posts `bo` made | Every card ends with a hairline and two small buttons: a **heart** with the like count and a **speech bubble** with the comment count. The solar fact card shows `1` and `1`; "A post for the limits to chew on." shows `1` and `60` (step 11); the tram opinion shows a **filled blue heart** and `2` (`cy` liked it in step 6) and `2` comments. Counts of 1,000 and more print as `1.4K`. |
+| Click the filled heart on the tram card | It turns into an outline heart and the count goes `2` to `1` **at once**, before the server answers. Click again: filled, `2`. |
+| Press `Tab` until a heart has the focus, then `Enter` or `Space` | The same toggle. A focused button has a thin blue ring. |
+| Reload the page | The heart and the numbers are what the server says: the state survived. |
+| Click the speech bubble | The post's own page opens, scrolled to the **Comments** section (`/p/<id>#comments`). Clicking the claim text opens the same page from the top. |
+| Open a private window and go to /home (a visitor) | The same cards with the same counts. The hearts are **links**: they point to `/login?next=%2Fp%2F<id>`, and after you log in you land on that post's page. |
+| In another window log in as `dee` (`part7-dee-<id>@example.test`, same password: never verified) and click a heart | The heart looks dimmed and nothing is sent; a toast says "Verify your email to like posts. Check your inbox for the link." |
+
+- Covered by `LikeButton.test.tsx` (flip before the answer, rollback and toast on every kind of failure, one
+  request for two clicks in one tick, all four visitor states) and the new E2E tests.
+- The heart on a card is always above the card's big invisible link, so it never opens the post by accident.
+
+#### Step 14: The discussion on a post's page
+
+**Where:** Browser, logged in as `cy`, with both servers running.
+
+**What this does:** Opens the tram post and uses the Comments section.
+
+| Do this | Expect |
+|---|---|
+| Open the tram post (click its text on /home) and scroll below the verdict | The heading **Comments (2)** with OLDEST FIRST at the right, a box "Add a comment…" with `0 / 500 characters`, the hint "Ctrl + Enter to post" and a blue **Comment** button; below it `ada`'s "A fair point." and then `cy`'s "Third.". Only `cy`'s own comment has a small **DELETE**. (`bo`'s was deleted in step 9.) |
+| Look at the row next to **Copy link** | The heart and the speech bubble with the words "Like" and "Comments" beside their counts (the words show from 640 px up). Clicking "Comments" jumps down to the section. |
+| Type a line (the counter moves), then press `Ctrl+Enter` (`Cmd+Enter` on a Mac) | Your comment appears at the **end** of the list with "now", the heading says **Comments (3)**, the box is empty and keeps the focus, and a toast says "Comment posted." |
+| Click **Comment** with the box empty, or only spaces | "Write something first." under the box; nothing is sent. |
+| Paste a text of 501 characters, then click **Comment** | The counter turns red (`501 / 500 characters`) and the message is "Keep it to 500 characters."; nothing is sent. |
+| Click **DELETE** under your own comment | A dialog "Delete this comment?" says "It disappears from the discussion right away. This can't be undone." **Cancel** closes it and nothing happens. **Delete comment** removes the row, the heading goes back to **Comments (2)** and a toast says "Comment deleted." |
+| Open the same page in a private window (a visitor) | The comments are readable, there is no box, and a link says "Log in to comment" (to join the discussion). |
+| Log in as `dee` (unverified) and open the page | The box is greyed out and locked, with the note "Verify your email to comment." |
+| Open a removed post's page (not available from the UI: try `/p/<op2>`) | The tombstone with no discussion at all, for anyone, its author too. |
+
+- Covered by `CommentComposer.test.tsx`, `CommentSection.test.tsx` (including the StrictMode case that once hid
+  the author's Delete button on posts), `CommentList.test.tsx`, `DeleteCommentModal.test.tsx` and the E2E tests.
+- The comments are fetched by the page after it loads (not server-rendered): `curl` of `/p/<id>` still gets the
+  claim, the tags and the counts, but not the comment texts.
+
+#### Step 15: A phone-sized window
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Checks the new parts at phone width. In Firefox or Chrome press `F12`, then the "responsive
+design" / device toolbar button, and set the width to 390.
+
+| Do this | Expect |
+|---|---|
+| Open /home | Each card's bar (heart, count, bubble, count) fits on one line under the claim. **No sideways scrolling.** |
+| Open a post's page | The claim card's action row holds the heart and the speech bubble with their counts only (the words are hidden below 640 px) and **Copy link** beside them; the comment box is full width with the counter under it and the **Comment** button at the right; each comment is a card with the name, the time, the text and **DELETE**. |
+| Type 300 characters into the box | Still **no sideways scrolling.** |
+
+- Measured with headless Chromium at 390 px: 0 px of horizontal overflow on `/home`, on a post's page and with 300
+  characters typed.
+
+#### Step 16: Django Admin hides and unhides comments
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Opens the admin list of comments and uses the two new actions, the way a moderator will.
+
+| URL / action | Expect |
+|---|---|
+| http://localhost:8000/admin/ | Sign in with the superuser you made in Part 0A. If it 404s, `ADMIN_URL_PATH` in `backend\.env` isn't `admin/`; use that path. |
+| http://localhost:8000/admin/social/comment/ | **Comments**: the text (shortened), author, post, **Is hidden**, **Deleted at** and **Created at**, newest first, with a search box (text and username), the filters **By is hidden**, **By deleted at** and **By created at**, and the **Action** menu with "Hide selected comments" and "Unhide selected comments". There is no **Add comment** button. The comments you deleted in the browser are there with a date in **Deleted at**: the rows survived. |
+| Click a comment | A page that only shows the values: no Save and no Delete (they answer 403 if you type the address). |
+| Tick one comment of the tram post, choose **Hide selected comments**, click **Go** | A banner says "Hidden: 1 comment." Reload the tram post's page: the comment is gone from the list and the heading is one lower; the public list from step 8 no longer has it either. |
+| Open the filter **By is hidden → Yes**, tick it, choose **Unhide selected comments**, click **Go** | "Unhidden: 1 comment." The comment is back in the discussion. Ticking one that is already in that state changes nothing ("Hidden: 0 comments."). |
+| http://localhost:8000/admin/social/like/ | **Likes**: user, post and time, read-only like the follows. |
+
+- Both actions need the `social.change_comment` permission. Today only a superuser has it; Part 10 gives it to the
+  Moderators group. A staff member without it sees the list but is not offered the actions (a test covers that).
+- Each change is written to Django's own admin log (the comment, who and "Hidden" or "Unhidden"): the moderation
+  actions table arrives in Part 10 and has no comment kind. **Unhide** doesn't undelete a comment its author deleted.
+- Covered by `test_admin_engagement.py` and, for these clicks, a scripted browser run; not clicked by a person.
+
+#### Step 17: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts, their posts, follows, likes and comments (all go with the accounts). In window 2, in `backend\` with the
+  venv active:
+
+  ```powershell
+  python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part7-').delete())" | Select-Object -Last 1
+  ```
+
+  After one clean run of steps 3 to 12 of this guide it prints `(86, {'social.Like': 4, 'social.Comment': 64, 'social.Follow': 1, 'account.EmailAddress': 6, 'posts.Post': 5, 'accounts.User': 6})`:
+  how many rows went in all, and per table (5 posts by `bo`: the tram opinion, the fact, the removed one, the
+  deleted one and the limits post, and a deleted post is still a row; 64 comments: 3 on the tram post, 1 on the fact
+  and 60 on the limits post, the deleted and the hidden-then-unhidden one included; 4 likes: `ada` and `cy` on
+  the tram post, `ada` on the fact and `eve` on the limits post, `bo`'s was taken back). Your count differs if you did the browser steps
+  (more comments and likes). Nothing else is touched.
+  (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
+  If you made a throwaway superuser for step 16, delete that too.
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
   wipes the whole local database, which is destructive.
 - No secret was used or printed in this part: the only values in the commands are Cloudflare's public test

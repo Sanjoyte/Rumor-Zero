@@ -1,5 +1,5 @@
 /** Shared test helpers for the social feature (not shipped: only *.test.* files import it). */
-import type { UserProfile, UserRowData } from "@/lib/api/types";
+import type { Comment, UserProfile, UserRowData } from "@/lib/api/types";
 
 export function makeProfile(overrides: Partial<UserProfile> = {}): UserProfile {
   return {
@@ -27,6 +27,17 @@ export function makeRow(overrides: Partial<UserRowData> = {}): UserRowData {
     reputation: { score: null, sample: 0 },
     is_following: false,
     is_me: false,
+    ...overrides,
+  };
+}
+
+export function makeComment(overrides: Partial<Comment> = {}): Comment {
+  return {
+    id: "c-1",
+    author: { id: "u-3", username: "cy", display_name: "Cy Lane", avatar_url: null },
+    content: "A fair point.",
+    is_mine: false,
+    created_at: "2026-10-08T11:00:00Z",
     ...overrides,
   };
 }
