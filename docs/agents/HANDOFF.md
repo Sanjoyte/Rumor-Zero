@@ -6,19 +6,20 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none. **Part 7 (Likes & comments) is done** (2026-10-10; built from the approved plan; every required
-  test and check green; `task.md` updated). Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6 and 7 are done. Part 1 CI is
-  green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6 and 7 CI have not run yet.**
+- **Part:** **7B (Bookmarks & reposts): planned and approved, not implemented.** Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4,
+  5, 6 and 7 are done (Part 7 committed by the user as `c562e70`). Part 1 CI is green (user-reported 2026-10-06);
+  **Part 2, 3, 4, 5, 6 and 7 CI have not run yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after finishing Part 7; Part 7B is not started).
-- **Phase:** done, uncommitted. The user reviews and commits.
+- **Owner:** none (Claude stopped after saving the Part 7B plan).
+- **Phase:** plan approved; implementation not started. No code written.
 - **Approved plan:**
-  [`docs/agents/plans/part-7-likes-comments.md`](plans/part-7-likes-comments.md)
-  (status line now says IMPLEMENTED)
+  [`docs/agents/plans/part-7b-bookmarks-reposts.md`](plans/part-7b-bookmarks-reposts.md)
+  (approved 2026-10-10; implement with Sonnet 5.5 · high, per `task.md`)
 - **Previous plans:**
+  - [`part-7-likes-comments.md`](plans/part-7-likes-comments.md), implemented 2026-10-10 (committed as `c562e70`);
   - [`part-6-profiles-follows-following-feed.md`](plans/part-6-profiles-follows-following-feed.md),
     implemented 2026-10-09 (committed as `15c1d8a`);
   - [`part-5-post-detail-sharing-deletion-polling.md`](plans/part-5-post-detail-sharing-deletion-polling.md),
@@ -31,9 +32,39 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-10 by Claude (Sonnet 5.5), Part 7 implementation.
+- **Last updated:** 2026-10-10 by Claude (Opus 5.5), Part 7B planning.
 
 ## Completed checkpoints
+
+- 2026-10-10 (Claude, Opus 5.5): **Part 7B planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `c562e70` ("Implemented Part 7: Likes & comments", committed by the user), a clean tree.
+    (The older text of this file said Part 7 was uncommitted; the user committed it in between.) `docker compose ps`:
+    Postgres and Redis up and healthy.
+  - **Dependency check:** Part 7B depends on Parts 6 (Done 2026-10-09) and 7 (Done 2026-10-10); their chains (5, 4, 1,
+    0C, 0A/0B/0D, plus 2 and 3) are Done. Open but not blocking: Part 3 criterion 4, and CI for Parts 2 to 7.
+  - **Research:** read-only only: two Explore agents (the frontend feed/social code; Stitch a1/b1/b3/c1 + DESIGN.md),
+    direct reads of the backend `social`/`posts`/`core` pagination and feed code and ARCHITECTURE §2/§3/§4a/§4d/§9/§10,
+    a Plan-agent review of the feed cursor design (its findings are folded into the plan), and one read-only
+    `manage.py shell` prototype that compiled and ran a `SELECT` (no write) to confirm Django 5.2.17 builds a `UNION
+    ALL` of two ordered, sliced `values_list` querysets.
+  - **Changed this session:** only the new plan file and this file. No code, no setup command, no `task.md` edit, no
+    env file read, `design/` untouched.
+  - **User decisions (2026-10-10):**
+    - **`BookmarkAdmin` is superuser-only** (registered read-only; moderators never see bookmarks).
+    - **A repost of a deleted or removed original can be taken back** (`DELETE …/repost/` is 204 whenever the post row
+      exists; your own "no longer available" card has Undo repost).
+    - **The page hides later repeats** of a post across Following-feed pages (the API keeps "once per page").
+    - **Profile chips filter reposts by the original's type.**
+  - **Defaults approved with the plan** are in its "Defaults" and "The mixed timeline" sections: the keyset timeline
+    (key `(activity_at, kind, post id, reposter id)`, integer-microsecond token, per-page dedupe over a `2 × size + 1`
+    window), cache v2 holding the full keys, the 201/200/204/404/409 codes and their order, `FOR NO KEY UPDATE` on
+    repost, the bookmark list in the §9 envelope, query counts, the button states, `/bookmarks`.
+  - **Found during planning** (all handled in the plan): DRF's cursor can't page a union; repost ids are bigint and post
+    ids uuid (so no single "item id" column; recorded as a deviation from task.md's wording); a plain OR cursor filter
+    can't use an index (a redundant `created_at <= t` is added); `FeedList` and `pendingPostIds` skip reposts today and
+    tests pin that; `LikeButton` and `FollowButton` repeat a constant hint id in lists (the plan fixes `LikeButton`
+    only); Stitch has no filled bookmark, "Reposted by" header, unavailable card or bookmarks page; the E2E suite uses
+    16 of the 20 sign-ups a minute (7B seeds its third author through `manage.py shell`).
 
 - 2026-10-10 (Claude, Sonnet 5.5): **Part 7 implemented** (uncommitted). Started from HEAD `3f8e174` ("Plan Part 7",
   committed by the user), a clean tree that matched this file; Docker was already healthy, ports free.
@@ -510,11 +541,9 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `3f8e174` ("Plan Part 7", committed by the user). **Uncommitted:** the whole Part 7 implementation: 40
-  modified files (this file included) and 26 new ones: `backend/apps/social/engagement.py`, the `0002` migration, 8
-  backend test files and 16 files in `frontend/src/features/social/` (`git status --short -uall`).
-- Docker (Postgres 18 + Redis) is up; no dev server is running; ports 3000/8000 are free (the servers started for
-  the manual checks were stopped).
+- HEAD is `c562e70` ("Implemented Part 7: Likes & comments", committed by the user). **Uncommitted:** this file and
+  the new `docs/agents/plans/part-7b-bookmarks-reposts.md` only.
+- Docker (Postgres 18 + Redis) is up and healthy; no dev server was started in the planning session.
 - The local database has `social.0002_like_comment` applied. The guide's `part7-*` test accounts (and the throwaway
   `part7_admin` superuser) with their posts, likes, follows and comments were deleted at the end; accounts from the
   E2E runs (`fan_*`, `star_*`, `post_*`, …) and their data remain (Django Admin → Users deletes them).
@@ -885,19 +914,25 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-1. **User:** review the diff and the Part 7 section of `docs/test-command.md` (its Linux steps 3 to 12 take about
-   five minutes; the browser steps 13 to 16 need a Next dev server, and step 16 needs your own superuser from Part
-   0A). Then commit, and push so CI runs; report the CI result (Part 2's to Part 7's jobs). Still open from Part 3:
-   the real-Google check (`docs/test-command.md` Part 3, steps 7 and 8).
-2. **Next part:** Part 7B (bookmarks and reposts), from `task.md` (it depends on Parts 6 and 7, both done). Fresh
-   session (`/clear`), first `git status` and `docker compose ps` (start the containers with
-   `docker compose up -d` if they are down). It adds `repost_count`, `reposted_by_me` and `bookmarked_by_me` to the same
-   `with_engagement` annotations (`apps/social/engagement.py`), the repost and bookmark buttons to `PostActions`, and
-   turns the Following cursor into `(activity_at, item id)`.
+**Implement Part 7B from the approved plan**
+([`docs/agents/plans/part-7b-bookmarks-reposts.md`](plans/part-7b-bookmarks-reposts.md)).
+
+1. **User (optional, before implementing):** commit the plan file and this file. Push so CI runs, and report the
+   result (Part 2's to Part 7's jobs). Still open from Part 3: the real-Google check (`docs/test-command.md` Part 3,
+   steps 7 and 8).
+2. **Implementing agent** (Sonnet 5.5 · high per `task.md`; a fresh session): start at the plan's step 0. Run
+   `git status` (expect HEAD `c562e70` plus the plan and this file, or a later commit of them) and `docker compose ps`
+   (start the containers with `docker compose up -d` if they are down), and check that ports 3000/8000 are free. Then
+   follow steps 1 to 9 in order. The first code edit is step 1: `Repost` and `Bookmark` in
+   `backend/apps/social/models.py`, then `python manage.py makemigrations social` → `0003_repost_bookmark`.
 
 ## Blockers or user decisions
 
 - None open.
+- User decisions for Part 7B (2026-10-10), to go into ARCHITECTURE §8/§9/§10 and ANALYSIS (a new c-39) when built:
+  `BookmarkAdmin` superuser-only; a repost of a deleted or removed original can be undone (204, and Undo repost on
+  your own unavailable card); the page hides later repeats of a post across Following pages; profile chips filter
+  reposts by the original's type.
 - User decisions for Part 7 (2026-10-10), now in ARCHITECTURE §2/§8/§9/§10 and ANALYSIS c-38: hidden comments are Django
   Admin only (not in the API for staff either); deleting your own comment is a soft delete (`deleted_at`); CommentAdmin
   has Hide **and Unhide**.
