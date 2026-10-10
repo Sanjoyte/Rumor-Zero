@@ -185,3 +185,31 @@ def test_an_opinion_has_no_sources_and_no_confidence(api_client):
 def test_the_post_does_not_need_its_author_to_be_verified(api_client):
     post = PostFactory(author=UserFactory())
     assert api_client.get(url(post)).status_code == 200
+
+
+def test_a_late_pipeline_verdict_on_a_post_under_review_stays_private_for_everyone(
+    api_client, auth_client
+):
+    """Part 9: the pipeline's late TRUE on a reported post is kept for a dismissal, but neither
+    the source nor the confidence shows while the post is under review, its author included."""
+    post = make(
+        PostStatus.UNDER_REVIEW,
+        flagged_reason="reports",
+        pre_review_status=PostStatus.VERIFIED_TRUE,
+        verdict_source="pipeline",
+        pipeline_verdict="true",
+        confidence_score=Decimal("95.00"),
+    )
+    for client in (api_client, auth_client(VerifiedUserFactory()), auth_client(post.author)):
+        body = client.get(url(post)).json()
+        assert body["status"] == "under_review"
+        assert body["verdict_source"] is None
+        assert body["confidence_score"] is None
+
+
+def test_the_author_of_a_removed_post_sees_no_verdict_source_either(auth_client):
+    post = make(PostStatus.REMOVED, verdict_source="pipeline", confidence_score=Decimal("90.00"))
+    body = auth_client(post.author).get(url(post)).json()
+    assert body["content"] == post.content
+    assert body["verdict_source"] is None
+    assert body["confidence_score"] is None

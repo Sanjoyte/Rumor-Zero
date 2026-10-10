@@ -20,8 +20,10 @@ from rumor_zero.env_helpers import (
     cache_config,
     check_jwt_signing_key,
     email_config,
+    flag,
     google_client_id,
     int_in_range,
+    pipeline_config,
 )
 
 BACKEND_DIR = Path(__file__).resolve().parents[3]
@@ -35,6 +37,7 @@ SECRET_VARIABLES = (
     "JWT_SIGNING_KEY",
     "TURNSTILE_SECRET_KEY",
     "BREVO_API_KEY",
+    "PIPELINE_API_KEY",
 )
 
 
@@ -66,6 +69,10 @@ def production_env(**overrides):
             "SENTRY_DSN": "",
             "SENTRY_ENVIRONMENT": "production",
             "SENTRY_TRACES_SAMPLE_RATE": "0.0",
+            "PIPELINE_BACKEND": "stub",
+            "PIPELINE_INLINE_KICK": "True",
+            "PIPELINE_URL": "",
+            "PIPELINE_API_KEY": "",
             **{name: str(default) for name, default, _, _ in FIELDS.values()},
         }
     )
@@ -513,3 +520,150 @@ def test_email_limits_and_enumeration_settings():
     assert project_settings.ACCOUNT_PREVENT_ENUMERATION is True
     assert project_settings.PASSWORD_RESET_TIMEOUT == 24 * 3600
     assert project_settings.ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS == 1
+
+
+# ---------- Fact-check pipeline (Part 9) ----------
+
+PIPELINE_KEY = secrets.token_urlsafe(24)
+PIPELINE_PROBE = """
+import json
+from django.conf import settings
+print(json.dumps({
+    "backend": settings.PIPELINE_BACKEND,
+    "kick": settings.PIPELINE_INLINE_KICK,
+    "url": settings.PIPELINE_URL,
+    "has_key": bool(settings.PIPELINE_API_KEY),
+}))
+"""
+
+
+def pipeline_settings(**overrides):
+    env = production_env(**overrides)
+    env["DJANGO_SETTINGS_MODULE"] = "rumor_zero.settings"
+    result = run_python(["-c", "import django; django.setup()\n" + PIPELINE_PROBE], env)
+    assert result.returncode == 0, result.stderr
+    assert_no_secret_in(result.stdout + result.stderr, env)
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def test_the_pipeline_defaults_to_the_stub_with_the_inline_kick_on():
+    probe = pipeline_settings(PIPELINE_BACKEND="", PIPELINE_INLINE_KICK="")
+    assert probe == {"backend": "stub", "kick": True, "url": "", "has_key": False}
+
+
+def test_the_stub_ignores_a_url_and_a_key_and_the_kick_can_be_turned_off():
+    probe = pipeline_settings(
+        PIPELINE_INLINE_KICK="False",
+        PIPELINE_URL="https://pipeline.example.test/check",
+        PIPELINE_API_KEY=PIPELINE_KEY,
+    )
+    assert probe == {"backend": "stub", "kick": False, "url": "", "has_key": False}
+
+
+def test_the_http_pipeline_reads_its_url_and_key():
+    probe = pipeline_settings(
+        PIPELINE_BACKEND="http",
+        PIPELINE_URL="https://pipeline.example.test/v1/check",
+        PIPELINE_API_KEY=PIPELINE_KEY,
+    )
+    assert probe == {
+        "backend": "http",
+        "kick": True,
+        "url": "https://pipeline.example.test/v1/check",
+        "has_key": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"PIPELINE_BACKEND": "celery"}, "PIPELINE_BACKEND must be one of: stub, http"),
+        (
+            {"PIPELINE_BACKEND": "http", "PIPELINE_API_KEY": PIPELINE_KEY},
+            "Set the PIPELINE_URL environment variable",
+        ),
+        (
+            {"PIPELINE_BACKEND": "http", "PIPELINE_URL": "https://pipeline.example.test/check"},
+            "Set the PIPELINE_API_KEY environment variable",
+        ),
+        (
+            {
+                "PIPELINE_BACKEND": "http",
+                "PIPELINE_URL": "http://pipeline.example.test/check",
+                "PIPELINE_API_KEY": PIPELINE_KEY,
+            },
+            "PIPELINE_URL must be an https:// URL",
+        ),
+    ],
+)
+def test_a_bad_pipeline_configuration_fails_by_name_without_leaking_values(overrides, message):
+    env = production_env(**overrides)
+    result = run_python(["manage.py", "check"], env)
+
+    assert result.returncode != 0
+    assert message in result.stderr
+    assert_no_secret_in(result.stdout + result.stderr, env)
+
+
+def pipeline_env(monkeypatch, **values):
+    for name in ("PIPELINE_BACKEND", "PIPELINE_URL", "PIPELINE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    return environ.Env()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://pipeline.example.test/check",
+        "https://pipeline.example.test:8443/v1/check?mode=full",
+        "http://localhost:9000/check",
+        "http://127.0.0.1:9000/check",
+        "http://[::1]:9000/check",
+    ],
+)
+def test_the_pipeline_url_can_be_https_or_plain_http_to_a_loopback_host(monkeypatch, url):
+    env = pipeline_env(
+        monkeypatch, PIPELINE_BACKEND="http", PIPELINE_URL=url, PIPELINE_API_KEY="key"
+    )
+    assert pipeline_config(env) == ("http", url, "key")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://pipeline.example.test/check",
+        "http://10.0.0.1/check",
+        "ftp://pipeline.example.test/check",
+        "pipeline.example.test/check",
+        "https://user:pw@pipeline.example.test/check",
+        "https://pipeline.example.test/check#part",
+        "https:///check",
+        "https://pipeline.example.test:99999/check",
+        "https://pipeline.example.test/a b",
+    ],
+)
+def test_any_other_pipeline_url_fails_by_name_without_quoting_it(monkeypatch, url):
+    env = pipeline_env(
+        monkeypatch, PIPELINE_BACKEND="http", PIPELINE_URL=url, PIPELINE_API_KEY="key"
+    )
+    with pytest.raises(ImproperlyConfigured, match="PIPELINE_URL must be an https:// URL") as exc:
+        pipeline_config(env)
+    assert url not in str(exc.value)
+
+
+def test_the_stub_needs_no_url_or_key(monkeypatch):
+    assert pipeline_config(pipeline_env(monkeypatch)) == ("stub", "", "")
+    assert pipeline_config(pipeline_env(monkeypatch, PIPELINE_BACKEND=" stub ")) == ("stub", "", "")
+
+
+def test_flag_reads_a_missing_or_empty_variable_as_its_default(monkeypatch):
+    env = environ.Env()
+    monkeypatch.delenv("RZ_TEST_FLAG", raising=False)
+    assert flag(env, "RZ_TEST_FLAG", True) is True
+    monkeypatch.setenv("RZ_TEST_FLAG", " ")
+    assert flag(env, "RZ_TEST_FLAG", True) is True
+    for value, expected in (("False", False), ("0", False), ("True", True), ("yes", True)):
+        monkeypatch.setenv("RZ_TEST_FLAG", value)
+        assert flag(env, "RZ_TEST_FLAG", not expected) is expected

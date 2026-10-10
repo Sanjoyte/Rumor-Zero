@@ -81,15 +81,23 @@ def shown_confidence(post):
     return None
 
 
+def shown_verdict_source(post):
+    """Who decided the label (`pipeline` or `moderator`), public only with the label itself
+    (`verified_*`). A post under review may already hold the pipeline's late TRUE (Part 9), which
+    stays private until a moderator acts; a removed post shows none either (its author included)."""
+    if post.status in (PostStatus.VERIFIED_TRUE, PostStatus.VERIFIED_FALSE):
+        return post.verdict_source
+    return None
+
+
 def status_item(post):
     """One entry of `GET /api/v1/posts/status/`: just what a badge needs. A removed post says only
     that it is removed."""
-    removed = post.status == PostStatus.REMOVED
     return {
         "id": str(post.pk),
         "status": post.status,
         "confidence_score": shown_confidence(post),  # None unless a pipeline verdict
-        "verdict_source": None if removed else post.verdict_source,
+        "verdict_source": shown_verdict_source(post),
     }
 
 
@@ -126,7 +134,7 @@ class PostSerializer(serializers.BaseSerializer):
             "emergency_active": is_active_emergency(post, now),
             "emergency_expires_at": iso(post.emergency_expires_at),
             "confidence_score": None if tombstone else shown_confidence(post),
-            "verdict_source": None if tombstone else post.verdict_source,
+            "verdict_source": shown_verdict_source(post),  # None for a removed post too
             "verdict_note": "" if tombstone else post.verdict_note,
             "like_count": post.like_count,
             "comment_count": post.comment_count,

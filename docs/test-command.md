@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -6245,6 +6245,587 @@ report service (it holds the row lock and works out whether the report counts); 
   wipes the whole local database, which is destructive.
 - No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
   token and the throwaway password of the test accounts.
+
+---
+
+### Part 9: Fact-check pipeline stub + routing
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
+`frontend/.env.local`. Part 9 adds **no migration**, **no dependency** and **no new variable** (`PIPELINE_BACKEND`,
+`PIPELINE_INLINE_KICK`, `PIPELINE_URL`, `PIPELINE_API_KEY` and `INTERNAL_CRON_SECRET` were already in
+`backend/.env.example`; Django now reads them). It makes fact posts get a verdict: the built-in **stub pipeline**, the
+rules that turn its answer into VERIFIED, FALSE or UNDER REVIEW, and three ways to run it: the **inline kick** (a
+background thread right after a fact is saved), the hourly **tick** `POST /api/internal/tick/` (cron-job.org, Part
+17) and `python manage.py process_pending` for local dev.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). Step 7 restarts it with the kick off and step 12 restarts it normally. | 3 to 14 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 11**: the variables and functions you set in step 3 (`id`, `ada`, `bo`, `cy`, `dee`, `api`, `mk`, `get`, `send`) and later (`t1` … `o1`, `src`, `k1` … `k3`, `secret`, `tick`, `l1`, `r1`, `f1`) only live in that one terminal. If you close it, redo step 3. | 1 to 11, 15 |
+| Window 3 (frontend) | `npm run dev` in `frontend`. Leave it running. | 12 to 14 |
+| Window 4 (sweeper) | `python manage.py process_pending --loop` in `backend`, venv active, for one step | 9 |
+| Browser | Steps 12 to 14 | 12 to 14 |
+
+Things to know first:
+
+- **The stub's rules** (ARCHITECTURE §6): a fact whose text contains `#true` gets VERIFIED 95%, `#false` gets FALSE
+  92%, `#unsure` goes to UNDER REVIEW (confidence 40). The first of these tags in the text wins, in any case, and only
+  as a whole tag (`#trueish` is not one). Any other text gets a confidence of 50 to 99 and "true" or "false" from a
+  hash of the text, so the same text always gets the same answer; below the threshold (85) it goes to UNDER REVIEW.
+  Opinions are never checked. The stub ignores sources (a real pipeline would read them).
+- **Not for production as it is** (user decision 2026-10-11, a launch blocker for Part 17): with the stub any
+  author can write `#true` to get VERIFIED 95%.
+- Steps 3 to 11 talk to the API with `curl` (they need `jq`: `sudo apt install jq`) and to Django with
+  `python manage.py shell`. Steps 12 to 14 use the browser. Step 3 makes four verified accounts: `ada` posts the facts
+  of steps 4 to 6, `bo` and `cy` those of steps 7 to 10, `dee` reposts in step 10 and posts in step 11 and in the browser.
+- The API and command outputs below were recorded on Linux on 2026-10-11. The browser steps were checked the same day
+  with headless Chromium (screenshots at 1280 and 390 px) and Django Admin with a scripted browser, not by a person at
+  a keyboard. Ids, numbers in names, times and seconds differ on every run.
+- Nothing here sends an email: step 3 marks the accounts verified with a shell command, which stands in for clicking
+  the link (Part 2 shows the real flow). Step 10 puts a post under review the same way, standing in for five reports
+  (Part 8 shows real ones), and step 11 stands in a pipeline that never answers for the stub.
+- **The numbers assume the default settings** (confidence threshold 85, 10 fact posts per person per 24 hours). The
+  backend seeds them from your own `backend/.env` the first time; step 3 prints yours.
+- Every check is logged in window 1 (or in window 2 when a `python manage.py` command runs it), one line per post:
+  `… INFO apps.pipeline.processor: Pipeline: post <id> -> labelled` (or `entered_review`, `updated_review`, `retry`).
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, confirms there is no migration
+to apply or make, then runs the whole backend test suite, Part 9's tests, the linter and the formatter check.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                            # No migrations to apply.
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 2359 passed
+python -m pytest apps/pipeline apps/core/tests/test_tick.py apps/posts/tests/test_services_pipeline.py -q   # 312 passed
+ruff check . ; ruff format --check .                # All checks passed! / 200 files already formatted
+```
+
+**You should see:** `No migrations to apply.`, `No changes detected` and `System check identified no issues (0
+silenced).`, then the full run ends with `2359 passed`, the pipeline run with `312 passed`, and the last line pair is
+`All checks passed!` and `200 files already formatted`. (Counts may grow later; what matters is that nothing fails.)
+
+- The pipeline run holds Part 8's 45 routing tests and 267 new ones: `test_contract.py` (61: what a request and a
+  result may hold, the confidence rounded half up to two places), `test_stub_client.py` (29: each tag, the first tag
+  wins, whole tags only, the hash rule pinned to fixed answers), `test_http_client.py` (35: the request it would send,
+  every way a call can fail, no redirect followed, at most 64 KB, a 20 s limit, the key never in an error), 
+  `test_routing_pipeline.py` (55: every pipeline row of the ARCHITECTURE §4 table, retries after 2, 4, 8 and 16
+  minutes and a moderator after five), `test_queue.py` (8: which posts wait for a check, in what order),
+  `test_processor.py` (32: the lease, a try that dies mid-call, what happens when a report, a delete, a moderator or a
+  dismissal arrives while a check is running), `test_races.py` (5: real threads: two sweepers never check the same
+  post, a locked post is skipped, the post is never locked while the pipeline thinks, the kick waits for a moment's
+  lock), `test_kick.py` (10), `test_command.py` (7), `test_no_network.py` (1), plus `apps/core/tests/test_tick.py`
+  (11) and `apps/posts/tests/test_services_pipeline.py` (13).
+- Some more in `apps/core/tests/test_settings.py` (the four `PIPELINE_*` variables are checked at startup) and in
+  `apps/posts/tests/` (who decided a label is public only with the label).
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have; a reused Django must also run with `PIPELINE_INLINE_KICK=False`).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 117 files, 1587 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 38 passed
+CI=1 npm run test:e2e                               # 38 passed (against the production build)
+cd ../backend                                       # back to backend/ for steps 3 to 11
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  117 passed (117)` and `Tests  1587 passed (1587)`. `npm run build` lists the same routes as in Part 8
+(Part 9 adds no page). Each E2E run ends with `38 passed`.
+
+- Part 9 changes no page: the verdict copy ("Checked automatically · 95% confidence", "Reviewed by a moderator") and
+  the badge polling came with Part 5. Seven new component tests pin the badges and the copy for the stub's real
+  answers.
+- The E2E backend runs with the stub and **without the kick** (`playwright.config.ts`): several tests need a new fact
+  to stay CHECKING FACTS…. The test "a #true fact is checked by the pipeline and its badge turns VERIFIED by itself"
+  (in `e2e/post-detail.spec.ts`, which used to flip the status by hand) now runs the real pipeline for its own post
+  only (`processPost()` in `e2e/helpers.ts`) and waits for VERIFIED 95% on the card and the post page. No new sign-up.
+
+#### Step 3: Start the servers and make four accounts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 11.**
+
+**What this does:** Windows 1 and 3 run the two servers, with your own settings (the kick is on). In window 2 you sign
+up four accounts through the API, mark them verified, and print the pipeline settings the backend uses. The helpers
+`mk` (make a post, print its id), `send` (any request, printing the status code and then the answer) and `get` (the
+same for a GET) are used by every later step.
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```bash
+cd frontend                                         # from the repo root
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend` with the venv active: steps 1 and 2 leave you there; needs `jq`). If you opened a new
+terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the addresses are new each run
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+signup() { jq -nc --arg e "$1" --arg u "$2" '{email: $e, username: $u, password: "correct-horse-battery-42", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/signup | jq -r .meta.access_token; }
+ada=$(signup "part9-ada-$id@example.test" "part9_ada_$id")      # $ada = ada's login token (the facts of steps 4 to 6)
+bo=$(signup "part9-bo-$id@example.test" "part9_bo_$id")         # $bo, $cy = the facts of steps 7 to 10
+cy=$(signup "part9-cy-$id@example.test" "part9_cy_$id")
+dee=$(signup "part9-dee-$id@example.test" "part9_dee_$id")      # $dee = reposts in step 10, posts in step 11 and the browser
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part9-', email__endswith='$id@example.test').update(is_email_verified=True), 'accounts marked verified')" | tail -1
+api=http://localhost:8000/api/v1
+mk() { curl -s -H "Authorization: Bearer $1" -H "Content-Type: application/json" --data-binary "$2" $api/posts/ | jq -r .id; }   # mk <token> <json>: makes a post, prints its id
+get() { local out; out=$(curl -s -w '\n%{http_code}' ${2:+-H "Authorization: Bearer $2"} "$api$1"); printf '%s  ' "${out##*$'\n'}"; printf '%s' "${out%$'\n'*}" | jq -c "${3:-.}"; }   # get <path> [token] [jq filter]: prints the status code, then the answer
+send() { local out; out=$(curl -s -w '\n%{http_code}' -X "$1" ${3:+-H "Authorization: Bearer $3"} ${4:+-H "Content-Type: application/json" --data-binary "$4"} "$api$2"); printf '%s  %s\n' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | jq -c "${5:-.}" 2>/dev/null)"; }   # send <METHOD> <path> [token] [json body] [jq filter]: prints the status code, then the answer
+python manage.py shell -c "from django.conf import settings; from apps.core.services import get_platform_settings as g; c = g(); print(settings.PIPELINE_BACKEND, settings.PIPELINE_INLINE_KICK, c.confidence_threshold, c.fact_posts_per_day)" | tail -1
+echo ${ada:0:10} ${bo:0:10} ${cy:0:10} ${dee:0:10}     # four prefixes, not an empty line
+```
+
+**You should see:**
+
+```text
+4 accounts marked verified
+stub True 85 10
+eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi
+```
+
+- The second line is the pipeline (`stub`), the kick (`True`), the confidence threshold (`85`) and the fact posts each
+  person may make in 24 hours (`10`; steps 4 to 11 need at most 9 per account). If your threshold isn't 85, the
+  untagged facts in step 4 may land differently; if your allowance is lower, some posts are refused (`null` ids).
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet.
+
+**If it differs:** an empty token means the sign-up failed: `runserver` isn't running, `jq` is missing, or you signed
+up more than 20 times in a minute. Fix that and run this step again from `id=$(date +%H%M%S)`.
+
+#### Step 4: The inline kick checks each fact right after it is saved
+
+**Where:** Terminal window 2 (the same terminal as step 3). Window 1 must be running `runserver` with your normal
+settings (the kick on).
+
+**What this does:** `ada` posts three facts with the stub's tags, three without, and an opinion. The answer to the
+post itself still says `pending` (the check runs after the post is saved); a second later every fact has its verdict.
+
+```bash
+r=$(curl -s -H "Authorization: Bearer $ada" -H "Content-Type: application/json" --data-binary '{"content":"Water boils at 100 degrees Celsius at sea level. #true","post_type":"fact"}' $api/posts/)
+echo "$r" | jq -c '{status, confidence_score, verdict_source}'   # 1: the 201 answer
+t1=$(echo "$r" | jq -r .id)
+t2=$(mk "$ada" '{"content":"The Great Wall of China is visible from the Moon. #false","post_type":"fact"}')
+t3=$(mk "$ada" '{"content":"Coffee stunts your growth. #unsure","post_type":"fact"}')
+h1=$(mk "$ada" '{"content":"Honey never spoils.","post_type":"fact"}')
+h2=$(mk "$ada" '{"content":"Sharks are older than trees.","post_type":"fact"}')
+h3=$(mk "$ada" '{"content":"The Moon orbits the Earth.","post_type":"fact"}')
+o1=$(mk "$ada" '{"content":"I think tea beats coffee.","post_type":"opinion"}')
+sleep 1                                             # the checks take a few milliseconds
+for p in $t1 $t2 $t3 $h1 $h2 $h3 $o1; do get /posts/$p/ "" '{content, status, confidence_score, verdict_source}'; done   # 2 to 8
+```
+
+**You should see:**
+
+```text
+{"status":"pending","confidence_score":null,"verdict_source":null}
+200  {"content":"Water boils at 100 degrees Celsius at sea level. #true","status":"verified_true","confidence_score":"95.00","verdict_source":"pipeline"}
+200  {"content":"The Great Wall of China is visible from the Moon. #false","status":"verified_false","confidence_score":"92.00","verdict_source":"pipeline"}
+200  {"content":"Coffee stunts your growth. #unsure","status":"under_review","confidence_score":null,"verdict_source":null}
+200  {"content":"Honey never spoils.","status":"verified_true","confidence_score":"88.00","verdict_source":"pipeline"}
+200  {"content":"Sharks are older than trees.","status":"verified_false","confidence_score":"95.00","verdict_source":"pipeline"}
+200  {"content":"The Moon orbits the Earth.","status":"under_review","confidence_score":null,"verdict_source":null}
+200  {"content":"I think tea beats coffee.","status":"published","confidence_score":null,"verdict_source":null}
+```
+
+- 1: a new fact is always `pending` in its own answer; the browser shows "Checking facts…" and its polling (Part 5)
+  picks up the verdict (step 12).
+- 2 to 4: the three tags. 5 to 7: no tag, so the hash of the text decides: "Honey never spoils." gets true at 88 and
+  "Sharks are older than trees." false at 95 (both at or above 85, so labelled), "The Moon orbits the Earth." true at
+  65, below the threshold, so a moderator decides (UNDER REVIEW). The same text always gets the same answer.
+- Under review, the post shows no confidence and no "who decided": only a label shows them.
+- 8: the opinion is `published` and never checked.
+- Window 1 printed one `Pipeline: post … -> labelled` (or `-> entered_review`) line per fact, a few milliseconds
+  after each post.
+
+#### Step 5: What the pipeline stored, and what stays private
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads three of the posts straight from the database, then checks that none of the pipeline's
+own fields shows in the API.
+
+```bash
+python manage.py shell -c "from apps.posts.models import Post
+for pk in '$t1 $t3 $h3'.split():
+    p = Post.objects.get(pk=pk)
+    print(p.status, p.flagged_reason, p.pre_review_status, p.pipeline_verdict, p.confidence_score, p.pipeline_result, p.pipeline_attempts, p.pipeline_next_attempt_at, round((p.pipeline_checked_at - p.created_at).total_seconds(), 2))" | tail -3     # 1 to 3
+get /posts/$t3/ "" 'keys | map(select(test("pipeline|flag|attempt|review")))'          # 4: none of it is public
+get "/posts/status/?ids=$t1,$t3" "" '[.results[] | {status, confidence_score, verdict_source}]'   # 5: what the badge poller sees
+```
+
+**You should see** (the last number on lines 1 to 3, the seconds between posting and the verdict, differs):
+
+```text
+verified_true None None true 95.00 {'rule': '#true', 'stub': True} 1 None 0.03
+under_review pipeline pending inconclusive 40.00 {'rule': '#unsure', 'stub': True} 1 None 0.01
+under_review pipeline pending true 65.00 {'rule': 'hash', 'stub': True} 1 None 0.01
+200  []
+200  [{"status":"verified_true","confidence_score":"95.00","verdict_source":"pipeline"},{"status":"under_review","confidence_score":null,"verdict_source":null}]
+```
+
+- Each line: the status, why it is under review (`pipeline`: the check couldn't decide) and what it was before, then
+  the pipeline's verdict, confidence and raw answer, the number of tries, when to try again (`None`: done), and how
+  long after the post the verdict came.
+- The verdict and confidence are kept even for a post under review: a moderator sees them in Django Admin (step 14),
+  the public doesn't.
+
+#### Step 6: The sources go to the pipeline in the author's order
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts a fact with two sources (a URL, then a DOI). The stub ignores them, but the request a
+real pipeline would get (`{post_id, content, sources}`) carries them, in order; a fact without sources sends an empty
+list. Nothing ever opens the links.
+
+```bash
+src=$(mk "$ada" '{"content":"Solar capacity grew by roughly 30% worldwide last year. #true","post_type":"fact","sources":["https://www.iea.org/reports/renewables-2023","doi:10.1038/s41558-024-02102"]}')
+for p in $src $t1; do python manage.py shell -c "import json; from apps.pipeline.contract import PipelineRequest; from apps.posts.models import Post; print(json.dumps(PipelineRequest.for_post(Post.objects.get(pk='$p')).to_json()['sources']))" | tail -1; done   # 1 and 2
+```
+
+**You should see:**
+
+```text
+["https://www.iea.org/reports/renewables-2023", "10.1038/s41558-024-02102"]
+[]
+```
+
+- 1: the URL first, then the DOI (stored bare, without `doi:`), as the author entered them. 2: the fact from step 4,
+  which has none.
+- The tests also check the body the HTTP client would send to a real pipeline, and that the only address it ever
+  opens is `PIPELINE_URL` (`test_http_client.py`).
+
+#### Step 7: With the kick off, facts wait until `process_pending` checks them
+
+**Where:** First window 1, then window 2.
+
+**What this does:** Restarts the server **without** the inline kick, the way it runs when the kick is missed (a worker
+restart, a sleeping server). New facts then stay pending until something checks them: here the management command.
+
+Window 1: press `Ctrl+C`, then:
+
+```bash
+PIPELINE_INLINE_KICK=False python manage.py runserver   # the kick off for this server only; leave it running
+```
+
+Window 2:
+
+```bash
+python manage.py process_pending | tail -1          # 1: first clears whatever was already waiting
+k1=$(mk "$bo" '{"content":"Mount Everest is the tallest mountain above sea level. #true","post_type":"fact"}')
+k2=$(mk "$bo" '{"content":"Lightning never strikes the same place twice. #false","post_type":"fact"}')
+k3=$(mk "$bo" '{"content":"Cracking your knuckles causes arthritis. #unsure","post_type":"fact"}')
+sleep 1
+for p in $k1 $k2 $k3; do get /posts/$p/ "" '{status}'; done                          # 2 to 4: nothing checked them
+python manage.py process_pending                    # 5: checks the three
+for p in $k1 $k2 $k3; do get /posts/$p/ "" '{status, confidence_score, verdict_source}'; done   # 6 to 8
+python manage.py process_pending                    # 9: nothing left
+```
+
+**You should see** (the first number, the times and the ids differ):
+
+```text
+Processed 0 fact posts.
+200  {"status":"pending"}
+200  {"status":"pending"}
+200  {"status":"pending"}
+2026-10-10 19:12:51,727 INFO apps.pipeline.processor: Pipeline: post 50f256c2-fa78-4b3d-84d0-b7722b706d56 -> labelled
+2026-10-10 19:12:51,733 INFO apps.pipeline.processor: Pipeline: post 0a17e2de-93dd-4595-b0e2-c04423d713d9 -> labelled
+2026-10-10 19:12:51,737 INFO apps.pipeline.processor: Pipeline: post 069209e7-a9b5-417f-8706-789ca174f8c4 -> entered_review
+Processed 3 fact posts.
+200  {"status":"verified_true","confidence_score":"95.00","verdict_source":"pipeline"}
+200  {"status":"verified_false","confidence_score":"92.00","verdict_source":"pipeline"}
+200  {"status":"under_review","confidence_score":null,"verdict_source":null}
+Processed 0 fact posts.
+```
+
+- 1: the end-to-end tests (step 2) leave pending facts in your local database, because their backend runs without the
+  kick, so the first run checks those too: any number, 0 included (it printed `Processed 116 fact posts.` the first
+  time on this machine, then 0). `tail -1` hides their log lines.
+- 5: one log line per post, then the count. One run checks **everything** that is due, in batches of 10
+  (`--limit` changes the batch size).
+
+#### Step 8: The tick needs the secret, and takes ten posts at a time
+
+**Where:** Terminal window 2. Window 1 still runs without the kick.
+
+**What this does:** The tick is what cron-job.org will call every hour (Part 17). It needs the `X-RZ-Cron-Secret`
+header, read here from your own `backend/.env` without printing it. Then `bo` and `cy` leave twelve facts waiting and
+three ticks clear them.
+
+```bash
+secret=$(grep -m1 '^INTERNAL_CRON_SECRET=' .env | cut -d= -f2- | tr -d '\r')    # sets $secret; nothing is printed
+tick() { local out last; out=$(curl -s -w '\n%{http_code} %{time_total}' -X "${2:-POST}" ${1:+-H "X-RZ-Cron-Secret: $1"} http://localhost:8000/api/internal/tick/); last=${out##*$'\n'}; printf '%s  %s  (%s s)\n' "${last% *}" "${out%$'\n'*}" "${last#* }"; }   # tick [secret] [method]: prints the status, the answer and how long it took
+tick                                                # 1: no secret
+tick wrong-secret                                   # 2: a wrong one
+tick "$secret" GET                                  # 3: the right one, but not a POST
+tick "$secret"                                      # 4: nothing waits
+for i in $(seq 6); do mk "$bo" "{\"content\":\"Backlog claim $i from bo. #true\",\"post_type\":\"fact\"}" > /dev/null; mk "$cy" "{\"content\":\"Backlog claim $i from cy. #false\",\"post_type\":\"fact\"}" > /dev/null; done   # twelve facts wait
+tick "$secret"                                      # 5: ten of them
+tick "$secret"                                      # 6: the other two
+tick "$secret"                                      # 7: none left
+```
+
+**You should see** (the seconds differ):
+
+```text
+403  {"detail":"You do not have permission to perform this action.","code":"permission_denied"}  (0.001658 s)
+403  {"detail":"You do not have permission to perform this action.","code":"permission_denied"}  (0.000825 s)
+405  {"detail":"Method \"GET\" not allowed.","code":"method_not_allowed"}  (0.000850 s)
+200  {"processed":0}  (0.008398 s)
+200  {"processed":10}  (0.048147 s)
+200  {"processed":2}  (0.017419 s)
+200  {"processed":0}  (0.007578 s)
+```
+
+- Without the right secret the tick checks nothing. With it, it takes at most **10 posts** and answers in well under
+  a second with the stub; cron-job.org gives it 30 s. It stops taking new posts so it always answers within about 25 s:
+  a real pipeline, which may need up to 20 s per post, would check 1 to 5 per call (the tests cover that).
+- Window 1 logs one line per post checked.
+
+**If it differs:** if every tick is 403, `$secret` is empty: `INTERNAL_CRON_SECRET` is missing from `backend/.env`.
+
+#### Step 9: The sweeper in a loop
+
+**Where:** A new window 4, then window 2, then window 4 again.
+
+**What this does:** `--loop` keeps checking every few seconds, a stand-in for the kick when you run the server without
+it. `cy` posts a fact and the loop picks it up.
+
+Window 4 (from the repo root):
+
+```bash
+cd backend
+source .venv/bin/activate
+python manage.py process_pending --loop --interval 2      # leave it running for now
+```
+
+Window 2:
+
+```bash
+l1=$(mk "$cy" '{"content":"Octopuses have three hearts. #true","post_type":"fact"}')
+sleep 3                                             # one turn of the loop
+get /posts/$l1/ "" '{status, confidence_score}'
+```
+
+Then press `Ctrl+C` in window 4.
+
+**You should see:** window 2 prints `200  {"status":"verified_true","confidence_score":"95.00"}`. Window 4 shows:
+
+```text
+Checking fact posts every 2 s. Press Ctrl+C to stop.
+2026-10-10 19:12:56,906 INFO apps.pipeline.processor: Pipeline: post c923b87a-2fdd-4a19-b97c-808faa862766 -> labelled
+Processed 1 fact post.
+Stopped.
+```
+
+- The loop prints only when it checked something. `Ctrl+C` ends it cleanly with "Stopped." (your terminal may show
+  `^C` in front of it); close window 4.
+
+#### Step 10: A late answer on a post that reports sent to review
+
+**Where:** Terminal window 2. Window 1 still runs without the kick (so the post isn't checked at once).
+
+**What this does:** `cy` posts a `#false` fact, which is then put under review the way five counting reports would
+(Part 8). Only then does the pipeline answer, with a decisive FALSE: a moderator must decide, and nothing reveals the
+FALSE meanwhile (user decision 2026-10-11). For comparison, the FALSE post from step 4 is put under review the same
+way: it was FALSE in public before, so it still can't be reposted.
+
+```bash
+r1=$(mk "$cy" '{"content":"The Sahara is growing every year. #false","post_type":"fact"}')
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$r1').update(status='under_review', flagged_reason='reports', pre_review_status='pending'), 'post sent to review, as five reports would')" | tail -1    # 1
+python manage.py shell -c "from apps.pipeline.processor import process_post; print(process_post('$r1'))" | tail -1    # 2: the pipeline answers late
+python manage.py shell -c "from apps.posts.models import Post; p = Post.objects.get(pk='$r1'); print(p.status, p.flagged_reason, p.pre_review_status, p.verdict_source, p.pipeline_verdict, p.confidence_score)" | tail -1   # 3
+get /posts/$r1/ "" '{status, confidence_score, verdict_source}'     # 4: what everyone sees
+send POST /posts/$r1/repost/ "$dee"                                 # 5: dee can still repost it
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$t2').update(status='under_review', flagged_reason='reports', pre_review_status='verified_false'), 'FALSE post sent to review, as five reports would')" | tail -1    # 6
+send POST /posts/$t2/repost/ "$dee"                                 # 7: a post that was FALSE in public can't be
+```
+
+**You should see:**
+
+```text
+1 post sent to review, as five reports would
+True
+under_review both pending None false 92.00
+200  {"status":"under_review","confidence_score":null,"verdict_source":null}
+201  {"reposted":true}
+1 FALSE post sent to review, as five reports would
+409  {"detail":"Posts labelled FALSE can't be reposted.","code":"cannot_repost_false"}
+```
+
+- 3: the post stays UNDER REVIEW and its reason becomes `both` (reports and the pipeline); the FALSE and its 92% are
+  kept for the moderator, but nothing is stored as the label to restore, so dismissing the reports (Part 10) can't
+  make it FALSE without a human. A late **TRUE** is kept as the label a dismissal restores (the tests cover it).
+- 4 and 5: from outside, nothing shows the FALSE: no confidence, no source, and reposting works.
+- 7: Part 8's rule still holds for a post whose FALSE label was public before the reports.
+
+#### Step 11: A pipeline that fails is retried, then a moderator decides
+
+**Where:** Terminal window 2. Window 1 still runs without the kick.
+
+**What this does:** The stub never fails, so this step stands in a pipeline that never answers and moves the clock
+forward between the tries: a failed try is retried after 2, 4, 8 and 16 minutes, and after the fifth the post goes to
+review.
+
+```bash
+f1=$(mk "$dee" '{"content":"A claim nobody can check today. #true","post_type":"fact"}')
+python manage.py shell <<EOF | grep -v -e 'imported automatically' -e '^$'
+from django.utils import timezone
+from apps.pipeline.clients import PipelineError
+from apps.pipeline.processor import process_post
+from apps.posts.models import Post
+
+class Down:  # a pipeline that never answers
+    max_seconds = 0
+    def check(self, request):
+        raise PipelineError("timeout", "no answer in time")
+
+when = timezone.now()
+for _ in range(5):
+    process_post("$f1", client=Down(), now=when)
+    post = Post.objects.get(pk="$f1")
+    wait = post.pipeline_next_attempt_at
+    print(post.pipeline_attempts, post.status, post.flagged_reason, "next try in", wait - when if wait else None)
+    when = wait or when
+print(post.pipeline_result)
+EOF
+get /posts/$f1/ "" '{status, confidence_score, verdict_source}'
+```
+
+**You should see** (the times and the id differ):
+
+```text
+2026-10-10 19:13:02,399 WARNING apps.pipeline.processor: Pipeline: post c0cdf1cd-5c74-48c3-9184-11df1109645f, try 1 failed (timeout)
+1 pending None next try in 0:02:00
+2026-10-10 19:13:02,403 WARNING apps.pipeline.processor: Pipeline: post c0cdf1cd-5c74-48c3-9184-11df1109645f, try 2 failed (timeout)
+2 pending None next try in 0:04:00
+2026-10-10 19:13:02,407 WARNING apps.pipeline.processor: Pipeline: post c0cdf1cd-5c74-48c3-9184-11df1109645f, try 3 failed (timeout)
+3 pending None next try in 0:08:00
+2026-10-10 19:13:02,411 WARNING apps.pipeline.processor: Pipeline: post c0cdf1cd-5c74-48c3-9184-11df1109645f, try 4 failed (timeout)
+4 pending None next try in 0:16:00
+2026-10-10 19:13:02,415 ERROR apps.pipeline.processor: Pipeline: post c0cdf1cd-5c74-48c3-9184-11df1109645f given up after 5 tries (timeout)
+5 under_review pipeline next try in None
+{'error': 'timeout', 'detail': 'no answer in time', 'attempt': 5}
+200  {"status":"under_review","confidence_score":null,"verdict_source":null}
+```
+
+- The post stays pending while it waits (2, 4, 8 and 16 minutes), then goes to UNDER REVIEW for the pipeline with
+  the last error kept for the moderators. A failed try logs a warning; giving up logs an error (in production, one
+  Sentry event per post).
+- In real life nothing moves the clock: the next try happens at the next tick or loop after the wait.
+
+#### Step 12: In the browser, a new fact's badge turns into its verdict by itself
+
+**Where:** First window 1, then the browser, with `npm run dev` (window 3) running.
+
+**What this does:** Restarts the server with your normal settings (the kick on), then posts three facts through the
+composer and watches the cards change on their own, then opens each post's page.
+
+Window 1: press `Ctrl+C`, then:
+
+```bash
+python manage.py runserver                          # your normal settings again; leave it running
+```
+
+Browser: log in at http://localhost:3000/login as `part9-dee-<id>@example.test` (use the `id` from step 3:
+`echo $id` in window 2) with the password `correct-horse-battery-42`.
+
+| Do this | Expect |
+|---|---|
+| On /home click **New post**, write `Paris is the capital of France. #true`, choose **Fact**, click **Post fact, will be checked** | A toast **"Posted. Checking the facts…"**. The new card is at the top with a grey dashed **CHECKING FACTS…** badge (a spinning glyph) and a grey stripe. After about **10 seconds**, without reloading, it turns into a teal **VERIFIED 95%** badge with a tick, and the stripe turns teal. |
+| Post `The Great Wall of China is visible from space. #false` the same way | CHECKING FACTS…, then after about 10 s a red **FALSE 92%** badge with a crossed circle and a red stripe. |
+| Post `Bats are blind. #unsure` | CHECKING FACTS…, then an amber **UNDER REVIEW** badge with an hourglass and an amber stripe. No percentage. |
+| Click the text of the VERIFIED post | Its page: the VERIFIED 95% badge and, under **Verdict**, a teal box **"CHECKED AUTOMATICALLY · 95% CONFIDENCE"** with "This claim was found to be true." |
+| Open the FALSE post's page | **"CHECKED AUTOMATICALLY · 92% CONFIDENCE"** and "This claim was found to be FALSE." The word "debunked" appears nowhere. |
+| Open the UNDER REVIEW post's page | **"UNDER REVIEW"** and "A moderator is taking a look at this post. The label changes once they decide." No percentage. |
+| Scroll down /home | The facts from steps 4 to 11 show their labels: VERIFIED, FALSE or UNDER REVIEW; "A claim nobody can check today." (step 11) is UNDER REVIEW. |
+
+- The check itself takes a few milliseconds (window 1 logs it at once); the card changes at the page's first status
+  check, 10 seconds after posting (Part 5's polling: 10 s, then 15, 22 …, while the tab is visible).
+- Measured with headless Chromium: each of the three cards changed 10.4 s after posting.
+- A moderator's verdict reads "Reviewed by a moderator" with no percentage (Part 10 adds the actions that make one).
+
+#### Step 13: A phone-sized window
+
+**Where:** Browser, logged in as `dee`.
+
+**What this does:** Checks the badges at phone width. In Firefox or Chrome press `F12`, then the "responsive design" /
+device toolbar button, and set the width to 390.
+
+| Do this | Expect |
+|---|---|
+| Open /home | Each card shows the author line, then the FACT chip and the badge (VERIFIED 95%, FALSE 92%, UNDER REVIEW) on their own line, then the claim. **No sideways scrolling.** |
+| Open the UNDER REVIEW post's page | The badge and the Verdict box fit the width. **No sideways scrolling.** |
+
+- Measured with headless Chromium at 390 px: 0 px of horizontal overflow on `/home` and on a post's page.
+
+#### Step 14: Django Admin: what the pipeline stored
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Shows a checked post in the read-only posts admin, with the fields the public never sees. The
+review queue and the moderator actions are Part 10.
+
+| URL / action | Expect |
+|---|---|
+| http://localhost:8000/admin/ (superuser from Part 0A; if it 404s, `ADMIN_URL_PATH` in `backend/.env` isn't `admin/`: use that path) | **Posts** is listed in the sidebar. |
+| http://localhost:8000/admin/posts/post/, then click "Water boils at 100 degrees Celsius at sea level. #true" | **View post**, read-only (no **Save**): **Status** "Verified true", **Confidence score** 95.00, **Pipeline verdict** "True", **Pipeline result** `{"rule": "#true", "stub": true}`, **Pipeline attempts** 1, **Pipeline next attempt at** "-", **Pipeline checked at** the time, **Verdict source** "Pipeline". |
+| Open "A claim nobody can check today. #true" (step 11) | **Status** "Under review", **Flagged reason** "Pipeline", **Pipeline attempts** 5, **Pipeline result** `{"error": "timeout", "detail": "no answer in time", "attempt": 5}`. |
+
+- Checked with a scripted browser and a throwaway superuser, not by a person.
+
+#### Step 15: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts and their posts and reposts (all go with the accounts). In window 2, in `backend/` with the
+  venv active:
+
+  ```bash
+  python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part9-').delete())" | tail -1
+  ```
+
+  After one clean run of steps 3 to 11 of this guide it prints `(35, {'social.Repost': 1, 'account.EmailAddress': 4, 'posts.Post': 26, 'accounts.User': 4})`:
+  how many rows went in all, and per table (26 posts: 8 by `ada` (steps 4 and 6), 9 by `bo` and 8 by `cy` (steps 7 to
+  10), 1 by `dee` (step 11); 1 repost, `dee`'s in step 10). Your count differs if you did the browser steps (3 more
+  posts) or made other accounts. Nothing else is touched; the pending facts that step 7 checked belong to the E2E
+  tests' accounts, which stay in your local database as in earlier parts (Django Admin → Users deletes them).
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- The only secret used is `INTERNAL_CRON_SECRET` in step 8, read from `backend/.env` into a variable and never
+  printed; `unset secret` forgets it. The other values in the commands are Cloudflare's public test token and the
+  throwaway password of the test accounts.
 
 ---
 
@@ -12693,3 +13274,620 @@ report service (it holds the row lock and works out whether the report counts); 
   wipes the whole local database, which is destructive.
 - No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
   token and the throwaway password of the test accounts.
+
+### Part 9: Fact-check pipeline stub + routing
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
+`frontend\.env.local`. Part 9 adds **no migration**, **no dependency** and **no new variable** (`PIPELINE_BACKEND`,
+`PIPELINE_INLINE_KICK`, `PIPELINE_URL`, `PIPELINE_API_KEY` and `INTERNAL_CRON_SECRET` were already in
+`backend\.env.example`; Django now reads them). It makes fact posts get a verdict: the built-in **stub pipeline**, the
+rules that turn its answer into VERIFIED, FALSE or UNDER REVIEW, and three ways to run it: the **inline kick** (a
+background thread right after a fact is saved), the hourly **tick** `POST /api/internal/tick/` (cron-job.org, Part
+17) and `python manage.py process_pending` for local dev.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). Step 7 restarts it with the kick off and step 12 restarts it normally. | 3 to 14 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for steps 3 to 11**: the variables and functions you set in step 3 (`$id`, `$ada`, `$bo`, `$cy`, `$dee`, `$api`, `Mk`, `Send`, `Fetch`) and later (`$t1` … `$o1`, `$src`, `$k1` … `$k3`, `$secret`, `Tick`, `$l1`, `$r1`, `$f1`) only live in that one terminal. If you close it, redo step 3. | 1 to 11, 15 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 12 to 14 |
+| Window 4 (sweeper) | `python manage.py process_pending --loop` in `backend\`, venv active, for one step | 9 |
+| Browser | Steps 12 to 14 | 12 to 14 |
+
+Things to know first:
+
+- **The stub's rules** (ARCHITECTURE §6): a fact whose text contains `#true` gets VERIFIED 95%, `#false` gets FALSE
+  92%, `#unsure` goes to UNDER REVIEW (confidence 40). The first of these tags in the text wins, in any case, and only
+  as a whole tag (`#trueish` is not one). Any other text gets a confidence of 50 to 99 and "true" or "false" from a
+  hash of the text, so the same text always gets the same answer; below the threshold (85) it goes to UNDER REVIEW.
+  Opinions are never checked. The stub ignores sources (a real pipeline would read them).
+- **Not for production as it is** (user decision 2026-10-11, a launch blocker for Part 17): with the stub any
+  author can write `#true` to get VERIFIED 95%.
+- Steps 3 to 11 talk to the API with `curl.exe` (with `.exe`: in PowerShell 5.1 plain `curl` is a different command)
+  and to Django with `python manage.py shell`. Steps 12 to 14 use the browser. Step 3 makes four verified accounts:
+  `ada` posts the facts of steps 4 to 6, `bo` and `cy` those of steps 7 to 10, `dee` reposts in step 10 and posts in
+  step 11 and in the browser.
+- **The PowerShell blocks below were not run on Windows.** The agent works on the Linux PC; it ran the bash twin of every command in the Linux guide on 2026-10-11, and the outputs below are those. The PowerShell commands follow the patterns Parts 1 to 8 proved on Windows (JSON written to a file and sent with `--data-binary "@file"`, `curl.exe`, no `&&`; a multi-line Python snippet is piped into `python manage.py shell` as a here-string). If one behaves differently, tell the agent which.
+- The API and command outputs below were recorded on Linux on 2026-10-11. The browser steps were checked the same day
+  with headless Chromium (screenshots at 1280 and 390 px) and Django Admin with a scripted browser, not by a person at
+  a keyboard. Ids, numbers in names, times and seconds differ on every run.
+- Nothing here sends an email: step 3 marks the accounts verified with a shell command, which stands in for clicking
+  the link (Part 2 shows the real flow). Step 10 puts a post under review the same way, standing in for five reports
+  (Part 8 shows real ones), and step 11 stands in a pipeline that never answers for the stub.
+- **The numbers assume the default settings** (confidence threshold 85, 10 fact posts per person per 24 hours). The
+  backend seeds them from your own `backend\.env` the first time; step 3 prints yours.
+- Every check is logged in window 1 (or in window 2 when a `python manage.py` command runs it), one line per post:
+  `… INFO apps.pipeline.processor: Pipeline: post <id> -> labelled` (or `entered_review`, `updated_review`, `retry`).
+- The texts of the posts are plain ASCII on purpose: `Set-Content -Encoding ascii` would turn a `°` into `?`.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, confirms there is no migration
+to apply or make, then runs the whole backend test suite, Part 9's tests, the linter and the formatter check.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                            # No migrations to apply.
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 2359 passed
+python -m pytest apps/pipeline apps/core/tests/test_tick.py apps/posts/tests/test_services_pipeline.py -q   # 312 passed
+ruff check . ; ruff format --check .                # All checks passed! / 200 files already formatted
+```
+
+**You should see:** `No migrations to apply.`, `No changes detected` and `System check identified no issues (0
+silenced).`, then the full run ends with `2359 passed`, the pipeline run with `312 passed`, and the last line pair is
+`All checks passed!` and `200 files already formatted`. (Counts may grow later; what matters is that nothing fails.)
+
+- The pipeline run holds Part 8's 45 routing tests and 267 new ones: `test_contract.py` (61), `test_stub_client.py`
+  (29), `test_http_client.py` (35), `test_routing_pipeline.py` (55: every pipeline row of the ARCHITECTURE §4 table),
+  `test_queue.py` (8), `test_processor.py` (32), `test_races.py` (5, real threads), `test_kick.py` (10),
+  `test_command.py` (7), `test_no_network.py` (1), plus `apps\core\tests\test_tick.py` (11) and
+  `apps\posts\tests\test_services_pipeline.py` (13). The Linux guide's step 1 says what each covers.
+- Some more in `apps\core\tests\test_settings.py` (the four `PIPELINE_*` variables are checked at startup) and in
+  `apps\posts\tests\` (who decided a label is public only with the label).
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have; a reused Django must also run with `PIPELINE_INLINE_KICK=False`).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 117 files, 1587 tests passed
+npm run build
+npm run test:e2e                                    # 38 passed
+$env:CI = "1" ; npm run test:e2e ; Remove-Item Env:CI   # 38 passed (against the production build)
+cd ..\backend                                       # back to backend\ for steps 3 to 11
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  117 passed (117)` and `Tests  1587 passed (1587)`. `npm run build` lists the same routes as in Part 8
+(Part 9 adds no page). Each E2E run ends with `38 passed`.
+
+- On Windows `npm run build` can't blank `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (PowerShell's `$env:NAME = ""` *deletes* the
+  variable), so a `frontend\.env.local` with your real client ID is baked into that build and the CI-mode run is less
+  representative than on Linux. The default run pins an empty client ID for both servers, so it is unaffected.
+- Part 9 changes no page: the verdict copy ("Checked automatically · 95% confidence", "Reviewed by a moderator") and
+  the badge polling came with Part 5. Seven new component tests pin the badges and the copy for the stub's real
+  answers.
+- The E2E backend runs with the stub and **without the kick** (`playwright.config.ts`): several tests need a new fact
+  to stay CHECKING FACTS…. The test "a #true fact is checked by the pipeline and its badge turns VERIFIED by itself"
+  (in `e2e\post-detail.spec.ts`, which used to flip the status by hand) now runs the real pipeline for its own post
+  only (`processPost()` in `e2e\helpers.ts`) and waits for VERIFIED 95% on the card and the post page. No new sign-up.
+
+#### Step 3: Start the servers and make four accounts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 11.**
+
+**What this does:** Windows 1 and 3 run the two servers, with your own settings (the kick is on). In window 2 you sign
+up four accounts through the API, mark them verified, and print the pipeline settings the backend uses. The helpers
+`Mk` (make a post, print its id), `Send` (any request, printing the status code and then the answer) and `Fetch` (the
+same for a GET) are used by every later step.
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 and 2 leave you there). If you opened a new
+terminal, first run `cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the addresses are new each run
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+function Signup($email, $username) {
+@"
+{"email": "$email", "username": "$username", "password": "correct-horse-battery-42", "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-signup.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-signup.json" http://localhost:8000/api/auth/app/v1/auth/signup | ConvertFrom-Json).meta.access_token
+}
+$ada = Signup "part9-ada-$id@example.test" "part9_ada_$id"      # $ada = ada's login token (the facts of steps 4 to 6)
+$bo = Signup "part9-bo-$id@example.test" "part9_bo_$id"         # $bo, $cy = the facts of steps 7 to 10
+$cy = Signup "part9-cy-$id@example.test" "part9_cy_$id"
+$dee = Signup "part9-dee-$id@example.test" "part9_dee_$id"      # $dee = reposts in step 10, posts in step 11 and the browser
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part9-', email__endswith='$id@example.test').update(is_email_verified=True), 'accounts marked verified')" | Select-Object -Last 1
+$api = 'http://localhost:8000/api/v1'
+# Mk <token> <json>: makes a post, prints its id
+function Mk($token, $json) {
+  $json | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+  (curl.exe -s -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | ConvertFrom-Json).id
+}
+# Send <METHOD> <path> [token] [json body] [fields]: prints the HTTP status, then the answer. `fields` is a list
+# of property names to keep, or a script block `{ param($r) ... }` that picks what to show from the answer.
+function Send($method, $path, $token, $json, $show) {
+  $a = @()
+  if ($token) { $a += '-H', "Authorization: Bearer $token" }
+  if ($json) {
+    $json | Set-Content -Encoding ascii $env:TEMP\rz-body.json
+    $a += '-H', 'Content-Type: application/json', '--data-binary', "@$env:TEMP\rz-body.json"
+  }
+  $out = curl.exe -s -w "`n%{http_code}" -X $method @a "$api$path"
+  $body = if ($out.Count -gt 1) { $out[0..($out.Count - 2)] -join '' } else { '' }
+  if ($show -and $body) {
+    $r = $body | ConvertFrom-Json
+    $shown = if ($show -is [scriptblock]) { & $show $r } else { $r | Select-Object $show }
+    $body = ConvertTo-Json -InputObject $shown -Depth 5 -Compress
+  }
+  "$($out[-1])  $body"
+}
+function Fetch($path, $token, $show) { Send GET $path $token $null $show }   # Fetch <path> [token] [fields]
+python manage.py shell -c "from django.conf import settings; from apps.core.services import get_platform_settings as g; c = g(); print(settings.PIPELINE_BACKEND, settings.PIPELINE_INLINE_KICK, c.confidence_threshold, c.fact_posts_per_day)" | Select-Object -Last 1
+"$($ada.Substring(0,10)) $($bo.Substring(0,10)) $($cy.Substring(0,10)) $($dee.Substring(0,10))"   # four prefixes, not an error
+```
+
+**You should see:**
+
+```text
+4 accounts marked verified
+stub True 85 10
+eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi
+```
+
+- The second line is the pipeline (`stub`), the kick (`True`), the confidence threshold (`85`) and the fact posts each
+  person may make in 24 hours (`10`; steps 4 to 11 need at most 9 per account). If your threshold isn't 85, the
+  untagged facts in step 4 may land differently; if your allowance is lower, some posts are refused (empty ids).
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet.
+
+**If it differs:** an empty token means the sign-up failed: `runserver` isn't running, or you signed up more than 20
+times in a minute. Fix that and run this step again from `$id = Get-Date …`.
+
+#### Step 4: The inline kick checks each fact right after it is saved
+
+**Where:** Terminal window 2 (the same terminal as step 3). Window 1 must be running `runserver` with your normal
+settings (the kick on).
+
+**What this does:** `ada` posts three facts with the stub's tags, three without, and an opinion. The answer to the
+post itself still says `pending` (the check runs after the post is saved); a second later every fact has its verdict.
+
+```powershell
+'{"content":"Water boils at 100 degrees Celsius at sea level. #true","post_type":"fact"}' | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+$r = curl.exe -s -H "Authorization: Bearer $ada" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | ConvertFrom-Json
+$r | Select-Object status, confidence_score, verdict_source | ConvertTo-Json -Compress   # 1: the 201 answer
+$t1 = $r.id
+$t2 = Mk $ada '{"content":"The Great Wall of China is visible from the Moon. #false","post_type":"fact"}'
+$t3 = Mk $ada '{"content":"Coffee stunts your growth. #unsure","post_type":"fact"}'
+$h1 = Mk $ada '{"content":"Honey never spoils.","post_type":"fact"}'
+$h2 = Mk $ada '{"content":"Sharks are older than trees.","post_type":"fact"}'
+$h3 = Mk $ada '{"content":"The Moon orbits the Earth.","post_type":"fact"}'
+$o1 = Mk $ada '{"content":"I think tea beats coffee.","post_type":"opinion"}'
+Start-Sleep 1                                       # the checks take a few milliseconds
+foreach ($p in $t1, $t2, $t3, $h1, $h2, $h3, $o1) { Fetch "/posts/$p/" $null @('content', 'status', 'confidence_score', 'verdict_source') }   # 2 to 8
+```
+
+**You should see:**
+
+```text
+{"status":"pending","confidence_score":null,"verdict_source":null}
+200  {"content":"Water boils at 100 degrees Celsius at sea level. #true","status":"verified_true","confidence_score":"95.00","verdict_source":"pipeline"}
+200  {"content":"The Great Wall of China is visible from the Moon. #false","status":"verified_false","confidence_score":"92.00","verdict_source":"pipeline"}
+200  {"content":"Coffee stunts your growth. #unsure","status":"under_review","confidence_score":null,"verdict_source":null}
+200  {"content":"Honey never spoils.","status":"verified_true","confidence_score":"88.00","verdict_source":"pipeline"}
+200  {"content":"Sharks are older than trees.","status":"verified_false","confidence_score":"95.00","verdict_source":"pipeline"}
+200  {"content":"The Moon orbits the Earth.","status":"under_review","confidence_score":null,"verdict_source":null}
+200  {"content":"I think tea beats coffee.","status":"published","confidence_score":null,"verdict_source":null}
+```
+
+- 1: a new fact is always `pending` in its own answer; the browser shows "Checking facts…" and its polling (Part 5)
+  picks up the verdict (step 12).
+- 2 to 4: the three tags. 5 to 7: no tag, so the hash of the text decides: "Honey never spoils." gets true at 88 and
+  "Sharks are older than trees." false at 95 (both at or above 85, so labelled), "The Moon orbits the Earth." true at
+  65, below the threshold, so a moderator decides (UNDER REVIEW). The same text always gets the same answer.
+- Under review, the post shows no confidence and no "who decided": only a label shows them.
+- 8: the opinion is `published` and never checked.
+- Window 1 printed one `Pipeline: post … -> labelled` (or `-> entered_review`) line per fact, a few milliseconds
+  after each post.
+
+#### Step 5: What the pipeline stored, and what stays private
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads three of the posts straight from the database, then checks that none of the pipeline's
+own fields shows in the API.
+
+```powershell
+@"
+from apps.posts.models import Post
+for pk in '$t1 $t3 $h3'.split():
+    p = Post.objects.get(pk=pk)
+    print(p.status, p.flagged_reason, p.pre_review_status, p.pipeline_verdict, p.confidence_score, p.pipeline_result, p.pipeline_attempts, p.pipeline_next_attempt_at, round((p.pipeline_checked_at - p.created_at).total_seconds(), 2))
+"@ | python manage.py shell | Select-Object -Last 3     # 1 to 3
+Fetch "/posts/$t3/" $null { param($r) @($r.PSObject.Properties.Name | Where-Object { $_ -match 'pipeline|flag|attempt|review' }) }   # 4: none of it is public
+Fetch "/posts/status/?ids=$t1,$t3" $null { param($r) @($r.results | Select-Object status, confidence_score, verdict_source) }   # 5: what the badge poller sees
+```
+
+**You should see** (the last number on lines 1 to 3, the seconds between posting and the verdict, differs):
+
+```text
+verified_true None None true 95.00 {'rule': '#true', 'stub': True} 1 None 0.03
+under_review pipeline pending inconclusive 40.00 {'rule': '#unsure', 'stub': True} 1 None 0.01
+under_review pipeline pending true 65.00 {'rule': 'hash', 'stub': True} 1 None 0.01
+200  []
+200  [{"status":"verified_true","confidence_score":"95.00","verdict_source":"pipeline"},{"status":"under_review","confidence_score":null,"verdict_source":null}]
+```
+
+- Each line: the status, why it is under review (`pipeline`: the check couldn't decide) and what it was before, then
+  the pipeline's verdict, confidence and raw answer, the number of tries, when to try again (`None`: done), and how
+  long after the post the verdict came.
+- The verdict and confidence are kept even for a post under review: a moderator sees them in Django Admin (step 14),
+  the public doesn't.
+
+#### Step 6: The sources go to the pipeline in the author's order
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts a fact with two sources (a URL, then a DOI). The stub ignores them, but the request a
+real pipeline would get (`{post_id, content, sources}`) carries them, in order; a fact without sources sends an empty
+list. Nothing ever opens the links.
+
+```powershell
+$src = Mk $ada '{"content":"Solar capacity grew by roughly 30% worldwide last year. #true","post_type":"fact","sources":["https://www.iea.org/reports/renewables-2023","doi:10.1038/s41558-024-02102"]}'
+foreach ($p in $src, $t1) { python manage.py shell -c "import json; from apps.pipeline.contract import PipelineRequest; from apps.posts.models import Post; print(json.dumps(PipelineRequest.for_post(Post.objects.get(pk='$p')).to_json()['sources']))" | Select-Object -Last 1 }   # 1 and 2
+```
+
+**You should see:**
+
+```text
+["https://www.iea.org/reports/renewables-2023", "10.1038/s41558-024-02102"]
+[]
+```
+
+- 1: the URL first, then the DOI (stored bare, without `doi:`), as the author entered them. 2: the fact from step 4,
+  which has none.
+- The tests also check the body the HTTP client would send to a real pipeline, and that the only address it ever
+  opens is `PIPELINE_URL` (`test_http_client.py`).
+
+#### Step 7: With the kick off, facts wait until `process_pending` checks them
+
+**Where:** First window 1, then window 2.
+
+**What this does:** Restarts the server **without** the inline kick, the way it runs when the kick is missed (a worker
+restart, a sleeping server). New facts then stay pending until something checks them: here the management command.
+
+Window 1: press `Ctrl+C`, then:
+
+```powershell
+$env:PIPELINE_INLINE_KICK = "False" ; python manage.py runserver   # the kick off in this window (step 12 removes it); leave it running
+```
+
+Window 2:
+
+```powershell
+python manage.py process_pending | Select-Object -Last 1   # 1: first clears whatever was already waiting
+$k1 = Mk $bo '{"content":"Mount Everest is the tallest mountain above sea level. #true","post_type":"fact"}'
+$k2 = Mk $bo '{"content":"Lightning never strikes the same place twice. #false","post_type":"fact"}'
+$k3 = Mk $bo '{"content":"Cracking your knuckles causes arthritis. #unsure","post_type":"fact"}'
+Start-Sleep 1
+foreach ($p in $k1, $k2, $k3) { Fetch "/posts/$p/" $null @('status') }                  # 2 to 4: nothing checked them
+python manage.py process_pending                    # 5: checks the three
+foreach ($p in $k1, $k2, $k3) { Fetch "/posts/$p/" $null @('status', 'confidence_score', 'verdict_source') }   # 6 to 8
+python manage.py process_pending                    # 9: nothing left
+```
+
+**You should see** (the first number, the times and the ids differ):
+
+```text
+Processed 0 fact posts.
+200  {"status":"pending"}
+200  {"status":"pending"}
+200  {"status":"pending"}
+2026-10-10 19:12:51,727 INFO apps.pipeline.processor: Pipeline: post 50f256c2-fa78-4b3d-84d0-b7722b706d56 -> labelled
+2026-10-10 19:12:51,733 INFO apps.pipeline.processor: Pipeline: post 0a17e2de-93dd-4595-b0e2-c04423d713d9 -> labelled
+2026-10-10 19:12:51,737 INFO apps.pipeline.processor: Pipeline: post 069209e7-a9b5-417f-8706-789ca174f8c4 -> entered_review
+Processed 3 fact posts.
+200  {"status":"verified_true","confidence_score":"95.00","verdict_source":"pipeline"}
+200  {"status":"verified_false","confidence_score":"92.00","verdict_source":"pipeline"}
+200  {"status":"under_review","confidence_score":null,"verdict_source":null}
+Processed 0 fact posts.
+```
+
+- 1: the end-to-end tests (step 2) leave pending facts in your local database, because their backend runs without the
+  kick, so the first run checks those too: any number, 0 included (it printed `Processed 116 fact posts.` the first
+  time on the Linux PC, then 0). `Select-Object -Last 1` hides their log lines.
+- 5: one log line per post, then the count. One run checks **everything** that is due, in batches of 10
+  (`--limit` changes the batch size).
+
+#### Step 8: The tick needs the secret, and takes ten posts at a time
+
+**Where:** Terminal window 2. Window 1 still runs without the kick.
+
+**What this does:** The tick is what cron-job.org will call every hour (Part 17). It needs the `X-RZ-Cron-Secret`
+header, read here from your own `backend\.env` without printing it. Then `bo` and `cy` leave twelve facts waiting and
+three ticks clear them.
+
+```powershell
+$secret = (Select-String -Path .\.env -Pattern '^INTERNAL_CRON_SECRET=(.*)$').Matches.Groups[1].Value    # sets $secret; nothing is printed
+# Tick [secret] [method]: prints the status, the answer and how long it took
+function Tick($secret, $method = 'POST') {
+  $a = @()
+  if ($secret) { $a += '-H', "X-RZ-Cron-Secret: $secret" }
+  $out = curl.exe -s -w "`n%{http_code} %{time_total}" -X $method @a http://localhost:8000/api/internal/tick/
+  $last = $out[-1] -split ' '
+  "$($last[0])  $($out[0..($out.Count - 2)] -join '')  ($($last[1]) s)"
+}
+Tick                                                # 1: no secret
+Tick 'wrong-secret'                                 # 2: a wrong one
+Tick $secret 'GET'                                  # 3: the right one, but not a POST
+Tick $secret                                        # 4: nothing waits
+foreach ($i in 1..6) { Mk $bo ('{{"content":"Backlog claim {0} from bo. #true","post_type":"fact"}}' -f $i) | Out-Null; Mk $cy ('{{"content":"Backlog claim {0} from cy. #false","post_type":"fact"}}' -f $i) | Out-Null }   # twelve facts wait
+Tick $secret                                        # 5: ten of them
+Tick $secret                                        # 6: the other two
+Tick $secret                                        # 7: none left
+```
+
+**You should see** (the seconds differ):
+
+```text
+403  {"detail":"You do not have permission to perform this action.","code":"permission_denied"}  (0.001658 s)
+403  {"detail":"You do not have permission to perform this action.","code":"permission_denied"}  (0.000825 s)
+405  {"detail":"Method \"GET\" not allowed.","code":"method_not_allowed"}  (0.000850 s)
+200  {"processed":0}  (0.008398 s)
+200  {"processed":10}  (0.048147 s)
+200  {"processed":2}  (0.017419 s)
+200  {"processed":0}  (0.007578 s)
+```
+
+- Without the right secret the tick checks nothing. With it, it takes at most **10 posts** and answers in well under
+  a second with the stub; cron-job.org gives it 30 s. It stops taking new posts so it always answers within about 25 s:
+  a real pipeline, which may need up to 20 s per post, would check 1 to 5 per call (the tests cover that).
+- Window 1 logs one line per post checked.
+
+**If it differs:** if every tick is 403, `$secret` is empty: `INTERNAL_CRON_SECRET` is missing from `backend\.env`.
+
+#### Step 9: The sweeper in a loop
+
+**Where:** A new window 4, then window 2, then window 4 again.
+
+**What this does:** `--loop` keeps checking every few seconds, a stand-in for the kick when you run the server without
+it. `cy` posts a fact and the loop picks it up.
+
+Window 4:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\backend
+.\.venv\Scripts\Activate.ps1
+python manage.py process_pending --loop --interval 2      # leave it running for now
+```
+
+Window 2:
+
+```powershell
+$l1 = Mk $cy '{"content":"Octopuses have three hearts. #true","post_type":"fact"}'
+Start-Sleep 3                                       # one turn of the loop
+Fetch "/posts/$l1/" $null @('status', 'confidence_score')
+```
+
+Then press `Ctrl+C` in window 4.
+
+**You should see:** window 2 prints `200  {"status":"verified_true","confidence_score":"95.00"}`. Window 4 shows:
+
+```text
+Checking fact posts every 2 s. Press Ctrl+C to stop.
+2026-10-10 19:12:56,906 INFO apps.pipeline.processor: Pipeline: post c923b87a-2fdd-4a19-b97c-808faa862766 -> labelled
+Processed 1 fact post.
+Stopped.
+```
+
+- The loop prints only when it checked something. `Ctrl+C` ends it cleanly with "Stopped." (your terminal may show
+  `^C` in front of it); close window 4.
+
+#### Step 10: A late answer on a post that reports sent to review
+
+**Where:** Terminal window 2. Window 1 still runs without the kick (so the post isn't checked at once).
+
+**What this does:** `cy` posts a `#false` fact, which is then put under review the way five counting reports would
+(Part 8). Only then does the pipeline answer, with a decisive FALSE: a moderator must decide, and nothing reveals the
+FALSE meanwhile (user decision 2026-10-11). For comparison, the FALSE post from step 4 is put under review the same
+way: it was FALSE in public before, so it still can't be reposted.
+
+```powershell
+$r1 = Mk $cy '{"content":"The Sahara is growing every year. #false","post_type":"fact"}'
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$r1').update(status='under_review', flagged_reason='reports', pre_review_status='pending'), 'post sent to review, as five reports would')" | Select-Object -Last 1    # 1
+python manage.py shell -c "from apps.pipeline.processor import process_post; print(process_post('$r1'))" | Select-Object -Last 1    # 2: the pipeline answers late
+python manage.py shell -c "from apps.posts.models import Post; p = Post.objects.get(pk='$r1'); print(p.status, p.flagged_reason, p.pre_review_status, p.verdict_source, p.pipeline_verdict, p.confidence_score)" | Select-Object -Last 1   # 3
+Fetch "/posts/$r1/" $null @('status', 'confidence_score', 'verdict_source')   # 4: what everyone sees
+Send POST "/posts/$r1/repost/" $dee                                       # 5: dee can still repost it
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$t2').update(status='under_review', flagged_reason='reports', pre_review_status='verified_false'), 'FALSE post sent to review, as five reports would')" | Select-Object -Last 1    # 6
+Send POST "/posts/$t2/repost/" $dee                                       # 7: a post that was FALSE in public can't be
+```
+
+**You should see:**
+
+```text
+1 post sent to review, as five reports would
+True
+under_review both pending None false 92.00
+200  {"status":"under_review","confidence_score":null,"verdict_source":null}
+201  {"reposted":true}
+1 FALSE post sent to review, as five reports would
+409  {"detail":"Posts labelled FALSE can't be reposted.","code":"cannot_repost_false"}
+```
+
+- 3: the post stays UNDER REVIEW and its reason becomes `both` (reports and the pipeline); the FALSE and its 92% are
+  kept for the moderator, but nothing is stored as the label to restore, so dismissing the reports (Part 10) can't
+  make it FALSE without a human. A late **TRUE** is kept as the label a dismissal restores (the tests cover it).
+- 4 and 5: from outside, nothing shows the FALSE: no confidence, no source, and reposting works.
+- 7: Part 8's rule still holds for a post whose FALSE label was public before the reports.
+
+#### Step 11: A pipeline that fails is retried, then a moderator decides
+
+**Where:** Terminal window 2. Window 1 still runs without the kick.
+
+**What this does:** The stub never fails, so this step stands in a pipeline that never answers and moves the clock
+forward between the tries: a failed try is retried after 2, 4, 8 and 16 minutes, and after the fifth the post goes to
+review.
+
+```powershell
+$f1 = Mk $dee '{"content":"A claim nobody can check today. #true","post_type":"fact"}'
+@"
+from django.utils import timezone
+from apps.pipeline.clients import PipelineError
+from apps.pipeline.processor import process_post
+from apps.posts.models import Post
+
+class Down:  # a pipeline that never answers
+    max_seconds = 0
+    def check(self, request):
+        raise PipelineError("timeout", "no answer in time")
+
+when = timezone.now()
+for _ in range(5):
+    process_post("$f1", client=Down(), now=when)
+    post = Post.objects.get(pk="$f1")
+    wait = post.pipeline_next_attempt_at
+    print(post.pipeline_attempts, post.status, post.flagged_reason, "next try in", wait - when if wait else None)
+    when = wait or when
+print(post.pipeline_result)
+"@ | python manage.py shell | Where-Object { $_ -and $_ -notmatch 'imported automatically' }
+Fetch "/posts/$f1/" $null @('status', 'confidence_score', 'verdict_source')
+```
+
+**You should see** (the times and the id differ):
+
+```text
+2026-10-10 19:13:02,399 WARNING apps.pipeline.processor: Pipeline: post c0cdf1cd-5c74-48c3-9184-11df1109645f, try 1 failed (timeout)
+1 pending None next try in 0:02:00
+2026-10-10 19:13:02,403 WARNING apps.pipeline.processor: Pipeline: post c0cdf1cd-5c74-48c3-9184-11df1109645f, try 2 failed (timeout)
+2 pending None next try in 0:04:00
+2026-10-10 19:13:02,407 WARNING apps.pipeline.processor: Pipeline: post c0cdf1cd-5c74-48c3-9184-11df1109645f, try 3 failed (timeout)
+3 pending None next try in 0:08:00
+2026-10-10 19:13:02,411 WARNING apps.pipeline.processor: Pipeline: post c0cdf1cd-5c74-48c3-9184-11df1109645f, try 4 failed (timeout)
+4 pending None next try in 0:16:00
+2026-10-10 19:13:02,415 ERROR apps.pipeline.processor: Pipeline: post c0cdf1cd-5c74-48c3-9184-11df1109645f given up after 5 tries (timeout)
+5 under_review pipeline next try in None
+{'error': 'timeout', 'detail': 'no answer in time', 'attempt': 5}
+200  {"status":"under_review","confidence_score":null,"verdict_source":null}
+```
+
+- The post stays pending while it waits (2, 4, 8 and 16 minutes), then goes to UNDER REVIEW for the pipeline with
+  the last error kept for the moderators. A failed try logs a warning; giving up logs an error (in production, one
+  Sentry event per post).
+- In real life nothing moves the clock: the next try happens at the next tick or loop after the wait.
+
+#### Step 12: In the browser, a new fact's badge turns into its verdict by itself
+
+**Where:** First window 1, then the browser, with `npm run dev` (window 3) running.
+
+**What this does:** Restarts the server with your normal settings (the kick on), then posts three facts through the
+composer and watches the cards change on their own, then opens each post's page.
+
+Window 1: press `Ctrl+C`, then:
+
+```powershell
+Remove-Item Env:PIPELINE_INLINE_KICK ; python manage.py runserver   # your normal settings again; leave it running
+```
+
+Browser: log in at http://localhost:3000/login as `part9-dee-<id>@example.test` (use the `id` from step 3:
+`$id` in window 2) with the password `correct-horse-battery-42`.
+
+| Do this | Expect |
+|---|---|
+| On /home click **New post**, write `Paris is the capital of France. #true`, choose **Fact**, click **Post fact, will be checked** | A toast **"Posted. Checking the facts…"**. The new card is at the top with a grey dashed **CHECKING FACTS…** badge (a spinning glyph) and a grey stripe. After about **10 seconds**, without reloading, it turns into a teal **VERIFIED 95%** badge with a tick, and the stripe turns teal. |
+| Post `The Great Wall of China is visible from space. #false` the same way | CHECKING FACTS…, then after about 10 s a red **FALSE 92%** badge with a crossed circle and a red stripe. |
+| Post `Bats are blind. #unsure` | CHECKING FACTS…, then an amber **UNDER REVIEW** badge with an hourglass and an amber stripe. No percentage. |
+| Click the text of the VERIFIED post | Its page: the VERIFIED 95% badge and, under **Verdict**, a teal box **"CHECKED AUTOMATICALLY · 95% CONFIDENCE"** with "This claim was found to be true." |
+| Open the FALSE post's page | **"CHECKED AUTOMATICALLY · 92% CONFIDENCE"** and "This claim was found to be FALSE." The word "debunked" appears nowhere. |
+| Open the UNDER REVIEW post's page | **"UNDER REVIEW"** and "A moderator is taking a look at this post. The label changes once they decide." No percentage. |
+| Scroll down /home | The facts from steps 4 to 11 show their labels: VERIFIED, FALSE or UNDER REVIEW; "A claim nobody can check today." (step 11) is UNDER REVIEW. |
+
+- The check itself takes a few milliseconds (window 1 logs it at once); the card changes at the page's first status
+  check, 10 seconds after posting (Part 5's polling: 10 s, then 15, 22 …, while the tab is visible).
+- Measured with headless Chromium: each of the three cards changed 10.4 s after posting.
+- A moderator's verdict reads "Reviewed by a moderator" with no percentage (Part 10 adds the actions that make one).
+
+#### Step 13: A phone-sized window
+
+**Where:** Browser, logged in as `dee`.
+
+**What this does:** Checks the badges at phone width. In Firefox or Chrome press `F12`, then the "responsive design" /
+device toolbar button, and set the width to 390.
+
+| Do this | Expect |
+|---|---|
+| Open /home | Each card shows the author line, then the FACT chip and the badge (VERIFIED 95%, FALSE 92%, UNDER REVIEW) on their own line, then the claim. **No sideways scrolling.** |
+| Open the UNDER REVIEW post's page | The badge and the Verdict box fit the width. **No sideways scrolling.** |
+
+- Measured with headless Chromium at 390 px: 0 px of horizontal overflow on `/home` and on a post's page.
+
+#### Step 14: Django Admin: what the pipeline stored
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Shows a checked post in the read-only posts admin, with the fields the public never sees. The
+review queue and the moderator actions are Part 10.
+
+| URL / action | Expect |
+|---|---|
+| http://localhost:8000/admin/ (superuser from Part 0A; if it 404s, `ADMIN_URL_PATH` in `backend\.env` isn't `admin/`: use that path) | **Posts** is listed in the sidebar. |
+| http://localhost:8000/admin/posts/post/, then click "Water boils at 100 degrees Celsius at sea level. #true" | **View post**, read-only (no **Save**): **Status** "Verified true", **Confidence score** 95.00, **Pipeline verdict** "True", **Pipeline result** `{"rule": "#true", "stub": true}`, **Pipeline attempts** 1, **Pipeline next attempt at** "-", **Pipeline checked at** the time, **Verdict source** "Pipeline". |
+| Open "A claim nobody can check today. #true" (step 11) | **Status** "Under review", **Flagged reason** "Pipeline", **Pipeline attempts** 5, **Pipeline result** `{"error": "timeout", "detail": "no answer in time", "attempt": 5}`. |
+
+- Checked with a scripted browser and a throwaway superuser, not by a person.
+
+#### Step 15: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1). Window 1 still has
+  `$env:PIPELINE_INLINE_KICK` removed since step 12; if you skipped step 12, run `Remove-Item Env:PIPELINE_INLINE_KICK`
+  there before the next `runserver`.
+- Delete the test accounts and their posts and reposts (all go with the accounts). In window 2, in `backend\` with the
+  venv active:
+
+  ```powershell
+  python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part9-').delete())" | Select-Object -Last 1
+  ```
+
+  After one clean run of steps 3 to 11 of this guide it prints `(35, {'social.Repost': 1, 'account.EmailAddress': 4, 'posts.Post': 26, 'accounts.User': 4})`:
+  how many rows went in all, and per table (26 posts: 8 by `ada` (steps 4 and 6), 9 by `bo` and 8 by `cy` (steps 7 to
+  10), 1 by `dee` (step 11); 1 repost, `dee`'s in step 10). Your count differs if you did the browser steps (3 more
+  posts) or made other accounts. Nothing else is touched; the pending facts that step 7 checked belong to the E2E
+  tests' accounts, which stay in your local database as in earlier parts (Django Admin → Users deletes them).
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- The only secret used is `INTERNAL_CRON_SECRET` in step 8, read from `backend\.env` into a variable and never
+  printed; `Remove-Variable secret` forgets it. The other values in the commands are Cloudflare's public test token
+  and the throwaway password of the test accounts.

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { marker, setPostState, signUpVerified } from "./helpers";
+import { marker, processPost, setPostState, signUpVerified } from "./helpers";
 
 /**
  * Part 5: a post's own page, sharing, the author's delete and live badges, against the real stack.
@@ -140,14 +140,14 @@ test("the author deletes a post: gone from Recent, 404 for everyone, with a toas
   await visitor.close();
 });
 
-test("a pending fact's badge turns into the verdict by itself, on the feed and on its page", async ({
+test("a #true fact is checked by the pipeline and its badge turns VERIFIED by itself, on the feed and on its page", async ({
   page,
 }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1280, height: 900 });
   await signUpVerified(page, "live");
   const id = marker("live");
-  const claim = `Claim ${id}`;
+  const claim = `Claim ${id} #true`;
   const card = await post(page, "Fact", claim);
   await expect(card.getByText("CHECKING FACTS…")).toBeVisible();
 
@@ -157,13 +157,18 @@ test("a pending fact's badge turns into the verdict by itself, on the feed and o
   const postId = await openFrom(second, claim);
   await expect(second.getByText("CHECKING FACTS…").first()).toBeVisible();
 
-  // Status changes underneath, as the pipeline or a moderator will do it.
-  setPostState(postId, "verified_true");
+  // The pipeline checks the post underneath (Part 9), as the inline kick does after a post commits.
+  const checked = processPost(postId);
+  expect(
+    checked.status,
+    `the stub gives #true 95%; the E2E backend's confidence_threshold is ${checked.threshold}`,
+  ).toBe("verified_true");
 
-  await expect(card.getByText("VERIFIED 94%")).toBeVisible({ timeout: 30_000 });
+  // Part 5's polling picks the verdict up on both pages.
+  await expect(card.getByText("VERIFIED 95%")).toBeVisible({ timeout: 30_000 });
   await expect(card.getByText("CHECKING FACTS…")).toHaveCount(0);
-  await expect(second.getByText("VERIFIED 94%").first()).toBeVisible({ timeout: 30_000 });
-  await expect(second.getByText("Checked automatically · 94% confidence")).toBeVisible();
+  await expect(second.getByText("VERIFIED 95%").first()).toBeVisible({ timeout: 30_000 });
+  await expect(second.getByText("Checked automatically · 95% confidence")).toBeVisible();
   await expect(second.getByText("CHECKING FACTS…")).toHaveCount(0);
 });
 

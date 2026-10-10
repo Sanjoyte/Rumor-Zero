@@ -74,11 +74,14 @@ const python =
     ? path.join(backendDir, ".venv", "Scripts", "python.exe")
     : path.join(backendDir, ".venv", "bin", "python");
 
+// The same pins as the E2E backend in playwright.config.ts.
 const shellEnv = {
   ...process.env,
   REDIS_URL: "",
   EMAIL_PROVIDER: "file",
   GOOGLE_OAUTH_CLIENT_ID: "",
+  PIPELINE_BACKEND: "stub",
+  PIPELINE_INLINE_KICK: "False",
 };
 
 function runShell(code: string): string {
@@ -166,4 +169,28 @@ export function setPostState(
   runShell(
     `from apps.posts.models import Post; assert Post.objects.filter(pk='${postId}').update(${fields}) == 1`,
   );
+}
+
+/**
+ * Runs the real fact-check pipeline (the stub) for one post, as the inline kick does after a post
+ * commits (Part 9): `process_post` through `manage.py shell`, against the E2E backend's database.
+ * Only that post: a sweep would also check the pending posts of tests running in parallel. The E2E
+ * backend checks nothing by itself (`PIPELINE_INLINE_KICK=False`). Returns the post's status and
+ * the confidence threshold the backend used (the developer's own PlatformSettings; seeded at 85).
+ */
+export function processPost(postId: string): { status: string; threshold: number } {
+  if (!/^[0-9a-f-]{36}$/.test(postId)) throw new Error("not a post id");
+  const out = runShell(
+    [
+      "from apps.core.services import get_platform_settings",
+      "from apps.pipeline.processor import process_post",
+      "from apps.posts.models import Post",
+      `assert process_post('${postId}'), 'the post was not due for a check'`,
+      `status = Post.objects.get(pk='${postId}').status`,
+      "print('RESULT=' + status + ',' + str(get_platform_settings().confidence_threshold))",
+    ].join("\n"),
+  );
+  const match = /RESULT=([a-z_]+),(\d+)/.exec(out);
+  if (!match) throw new Error(`no result in: ${out}`);
+  return { status: match[1], threshold: Number(match[2]) };
 }

@@ -1,12 +1,15 @@
-"""Creating, deleting and reporting posts, and the fact quota (ARCHITECTURE §3, §4, §4b, §5).
+"""Creating, deleting and reporting posts, the fact quota, and writing pipeline results
+(ARCHITECTURE §3, §4, §4b, §5, §6).
 
 Only this module and `apps/moderation/services.py` (Part 10) change `Post.status`. There is no HTTP
 here: the views turn these domain errors into responses.
 """
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
@@ -16,6 +19,8 @@ from apps.core.services import get_platform_settings
 from apps.pipeline import routing
 from apps.posts.models import Post, PostStatus, PostType
 from apps.social.feed import bust_following_feed
+
+logger = logging.getLogger(__name__)
 
 # The quota is a rolling window, not a calendar day (user decision 2026-10-08): a slot frees up 24
 # hours after the post that used it. It counts every fact post made in the window, **including ones
@@ -91,7 +96,8 @@ def fact_quota(user, *, now=None):
 def create_post(*, author, content, post_type, sources=(), is_emergency=False, now=None):
     """Create an opinion (`published`) or a fact (`pending`). Raises the errors above.
 
-    The pipeline is Part 9: a fact post just waits as `pending` ("Checking facts…").
+    A fact shows "Checking facts…" until the pipeline answers. With `PIPELINE_INLINE_KICK` on, a
+    background thread checks it right after the commit (§6); otherwise the sweeper does.
     """
     now = now or timezone.now()
     if is_emergency:
@@ -121,7 +127,25 @@ def create_post(*, author, content, post_type, sources=(), is_emergency=False, n
         )
         # Your own Following feed must show the new post at once, despite its cache (Part 6).
         bust_following_feed(author.pk)
+        if post_type == PostType.FACT and settings.PIPELINE_INLINE_KICK:
+            post_id = post.pk
+            transaction.on_commit(lambda: _kick_pipeline(post_id))
         return post
+
+
+def _kick_pipeline(post_id):
+    """After the commit, check the new fact post in a background thread (the inline kick).
+
+    It never raises: the post is already saved, and an error here would escape the commit and
+    turn the 201 into a 500, so the client would post it again (a duplicate that uses quota). The
+    import is local: `apps.pipeline.processor` imports this module.
+    """
+    try:
+        from apps.pipeline.processor import start_kick
+
+        start_kick(post_id)
+    except Exception:
+        logger.exception("Could not start the inline pipeline check of post %s", post_id)
 
 
 def delete_post(*, post_id, user, now=None):
@@ -172,3 +196,75 @@ def record_report(post, *, counting_reports, cfg, now):
         ]
     )
     return entered
+
+
+# ---------- Pipeline results (Part 9; ARCHITECTURE §4, §6) ----------
+
+_RESULT_FIELDS = [
+    "status",
+    "flagged_reason",
+    "pre_review_status",
+    "verdict_source",
+    "pipeline_verdict",
+    "confidence_score",
+    "pipeline_result",
+    "pipeline_checked_at",
+    "pipeline_next_attempt_at",
+    "updated_at",
+]
+_FAILURE_FIELDS = [
+    "status",
+    "flagged_reason",
+    "pre_review_status",
+    "pipeline_result",
+    "pipeline_next_attempt_at",
+    "updated_at",
+]
+
+
+def _lock_claimed_post(post_id, claimed_attempts):
+    """The post a pipeline try was claimed for, locked, or None when the answer must be dropped:
+    the author deleted the post meanwhile, or a newer claim took it over (its lease ran out, so
+    `pipeline_attempts` moved on). The lock is Part 8's `FOR NO KEY UPDATE`: it waits for a report,
+    a repost or a delete, not for likes, comments or bookmarks."""
+    post = (
+        Post.objects.not_deleted()
+        .select_for_update(no_key=True, of=("self",))
+        .filter(pk=post_id)
+        .first()
+    )
+    if post is None or post.pipeline_attempts != claimed_attempts:
+        return None
+    return post
+
+
+def record_pipeline_result(post_id, result, *, claimed_attempts, now):
+    """Write a pipeline result through `routing.apply_pipeline_result` (§4).
+
+    `claimed_attempts` is the post's `pipeline_attempts` when the processor claimed the try (the
+    claim token). Returns the `Outcome`, or None when the answer was dropped (see
+    `_lock_claimed_post`); an `IGNORED` post (removed, decided by a moderator, already checked) is
+    not written at all, so its fields and `updated_at` stay as they were. `durable=True`: this
+    must never run inside a caller's transaction, which would hold the row lock across the call.
+    """
+    with transaction.atomic(durable=True):
+        post = _lock_claimed_post(post_id, claimed_attempts)
+        if post is None:
+            return None
+        outcome = routing.apply_pipeline_result(post, result, get_platform_settings(), now)
+        if outcome != routing.Outcome.IGNORED:
+            post.save(update_fields=_RESULT_FIELDS)
+        return outcome
+
+
+def record_pipeline_failure(post_id, error, *, claimed_attempts, now):
+    """Write a failed try through `routing.apply_pipeline_failure` (the backoff, or after
+    `MAX_ATTEMPTS` a moderator's review). Same rules as `record_pipeline_result`."""
+    with transaction.atomic(durable=True):
+        post = _lock_claimed_post(post_id, claimed_attempts)
+        if post is None:
+            return None
+        outcome = routing.apply_pipeline_failure(post, error, now)
+        if outcome != routing.Outcome.IGNORED:
+            post.save(update_fields=_FAILURE_FIELDS)
+        return outcome

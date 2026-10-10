@@ -11,9 +11,11 @@ from rumor_zero.env_helpers import (
     cache_config,
     check_jwt_signing_key,
     email_config,
+    flag,
     google_client_id,
     int_in_range,
     load_env_file,
+    pipeline_config,
     require,
 )
 from rumor_zero.sentry import init_sentry
@@ -137,6 +139,14 @@ CACHES = cache_config(env.str("REDIS_URL", default=""))
 # Seconds the first page of a user's Following feed stays cached (ARCHITECTURE §3, §9). 0 turns the
 # cache off. Not a PlatformSettings value: it is read here, not edited in Django Admin.
 FEED_CACHE_SECONDS = int_in_range(env, "FEED_CACHE_SECONDS", 30, 0, 300)
+
+# ---------- Fact-check pipeline (ARCHITECTURE §6; Part 9) ----------
+# stub = the built-in deterministic fake; http = a real pipeline at PIPELINE_URL (Bearer
+# PIPELINE_API_KEY). Running the stub in production is a launch decision for Part 17 (§6).
+PIPELINE_BACKEND, PIPELINE_URL, PIPELINE_API_KEY = pipeline_config(env)
+# Check a new fact post in a background thread right after it commits (the fast path). The hourly
+# tick and `manage.py process_pending` pick up anything it misses. Tests turn it off.
+PIPELINE_INLINE_KICK = flag(env, "PIPELINE_INLINE_KICK", default=True)
 
 # ---------- Passwords ----------
 PASSWORD_HASHERS = [

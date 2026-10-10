@@ -49,15 +49,18 @@ def test_reporting_makes_no_network_request(blocked, auth_client):
 
 
 def test_the_reports_and_pipeline_code_import_nothing_that_can_fetch():
+    """Only the pipeline's HTTP client may open a connection (Part 9), and only to the configured
+    `PIPELINE_URL`: no module fetches a user-supplied link. The allow-list must match exactly, so
+    it can't silently go stale."""
     forbidden = re.compile(
         r"^\s*(?:import|from)\s+(?:urllib\.request|urllib3|requests|httpx|aiohttp|socket|http\.client)\b",
         re.MULTILINE,
     )
-    offenders = [
+    importers = [
         f"{package.name}/{path.name}"
         for module in (apps.reports, apps.pipeline)
         for package in [Path(module.__file__).parent]
         for path in package.glob("*.py")
         if forbidden.search(path.read_text())
     ]
-    assert offenders == []
+    assert importers == ["pipeline/clients.py"]

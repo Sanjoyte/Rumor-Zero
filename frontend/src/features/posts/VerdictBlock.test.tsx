@@ -97,3 +97,40 @@ describe("VerdictBlock", () => {
     ).toBe("Verified");
   });
 });
+
+// Part 9: the exact objects the API sends once the stub pipeline has answered (`#true`, `#false`,
+// `#unsure`), and a post under review whose late verdict the API keeps private.
+describe("VerdictBlock with the pipeline's real answers", () => {
+  const cases: [string, Parameters<typeof fact>[0], string, string][] = [
+    [
+      "#true",
+      { status: "verified_true", verdict_source: "pipeline", confidence_score: "95.00" },
+      "Checked automatically · 95% confidence",
+      "This claim was found to be true.",
+    ],
+    [
+      "#false",
+      { status: "verified_false", verdict_source: "pipeline", confidence_score: "92.00" },
+      "Checked automatically · 92% confidence",
+      "This claim was found to be FALSE.",
+    ],
+    [
+      "#unsure",
+      { status: "under_review", verdict_source: null, confidence_score: null },
+      "Under review",
+      "A moderator is taking a look at this post. The label changes once they decide.",
+    ],
+  ];
+
+  it.each(cases)("%s", (_tag, post, title, body) => {
+    render(<VerdictBlock post={fact(post)} />);
+    expect(screen.getByText(title)).toBeInTheDocument();
+    expect(screen.getByText(body)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/debunk/i);
+  });
+
+  it("shows no percentage while a post is under review", () => {
+    render(<VerdictBlock post={fact({ status: "under_review" })} />);
+    expect(screen.queryByText(/%/)).toBeNull();
+  });
+});

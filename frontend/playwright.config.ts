@@ -32,9 +32,19 @@ export default defineConfig({
       cwd: backendDir,
       // In-memory cache, so every run starts with empty allauth rate-limit counters. Emails go to
       // backend/tmp/mail/ (git-ignored), where e2e/mailbox.ts reads them. The process env wins over
-      // backend/.env, so this holds in CI and locally. A reused `runserver` must also use "file".
+      // backend/.env, so this holds in CI and locally. A reused `runserver` must also use "file"
+      // and the kick off (below).
       // No Google client ID: "Continue with Google" is a 404 here, and the tests never reach Google.
-      env: { REDIS_URL: "", EMAIL_PROVIDER: "file", GOOGLE_OAUTH_CLIENT_ID: "" },
+      // The fact-check pipeline is the stub and checks nothing by itself (no inline kick): tests
+      // expect a new fact to stay CHECKING FACTS…, and the one that wants a verdict runs the
+      // pipeline for its own post (`processPost` in e2e/helpers.ts).
+      env: {
+        REDIS_URL: "",
+        EMAIL_PROVIDER: "file",
+        GOOGLE_OAUTH_CLIENT_ID: "",
+        PIPELINE_BACKEND: "stub",
+        PIPELINE_INLINE_KICK: "False",
+      },
       url: `${BACKEND_ORIGIN}/api/health/`,
       reuseExistingServer: !CI,
       timeout: 120_000,

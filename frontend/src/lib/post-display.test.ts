@@ -78,3 +78,25 @@ describe("stripeTone", () => {
     expect(stripeTone({ status: "removed", emergencyActive: true })).toBeNull();
   });
 });
+
+describe("statusBadgeSpec with the pipeline's real answers (Part 9)", () => {
+  it.each([
+    [
+      "#true",
+      { status: "verified_true", verdictSource: "pipeline", confidenceScore: "95.00" },
+      "VERIFIED 95%",
+    ],
+    [
+      "#false",
+      { status: "verified_false", verdictSource: "pipeline", confidenceScore: "92.00" },
+      "FALSE 92%",
+    ],
+    [
+      "#unsure",
+      { status: "under_review", verdictSource: null, confidenceScore: null },
+      "UNDER REVIEW",
+    ],
+  ] as [string, PostDisplayInput, string][])("%s", (_tag, input, label) => {
+    expect(statusBadgeSpec(input)?.label).toBe(label);
+  });
+});

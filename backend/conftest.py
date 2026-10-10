@@ -1,3 +1,5 @@
+import threading
+
 import pytest
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from django.core.cache import cache
@@ -20,6 +22,10 @@ def _no_network(*args, **kwargs):
 
 def _no_google_network(self, *args, **kwargs):
     raise AssertionError("Tests must not call Google: use the `google` fixture")
+
+
+def _no_pipeline_network():
+    raise AssertionError("Tests must not call a real pipeline: give HttpPipelineClient an opener")
 
 
 @pytest.fixture(autouse=True)
@@ -62,7 +68,25 @@ def _hermetic(settings, monkeypatch):
         }
     }
     monkeypatch.setattr(DefaultSocialAccountAdapter, "get_requests_session", _no_google_network)
+    # The fact-check pipeline is the deterministic stub and nothing is checked in a background
+    # thread unless a test asks for it (`settings.PIPELINE_INLINE_KICK = True`).
+    settings.PIPELINE_BACKEND = "stub"
+    settings.PIPELINE_INLINE_KICK = False
+    settings.PIPELINE_URL = ""
+    settings.PIPELINE_API_KEY = ""
+    monkeypatch.setattr("apps.pipeline.clients._default_opener", _no_pipeline_network)
     cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_kick_thread_left_behind():
+    """A kick thread that outlives its test would keep a connection to the test database open (and
+    could write into the next test). Tests that start one join it; this catches those that don't."""
+    yield
+    left = [t for t in threading.enumerate() if t.name == "pipeline-kick"]
+    for thread in left:
+        thread.join(timeout=10)
+    assert [t for t in left if t.is_alive()] == [], "a pipeline-kick thread outlived its test"
 
 
 @pytest.fixture

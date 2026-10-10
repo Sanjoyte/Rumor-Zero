@@ -1,5 +1,6 @@
 """Small helpers for reading settings from the environment (django-environ)."""
 
+import ipaddress
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -9,6 +10,7 @@ from django.core.exceptions import ImproperlyConfigured
 # PyJWT warns below 32 bytes for HS256 (RFC 7518 §3.2).
 MIN_JWT_KEY_LENGTH = 32
 EMAIL_PROVIDERS = ("console", "brevo", "file")
+PIPELINE_BACKENDS = ("stub", "http")
 
 
 def load_env_file(path):
@@ -39,6 +41,76 @@ def int_in_range(env, name, default, minimum, maximum):
     if value is None or not minimum <= value <= maximum:
         raise ImproperlyConfigured(f"{name} must be an integer between {minimum} and {maximum}")
     return value
+
+
+def flag(env, name, default):
+    """A True/False variable. Missing or empty → default (django-environ alone reads "" as
+    False, which would make `NAME=` in .env turn a feature off)."""
+    if not env.str(name, default="").strip():
+        return default
+    return env.bool(name)
+
+
+def _is_loopback(host):
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def pipeline_url(name, value):
+    """The real pipeline's endpoint: an https:// URL, or plain http:// to a loopback host only
+    (the relay's rule: the API key never travels in clear). Errors name the variable only."""
+    value = value.strip()
+    if not value:
+        raise ImproperlyConfigured(
+            f"Set the {name} environment variable when PIPELINE_BACKEND is http"
+        )
+    error = ImproperlyConfigured(
+        f"{name} must be an https:// URL (plain http:// only to a loopback host), "
+        "with no user info or fragment"
+    )
+    try:
+        parts = urlsplit(value)
+        parts.port  # noqa: B018 (raises ValueError for a bad port)
+    except ValueError:
+        raise error from None
+    if (
+        parts.scheme not in ("http", "https")
+        or not parts.hostname
+        or parts.username is not None
+        or parts.password is not None
+        or parts.fragment
+        or any(ch.isspace() or ord(ch) < 32 for ch in value)
+    ):
+        raise error
+    if parts.scheme == "http" and not _is_loopback(parts.hostname):
+        raise error
+    return value
+
+
+def pipeline_config(env):
+    """(PIPELINE_BACKEND, PIPELINE_URL, PIPELINE_API_KEY) (ARCHITECTURE §6).
+
+    `stub` (the default) needs nothing else and ignores the other two; `http` needs both. A wrong
+    value fails at startup naming the variable, never quoting it.
+    """
+    backend = env.str("PIPELINE_BACKEND", default="").strip() or "stub"
+    if backend not in PIPELINE_BACKENDS:
+        raise ImproperlyConfigured(
+            f"PIPELINE_BACKEND must be one of: {', '.join(PIPELINE_BACKENDS)}"
+        )
+    if backend == "stub":
+        return backend, "", ""
+    url = pipeline_url("PIPELINE_URL", env.str("PIPELINE_URL", default=""))
+    api_key = env.str("PIPELINE_API_KEY", default="").strip()
+    if not api_key:
+        raise ImproperlyConfigured(
+            "Set the PIPELINE_API_KEY environment variable when PIPELINE_BACKEND is http"
+        )
+    return backend, url, api_key
 
 
 GOOGLE_CLIENT_ID_SUFFIX = ".apps.googleusercontent.com"

@@ -1,8 +1,9 @@
 # Plan: Part 9, Fact-check pipeline stub + routing
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-11, together with the two decisions and the defaults
-  below. Saved here and linked from `HANDOFF.md`. Not implemented yet. Drafted 2026-10-10/11 by Claude (Opus 5.5).
-  Step 0's "save the plan" is done; its HANDOFF and workspace checks still run at the start of implementation.
+  below. Saved here and linked from `HANDOFF.md`. **IMPLEMENTED 2026-10-11** (Claude, Opus 5.5), as written. Small
+  deviations are listed in `task.md` Part 9: `processPost` returns the status and the test asserts it, the claim doesn't
+  move `updated_at`, and the `lease_expired` failure kind. Drafted 2026-10-10/11 by Claude (Opus 5.5).
 - **Implement with:** Opus 5.5 · high (task.md).
 - **Evidence (read-only):**
   - Docs: HANDOFF, MEMORY, `task.md` Part 9 (+ the Part 8 record), ARCHITECTURE §1–§4b, §6, §9–§13, ANALYSIS c-3, c-5,

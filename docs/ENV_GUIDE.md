@@ -111,8 +111,8 @@ Gotcha: don't wrap these values in quotes, and don't leave trailing spaces.
 | `REPORT_THRESHOLD` … `FACT_POSTS_PER_DAY` | defaults | Guide §6.2, §7.2; ANALYSIS D7 (only initial values; then Django Admin) |
 | `FEED_CACHE_SECONDS` | `30` | Seconds the first page of a user's Following feed stays cached (Part 6; 0 to 300, **0 turns the cache off**). Read by Django settings, **not** seeded into PlatformSettings or editable in Django Admin. Needs `REDIS_URL` to be shared between processes (without it each process keeps its own copy) |
 | `EMERGENCY_DURATION_HOURS` … `EMERGENCY_FALSE_COOLDOWN_DAYS` (6 variables, new on 2026-09-29) | defaults | **Needed for local dev: no action.** Emergency-post limits (ANALYSIS f-1). If your `backend/.env` was copied before they existed, the defaults apply; see §1.8 |
-| `PIPELINE_BACKEND` / `PIPELINE_INLINE_KICK` | `stub` / `True` | Built-in fake pipeline |
-| `PIPELINE_URL` / `PIPELINE_API_KEY` | *(empty)* | Reserved for the future real pipeline |
+| `PIPELINE_BACKEND` / `PIPELINE_INLINE_KICK` | `stub` / `True` | Built-in fake pipeline (`#true` → VERIFIED 95%, `#false` → FALSE 92%, `#unsure` → UNDER REVIEW; other text is labelled from a hash of it, ARCHITECTURE §6). With the kick on, a new fact post is checked a moment after it is saved; `False` leaves it to `python manage.py process_pending` or the tick (Part 9). `PIPELINE_BACKEND` accepts only `stub` or `http`; an empty kick counts as `True`. Tests pin the stub and turn the kick off, and Playwright's E2E backend runs with `PIPELINE_INLINE_KICK=False` (a `runserver` you reuse for E2E needs it too) |
+| `PIPELINE_URL` / `PIPELINE_API_KEY` | *(empty)* | Reserved for the future real pipeline. Read only when `PIPELINE_BACKEND=http`: then both are required, and the URL must be `https://` (plain `http://` only to `localhost`/`127.0.0.1`/`::1`); Django refuses to start otherwise, naming the variable |
 | `SENTRY_DSN` | *(empty)* | Sentry off locally |
 | `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | `local` / `0.0` | |
 | frontend `BACKEND_ORIGIN` | `http://localhost:8000` | Django `runserver` |
@@ -383,7 +383,7 @@ Also pick `ADMIN_URL_PATH`: run `python3 -c "import secrets; print('mod-' + secr
    | `REPORT_THRESHOLD` … `FACT_POSTS_PER_DAY` | defaults (only initial values) |
    | `FEED_CACHE_SECONDS` | optional, default 30 (a real setting, not an initial value) |
    | `EMERGENCY_DURATION_HOURS` … `EMERGENCY_FALSE_COOLDOWN_DAYS` | **deployment: optional.** Leave them out to use the defaults in §1.8 (only initial values; then Django Admin) |
-   | `PIPELINE_BACKEND` / `PIPELINE_INLINE_KICK` | `stub` / `True` |
+   | `PIPELINE_BACKEND` / `PIPELINE_INLINE_KICK` | `stub` / `True`. **Launch blocker (Part 9, decision of 2026-10-11): decide in Part 17 how production gets verdicts.** With the stub any author can write `#true` to get VERIFIED 95%, and untagged facts get hash-chosen labels that feed the public credibility score (ARCHITECTURE §6) |
    | `INTERNAL_CRON_SECRET` | from §2.1 |
    | `SENTRY_DSN` / `SENTRY_ENVIRONMENT` / `SENTRY_TRACES_SAMPLE_RATE` | §2.5 |
    | `WEB_CONCURRENCY` | `2` (read by gunicorn; matches `--workers`) |
@@ -523,7 +523,7 @@ Gotcha: never point it at `/api/health/deep/` or any page that queries the datab
    - Click **Save**.
 2. Use **Test run**. The response should be `200` with JSON such as `{"processed": 0}`.
 
-Gotchas: 30 s timeout (the endpoint processes a small batch and returns quickly). cron-job.org disables a job after more than 25 consecutive failures.
+Gotchas: 30 s timeout. The endpoint checks at most 10 posts and stops taking new ones so it answers within about 25 s (Part 9; with the stub it takes well under a second, with a real pipeline it may check only 1 to 5 posts per call). A missing or wrong `X-RZ-Cron-Secret` answers 403 and a GET answers 405. cron-job.org disables a job after more than 25 consecutive failures.
 
 ### 2.13 If a secret leaks, or when rotating
 

@@ -94,7 +94,7 @@ not let the review expand the part's scope without user approval.
 | 7 | Likes & comments | 5 | [x] Done (2026-10-10) |
 | 7B | Bookmarks & reposts | 6, 7 | [x] Done (2026-10-10) |
 | 8 | Reporting & threshold | 5 | [x] Done (2026-10-10) |
-| 9 | Fact-check pipeline stub + routing | 8 | [ ] |
+| 9 | Fact-check pipeline stub + routing | 8 | [x] Done (2026-10-11) |
 | 10 | Human review panel (Django Admin) | 9 | [ ] |
 | 11 | Appeals & removed-post tombstones | 10 | [ ] |
 | 11B | Credibility score | 7B, 10, 11 | [ ] |
@@ -996,7 +996,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 ---
 
 ## Part 9: Fact-check pipeline stub + routing
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-11)
 **Goal:** the fixed pipeline contract (guide §7.1), a deterministic stub, the corrected routing logic (c-3), and a DB-backed queue processed without Celery or workers (c-21), so verdict badges go live.
 **Depends on:** 8.
 **Stitch files to convert:** none new. Verify the verified, false and under-review badge and card states from `b1_home_feed` and `b3_post_detail_forensic_proof` against real data.
@@ -1016,13 +1016,34 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 **API endpoints:** `POST /api/internal/tick/`.
 
 **Acceptance criteria**
-- [ ] Locally, a fact containing `#true` becomes VERIFIED 95% within seconds; `#false` becomes FALSE 92%; `#unsure` becomes UNDER REVIEW (pipeline)
-- [ ] The pipeline request includes the post's `sources` in order (empty when there are none)
-- [ ] With the inline kick off, `process_pending` or the tick clears the backlog
-- [ ] **Every pipeline-related row of the ARCHITECTURE §4 table has a passing test**, including a late result on a reported post, moderator-decided posts ignored, removed posts ignored, and inconclusive-with-high-confidence → review
-- [ ] Client errors are retried with backoff; after 5 attempts the post goes to review
-- [ ] The tick needs the secret (403 otherwise) and finishes in under 30 s for 10 posts
-- [ ] Two concurrent processors never handle the same post
+- [x] Locally, a fact containing `#true` becomes VERIFIED 95% within seconds; `#false` becomes FALSE 92%; `#unsure` becomes UNDER REVIEW (pipeline) (with `runserver` on its defaults the inline kick checked each post 0.01 to 0.02 s after it was saved; in the browser the card turned from CHECKING FACTS… to its verdict about 10 s after posting, at Part 5's first poll; E2E: the converted live-badge test)
+- [x] The pipeline request includes the post's `sources` in order (empty when there are none) (`PipelineRequest.for_post` keeps the stored order; the HTTP client sends them as `sources` and opens nothing else; a test checks the JSON body)
+- [x] With the inline kick off, `process_pending` or the tick clears the backlog (one `process_pending` run checks everything that is due, in batches; a backlog of 12 takes two ticks, 10 then 2)
+- [x] **Every pipeline-related row of the ARCHITECTURE §4 table has a passing test**, including a late result on a reported post, moderator-decided posts ignored, removed posts ignored, and inconclusive-with-high-confidence → review (`apps/pipeline/tests/test_routing_pipeline.py`, pure, one test per row; the events while a check is in flight in `test_processor.py`)
+- [x] Client errors are retried with backoff; after 5 attempts the post goes to review (2, 4, 8 and 16 minutes, then UNDER REVIEW for the pipeline, or `both` on a reported post; a post whose tries all died mid-call is given up without another call)
+- [x] The tick needs the secret (403 otherwise) and finishes in under 30 s for 10 posts (well under a second with the stub; a pipeline that may take 25 s gets one post per tick)
+- [x] Two concurrent processors never handle the same post (real threads: each of 8 posts checked exactly once; `SKIP LOCKED` takes the next post without waiting; the lease and its token drop the answer of a try whose lease ran out)
+
+**Decisions and deviations (plan approved 2026-10-11; built 2026-10-11; recorded in ARCHITECTURE §3/§4/§4d/§6/§9/§11, ANALYSIS c-41, STRUCTURE, ENV_GUIDE, `backend/.env.example`, MEMORY):**
+- **User decisions (2026-10-11):**
+  - **A decisive FALSE that arrives while the post is already under review for reports goes to a moderator** (`flagged_reason=both`, nothing stored as the label to restore); a late TRUE still becomes `pre_review_status=verified_true`. This changes one §4 row and closes Part 8's appendix A2 (the repost refusal can't reveal a hidden FALSE).
+  - **The stub in production is a launch blocker for Part 17** (any author can write `#true`); the stub is built as §6 says. A note was added to Part 17's scope.
+- **Defaults approved with the plan:** the queue is claim → call → apply with a 5-minute lease and the attempt count as the claim's token (a try is counted when it is claimed, not when it fails: §6 said "on error"); one "awaiting a check" predicate for the queue and the apply guard (reported pending facts are still checked: `under_review` + `reports` + `pre_review_status=pending`); a post that already has a verdict ignores any result; a post deleted mid-check keeps no verdict; `transaction.atomic(durable=True)` for the claim and both writes; `SKIP LOCKED` for the sweeper and a waiting claim for the kick; the kick is a daemon thread, at most 4 per process, and its callback never raises after the commit; the tick takes its first post always, then a 25 s budget; `process_pending` drains everything due, `--loop` every 5 s; the HTTP client uses the standard library (no new dependency), follows no redirect, reads at most 64 KB in 20 s; the stub's first tag wins, matched as a whole tag in any case; `verdict_source` is public only with a `verified_*` status; the E2E backend runs with the kick off and the E2E test checks only its own post; no migration.
+- **Built differently from the plan:** the plan's E2E helper was to throw unless the post ended `verified_true`; `processPost` returns the status and the threshold instead, and the test asserts with a message naming the threshold. The claim does not move `updated_at` (the plan didn't say). An extra failure kind, `lease_expired`, names a post whose tries all died mid-call. Two small tests were added for the mutation checks (the claim's durability; the hermetic pins).
+- **Found while building (all handled):**
+  - `apps/reports/tests/test_no_network.py` refused network imports in every `apps/pipeline/*.py`; it now requires that `pipeline/clients.py` is the only one.
+  - A test-helper trap twice: a factory helper that sets a field must let the caller override it (`setdefault`), or the test fails with "multiple values for keyword argument".
+  - In a `db` test, captured SQL includes `SAVEPOINT` statements; the claim's SQL test filters them out.
+  - The first `process_pending` on a developer's database checks every fact the E2E runs left pending (116 here).
+  - The mutation run found one weak spot (no test that a later failure replaces the earlier error); a test was added.
+- **Not done (later parts):**
+  - **Part 10:** after a late FALSE, Dismiss leaves the post under review for the pipeline and a moderator labels it; the queue should show the pipeline's verdict and confidence. Moderator actions must not touch `pipeline_attempts` (the claim token).
+  - **Part 11:** a Restore to `pending` puts the post back in the queue with its attempt count; one already at 5 is given up again at once. Decide whether Restore resets it.
+  - **Part 11B:** the reputation hooks in `posts.services.record_pipeline_result`. **Part 11C:** the emergency branch of `apply_pipeline_result` and "active emergency" as the queue's first key (§4's late-FALSE emergency row is now the general rule). **Part 13:** notify on the `labelled` and `entered_review` outcomes, in the same transaction.
+  - **Part 17:** the stub in production (decision 2).
+  - **When a real pipeline arrives (16/17 or later):** with the hourly tick, retries take hours and HTTP checks about 1 to 5 posts per tick; the DNS lookup has no timeout; close the database connection before a long call.
+  - A new post's first status poll comes after 10 s although the stub's verdict exists after a few milliseconds (a quicker first poll for your own new post is possible later).
+- **Verified:** see HANDOFF (backend 2359 tests, frontend 1587, E2E 38 in dev and CI mode, 36 backend mutation checks all caught, the threaded tests 15 runs in a row, the Linux blocks of `docs/test-command.md` Part 9 extracted from the doc and run verbatim, a scripted-browser check of the cards, the post pages, the phone width and Django Admin). The PowerShell blocks of that section were not run on Windows. CI itself runs when you push.
 
 **Required tests:** contract validation; stub determinism; exhaustive routing table tests; processor retries and backoff (time-controlled); SKIP LOCKED concurrency; tick auth; frontend badge copy per status and source; E2E: post a `#true` fact → badge becomes VERIFIED.
 
@@ -1516,6 +1537,7 @@ Plus toasts and field errors.
 - Anymail Brevo backend; Sentry.
 - A staff-only "send test error" management command.
 - Deploy runbook notes in `docs/`.
+- **Launch blocker from Part 9 (user decision 2026-10-11):** decide how production gets verdicts before deploying. With `PIPELINE_BACKEND=stub` any author can write `#true` to get VERIFIED 95%, and untagged facts get hash-chosen labels that feed the public credibility score (ARCHITECTURE §6).
 
 **Frontend scope:** none.
 

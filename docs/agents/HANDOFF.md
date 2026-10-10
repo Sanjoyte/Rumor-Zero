@@ -6,21 +6,23 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **9 (Fact-check pipeline stub + routing): planned and approved (2026-10-11), not started.** Parts 0A, 0B, 0D,
-  0C, 1, 2, 3, 4, 5, 6, 7, 7B and 8 are done (Part 8 committed by the user as `0d8c331`). Part 1 CI is green
-  (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B and 8 CI have not been reported yet.**
+- **Part:** none. **Part 9 (Fact-check pipeline stub + routing) is done** (2026-10-11; built from the approved plan;
+  every required test and check green; `task.md` updated). Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8 and 9 are
+  done (Part 8 committed by the user as `0d8c331`, the Part 9 plan as `56f7f34`). Part 1 CI is green (user-reported
+  2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8 and 9 CI have not been reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
+  - **Part 17 has a launch blocker from Part 9** (your decision 2026-10-11): decide how production gets verdicts
+    before deploying; the stub lets an author self-label with `#true` (ARCHITECTURE §6, `task.md` Part 17).
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after saving the approved Part 9 plan).
-- **Phase:** planned; the plan file and this file are uncommitted. No code, no `task.md` edit.
-- **Next action:** **Implement Part 9 from the approved plan**
-  ([`docs/agents/plans/part-9-pipeline-stub-routing.md`](plans/part-9-pipeline-stub-routing.md)), starting at its step 0
-  (verify `git status` and `docker compose ps`, then step 1). Implement with Opus 5.5 · high (`task.md`).
+- **Owner:** none (Claude stopped after finishing Part 9; Part 10 is not started).
+- **Phase:** done, uncommitted. The user reviews and commits.
+- **Next action:** you review and commit Part 9 (and push for CI). Then the next part in `task.md` is **Part 10
+  (Human review panel)**: start a fresh session and plan it ("Plan Part 10 from task.md. Do not implement yet.").
 - **Approved plan:**
-  [`docs/agents/plans/part-9-pipeline-stub-routing.md`](plans/part-9-pipeline-stub-routing.md) (approved 2026-10-11 by
-  the user, with two decisions and the listed defaults; not implemented yet)
+  [`docs/agents/plans/part-9-pipeline-stub-routing.md`](plans/part-9-pipeline-stub-routing.md) (approved 2026-10-11;
+  status line now says IMPLEMENTED)
 - **Previous plans:**
   - [`part-8-reporting-threshold.md`](plans/part-8-reporting-threshold.md), implemented 2026-10-10 (committed as
     `0d8c331`; its appendix A2 is resolved by Part 9's decision 1);
@@ -38,9 +40,80 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-11 by Claude (Opus 5.5), Part 9 planning.
+- **Last updated:** 2026-10-11 by Claude (Opus 5.5), Part 9 implementation.
 
 ## Completed checkpoints
+
+- 2026-10-11 (Claude, Opus 5.5): **Part 9 implemented** (uncommitted). Started from HEAD `56f7f34` ("Plan Part 9",
+  committed by the user), a clean tree that matched this file (it still said the plan was uncommitted); Docker healthy,
+  ports 3000 and 8000 free.
+  - **Backend** (`backend/`):
+    - New in `apps/pipeline/`: `contract.py` (`PipelineRequest`, `PipelineResult`, `ContractError`), `clients.py`
+      (`StubPipelineClient`, `HttpPipelineClient`, `PipelineError`, `get_client`), `processor.py` (`due_posts`,
+      `claim_next`, `process_pending`, `process_post`, `start_kick`), `management/commands/process_pending.py`, and
+      `tests/` (`conftest.py` + 10 new files: contract, stub, HTTP client, routing, queue, processor, races, kick,
+      command, no-network).
+    - Changed: `apps/pipeline/routing.py` (`awaiting_check_q`, `is_awaiting_check`, `backoff`, `MAX_ATTEMPTS`, `Outcome`,
+      `apply_pipeline_result`, `apply_pipeline_failure`), `apps/posts/services.py` (`record_pipeline_result`,
+      `record_pipeline_failure`, the kick in `create_post`), `apps/posts/serializers.py` (`shown_verdict_source`),
+      `apps/core/{views,urls}.py` (`TickView`, the shared cron-secret check), `rumor_zero/{settings,env_helpers}.py`
+      (`pipeline_config`, `flag`, the three settings), `conftest.py` (the pipeline pins, no-network opener, the
+      kick-thread check), `.env.example` (comments only).
+    - Tests also added or changed in `apps/core/tests/{test_tick,test_settings}.py`,
+      `apps/posts/tests/{test_services_pipeline,test_api_status,test_api_detail}.py` and
+      `apps/reports/tests/test_no_network.py` (`pipeline/clients.py` is the one module allowed to connect).
+  - **Frontend** (`frontend/`): no production code change. `playwright.config.ts` and `e2e/helpers.ts` pin the stub and
+    the kick off; new `processPost()`; `e2e/post-detail.spec.ts`'s live-badge test now runs the real pipeline (`#true` →
+    VERIFIED 95%); 7 new unit tests in `VerdictBlock.test.tsx` and `post-display.test.ts`.
+  - **Docs:** ARCHITECTURE §3/§4/§4d/§6/§9/§11, ANALYSIS c-41, STRUCTURE, ENV_GUIDE (the pipeline rows, the Render row's
+    launch blocker, §2.12's note), MEMORY (2 entries; two Part 8 bullets marked resolved), `task.md` (criteria,
+    decisions and deviations, both status spots, one note in Part 17), the plan's status line, and
+    `docs/test-command.md`: a "Part 9" section in **both** guides (15 steps each) and one number in its intro line.
+  - No migration, no new dependency, service or env variable; `design/` untouched. `backend/.env` was **read only** to
+    take `INTERNAL_CRON_SECRET` into a shell variable for the tick check (`grep … | cut`, as `docs/test-command.md`
+    Part 0A does, at your request); no value was printed or written anywhere. `frontend/.env.local` was used by
+    `next dev` itself, not read.
+  - **User decisions and defaults** are in `task.md` Part 9 and the plan.
+  - **Validation (all green):**
+    - Backend: `ruff check .` (All checks passed!), `ruff format --check .` (200 files already formatted),
+      `makemigrations --check --dry-run` (No changes detected), `manage.py check` (no issues), `pytest` **2359 passed**
+      (2066 after Part 8). The Part 9 set: `pytest apps/pipeline apps/core/tests/test_tick.py
+      apps/posts/tests/test_services_pipeline.py` 312 passed. The threaded tests (`test_races.py`, `test_kick.py`) ran
+      15 times in a row without a failure.
+    - **36 backend mutation checks**, every one caught (the first run had one survivor, "a later failure keeps the
+      first error", fixed with a test): no SKIP LOCKED, no lease, no token check, the queue or the guard without the
+      reported branch or the `verdict_source` test, writes or claim not durable, a kick callback that can raise, the
+      deadline stopping the first claim, the late FALSE stored as the label, `verdict_source` always public, redirects
+      followed, no size cap, no total time limit, exhausted posts called again, the kick keeping its connection or its
+      slot, a one-batch command, a kick that skips locked rows, never giving up, an uncapped backoff, a strict threshold,
+      `get_client` always the stub, tags inside words, a tick without the secret, an exception's message stored, `bool`
+      as a score, opinions kicked, plain http to any host, the claim loading every column, a result without its
+      timestamp, a per-post error stopping the batch. Frontend: no production change, so no frontend mutation run.
+    - Frontend: `npm run lint`, `lint:tokens`, `typecheck`, `format:check` clean; `npm test` **1587 passed** (117
+      files); `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` OK; `npm run test:e2e` **38 passed**, and `CI=1` 38 passed.
+      The E2E backend logged no pipeline activity of its own (the kick is off there).
+    - Live checks: `runserver` with the kick on checked each new fact 0.01–0.03 s after it was saved; with
+      `PIPELINE_INLINE_KICK=False`, `process_pending` and the tick cleared the backlog (10 then 2 per tick, about 0.05 s
+      for 10). The first `process_pending` on this database checked **116** pending facts left by earlier E2E runs.
+    - Browser (headless Chromium, 30 checks, screenshots at 1280 and 390 px): each composer fact (`#true`, `#false`,
+      `#unsure`) turned from CHECKING FACTS… into its badge 10.4 s after posting; the post pages show "Checked
+      automatically · 95% / 92% confidence" and "Under review" with no %; 0 px overflow at 390 px; Django Admin (a
+      throwaway superuser, deleted with the `part9-` accounts) shows the pipeline fields read-only.
+  - **Found and fixed on the way:** the import guard of Part 8 (`apps/reports/tests/test_no_network.py`) now names
+    `pipeline/clients.py` as the one exception; twice a test helper didn't let the caller override a field it set; SQL
+    captured in a `db` test includes `SAVEPOINT` lines; the management command prints the app's INFO log lines (MEMORY).
+  - **Test-command notes:**
+    - The section is `### Part 9` inside each guide (the brief said `## Part <ID>`; the file's parts are `###`
+      sections inside its two `##` guides, as Parts 3 to 8 did).
+    - The file has **no comment marker** at its bottom (as in Parts 3 to 8): it ends with the last bullet of the
+      Windows Part 9 section. (The brief asked to keep one; there is none to keep.)
+    - The Linux bash blocks of steps 3 to 11 were **extracted from the finished doc by script and run verbatim**
+      against live Django (window 1 restarted as the steps say, window 4's `--loop` in the background); their output
+      was diffed against the doc's expected-output blocks (uuids, log times and seconds normalised): **all nine steps
+      and window 4 matched**, twice. All 17 bash blocks pass `bash -n`. The cleanup command printed
+      `(35, {'social.Repost': 1, 'account.EmailAddress': 4, 'posts.Post': 26, 'accounts.User': 4})` after each of two
+      bare runs of steps 3 to 11. The browser steps 12 to 14 were checked with the headless script above, not by a
+      person. The **PowerShell blocks were not run** (no PowerShell here).
 
 - 2026-10-11 (Claude, Opus 5.5): **Part 9 planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `0d8c331` ("Implemented Part 8…", committed by the user), a clean tree. (The older text of

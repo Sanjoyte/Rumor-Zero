@@ -170,3 +170,35 @@ def test_reading_the_feed_does_not_use_up_the_status_throttle(api_client, settin
     for _ in range(130):
         assert api_client.get("/api/v1/posts/", **relay).status_code == 200
     assert ask(api_client, [uuid.uuid4()], **relay).status_code == 200
+
+
+def late_true_under_review():
+    """A fact that reports sent to review, then the pipeline's late decisive TRUE (Part 9): the
+    TRUE is kept for when the reports are dismissed, and must stay private until then."""
+    return PostFactory(
+        fact=True,
+        status=PostStatus.UNDER_REVIEW,
+        flagged_reason="reports",
+        pre_review_status=PostStatus.VERIFIED_TRUE,
+        verdict_source="pipeline",
+        pipeline_verdict="true",
+        confidence_score=Decimal("95.00"),
+    )
+
+
+def test_who_decided_is_public_only_with_the_label(api_client):
+    hidden = late_true_under_review()
+    appealed = PostFactory(
+        fact=True,
+        status=PostStatus.UNDER_REVIEW,
+        flagged_reason="appeal",
+        pre_review_status=PostStatus.VERIFIED_FALSE,
+        verdict_source="moderator",
+    )
+    shown = PostFactory(verified_pipeline=True)
+    results = ask(api_client, [hidden.pk, appealed.pk, shown.pk]).json()["results"]
+    assert [(r["status"], r["verdict_source"], r["confidence_score"]) for r in results] == [
+        ("under_review", None, None),
+        ("under_review", None, None),
+        ("verified_true", "pipeline", "94.00"),
+    ]

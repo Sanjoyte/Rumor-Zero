@@ -271,8 +271,9 @@ A separate table keeps image bytes out of every `users` query.
 | Following-feed cache TTL (s), first page only (Part 6) | 30 | `FEED_CACHE_SECONDS` (0 to 300; **0 turns the cache off**). Read by Django settings, **not** a PlatformSettings value | — |
 | Access / refresh token lifetime | 15 min / 14 days | `JWT_ACCESS_TOKEN_MINUTES` / `JWT_REFRESH_TOKEN_DAYS` | — |
 | Email-confirmation link validity | 1 day | code (`ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS`) | — |
-| Pipeline: batch size / max attempts / timeout | 10 / 5 / 20 s | code constants | — |
-| Pipeline retry backoff | 2^attempts min, cap 60 min | code | — |
+| Pipeline: batch size / max attempts / timeout | 10 / 5 / 20 s for the whole call (10 s per socket operation) | code constants (`processor.BATCH_SIZE`, `routing.MAX_ATTEMPTS`, `clients.TIMEOUT_SECONDS`) | — |
+| Pipeline retry backoff | 2^attempts min, cap 60 min; a try is counted when it is claimed (Part 9) | code (`routing.backoff`) | — |
+| Pipeline lease / tick budget / kick threads | 5 min / 25 s (the tick takes its first post always, another only if the worst case still fits) / at most 4 per process (Part 9) | code (`processor.LEASE`, `core.views.TICK_BUDGET_SECONDS`, `processor.MAX_KICK_THREADS`) | — |
 | Post / comment / appeal text max | 500 chars | code | — |
 | Bio / display name max | 280 / 50 | code | — |
 | Page size | 20 (max 50) | code | — |
@@ -323,12 +324,14 @@ Auth endpoints use allauth's `ACCOUNT_RATE_LIMITS`, keyed on `REMOTE_ADDR` (the 
 | `pending` | pipeline result, verdict `true`/`false` **and** confidence ≥ threshold | `verified_true` / `verified_false` | `verdict_source=pipeline`; notify author (`verdict`) |
 | `pending` | pipeline result, `inconclusive` **or** confidence < threshold | `under_review` | `flagged_reason=pipeline`, `pre_review_status=pending`; notify (`under_review`) |
 | `pending` | pipeline failed `max_attempts` times | `under_review` | `flagged_reason=pipeline`; error kept in `pipeline_result` |
+| `under_review` (reports, not yet checked: `pre_review_status=pending`) | pipeline failed `max_attempts` times | unchanged | `flagged_reason=both`; error kept (Part 9: reported pending facts are still checked) |
 | `pending` / `published` / `verified_*` | report threshold crossed | `under_review` | `flagged_reason=reports`, `pre_review_status=<old>`; notify author |
 | `under_review` | report threshold crossed | unchanged | `pipeline`→`both`; `reports`/`both`/`appeal` unchanged |
-| `under_review` (reports, pipeline result arrives late) | decisive result | unchanged | store result; `pre_review_status=verified_*`, `verdict_source=pipeline` |
+| `under_review` (reports, pipeline result arrives late) | decisive **TRUE** | unchanged | store result; `pre_review_status=verified_true`, `verdict_source=pipeline` (Dismiss restores VERIFIED; the source stays private meanwhile, §9) |
+| `under_review` (reports, pipeline result arrives late) | decisive **FALSE** | unchanged | store result; `flagged_reason=both`, `pre_review_status` stays `pending`: a moderator decides (user decision 2026-10-11, Part 9: no hidden FALSE is ever stored, so nothing can reveal it and Dismiss can't make a post FALSE without a human) |
 | `under_review` (reports, pipeline result arrives late) | low / inconclusive result | unchanged | `flagged_reason=both` |
 | `pending` (**active emergency**) | pipeline result FALSE, confidence ≥ threshold | `under_review` | treated as not decisive: `flagged_reason=pipeline`, `pre_review_status=pending`; top of the admin queue; the post keeps its priority (§4b) |
-| `under_review` (reports, **active emergency**, late result) | pipeline result FALSE, confidence ≥ threshold | unchanged | treated as not decisive: `flagged_reason=both` (no `pre_review_status=verified_false`, so dismissing reports can't make it FALSE without a human) |
+| `under_review` (reports, **active emergency**, late result) | pipeline result FALSE, confidence ≥ threshold | unchanged | treated as not decisive: `flagged_reason=both` (no `pre_review_status=verified_false`, so dismissing reports can't make it FALSE without a human). Since Part 9 this is the rule for every post, so 11C adds nothing here |
 | `pending` / `published` / `verified_*` (**active emergency**) | **emergency** report threshold (2) crossed | `under_review` | as for the normal threshold; priority kept |
 | `under_review` | moderator **Mark verified** (fact only) | `verified_true` | `verdict_source=moderator`, `flagged_reason=null`, open reports→`actioned`; log action; notify. An emergency keeps its priority. |
 | `under_review` | moderator **Mark FALSE** (fact only) | `verified_false` | same as above. On an emergency, also `emergency_demoted_at=now` (if active), author `emergency_blocked_until = now + emergency_false_cooldown_days`, notify `emergency_demoted` |
@@ -346,7 +349,7 @@ Auth endpoints use allauth's `ACCOUNT_RATE_LIMITS`, keyed on `REMOTE_ADDR` (the 
 | any | author deletes (`DELETE /api/v1/posts/{id}/`, Part 5) | unchanged | `deleted_at=now` (the row stays for audit and the admin); hidden from every list and detail view (404, the author included); still counts toward the fact quota; a second delete is 404; only the author (403 `not_author`) |
 
 Also:
-- A pipeline result is **ignored** when `verdict_source=moderator` (humans win).
+- A pipeline result is **ignored** when `verdict_source=moderator` (humans win). More precisely (Part 9), a result or a failure is applied only while the post is **awaiting a check** (`routing.is_awaiting_check`, the same rule as the queue's `awaiting_check_q`): a fact, not deleted, with no `verdict_source`, that is `pending` or under review **for reports only** with `pre_review_status=pending`. Anything else (removed, decided by a moderator, already checked) is ignored and nothing is written, `updated_at` included. A result for a post the author deleted meanwhile, or for a try whose lease a newer claim took over, is dropped (§6).
 - An appeal must be resolved by a moderator other than `original_moderator` unless the resolver is a senior (`APPEAL_REQUIRE_DIFFERENT_MODERATOR`).
 - Opinions: moderators can only Dismiss or Remove.
 - "Active emergency" is always computed at read time from the stored columns (`is_active_emergency`, below). No job ever flips a flag.
@@ -369,19 +372,36 @@ def is_active_emergency(post, now):                 # read-time only; no schedul
     return (post.is_emergency and post.emergency_demoted_at is None and now < post.emergency_expires_at
             and post.status != REMOVED and post.deleted_at is None)
 
-def apply_pipeline_result(post, result, cfg, now):  # called by the processor inside a transaction
-    if post.post_type != FACT or post.status == REMOVED or post.verdict_source == MODERATOR:
-        return                                      # humans and removals win
+def is_awaiting_check(post):                        # = awaiting_check_q(), the queue's Q (Part 9)
+    return (post.post_type == FACT and post.deleted_at is None and post.verdict_source is None
+            and (post.status == PENDING
+                 or (post.status == UNDER_REVIEW and post.flagged_reason == REPORTS
+                     and post.pre_review_status == PENDING)))
+
+def apply_pipeline_result(post, result, cfg, now):  # posts.services writes it, row locked (§6)
+    if not is_awaiting_check(post):
+        return IGNORED                              # humans, removals and finished checks win
     post.pipeline_verdict, post.confidence_score, post.pipeline_result = result.verdict, result.confidence_score, result.raw_result
-    decisive = (result.verdict in (TRUE, FALSE) and result.confidence_score >= cfg.confidence_threshold
-                and not (result.verdict == FALSE and is_active_emergency(post, now)))  # a human confirms FALSE on a live emergency
-    label = VERIFIED_TRUE if result.verdict == TRUE else VERIFIED_FALSE
+    post.pipeline_checked_at, post.pipeline_next_attempt_at = now, None
+    decisive = result.verdict in (TRUE, FALSE) and result.confidence_score >= cfg.confidence_threshold
+    # 11C adds: and not (result.verdict == FALSE and is_active_emergency(post, now))
     if post.status == PENDING:
-        if decisive: post.status, post.verdict_source = label, PIPELINE
-        else:        enter_review(post, PIPELINE)
-    elif post.status == UNDER_REVIEW:
-        if decisive: post.pre_review_status, post.verdict_source = label, PIPELINE
-        else:        post.flagged_reason = merge_flag(post.flagged_reason, PIPELINE)
+        if decisive: post.status, post.verdict_source = label(result), PIPELINE      # LABELLED
+        else:        enter_review(post, PIPELINE)                                   # ENTERED_REVIEW
+    else:                                           # under review for reports: a late result
+        if decisive and result.verdict == TRUE:
+            post.pre_review_status, post.verdict_source = VERIFIED_TRUE, PIPELINE    # Dismiss restores it
+        else:                                       # a late FALSE goes to a human (decision 2026-10-11)
+            post.flagged_reason = merge_flag(post.flagged_reason, PIPELINE)        # → both
+
+def apply_pipeline_failure(post, error, now):       # the same guard; attempts were counted at claim
+    post.pipeline_result = {"error": error.kind, "detail": error.detail, "attempt": post.pipeline_attempts}
+    if post.pipeline_attempts < MAX_ATTEMPTS:       # 5
+        post.pipeline_next_attempt_at = now + backoff(post.pipeline_attempts)       # RETRY
+    else:                                           # give up: a moderator decides
+        post.pipeline_next_attempt_at = None
+        if post.status == PENDING: enter_review(post, PIPELINE)
+        else:                      post.flagged_reason = merge_flag(post.flagged_reason, PIPELINE)
 
 def apply_report_threshold(post, counting_reports, cfg, now):
     threshold = cfg.emergency_report_threshold if is_active_emergency(post, now) else cfg.report_threshold
@@ -389,7 +409,7 @@ def apply_report_threshold(post, counting_reports, cfg, now):
         enter_review(post, REPORTS)
 ```
 
-`now` is a parameter everywhere so tests control time. Part 8 built `merge_flag`, `enter_review` and `apply_report_threshold` (`apps/pipeline/routing.py`; `apply_report_threshold` returns True only when the post **entered** review, and `merge_flag` raises `ValueError` for an appeal onto a post under review for the pipeline, reports or both, and for anything that is not a flag); Part 9 adds `apply_pipeline_result`; Part 11C adds the emergency branches.
+`now` is a parameter everywhere so tests control time. Part 8 built `merge_flag`, `enter_review` and `apply_report_threshold` (`apps/pipeline/routing.py`; `apply_report_threshold` returns True only when the post **entered** review, and `merge_flag` raises `ValueError` for an appeal onto a post under review for the pipeline, reports or both, and for anything that is not a flag). Part 9 built `awaiting_check_q`/`is_awaiting_check`, `backoff`, `MAX_ATTEMPTS`, `apply_pipeline_result` and `apply_pipeline_failure`; both return an `Outcome` (`ignored`, `labelled`, `entered_review`, `updated_review`, `retry`), and Part 13 notifies the author on `labelled` and `entered_review`. Part 11C adds the emergency branches.
 
 All status writes go through `apps/posts/services.py` (plus `apps/moderation/services.py` for moderator actions), which wrap the pure functions in `transaction.atomic()` with `select_for_update()` on the post row. **No other code assigns `post.status`.**
 
@@ -532,7 +552,7 @@ Nothing else changes the score:
 - Plain reposts only: one per user per post, and never of a repost (reposting a repost reposts the original).
 - Refused:
   - your own posts (`cannot_repost_own`);
-  - posts that are `verified_false`, **and posts under review that were `verified_false` before the review** (`pre_review_status`; `cannot_repost_false`; Part 8, user decision 2026-10-10: reports can move a FALSE post to review, which must not reopen it to reposts). `pre_review_status` is never public, so the button can't be disabled in advance for this case: the click is answered 409 and the rollback toast says "Posts labelled FALSE can't be reposted.";
+  - posts that are `verified_false`, **and posts under review that were `verified_false` before the review** (`pre_review_status`; `cannot_repost_false`; Part 8, user decision 2026-10-10: reports can move a FALSE post to review, which must not reopen it to reposts). `pre_review_status` is never public, so the button can't be disabled in advance for this case: the click is answered 409 and the rollback toast says "Posts labelled FALSE can't be reposted.". Since Part 9 this only ever concerns a FALSE label that was public before the review: a FALSE the pipeline finds while the post is already under review for reports is never stored as the label to restore (§4), so the refusal can't reveal it;
   - removed or deleted posts (404).
 - Email-verified users only. `status_at_repost` is recorded (the status at commit: the repost locks the post row with `FOR NO KEY UPDATE`).
 - **Order of the checks:** a post the public can see (404 otherwise), then an existing repost (**200**: a post that turned FALSE after you reposted it doesn't refuse you), then your own post (409 `cannot_repost_own`), then FALSE or under review after FALSE (409 `cannot_repost_false`).
@@ -596,21 +616,28 @@ class PipelineClient(Protocol):
     def check(self, request: PipelineRequest) -> PipelineResult: ...
 ```
 
+- **The contract (Part 9)** is checked when a request or a result is built (`ContractError`, a `ValueError`): `sources` is a **tuple** of 0–5 non-empty strings of at most 500 characters (a list is refused), `content` 1–500 code points; `verdict` is exactly one of the three; `confidence_score` is a `Decimal`, `int` or numeric string (a `bool`, a float, NaN and infinity are refused), checked 0–100 on the exact value, then rounded half up to 0.01 (what is stored, shown and compared with the threshold); `raw_result` is an object. `PipelineResult.from_json` reads the three keys of a JSON answer (others are ignored; a JSON number goes through its text, so 91.5 is exactly 91.50).
 - **`StubPipelineClient`** (`PIPELINE_BACKEND=stub`) is deterministic, so tests and demos are predictable:
   - content containing `#true` → (true, 95)
   - `#false` → (false, 92)
   - `#unsure` → (inconclusive, 40)
-  - otherwise a hash of the content gives the confidence (50–99) and verdict
-  - `raw_result={"stub": true, "rule": …}`
-- **`HttpPipelineClient`** (`PIPELINE_BACKEND=http`, future): `POST PIPELINE_URL` with `{post_id, content, sources}`, `Authorization: Bearer PIPELINE_API_KEY`, 20 s timeout. It expects `{verdict, confidence_score, raw_result}`. Swapping it in changes nothing else.
-- **Processor** `process_pending(limit=10, now)`:
-  - selects fact posts with `status='pending'`, `deleted_at IS NULL`, `pipeline_next_attempt_at` null or ≤ now, **emergencies first** (`is_emergency DESC`), then oldest first, `FOR UPDATE SKIP LOCKED`;
-  - calls the client and routes the result with `apply_pipeline_result(post, result, cfg, now)`;
-  - on error: `attempts += 1`, then backoff; at `max_attempts` → `enter_review(post, PIPELINE)`.
+  - the **first** of these tags in the text decides; a tag counts in any case but only as a whole tag (`#True.` yes, `#trueish` no)
+  - otherwise the SHA-256 of the UTF-8 content gives the confidence (`50 + bytes 0–1 mod 50`, so 50–99) and the verdict (`true` when byte 2 is even, else `false`; never `inconclusive`). Python's own `hash()` changes per process and is never used. At the seeded threshold of 85, about 15 % of untagged facts become VERIFIED, 15 % FALSE and 70 % UNDER REVIEW
+  - `raw_result={"stub": true, "rule": "#true" | "#false" | "#unsure" | "hash"}`; `sources` are ignored
+- **Production (user decision 2026-10-11, a launch blocker for Part 17):** `.env.example` says production runs the stub until a real pipeline exists. With the stub, any author can write `#true` to get VERIFIED 95%, and about 15 % of untagged facts get a hash-chosen FALSE that would feed the public credibility score (§4a). Part 9 builds the stub as specified; **before any deploy, Part 17 must decide how production gets verdicts** (a real pipeline, or a mode that applies no automatic labels).
+- **`HttpPipelineClient`** (`PIPELINE_BACKEND=http`, future): `POST PIPELINE_URL` with `{post_id, content, sources}`, `Authorization: Bearer PIPELINE_API_KEY`, 20 s for the whole call (10 s per socket operation, the body read in chunks; the DNS lookup has no timeout). It expects `{verdict, confidence_score, raw_result}`. Standard library only (like Turnstile), **no redirect is followed**, at most 64 KB of answer. Failures are `PipelineError(kind, detail)` with `kind` `timeout`, `network`, `http_status`, `bad_response` or `contract`; the detail is our own text, never the answer's body or the key. It is the only module of `apps/pipeline` that may open a connection, and only to `PIPELINE_URL` (`apps/reports/tests/test_no_network.py` names it). Swapping it in changes nothing else.
+- **Settings:** `PIPELINE_BACKEND` is `stub` (default) or `http`; with `http`, `PIPELINE_URL` must be `https://` (plain `http://` only to a loopback host, the relay's rule) and `PIPELINE_API_KEY` is required; anything else stops startup naming the variable. `PIPELINE_INLINE_KICK` defaults to True (empty counts as the default). Tests pin the stub and turn the kick off (§11).
+- **Processor** (`apps/pipeline/processor.py`; Part 9). The `posts` table is the queue. A post is **due** when it is awaiting a check (§4: a fact, not deleted, no `verdict_source`, and `pending` **or under review for reports while still pending**, because reports can arrive before the check) and `pipeline_next_attempt_at` is null or ≤ now; order **`is_emergency DESC`** (11C: active emergencies), then oldest (`created_at`, `id`). One post at a time, in three steps, so the post's row is **never locked while the pipeline thinks** (reports, reposts, deletes and moderators would wait up to 20 s):
+  1. **Claim** (a short `transaction.atomic(durable=True)`): lock the first due post with `FOR NO KEY UPDATE SKIP LOCKED` (the kick waits for the lock instead of skipping, because a report holds a row for a moment), add 1 to `pipeline_attempts` (that number is the claim's **token**: a try is counted when it is claimed, not when it fails, so a post that crashes the worker every time still ends) and set `pipeline_next_attempt_at = now + 5 min`, the **lease** that keeps every other processor away. `updated_at` doesn't move. A post already at `MAX_ATTEMPTS` (every earlier try died mid-call) is given up at once without a call (`lease_expired`).
+  2. **Call** the client outside any transaction. Building the request is part of the try, and **any** exception is a failed try (an unexpected one is recorded as `error` with its class name only).
+  3. **Apply** in `posts.services.record_pipeline_result` / `record_pipeline_failure` (`atomic(durable=True)`, the row locked with `FOR NO KEY UPDATE`): the answer is **dropped** when the post was deleted meanwhile or its `pipeline_attempts` no longer equals the token (the lease ran out and a newer claim took the post); otherwise the pure routing (§4) decides, and an ignored post is not written at all. `pipeline_next_attempt_at` ends null after a result or a give-up, holds the backoff after a failure, and is left alone when an answer is ignored or dropped (it would overwrite a newer lease).
+  - `process_pending(limit=10, now=None, client=None, deadline=None)` repeats that up to `limit` times and returns how many posts it handled; with a `deadline` it **always takes the first post** and another only while `monotonic() + client.max_seconds` still fits (the stub takes no time, so it does 10; a real pipeline about 1 to 5). A post that fails in an unexpected way is logged and skipped (its lease brings it back); a failing claim ends the run. `process_post(post_id)` does one post (the kick).
+  - Logging: INFO per outcome (the post id, never its content), WARNING per failed try (the kind), ERROR when it gives up (one Sentry event per abandoned post).
 - **Triggers:**
-  - (1) **Inline kick:** `transaction.on_commit` → a daemon thread processes that post (`PIPELINE_INLINE_KICK`, off in tests).
-  - (2) `POST /api/internal/tick/` (header `X-RZ-Cron-Secret`), hourly from cron-job.org. It returns `{"processed": n}` in < 30 s.
-  - (3) `python manage.py process_pending [--loop]` for local dev.
+  - (1) **Inline kick:** `create_post` registers `transaction.on_commit` for a **fact** while `PIPELINE_INLINE_KICK` is on; the callback **never raises** (an error after the commit would turn a saved post's 201 into a 500 and invite a duplicate) and starts a **daemon** thread (`pipeline-kick`) that runs `process_post` and then closes its own database connections. At most 4 such threads per process (a `BoundedSemaphore`); when all are busy the post waits for the sweeper. A post whose transaction rolls back queues nothing.
+  - (2) `POST /api/internal/tick/` (header `X-RZ-Cron-Secret`, checked like the deep health check; missing, wrong or non-ASCII → 403 `permission_denied`; GET → 405), hourly from cron-job.org: `process_pending(limit=10, deadline=now + 25 s)` → `200 {"processed": n}`, well inside cron-job.org's 30 s and gunicorn's 60 s. It authenticates no user and has no throttle (the secret is the guard).
+  - (3) `python manage.py process_pending [--limit N] [--loop] [--interval S]` for local dev: one run checks **everything that is due** (in batches of `--limit`, 1–100, default 10) and prints "Processed N fact posts."; `--loop` repeats that every `--interval` seconds (default 5) until Ctrl+C.
+  - With the hourly tick, a try that fails waits for the next tick, so retries in production take hours (a note for when a real pipeline arrives).
   - No Celery, no worker service.
 
 ## 7. Authentication (guide §4; D1, c-17, c-18, d)
@@ -827,6 +854,7 @@ Other settings:
 - **A removed post is a tombstone for everyone but its author** (Part 5; user decision 2026-10-09): the same 23 keys, with `content` `""`, `sources` `[]`, `verdict_note` `""`, `confidence_score` null and `verdict_source` null; the author block, `post_type`, `status: "removed"` and `created_at` stay (so the public sees whose post it was and when). Its author gets the full object. The rule lives in `PostSerializer`, so no list can leak a removed post's text. The removal reason and `can_appeal` arrive with Parts 10 and 11.
 - `sources` is `[]` for opinions and for facts without sources; `kind` is derived from the stored value (§4c).
 - `confidence_score` is non-null only for `verified_*` with `verdict_source=pipeline`.
+- `verdict_source` is non-null only for `verified_*` (Part 9; the same in `GET /api/v1/posts/status/`): a post under review may already hold the pipeline's late TRUE, which stays private until a moderator acts, and a removed post shows none, its author included.
 - `emergency_active` is computed at serialization with `now` (§4b).
 - **Counts (Parts 7, 7B and 8):** `like_count`, `comment_count`, `repost_count`, `liked_by_me`, `reposted_by_me`, `bookmarked_by_me` and `reported_by_me` are correlated subqueries added by `PostQuerySet.for_list(viewer)` (`apps/social/engagement.py`), so every list and the detail count in the same query as the posts (a list stays 1 query anonymous, 2 signed in). `comment_count` leaves out hidden and deleted comments; `repost_count` counts every repost row; the four `*_by_me` flags are `false` for visitors (`reported_by_me` is an `Exists` on `reports_pair_unique` and stays true for life, a dismissed report included). Nobody ever sees a bookmark or report count. `PostSerializer` reads them strictly (a post that was not counted raises), and the 201 answer of a new post gets explicit zeros (`engagement_defaults`). A removed post's tombstone keeps its counts. Nothing is cached: the Following feed caches only ids.
 - `avatar_url` is `/api/v1/avatars/{user_id}/{avatar_version}-96.webp`, or null (initials). The 256 px size is used on profiles.
@@ -894,6 +922,10 @@ Other settings:
 **Reports (Part 8):**
 - `POST /api/v1/posts/{id}/report/` `{reason, details?}` (`IsAuthenticated` + `IsEmailVerified`, throttle `report`, POST only: any other method is 405, `never_cache`): **201** `{"reported": true}` whether or not this report sent the post to review. Errors: 401, 403 `email_unverified`, 429 (+ `Retry-After`), **404** for an unknown, malformed, deleted or removed post (its author too), **400** per field (`{"reason": ["Choose a reason."]}`, `{"details": [...]}`), **403 `cannot_report_own`** "You can't report your own post.", **409 `already_reported`** "You already reported this post.". The rules and their order are in §5. Every visible status can be reported, pending and under review included; the same five reasons apply to facts and opinions.
 - The post object's `reported_by_me` says whether *you* reported it; no report, count, reason or reporter is ever public (`report_count` and `flagged_reason` stay out of the object).
+
+**Pipeline (Part 9):**
+- `POST /api/internal/tick/` (no user authentication, no throttle, `never_cache`; header `X-RZ-Cron-Secret`): **200** `{"processed": n}` after checking up to 10 due fact posts within a 25 s budget (§6). A missing, wrong or non-ASCII secret is **403** `permission_denied` and checks nothing; any other method is **405**. A stale Bearer header is ignored.
+- A fact post's 201 answer is always `pending`: the check runs after the commit, and the page's status polling (§10, Part 5) picks the verdict up (the first poll comes after 10 s).
 
 **Auth payloads (Part 1):**
 - `GET /api/v1/me/` (`IsAuthenticated`, never cached, **two queries**: the user, and the `google_connected` `exists()` check): `{id, username, display_name, email, is_email_verified, role, has_usable_password, google_connected, avatar_url}`. `google_connected` is true when the user has a Google `SocialAccount` (Part 3); `avatar_url` follows the rule above (null until 14B). Staff (`is_staff`: moderators and superusers) also get `admin_url`, the absolute Django Admin URL on the backend host. Anonymous → 401 `not_authenticated`.
@@ -1004,7 +1036,7 @@ Other settings:
   - API permissions and throttles
   - query counts
   - `/api/health/` = 0 queries
-  - **hermetic:** tests never depend on the developer's real `backend/.env`. They set what they need through the `settings` fixture or `monkeypatch`; CI builds its env file from `backend/.env.example`.
+  - **hermetic:** tests never depend on the developer's real `backend/.env`. They set what they need through the `settings` fixture or `monkeypatch`; CI builds its env file from `backend/.env.example`. The root conftest pins the stub pipeline, turns the inline kick off (a test turns it on when it needs it) and forbids the HTTP pipeline client's default opener; a test that leaves a `pipeline-kick` thread running fails (Part 9).
 - **Frontend:** Vitest + React Testing Library for components and hooks.
 - **E2E:** Playwright for one user flow per part where it applies (e.g. sign up → post a fact → see CHECKING FACTS… → verdict badge).
 - **CI (`.github/workflows/ci.yml`, Part 0C):** on push to `main`, pull requests and manual dispatch; read-only permissions; superseded runs cancelled; 15 min per job; no secrets (env files are copied from the `.env.example` files).
