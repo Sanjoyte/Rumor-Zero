@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { DETAIL_MESSAGES, PostDetail } from "./PostDetail";
-import { makePost, renderWithComposer, type SessionKind } from "./test-helpers";
+import { BO, makePost, renderWithComposer, type SessionKind } from "./test-helpers";
 
 const api = vi.hoisted(() => ({
   fetchPost: vi.fn(),
@@ -17,6 +17,11 @@ const api = vi.hoisted(() => ({
 vi.mock("./posts-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./posts-api")>()),
   ...api,
+}));
+const reports = vi.hoisted(() => ({ reportPost: vi.fn() }));
+vi.mock("@/features/reports/reports-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/reports/reports-api")>()),
+  ...reports,
 }));
 const social = vi.hoisted(() => ({
   fetchComments: vi.fn(),
@@ -426,5 +431,67 @@ describe("PostDetail likes and comments (Part 7)", () => {
     await screen.findByText(/Only you can see this text/);
     expect(screen.queryByRole("heading", { name: /Comments/ })).toBeNull();
     expect(social.fetchComments).not.toHaveBeenCalled();
+  });
+});
+
+describe("PostDetail report (Part 8)", () => {
+  // By someone else than the test session's user (`u-1`).
+  const theirs = (overrides = {}) => fact({ author: BO, ...overrides });
+
+  it("offers Report in the action row, with its word, to a signed-in reader", async () => {
+    api.fetchPost.mockResolvedValue(theirs());
+    renderDetail(theirs(), "verified");
+    const button = await screen.findByRole("button", { name: "Report" });
+    expect(within(button).getByText("Report", { selector: "[aria-hidden]" })).toHaveClass(
+      "sm:inline",
+    );
+    // In the same row as Like, Comments, Repost, Bookmark and Copy link.
+    expect(button.closest(".border-t")).toContainElement(
+      screen.getByRole("button", { name: "Copy link" }),
+    );
+  });
+
+  it("sends a log-in link to a visitor", () => {
+    renderDetail(theirs(), "anonymous");
+    expect(screen.getByRole("link", { name: "Report" })).toHaveAttribute(
+      "href",
+      `/login?next=%2Fp%2F${ID}`,
+    );
+  });
+
+  it("reports from the page: the dialog quotes the claim, and the button follows", async () => {
+    reports.reportPost.mockResolvedValue({ reported: true });
+    api.fetchPost.mockResolvedValue(theirs());
+    renderDetail(theirs(), "verified");
+    await userEvent.click(await screen.findByRole("button", { name: "Report" }));
+    const dialog = screen.getByRole("dialog", { name: "Report this post" });
+    expect(within(dialog).getByText(/Solar capacity grew 30% last year\./)).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("radio", { name: /False or inaccurate/ }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Submit report" }));
+    expect(reports.reportPost).toHaveBeenCalledWith(ID, { reason: "inaccurate", details: "" });
+    expect(await screen.findByRole("button", { name: /You reported this/ })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  it("shows 'You reported this' when the signed-in view says so", async () => {
+    api.fetchPost.mockResolvedValue(theirs({ reported_by_me: true }));
+    renderDetail(theirs(), "verified");
+    expect(await screen.findByRole("button", { name: /You reported this/ })).toBeInTheDocument();
+  });
+
+  it("has no Report on your own post", async () => {
+    api.fetchPost.mockResolvedValue(fact({ is_mine: true }));
+    renderDetail(fact({ is_mine: true }), "verified");
+    await screen.findByRole("button", { name: "Delete" });
+    expect(screen.queryByRole("button", { name: /report/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /report/i })).not.toBeInTheDocument();
+  });
+
+  it("has no Report on a removed post's tombstone", async () => {
+    renderDetail(theirs({ status: "removed", content: "" }), "anonymous");
+    expect(screen.queryByRole("link", { name: /report/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /report/i })).not.toBeInTheDocument();
   });
 });

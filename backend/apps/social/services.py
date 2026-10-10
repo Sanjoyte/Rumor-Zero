@@ -170,15 +170,16 @@ def repost(*, user, post_id, now=None):
     bookmarks take), so `status_at_repost` is the status at commit and two simultaneous reposts by
     one user make one row. Order: a post the public can see (else `PostNotFound`), then an existing
     repost (so a post that turned FALSE after you reposted it doesn't refuse you), then your own
-    post, then FALSE. A repost has no id in the API: it is always of this post, so "reposting a
-    repost" is reposting the original.
+    post, then FALSE (a post under review that was FALSE before the review counts as FALSE). A
+    repost has no id in the API: it is always of this post, so "reposting a repost" is reposting
+    the original.
     """
     now = now or timezone.now()
     with transaction.atomic():
         post = (
             Post.objects.visible()
             .select_for_update(no_key=True, of=("self",))
-            .only("id", "author_id", "status")
+            .only("id", "author_id", "status", "pre_review_status")
             .filter(pk=post_id)
             .first()
         )
@@ -189,7 +190,12 @@ def repost(*, user, post_id, now=None):
         else:
             if post.author_id == user.pk:
                 raise CannotRepostOwn
-            if post.status == PostStatus.VERIFIED_FALSE:
+            if post.status == PostStatus.VERIFIED_FALSE or (
+                # Reports can move a FALSE post to review; it keeps its label until a moderator
+                # decides, so it stays closed to reposts meanwhile (user decision 2026-10-10).
+                post.status == PostStatus.UNDER_REVIEW
+                and post.pre_review_status == PostStatus.VERIFIED_FALSE
+            ):
                 raise CannotRepostFalse
             _, created = Repost.objects.get_or_create(
                 user=user, post=post, defaults={"status_at_repost": post.status, "created_at": now}

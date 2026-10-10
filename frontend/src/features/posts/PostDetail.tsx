@@ -82,7 +82,7 @@ function AuthorRow({ post }: { post: Post }) {
 /**
  * `/p/[id]` (Stitch b3: claim header, author row, verdict, sources, actions). The claim and its
  * status arrive server-rendered; the rest is client-side, including the like button and the
- * discussion (Part 7), repost and bookmark (7B). 8 adds report, 11 appeal, 11D stats.
+ * discussion (Part 7), repost and bookmark (7B), report (8). 11 adds appeal, 11D stats.
  */
 export function PostDetail({ id, initial }: { id: string; initial: Post | null }) {
   const router = useRouter();

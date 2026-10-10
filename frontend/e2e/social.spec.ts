@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
-import { marker, seedPost, setPostState, signUpVerified } from "./helpers";
+import { marker, seedPost, seedReports, setPostState, signUpVerified } from "./helpers";
 
 /**
  * Two people, signed up once for the whole file: allauth limits sign-ups to 20 a minute per
@@ -462,7 +462,7 @@ test("Repost is disabled, with the reason, on your own post and on a FALSE one; 
   await expect(page).toHaveURL(/\/login\?next=%2Fbookmarks$/, NAVIGATION);
 });
 
-test("a card with four actions and the bookmarks page fit a phone", async () => {
+test("a card with five actions and the bookmarks page fit a phone", async () => {
   const page = fan.page;
   await page.setViewportSize({ width: 390, height: 844 });
   const text = `I think ${marker("phone-actions")}`;
@@ -471,6 +471,7 @@ test("a card with four actions and the bookmarks page fit a phone", async () => 
   const card = page.getByRole("article").filter({ hasText: text });
   await expect(card.getByRole("button", { name: "Repost 0" })).toBeVisible(NAVIGATION);
   await expect(card.getByRole("button", { name: "Bookmark" })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Report" })).toBeVisible();
   for (const path of ["/home", "/bookmarks"]) {
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1 })).toBeAttached(NAVIGATION);
@@ -480,4 +481,86 @@ test("a card with four actions and the bookmarks page fit a phone", async () => 
     expect(overflow, path).toBeLessThanOrEqual(0);
   }
   await page.setViewportSize({ width: 1280, height: 900 });
+});
+
+test("reporting: the form checks itself, the report is private and final, and enough reports send the post to review while it stays visible", async () => {
+  // A fresh account's report counts only if it has taken part: the fan posts something first.
+  await postOpinion(fan.page, `I think ${marker("fanrep")}`);
+  const text = `Cats fly ${marker("report")}`;
+  const id = seedPost(text);
+  seedReports(id); // threshold − 1 counting reports by seeded people
+
+  const page = fan.page;
+  await page.goto("/home");
+  const card = page.getByRole("article").filter({ hasText: text });
+  await expect(card).toBeVisible(NAVIGATION);
+  await expect(card.getByText("UNDER REVIEW")).toHaveCount(0);
+  await card.getByRole("button", { name: "Report" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Report this post" });
+  await expect(dialog.getByText(text)).toBeVisible();
+  await expect(dialog.getByRole("radio", { checked: true })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Submit report" }).click();
+  await expect(dialog.getByRole("alert")).toHaveText("Choose a reason.");
+  await dialog.getByRole("radio", { name: /Something else/ }).click();
+  await dialog.getByRole("button", { name: "Submit report" }).click();
+  await expect(dialog.getByText("Tell us what's wrong.")).toBeVisible();
+  await dialog.getByRole("textbox", { name: "Details" }).fill("It is a made-up claim.");
+  await dialog.getByRole("button", { name: "Submit report" }).click();
+
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText("Report sent. Thank you.")).toBeVisible();
+  const reported = card.getByRole("button", { name: "You reported this" });
+  await expect(reported).toHaveAttribute("aria-disabled", "true");
+  await expect(reported).toBeFocused();
+
+  // The post is under review but still there, with its text, and the page remembers the report.
+  await page.reload();
+  const after = page.getByRole("article").filter({ hasText: text });
+  await expect(after).toBeVisible(NAVIGATION);
+  await expect(after.getByText("UNDER REVIEW")).toBeVisible();
+  await expect(after.getByRole("button", { name: "You reported this" })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  await after.getByRole("button", { name: "You reported this" }).click({ force: true });
+  await expect(page.getByText("You already reported this post.")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Report this post" })).toHaveCount(0);
+
+  // The post page shows the same: visible, under review, and "Reported".
+  await page.goto(`/p/${id}`);
+  await expect(page.getByRole("heading", { level: 1, name: new RegExp(text) })).toBeVisible(
+    NAVIGATION,
+  );
+  await expect(page.getByText("UNDER REVIEW").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /You reported this/ })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+});
+
+test("there is no Report on your own post, and a visitor is sent to log in to report", async ({
+  page,
+}) => {
+  const own = `I think ${marker("ownpost")}`;
+  await postOpinion(star.page, own);
+  await star.page.goto("/home");
+  const mine = star.page.getByRole("article").filter({ hasText: own });
+  await expect(mine.getByRole("button", { name: "Bookmark" })).toBeVisible(NAVIGATION);
+  await expect(mine.getByRole("button", { name: /report/i })).toHaveCount(0);
+  await expect(mine.getByRole("link", { name: /report/i })).toHaveCount(0);
+  // Not on its own page either (the Delete button shows the signed-in view has landed).
+  const href = await mine.getByRole("link", { name: new RegExp(own) }).getAttribute("href");
+  await star.page.goto(href!);
+  await expect(star.page.getByRole("button", { name: "Delete" })).toBeVisible(NAVIGATION);
+  await expect(star.page.getByRole("button", { name: /report/i })).toHaveCount(0);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/home");
+  const visitorCard = page.getByRole("article").filter({ hasText: own });
+  await expect(visitorCard).toBeVisible(NAVIGATION);
+  await expect(visitorCard.getByRole("link", { name: "Report" })).toHaveAttribute(
+    "href",
+    /^\/login\?next=%2Fp%2F[0-9a-f-]{36}$/,
+  );
 });

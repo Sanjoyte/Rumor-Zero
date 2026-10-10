@@ -1,9 +1,10 @@
 # Plan: Part 8, Reporting & threshold
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-10, together with the three decisions and the
-  defaults below. Saved here and linked from `HANDOFF.md`. Not implemented yet. Drafted 2026-10-10 by Claude
-  (Opus 5.5). **Read the appendix at the end first:** design-review findings that arrived after approval (two need
-  the user's answer before step 2).
+  defaults below. Saved here and linked from `HANDOFF.md`. **IMPLEMENTED 2026-10-10** (Claude, Sonnet 5.5), as
+  written. Deviations: see `task.md` Part 8 and `docs/agents/HANDOFF.md` (none of substance: the focus after a
+  server field error moved into an effect, `ReportButton` also hides on the session user's id, and the appendix's
+  items A1 and A2 were **not adopted**; A2 is recorded for Part 9). Drafted 2026-10-10 by Claude (Opus 5.5).
 - **Implement with:** Sonnet 5.5 · high (task.md).
 - **Evidence (read-only):** HANDOFF, MEMORY, `task.md` Part 8 (+ the Part 7/7B records), ARCHITECTURE
   §2/§3/§4/§4d/§5/§8/§9/§10, ANALYSIS (b-5, c-2, c-3, c-5, the d1 and ActionBar rows), STRUCTURE, DESIGN.md, Stitch

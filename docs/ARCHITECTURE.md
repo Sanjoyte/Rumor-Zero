@@ -115,7 +115,7 @@ Conventions:
 | pipeline_checked_at | timestamptz null | |
 | verdict_source | `pipeline` \| `moderator`, null | c-6. Moderator verdicts show no % |
 | verdict_note | varchar(500) | public note set by a moderator |
-| report_count | int, default 0 | **lifetime** counter, updated in the report-insert transaction (guide §3.2 note) |
+| report_count | int, default 0 | **lifetime** counter of every report (counting or not), updated by `posts.services.record_report` in the report-insert transaction (guide §3.2 note); never decremented |
 | escalated_at | timestamptz null | c-9 |
 | moderated_by | FK users SET_NULL null | last moderator to act |
 | moderated_at | timestamptz null | |
@@ -146,19 +146,21 @@ The sources, emergency and `pre_removal_status` columns are created in Part 4 wi
 
 All FKs to users and posts CASCADE.
 
-### reports
+### reports: `reports.Report` (Part 8)
 
 | Field | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
-| post, reporter | FKs CASCADE | **unique(post, reporter)**, one per user per post (guide §6.1) |
-| reason | `inaccurate` \| `misleading` \| `harassment` \| `spam` \| `other` | labels in ANALYSIS b-5 |
-| details | varchar(500) | required when reason = `other` |
-| status | `open` \| `dismissed` \| `actioned`, default open | dismissed/actioned reports stop counting |
-| counts_toward_threshold | bool | computed at insert (§4) |
-| resolved_by | FK users null | |
-| resolved_at | timestamptz null | |
-| created_at | timestamptz | index(post, created_at) |
+| post, reporter | FKs CASCADE | **`reports_pair_unique` (post, reporter)**: one per user per post **for life** (guide §6.1), so a dismissed or actioned report is not a second try. `post` has no index of its own (both composites lead with it); `reporter` keeps its index (account deletion and export) |
+| reason | `inaccurate` \| `misleading` \| `harassment` \| `spam` \| `other` | labels in ANALYSIS b-5; `reports_reason_valid` |
+| details | varchar(500), blank | trimmed, counted in code points; `reports_other_needs_details`: `other` needs words |
+| status | `open` \| `dismissed` \| `actioned`, default open | dismissed/actioned reports stop counting; `reports_status_valid` |
+| counts_toward_threshold | bool, no default | decided once, at insert (§5); the service always sets it |
+| resolved_by | FK users SET_NULL null | set with `resolved_at` by Part 10 |
+| resolved_at | timestamptz null | `reports_resolution_consistent`: `open` exactly while `resolved_at` is null, so a bulk Dismiss must set both |
+| created_at | timestamptz, `default=timezone.now` | `reports_post_created_idx` (post, created_at) serves the windowed count (the service passes `now`; tests place reports in time) |
+
+Written only by `apps/reports/services.py`. A report never shows its details or its reporter to anyone but moderators (§9); `__str__` and the admin list leave the text out. Deleting a reporter's account deletes their rows, but `posts.report_count` (a lifetime counter) and the post's review state stay as they were (Part 14 must not decrement it).
 
 ### moderation_actions (audit trail, append-only)
 
@@ -282,7 +284,7 @@ DRF throttles (per user, Redis-backed; scope → rate):
 - `comment` 60/h (Part 7): `POST …/comments/` only; reading and deleting never count, and a 401, 403 or 404 doesn't either (a 400 does)
 - `like` 300/h (Part 7): `POST` and `DELETE …/like/` share it, per user; a 401 or 403 doesn't count
 - `follow` 100/h (Part 6): `POST` and `DELETE …/follow/` share it, per user; a 401 or 403 doesn't count
-- `report` **10/h** (guide §6.3)
+- `report` **10/h** (guide §6.3; Part 8): `POST …/report/` only. A 401 or `email_unverified` never counts; from the throttle on, every answer does (a 400, a 404, a 403 `cannot_report_own` or a 409 included, as for a repost's 409)
 - `appeal` 5/day
 - `repost` 100/h (Part 7B): `POST` and `DELETE …/repost/` share it, per user; a 401 or 403 doesn't count, a 409 does
 - `bookmark` 300/h (Part 7B): `POST` and `DELETE …/bookmark/` share it, per user; separate from `like`
@@ -363,7 +365,7 @@ def enter_review(post, reason):
         post.pre_review_status, post.status, post.flagged_reason = post.status, UNDER_REVIEW, reason
 
 def is_active_emergency(post, now):                 # read-time only; no scheduler (§4b). Defined in apps/posts/emergency.py
-                                                    # (Part 4; apps/pipeline doesn't exist until Part 9) and imported here
+                                                    # (Part 4, where the serializer reads it) and imported here (Part 11C)
     return (post.is_emergency and post.emergency_demoted_at is None and now < post.emergency_expires_at
             and post.status != REMOVED and post.deleted_at is None)
 
@@ -387,7 +389,7 @@ def apply_report_threshold(post, counting_reports, cfg, now):
         enter_review(post, REPORTS)
 ```
 
-`now` is a parameter everywhere so tests control time. Parts 8 and 9 already take `now`; Part 11C adds the emergency branches.
+`now` is a parameter everywhere so tests control time. Part 8 built `merge_flag`, `enter_review` and `apply_report_threshold` (`apps/pipeline/routing.py`; `apply_report_threshold` returns True only when the post **entered** review, and `merge_flag` raises `ValueError` for an appeal onto a post under review for the pipeline, reports or both, and for anything that is not a flag); Part 9 adds `apply_pipeline_result`; Part 11C adds the emergency branches.
 
 All status writes go through `apps/posts/services.py` (plus `apps/moderation/services.py` for moderator actions), which wrap the pure functions in `transaction.atomic()` with `select_for_update()` on the post row. **No other code assigns `post.status`.**
 
@@ -530,10 +532,10 @@ Nothing else changes the score:
 - Plain reposts only: one per user per post, and never of a repost (reposting a repost reposts the original).
 - Refused:
   - your own posts (`cannot_repost_own`);
-  - posts that are `verified_false` (`cannot_repost_false`);
+  - posts that are `verified_false`, **and posts under review that were `verified_false` before the review** (`pre_review_status`; `cannot_repost_false`; Part 8, user decision 2026-10-10: reports can move a FALSE post to review, which must not reopen it to reposts). `pre_review_status` is never public, so the button can't be disabled in advance for this case: the click is answered 409 and the rollback toast says "Posts labelled FALSE can't be reposted.";
   - removed or deleted posts (404).
 - Email-verified users only. `status_at_repost` is recorded (the status at commit: the repost locks the post row with `FOR NO KEY UPDATE`).
-- **Order of the checks:** a post the public can see (404 otherwise), then an existing repost (**200**: a post that turned FALSE after you reposted it doesn't refuse you), then your own post (409 `cannot_repost_own`), then FALSE (409 `cannot_repost_false`).
+- **Order of the checks:** a post the public can see (404 otherwise), then an existing repost (**200**: a post that turned FALSE after you reposted it doesn't refuse you), then your own post (409 `cannot_repost_own`), then FALSE or under review after FALSE (409 `cannot_repost_false`).
 - **You can always take a repost back**, whatever became of the original (user decision 2026-10-10): `DELETE …/repost/` is 204 whenever the post row exists, deleted and removed included, so your own "no longer available" card always has an **Undo repost**.
 - A repost has no content and no status of its own. It always shows the original's **live** label, and nothing is re-checked.
 - If the original is later deleted or removed, the repost item shows "This post is no longer available".
@@ -563,20 +565,23 @@ Nothing else changes the score:
 
 **Moderation:** AvatarAdmin (thumbnails, newest first) with **Remove photo** and **Block photo uploads**, logged with `subject_user`. There is no user-facing "report photo" in the MVP (follow-up). The Google profile picture is never imported.
 
-## 5. Reporting (guide §6; c-2)
+## 5. Reporting (guide §6; c-2; Part 8)
 
-`POST /api/v1/posts/{id}/report/`:
-1. **Pre-checks:** logged in, **email verified**, not the author, post visible (not removed or deleted), throttle `report` 10/h.
-2. Inside `transaction.atomic()`:
-   - `select_for_update()` the post
-   - insert the report (the unique constraint turns a duplicate into **409**)
-   - `report_count += 1`
-   - `counts_toward_threshold` = reporter account age ≥ `report_min_account_age_hours` **or** reporter has ≥1 post or comment (guide §6.3)
-   - `n` = count of this post's reports with `status='open' AND counts_toward_threshold AND created_at >= now - window`
-   - `apply_report_threshold(post, n, cfg, now)` (threshold 2 instead of 5 while an emergency is active, §4b)
-   - save
-3. The post stays visible while under review (guide §6.4). Redis is never used for the count.
+`POST /api/v1/posts/{id}/report/` `{reason, details?}` (`apps/reports/`):
+1. **Before the service:** logged in, **email verified** (401 / 403 `email_unverified`; neither counts against the throttle), throttle `report` 10/h (429; from here every answer counts), a well-formed id (JSON 404), the body (400).
+2. **Inside `transaction.atomic()`** (`reports.services.file_report`), in this order:
+   - lock the post: `Post.objects.visible().select_for_update(no_key=True, of=("self",))`; none (unknown, deleted, removed, **its author too**) → **404**. `FOR NO KEY UPDATE` serialises reports with each other and with status writes (a delete, a moderator's action) but not with the `FOR KEY SHARE` that likes, comments and bookmark inserts take on a busy post. A report that waited for a delete or a removal re-checks the row and finds nothing;
+   - your own post → **403 `cannot_report_own`**;
+   - an earlier report by you (any status) → **409 `already_reported`**. The lock makes this check race-free; the unique pair is the last-resort guard (no `IntegrityError` catch);
+   - insert the report; `posts.services.record_report` adds 1 to `report_count` (every report, counting or not);
+   - `counts_toward_threshold` = reporter account age ≥ `report_min_account_age_hours` (**inclusive**) **or** the reporter has taken part: **a post that isn't removed or a comment that isn't hidden. Posts and comments the reporter deleted themselves still count** ("deleting undoes nothing", as for the fact quota); content a moderator took down (removed posts, hidden comments) earns no trust (user decision 2026-10-10). An established account costs no query;
+   - `n` = this post's reports with `status='open' AND counts_toward_threshold AND created_at >= now - window` (**inclusive**; **no upper bound**: `now` is taken before a lock wait, so a report that waited can carry a `now` older than a committed row that must still count), the new one included;
+   - `apply_report_threshold(post, n, cfg, now)` (`apps/pipeline/routing.py`; threshold 2 instead of 5 while an emergency is active, §4b, from Part 11C);
+   - save `report_count`, `status`, `flagged_reason`, `pre_review_status` and `updated_at` (all `Post` writes stay in `posts/services.py`).
+3. **201 `{"reported": true}`**, always the same: the answer never says whether this report sent the post to review. The post stays visible while under review (guide §6.4), a FALSE post included (it goes to `under_review` with `pre_review_status=verified_false`, so Dismiss restores FALSE; it can't be reposted meanwhile, §4d). Redis is never used for the count.
 4. When a moderator later removes the post or marks it FALSE, every report that was still open becomes `actioned`, and each reporter gets the `report_upheld` credit (§4a, capped).
+
+Bodies: `reason` is required and one of the five ("Choose a reason." for missing, null or unknown); `details` is trimmed, at most 500 code points ("Keep it to 500 characters."), and required when the reason is `other` (`{"details": ["Tell us what's wrong."]}`); undeclared fields (`status`, `reporter`, `counts_toward_threshold`) are ignored. Reports are permanent: there is no withdrawing one.
 
 ## 6. Pipeline contract and processing (guide §5.4, §7.1; c-21)
 
@@ -759,6 +764,7 @@ Other settings:
 - Users: *Block emergency posting* (11C); *Remove photo*, *Block photo uploads* (14B). These are logged with `subject_user`.
 - Comments (Part 7): *Hide comments* and *Unhide comments* bulk actions on a read-only `CommentAdmin` (list: text, author, post, hidden, deleted; filters: hidden, "By deleted at", created; search: text, username; no add, change or delete). Both need `social.change_comment` (today a superuser; Part 10 gives it to the Moderators group). Each change writes Django's own admin log entry ("Hidden" / "Unhidden"), because `moderation_actions` (Part 10) has no comment kind. Unhide doesn't undelete a comment its author deleted. `LikeAdmin` is read-only.
 - Reposts and bookmarks (Part 7B): `RepostAdmin` is a read-only list (user, post, status at repost, created; filter by status at repost; search by username). `BookmarkAdmin` is read-only and **superuser-only** (`has_view_permission` is `is_superuser`, so Django also leaves it off the admin index): a moderator holding every bookmark permission still gets 403, because bookmarks are private (§4d).
+- Reports (Part 8): `ReportAdmin` is a read-only list (post, reporter, reason, status, whether it counts, created; filters status, reason, counts, created; search by reporter username; no add, change or delete). The list and `__str__` never show the details text; the page of one report does, for whoever may view it. Viewing needs `reports.view_report`: a superuser today, the moderators from Part 10, which also adds the `PostAdmin` inline and Dismiss (setting `resolved_at` and `resolved_by` together with `status`).
 - Credibility ledger: read-only list (filters by kind; search by username). UserAdmin shows the score with a link to the user's rows.
 - The admin header shows the logo (`core/brand/logo-admin.png`, §14) and "Rumor Zero moderation" (`templates/admin/base_site.html`). It is served at `<BACKEND>/<ADMIN_URL_PATH>`. `/api/v1/me/` returns `admin_url` only to staff, so the sidebar "Moderation" link never exposes the path to others.
 
@@ -775,7 +781,7 @@ Other settings:
 - **Errors:**
   - DRF shape `{"detail": "...", "code": "..."}` (custom handler adds `code`), or `{"field": ["msg"]}` for validation.
   - allauth endpoints keep allauth's `{"status":…, "errors":[{code,param,message}]}`; the frontend client normalises both.
-  - Codes: 400 validation · 401 unauthenticated · 403 forbidden (`email_unverified`, `not_author`…) · 404 · 409 conflict (`already_reported`, `already_appealed`) · 429 throttled (+`Retry-After`) · 503 `backend_waking` (relay).
+  - Codes: 400 validation · 401 unauthenticated · 403 forbidden (`email_unverified`, `not_author`, `cannot_report_own`…) · 404 · 409 conflict (`already_reported`, `already_appealed`) · 429 throttled (+`Retry-After`) · 503 `backend_waking` (relay).
 - **Toggles are idempotent:** `POST` like/follow/repost/bookmark → 201 (200 if already there); `DELETE` → 204.
 - **Performance:** every list uses `select_related("author")` plus annotated `like_count`, `comment_count`, `repost_count`, `liked_by_me`, `reposted_by_me`, `bookmarked_by_me`, `reported_by_me`. No N+1 (guide §9.3). Tests assert query counts.
 - **Home feed (Following):**
@@ -822,7 +828,7 @@ Other settings:
 - `sources` is `[]` for opinions and for facts without sources; `kind` is derived from the stored value (§4c).
 - `confidence_score` is non-null only for `verified_*` with `verdict_source=pipeline`.
 - `emergency_active` is computed at serialization with `now` (§4b).
-- **Counts (Parts 7 and 7B):** `like_count`, `comment_count`, `repost_count`, `liked_by_me`, `reposted_by_me` and `bookmarked_by_me` are correlated subqueries added by `PostQuerySet.for_list(viewer)` (`apps/social/engagement.py`), so every list and the detail count in the same query as the posts (a list stays 1 query anonymous, 2 signed in). `comment_count` leaves out hidden and deleted comments; `repost_count` counts every repost row; the three `*_by_me` flags are `false` for visitors. Nobody ever sees a bookmark count. `PostSerializer` reads them strictly (a post that was not counted raises), and the 201 answer of a new post gets explicit zeros (`engagement_defaults`). A removed post's tombstone keeps its counts. Nothing is cached: the Following feed caches only ids.
+- **Counts (Parts 7, 7B and 8):** `like_count`, `comment_count`, `repost_count`, `liked_by_me`, `reposted_by_me`, `bookmarked_by_me` and `reported_by_me` are correlated subqueries added by `PostQuerySet.for_list(viewer)` (`apps/social/engagement.py`), so every list and the detail count in the same query as the posts (a list stays 1 query anonymous, 2 signed in). `comment_count` leaves out hidden and deleted comments; `repost_count` counts every repost row; the four `*_by_me` flags are `false` for visitors (`reported_by_me` is an `Exists` on `reports_pair_unique` and stays true for life, a dismissed report included). Nobody ever sees a bookmark or report count. `PostSerializer` reads them strictly (a post that was not counted raises), and the 201 answer of a new post gets explicit zeros (`engagement_defaults`). A removed post's tombstone keeps its counts. Nothing is cached: the Following feed caches only ids.
 - `avatar_url` is `/api/v1/avatars/{user_id}/{avatar_version}-96.webp`, or null (initials). The 256 px size is used on profiles.
 - `flagged_reason`, report details and bookmark counts are never public.
 - `appeal_status` is only returned to the author; `can_appeal` is true for their FALSE-labelled or removed posts without a previous appeal.
@@ -884,6 +890,10 @@ Other settings:
 - `POST /api/v1/posts/{id}/bookmark/` (`IsAuthenticated` only, throttle `bookmark`): **201** `{"bookmarked": true}` / **200**; 404 for an unknown, malformed, deleted or removed post; your own posts, FALSE ones and pending ones are fine. `DELETE`: **204** always, also on a removed post; 404 for an unknown, malformed or deleted one.
 - `GET /api/v1/me/bookmarks/` (`IsAuthenticated`, not verified-only, never cached; a stale Bearer token is a 401): the §9 envelope (`pinned: []`), items `{"kind": "post", "post": {Post}, "reposted_by": null, "activity_at": <bookmark time>}`, newest bookmark first on `(created_at, id)` (`BookmarkPagination`: `TimestampCursorMixin`, so a crafted cursor is 404), `?page_size=` up to 50. Deleted and removed posts are dropped in the bookmark query itself, so pages stay full (the bookmark rows stay). **Only ever the caller's**; there is no route for anyone else's. **3 queries**: the user, the bookmark page, the posts.
 - `GET /api/v1/feed/` and `GET /api/v1/users/{username}/posts/` return reposts (see "Home feed (Following)" above). Profile lists: the user's visible posts and **all** their reposts, ordered by activity; `?post_type=` filters a repost by its original's type. A repost of an original that is deleted or removed is `{"kind": "repost", "post": {"id": "uuid", "unavailable": true}, "reposted_by": {…}, "activity_at": "…"}`: no text, nothing else. **Queries:** the Following feed 4 on a miss and 3 on a hit when the page holds a repost (the user, the keys, the posts, the reposts), one fewer when it holds only posts; a profile 3 anonymous and 4 signed in.
+
+**Reports (Part 8):**
+- `POST /api/v1/posts/{id}/report/` `{reason, details?}` (`IsAuthenticated` + `IsEmailVerified`, throttle `report`, POST only: any other method is 405, `never_cache`): **201** `{"reported": true}` whether or not this report sent the post to review. Errors: 401, 403 `email_unverified`, 429 (+ `Retry-After`), **404** for an unknown, malformed, deleted or removed post (its author too), **400** per field (`{"reason": ["Choose a reason."]}`, `{"details": [...]}`), **403 `cannot_report_own`** "You can't report your own post.", **409 `already_reported`** "You already reported this post.". The rules and their order are in §5. Every visible status can be reported, pending and under review included; the same five reasons apply to facts and opinions.
+- The post object's `reported_by_me` says whether *you* reported it; no report, count, reason or reporter is ever public (`report_count` and `flagged_reason` stay out of the object).
 
 **Auth payloads (Part 1):**
 - `GET /api/v1/me/` (`IsAuthenticated`, never cached, **two queries**: the user, and the `google_connected` `exists()` check): `{id, username, display_name, email, is_email_verified, role, has_usable_password, google_connected, avatar_url}`. `google_connected` is true when the user has a Google `SocialAccount` (Part 3); `avatar_url` follows the rule above (null until 14B). Staff (`is_staff`: moderators and superusers) also get `admin_url`, the absolute Django Admin URL on the backend host. Anonymous → 401 `not_authenticated`.
@@ -969,6 +979,10 @@ Other settings:
     - **`RepostHeader`** ("↻ Reposted by Name", a link to the profile, `relative z-10`) goes in `PostCard`'s new `header` slot; **`UnavailablePostCard`** is the tombstone's look with the header and "This post is no longer available", plus **Undo repost** when the repost is yours (it calls the API, removes the item with `feed.remove`, toasts "Repost removed.").
     - **`FeedList`** renders repost items, turns a repost whose original was polled as `removed`, found gone or sent as a stub into the unavailable card, and **hides a post that already showed higher up** (`visibleItems`: an older activity of it that comes back on a later page, a second reposter, the original after its repost; user decision 2026-10-10). The empty state shows only when nothing more can load (a cached page can come back empty with a next cursor). `pendingPostIds` includes the originals of reposts (a repost shows the live label), each id once.
     - **`/bookmarks`** (`BookmarkList`, client-rendered, `noindex`, in `PROTECTED_PREFIXES`): the profile page's container, a visible `h1` "Bookmarks", `FeedList` over `useCursorFeed` (enabled only for a settled signed-in session), polling of pending posts, the empty state "No bookmarks yet" / "Posts you bookmark appear here. Only you can see them.". An un-bookmarked card stays until the next load. Your new repost isn't inserted into an open list; the next load shows it.
+  - **Reports (Part 8; `features/reports/`, the action bars):** user decision 2026-10-10: the report action is a **flag button**, as Stitch b1/b3 draw it, not an overflow menu (`task.md` said "overflow menu"; DESIGN.md's glyph list names `more_horiz` for overflow menus but no `flag`, recorded in ANALYSIS c-40).
+    - **Action bar:** a card's right-hand group is the bookmark and the flag (`gap-space-md`); on `/p/[id]` the row ends with Bookmark and "Report". `PostActions` takes the post's `author`, `content` and `post_type` too (the modal quotes them). A repost item reports the original.
+    - **`ReportButton`** mirrors `LikeButton`'s states: session loading → an inert same-size look-alike; a visitor → a link to `/login?next=/p/<id>` ("Log in to report"); **your own post → nothing** (`is_mine`, or the session's user id equal to the author's, so the server-rendered anonymous view hides it as soon as the session settles); an unverified email → `aria-disabled` with the hint "Verify your email to report posts." and the Part 2 toast; reported → a filled `flag` in `secondary`, named "You reported this", `aria-disabled` but not dimmed, a click only toasts "You already reported this post.". It is **one `<button>` element throughout**, so focus returns to it after a report (`Modal` returns focus only from the dialog's `close` event). The modal is built on the first click and then kept (a feed doesn't carry 20 dialogs). Cards show the glyph only (`title` "Report this post"); the post page adds the word from `sm` up ("Report", "Reported"), inside the accessible name. State is seeded from `reported_by_me` and re-synced when it changes ("adjust state while rendering").
+    - **`ReportModal`** (Stitch d1, `max-w-modal`, `footerTone="plain"`, plain-language copy from ANALYSIS b-5): the post quoted in d1's neutral-stripe card (name, `@handle`, the claim clamped to three lines, italic for opinions); the five reasons as `RadioCardGroup` with **none preselected** (d1 preselects the first; a default would bias what people report); "Details" (`Textarea`, `maxCount` 500, "Optional." / "Required for “Something else”."); an info `Alert` "What happens next" ("When several people report a post, a moderator reviews it. The post stays visible meanwhile, and nothing is removed automatically."); the footer "Reports are private. The author is never told who reported.", Cancel and **Submit report**. Submit checks everything, shows every problem (a reason error is a `<p role="alert">` under the group) and focuses the first. Sending locks the form in a `fieldset disabled`, and the modal can't be closed then. A problem the server finds after sending takes the focus only once the form has unlocked (a disabled fieldset ignores `focus()`). Outcomes: 201 → close and toast "Report sent. Thank you."; 409 `already_reported` → close, "You already reported this post.", button reported; 404 → close, "This post is no longer available.", button unchanged; 403 `email_unverified` → a warning "Verify your email to report."; 400 → the server's messages on their fields; 429 → "You're reporting too fast. Try again in about N minutes."; network, 503 and the rest → an error `Alert` with the choices kept. Not built from d1: "Claim Hash", the "Evidentiary Integrity Protocol" eyebrow, the "Editorial Consensus Threshold" callout and "Cryptographic report signature" (jargon, D8), the preview badge at the bottom.
   - Menus and the sheet are native `popover` elements with explicit positioning (a popover is centred by default). `aria-current="page"` comes from `usePathname()` on the item and everything below it (`/u/ada/followers` keeps Profile active).
   - Marketing links go only to pages that exist (user decision 2026-10-01): nav How it works, Log in, Sign up; footer How verification works, Privacy, Terms, "© 2026 Rumor Zero".
   - Titles: the root metadata template is `"%s · Rumor Zero"`. `not-found`, `error` and `global-error` are basic AuthLayout cards with the logo (Part 15 polishes them). `/dev/shell` previews the shell with a sample user in development only.

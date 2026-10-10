@@ -92,8 +92,12 @@ rumor-zero/
 │   │   │                            timeline.py (the mixed feed's sort key, cursor token, per-page rule and union query), feed.py (cache v2:
 │   │   │                            keys, `load_entries`), RepostView, BookmarkView, BookmarkListView, RepostAdmin, BookmarkAdmin
 │   │   │                            (superuser-only), engagement.py (+ repost count, reposted and bookmarked flags), tests (695 in all)
-│   │   ├── reports/             8   Report + windowed threshold
-│   │   ├── pipeline/            9   contract.py (dataclasses), clients.py (stub/http), routing.py (pure functions; imports
+│   │   ├── reports/             ✅ 8 Report (migration 0001: the unique pair, five named checks, `reports_post_created_idx`), services.py
+│   │   │                            (`file_report`: post row lock, own/duplicate checks, `counts_toward_threshold`, the windowed count;
+│   │   │                            calls `posts.services.record_report`), serializers.py, exceptions.py (`cannot_report_own`,
+│   │   │                            `already_reported`), views.py (ReportView), urls.py, read-only ReportAdmin, tests (137)
+│   │   ├── pipeline/            ✅ 8 routing.py (pure: merge_flag, enter_review, apply_report_threshold), tests (45);
+│   │   │                        9   contract.py (dataclasses), clients.py (stub/http), routing.py (+ apply_pipeline_result; imports
 │   │   │                            is_active_emergency from apps/posts/emergency.py), processor.py (SKIP LOCKED batch),
 │   │   │                            management/commands/process_pending.py
 │   │   ├── moderation/          10–11 ModerationAction, Appeal (label/removal), admin.py (review queue, bulk actions,
@@ -198,7 +202,7 @@ rumor-zero/
 │       │   │                        ✅ 7B RepostButton, BookmarkButton, RepostHeader, UnavailablePostCard, repost-rules.ts (why a post
 │       │   │                            can't be reposted); PostActions now takes the post (posts/feed-items.ts: isUnavailable, visibleItems)
 │       │   ├── bookmarks/       ✅ 7B BookmarkList
-│       │   ├── reports/         8    ReportModal
+│       │   ├── reports/         ✅ 8 ReportButton (the flag in the action bars), ReportModal, reasons.ts, reports-api.ts, messages.ts
 │       │   ├── appeals/         11   AppealModal, RemovedPostCard
 │       │   ├── reputation/      11B  CredibilityBadge; 11D CredibilityWidget, CredibilityPanel
 │       │   ├── search/          12   SearchBar, SearchResults

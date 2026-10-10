@@ -73,6 +73,48 @@ def test_a_false_post_is_refused():
     assert Repost.objects.count() == 0
 
 
+def test_a_post_that_reports_sent_to_review_after_it_was_false_is_still_closed_to_reposts():
+    """Reports move a FALSE post to review (§4); it keeps its label until a moderator decides
+    (user decision 2026-10-10), so the review must not reopen it."""
+    post = PostFactory(
+        moderator_verdict=True,
+        status=PostStatus.UNDER_REVIEW,
+        pre_review_status=PostStatus.VERIFIED_FALSE,
+        flagged_reason="reports",
+    )
+    with pytest.raises(services.CannotRepostFalse):
+        services.repost(user=VerifiedUserFactory(), post_id=post.pk)
+    assert Repost.objects.count() == 0
+
+
+@pytest.mark.parametrize(
+    "before", [PostStatus.PENDING, PostStatus.PUBLISHED, PostStatus.VERIFIED_TRUE, None]
+)
+def test_a_post_under_review_that_was_not_false_can_be_reposted(before):
+    post = PostFactory(fact=True, under_review=True, pre_review_status=before)
+    assert services.repost(user=VerifiedUserFactory(), post_id=post.pk) is True
+    assert Repost.objects.get().status_at_repost == PostStatus.UNDER_REVIEW
+
+
+def test_a_repost_you_already_made_survives_the_post_going_to_review_after_false():
+    me = VerifiedUserFactory()
+    post = PostFactory(fact=True)
+    services.repost(user=me, post_id=post.pk)
+    post.status, post.pre_review_status = PostStatus.UNDER_REVIEW, PostStatus.VERIFIED_FALSE
+    post.save()
+    assert services.repost(user=me, post_id=post.pk) is False  # a quiet 200, as for a FALSE post
+
+
+def test_your_own_post_under_review_after_false_is_own_not_false():
+    mine = PostFactory(
+        moderator_verdict=True,
+        status=PostStatus.UNDER_REVIEW,
+        pre_review_status=PostStatus.VERIFIED_FALSE,
+    )
+    with pytest.raises(services.CannotRepostOwn):
+        services.repost(user=mine.author, post_id=mine.pk)
+
+
 @pytest.mark.parametrize("state", ["removed", "deleted"])
 def test_a_removed_or_deleted_post_is_not_found_even_for_its_author(state):
     post = PostFactory(**{state: True})

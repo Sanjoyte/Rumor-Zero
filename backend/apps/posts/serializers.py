@@ -97,10 +97,10 @@ class PostSerializer(serializers.BaseSerializer):
     """The post object of ARCHITECTURE §9, for lists, the detail page and the 201 answer.
 
     The counts and the viewer's flags (`like_count`, `comment_count`, `repost_count`, `liked_by_me`,
-    `reposted_by_me`, `bookmarked_by_me`) come from `PostQuerySet.for_list(viewer)` (a new post gets
-    `engagement_defaults`); the fields later parts fill (reports, appeals) are `false` or `null` for
-    now. Nothing internal leaks: no `flagged_reason`, pipeline fields, `report_count` or moderation
-    fields.
+    `reposted_by_me`, `bookmarked_by_me`, `reported_by_me`) come from
+    `PostQuerySet.for_list(viewer)` (a new post gets `engagement_defaults`); the fields later parts
+    fill (appeals) are `false` or `null` for now. Nothing internal leaks: no `flagged_reason`,
+    pipeline fields, `report_count` or moderation fields.
     **A removed post is a tombstone for everyone but its author** (user decision 2026-10-09): the
     same keys, with `content`, `sources`, `verdict_note`, `confidence_score` and `verdict_source`
     blanked. The rule lives here so no list can ever leak a removed post's text.
@@ -134,7 +134,7 @@ class PostSerializer(serializers.BaseSerializer):
             "liked_by_me": post.liked_by_me,
             "reposted_by_me": post.reposted_by_me,
             "bookmarked_by_me": post.bookmarked_by_me,
-            "reported_by_me": False,
+            "reported_by_me": post.reported_by_me,
             "is_mine": is_mine,
             "can_appeal": False,
             "appeal_status": None,

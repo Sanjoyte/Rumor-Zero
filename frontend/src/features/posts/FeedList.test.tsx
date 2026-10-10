@@ -335,6 +335,45 @@ describe("FeedList", () => {
     });
   });
 
+  describe("report flag (Part 8)", () => {
+    // Someone else's posts (the session's user is `u-1`, like `makePost`'s default author).
+    const theirs = (id: string, overrides: Partial<Post> = {}) =>
+      post(id, { author: BO, ...overrides });
+
+    it("puts a flag on every card of someone else's post, and none on your own", async () => {
+      render(
+        <FeedList
+          feed={feedWith({
+            items: [entry(theirs("a")), entry(post("b", { is_mine: true })), entry(theirs("c"))],
+          })}
+        />,
+      );
+      await screen.findAllByRole("button", { name: "Report" });
+      expect(screen.getAllByRole("button", { name: "Report" })).toHaveLength(2);
+    });
+
+    it("marks a post you reported, and gives every card its own flag", async () => {
+      render(
+        <FeedList
+          feed={feedWith({
+            items: [entry(theirs("a", { reported_by_me: true })), entry(theirs("b"))],
+          })}
+        />,
+      );
+      expect(await screen.findAllByRole("button", { name: "You reported this" })).toHaveLength(1);
+      expect(screen.getAllByRole("button", { name: "Report" })).toHaveLength(1);
+      // No dialog is built until a flag is clicked: a feed doesn't carry 20 of them.
+      expect(document.querySelector("dialog")).toBeNull();
+    });
+
+    it("reports the original from a repost item", async () => {
+      render(<FeedList feed={feedWith({ items: [repostEntry(theirs("r"))] })} />);
+      await userEvent.click(await screen.findByRole("button", { name: "Report" }));
+      expect(screen.getByRole("dialog", { name: "Report this post" })).toBeInTheDocument();
+      expect(screen.getByText(/Content of r/, { selector: "p" })).toBeInTheDocument();
+    });
+  });
+
   it("shows the default empty state, or the one it is given", () => {
     const { rerender } = render(<FeedList feed={feedWith()} />);
     expect(screen.getByText("No posts yet")).toBeInTheDocument();

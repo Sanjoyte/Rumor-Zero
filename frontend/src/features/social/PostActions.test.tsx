@@ -1,6 +1,6 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { makePost, renderWithSessionAndToast } from "@/features/posts/test-helpers";
+import { BO, makePost, renderWithSessionAndToast } from "@/features/posts/test-helpers";
 import { PostActions } from "./PostActions";
 
 vi.mock("./social-api", async (importOriginal) => ({
@@ -13,8 +13,10 @@ vi.mock("./social-api", async (importOriginal) => ({
   unbookmarkPost: vi.fn(),
 }));
 
+// By someone else than the test session's user (`u-1`), so the flag is offered.
 const post = makePost({
   id: "p1",
+  author: BO,
   is_mine: false,
   like_count: 2,
   comment_count: 5,
@@ -34,13 +36,37 @@ describe("PostActions", () => {
     expect(container.firstChild).toHaveClass("border-t", "justify-between");
   });
 
-  it("puts the bookmark at the right of the bar, apart from the counters", async () => {
+  it("puts the bookmark and the report flag at the right of the bar, apart from the counters", async () => {
     const { container } = renderWithSessionAndToast(<PostActions post={post} />);
     await screen.findByRole("button", { name: "Bookmark" });
     const bar = container.firstChild as HTMLElement;
     expect(bar.children).toHaveLength(2);
     expect(bar.children[0]).toContainElement(screen.getByRole("button", { name: "Repost 4" }));
-    expect(bar.children[1]).toBe(screen.getByRole("button", { name: "Bookmark" }));
+    const right = bar.children[1];
+    expect(right).toContainElement(screen.getByRole("button", { name: "Bookmark" }));
+    expect(right).toContainElement(screen.getByRole("button", { name: "Report" }));
+    expect(right.children[0]).toBe(screen.getByRole("button", { name: "Bookmark" }));
+    expect(right.children[1]).toBe(screen.getByRole("button", { name: "Report" }));
+  });
+
+  it("has a flag on someone else's post, with no word and no count, above the stretched link", async () => {
+    renderWithSessionAndToast(<PostActions post={post} />);
+    const flag = await screen.findByRole("button", { name: "Report" });
+    expect(flag).toHaveAttribute("title", "Report this post");
+    expect(flag).toHaveClass("z-10");
+    expect(flag).not.toHaveTextContent("Report ");
+  });
+
+  it("has no flag on your own post", async () => {
+    renderWithSessionAndToast(<PostActions post={{ ...post, is_mine: true }} />);
+    await screen.findByRole("button", { name: "Bookmark" });
+    expect(screen.queryByRole("button", { name: /report/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a reported post's flag as 'You reported this'", async () => {
+    renderWithSessionAndToast(<PostActions post={{ ...post, reported_by_me: true }} />);
+    const flag = await screen.findByRole("button", { name: "You reported this" });
+    expect(flag).toHaveAttribute("aria-disabled", "true");
   });
 
   it("on the post page: one row, with words, and the link jumps to the section below", async () => {
@@ -52,12 +78,13 @@ describe("PostActions", () => {
     expect(screen.getByText("Comments", { selector: "[aria-hidden]" })).toHaveClass("sm:inline");
     expect(screen.getByText("Repost", { selector: "[aria-hidden]" })).toHaveClass("sm:inline");
     expect(screen.getByRole("button", { name: "Bookmark" })).toBeInTheDocument();
+    expect(screen.getByText("Report", { selector: "[aria-hidden]" })).toHaveClass("sm:inline");
     expect(container.firstChild).not.toHaveClass("border-t");
   });
 
   it("puts its buttons above the card's stretched link", async () => {
     renderWithSessionAndToast(<PostActions post={post} />);
-    for (const name of ["Like 2", "Repost 4", "Bookmark"]) {
+    for (const name of ["Like 2", "Repost 4", "Bookmark", "Report"]) {
       expect(await screen.findByRole("button", { name })).toHaveClass("z-10");
     }
     expect(screen.getByRole("link", { name: "Comments 5" })).toHaveClass("z-10");

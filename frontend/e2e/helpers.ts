@@ -114,6 +114,39 @@ export function seedPost(content: string, { fact = false } = {}): string {
 }
 
 /**
+ * Files `threshold − 1` reports on a post, each by a new aged verified user, through the backend's
+ * own `file_report` service, so the next report from a test account reaches the threshold. It reads
+ * the threshold and the minimum account age from the platform settings (the E2E backend uses the
+ * developer's own seed, so a test can't assume 5 and 24). No sign-up is used: the suite is bounded
+ * by allauth's 20 sign-ups a minute. Returns how many were filed.
+ */
+export function seedReports(postId: string): number {
+  if (!/^[0-9a-f-]{36}$/.test(postId)) throw new Error("not a post id");
+  const out = runShell(
+    [
+      "import datetime, uuid",
+      "from django.utils import timezone",
+      "from apps.accounts.models import User",
+      "from apps.core.services import get_platform_settings",
+      "from apps.reports import services",
+      "cfg = get_platform_settings()",
+      "needed = max(cfg.report_threshold - 1, 0)",
+      "aged = timezone.now() - datetime.timedelta(hours=cfg.report_min_account_age_hours + 1)",
+      "for _ in range(needed):",
+      "    tag = uuid.uuid4().hex[:10]",
+      "    user = User.objects.create_user(email=f'rep-{tag}@example.test', username=f'rep_{tag}', is_email_verified=True)",
+      "    User.objects.filter(pk=user.pk).update(created_at=aged)",
+      "    user.refresh_from_db()",
+      `    services.file_report(reporter=user, post_id='${postId}', reason='spam', details='')`,
+      "print('SEEDED=' + str(needed))",
+    ].join("\n"),
+  );
+  const seeded = /SEEDED=(\d+)/.exec(out)?.[1];
+  if (seeded === undefined) throw new Error(`no count in: ${out}`);
+  return Number(seeded);
+}
+
+/**
  * Changes a post's status straight in the database, the way a moderator or the pipeline will
  * (Parts 9 and 10) and the way the manual check does it in the Django shell. Runs the backend's own
  * `manage.py shell` against the same database the E2E backend uses. A fact post only.

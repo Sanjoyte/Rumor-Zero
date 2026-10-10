@@ -122,6 +122,7 @@ def test_a_viewers_like_on_a_removed_post_is_still_reported_to_that_viewer(auth_
         "liked_by_me",
         "reposted_by_me",
         "bookmarked_by_me",
+        "reported_by_me",
     ],
 )
 def test_the_serializer_refuses_a_post_that_was_not_annotated(missing):

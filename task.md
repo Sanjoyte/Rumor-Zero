@@ -93,7 +93,7 @@ not let the review expand the part's scope without user approval.
 | 6 | Profiles, follows, Following feed | 4 | [x] Done (2026-10-09) |
 | 7 | Likes & comments | 5 | [x] Done (2026-10-10) |
 | 7B | Bookmarks & reposts | 6, 7 | [x] Done (2026-10-10) |
-| 8 | Reporting & threshold | 5 | [ ] |
+| 8 | Reporting & threshold | 5 | [x] Done (2026-10-10) |
 | 9 | Fact-check pipeline stub + routing | 8 | [ ] |
 | 10 | Human review panel (Django Admin) | 9 | [ ] |
 | 11 | Appeals & removed-post tombstones | 10 | [ ] |
@@ -940,7 +940,7 @@ All three jobs run on test values only; no secrets.
 ---
 
 ## Part 8: Reporting & threshold
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-10)
 **Goal:** one report per user per post; a windowed, brigading-resistant threshold that sends posts to review while keeping them visible (guide §6; ARCHITECTURE §5).
 **Depends on:** 5.
 **Stitch files to convert:** `d1_report_post_modal`, with plain-language reasons (ANALYSIS b-5).
@@ -957,16 +957,35 @@ All three jobs run on test values only; no secrets.
 - 5 reasons; the details textarea is required for "Something else"
 - states: submitting, success toast, **"You reported this"** (disabled), "Verify your email to report", own post (no report action)
 
-The Report action sits in the PostCard overflow menu and on the detail page.
+The Report action is a **flag button** in the card's action bar and a "Report" button on the detail page (user decision 2026-10-10; this section said "overflow menu", see the deviations).
 
 **API endpoints:** `POST /api/v1/posts/{id}/report/`.
 
 **Acceptance criteria**
-- [ ] 5 counting reports within 24 h move the post to UNDER REVIEW (`flagged_reason=reports`); it stays visible
-- [ ] Reports outside the window, from new inactive accounts, or dismissed don't count
-- [ ] Reporting twice returns 409 and shows "You reported this"; reporting your own post → 403; a removed or deleted post → 404
-- [ ] The 11th report in an hour → 429
-- [ ] Concurrent reports can't skip the threshold (a threaded transaction test)
+- [x] 5 counting reports within 24 h move the post to UNDER REVIEW (`flagged_reason=reports`); it stays visible (the fifth counting report, through the API, moves it with `pre_review_status` kept; the detail page, Recent and a visitor still show its text; E2E: a reload shows UNDER REVIEW with the text)
+- [x] Reports outside the window, from new inactive accounts, or dismissed don't count (a report exactly one window old counts and one a microsecond older doesn't; an account under 24 h old with no post or comment is stored as not counting; dismissed and actioned reports and other posts' reports are left out)
+- [x] Reporting twice returns 409 and shows "You reported this"; reporting your own post → 403; a removed or deleted post → 404 (409 `already_reported`, even after a dismissal; 403 `cannot_report_own`; 404 for a removed or deleted post, its author included; the flag turns into a filled "You reported this")
+- [x] The 11th report in an hour → 429 (the real 10 + 1 requests; a 401 and an unverified email don't count, a 400 does)
+- [x] Concurrent reports can't skip the threshold (a threaded transaction test): real threads: two simultaneous reports by one person make one, six people are all counted and the post reaches review, and two reports waiting behind a held `FOR NO KEY UPDATE` row lock with three counting reports committed end with the post under review and `report_count == 5` (without the lock both would count four)
+
+**Deviations and decisions (plan approved 2026-10-10; built 2026-10-10; recorded in ARCHITECTURE §2/§3/§4/§4d/§5/§8/§9/§10, ANALYSIS c-40, STRUCTURE, MEMORY):**
+- **User decisions (2026-10-10):**
+  - **The report action is a flag button**, as Stitch b1/b3 draw it, not an overflow menu (this section said "PostCard overflow menu"). No menu component was built.
+  - **What makes a young account's report count:** a post that isn't removed or a comment that isn't hidden; the reporter's **deleted** posts and comments still count, moderated ones don't (Part 7 had left the soft-deleted comment open).
+  - **FALSE posts follow the docs** (they go to UNDER REVIEW with `pre_review_status=verified_false`), and **a post under review after being FALSE can't be reposted** (409 `cannot_repost_false`; one condition in `social.services.repost`).
+- **Defaults approved with the plan:** `FOR NO KEY UPDATE` on the post with the `visible()` filters in the locking query; the check order (401, 403 `email_unverified`, 429, malformed id 404, 400, then 404, 403 `cannot_report_own`, 409 `already_reported`); 201 `{"reported": true}` whatever the effect; reports are permanent (no withdrawing); no `IntegrityError` catch (the lock makes the duplicate check race-free); the window has **no upper bound**; every visible status can be reported; the five reasons for facts and opinions alike; no reason preselected in the dialog; `apps/pipeline` made with `startapp` now (only `routing.py`; Part 9 adds to it); `posts.services.record_report` as the one status write; `apply_report_threshold` returns True only when the post **entered** review (Part 13's hook); `merge_flag` raises `ValueError` for an appeal onto a post under review for the pipeline, reports or both; five named database checks on `reports` (including `reports_resolution_consistent`: Part 10's Dismiss must set `resolved_at` with `status`); the modal is built on the first click and kept, and the flag stays one `<button>`.
+- **Built differently from the plan:** none of substance. `ReportModal` stores the focus target of a server field error in a ref and focuses it in an effect once the form has unlocked (a disabled fieldset ignores `focus()`; found by a test); `ReportButton` also hides itself when the session's user id equals the author's (the anonymous server-rendered view doesn't know `is_mine`); a test-only helper, `aged_user`, and an autouse `report_settings` fixture were added.
+- **Design-review appendix (arrived after approval, not part of the approved plan; the approved plan was built as written):** A1 `enter_review` refuses a removed post and A2 a decisive late pipeline FALSE on a reported post would make the new repost refusal reveal a hidden verdict were **not adopted**. A2 is recorded for Part 9 (below); every item of its "B" list that only sharpened the plan (no upper bound on the window, no `.only()` on the locked post, the return value of `apply_report_threshold`, extra boundary tests, the exception codes, the ReportAdmin never listing the details) is built.
+- **Found while building (all handled):**
+  - A server field error can't take focus while the fieldset is disabled (see above).
+  - The test session's user is `u-1`, also `makePost`'s default author, so the flag was hidden in tests until the post got another author.
+  - A mutation run found three weak tests (the Escape-while-sending test was vacuous because the disabled button had taken the focus, the filled glyph wasn't asserted, and one pattern didn't match); all fixed.
+  - A test of mine used `getByText("Bo")`, which matches inside other words; E2E markers must not contain "report" (`/report/i` matches the claim link).
+- **Not done (later parts):**
+  - **Part 9:** the processor selects `status='pending'` only, so a pending fact that reports sent to review would never be checked: it must also take under-review facts with `pre_review_status='pending'` and no `pipeline_checked_at`; a decisive late FALSE on a reported post sets `pre_review_status=verified_false` without the label ever being public, which the "under review after FALSE" repost refusal would then reveal (narrow the condition or accept it); the processor must not hold the post row lock across its 20 s call.
+  - **Part 10:** moderator permissions on `ReportAdmin`, the `PostAdmin` report inline, Dismiss and the other actions (open reports become `dismissed` or `actioned`, `resolved_at` and `resolved_by` set in the same write), the queue's report-count ordering. **11B:** `report_upheld`. **11C:** the emergency threshold branch of `apply_report_threshold`. **13:** notify the author when `record_report` returns True, in the same transaction. **14:** export and account deletion of reports (deleting a reporter cascades their rows but must not decrement `report_count`). **16:** the `report` rate (a guess), the dev gallery's three copies of the reason list.
+  - Known limits: a report made in one list isn't copied into another mounted list showing the same post (every route change refetches); the post page flickers from "Report" to "Reported" once the signed-in view lands for someone who reported before.
+- **Verified:** see HANDOFF (backend 2066 tests, frontend 1580, E2E 38 in dev and CI mode, 46 backend and 36 frontend mutation checks, the Linux blocks of `docs/test-command.md` Part 8 extracted from the doc and run verbatim, a scripted-browser check of the card, the dialog, the post page, the phone width and Django Admin). The PowerShell blocks of that section were not run on Windows. CI itself runs when you push.
 
 **Required tests:** window boundaries (time-controlled), account-weighting rules, `merge_flag`/`enter_review` unit tests, concurrency, API errors, ReportModal states; E2E: report flow.
 

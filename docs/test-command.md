@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -5715,6 +5715,532 @@ matter).
   likes) or step 18 (one more account, with its permissions). Nothing else is touched.
   (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
   If you made a throwaway moderator for step 18, that goes too (same prefix).
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
+  token and the throwaway password of the test accounts.
+
+### Part 8: Reporting & threshold
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
+`frontend/.env.local`. Part 8 adds **one migration** (`reports.0001_initial`: the reports table), **two new Django
+apps** (`apps/reports` and `apps/pipeline`, which holds only `routing.py` so far), **no dependency** and **no new
+variable** (the `report` rate of 10 an hour and the four report settings were already there). It adds the endpoint
+`POST /api/v1/posts/{id}/report/`, fills `reported_by_me` in every post, adds the **flag button** and the **report
+dialog**, and closes one gap in Part 7B: a post under review that was FALSE before the review can't be reposted.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 13 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 9**: the variables and functions you set in step 3 (`id`, `ada`, `bo`, `cy`, `dee`, `ed`, `fay`, `gus`, `hal`, `ivy`, `api`, `op1`, `fact1`, `mk`, `get`, `send`, and the helpers later steps add) only live in that one terminal. If you close it, redo step 3. | 1 to 9, 14 |
+| Window 3 (frontend) | `npm run dev` in `frontend`. Leave it running. | 10 to 13 |
+| Browser | Steps 10 to 13 | 10 to 13 |
+
+Things to know first:
+
+- Steps 3 to 9 talk to the API directly with `curl` (they need `jq`: `sudo apt install jq`). Steps 10 to 13 use the
+  browser. Step 3 makes nine accounts: `bo` writes the posts, five people (`ada`, `cy`, `ed`, `fay`, `gus`) each post
+  once and then report, `hal` is verified but has **never posted or commented**, `dee` is never verified, and `ivy`
+  is only there for the rate limit in step 9.
+- The API and page outputs below were recorded on Linux on 2026-10-10. The browser steps were checked the same
+  day with headless Chromium (screenshots at 1280 and 390 px) and Django Admin with a scripted browser, not by a
+  person at a keyboard. Ids, numbers in names, times and seconds differ on every run.
+- Nothing here sends an email: step 3 marks the accounts verified with a shell command, which stands in for
+  clicking the link (Part 2 shows the real flow). Steps 7 and 8 set a post's status or move a report's time the same
+  way, because the pipeline and the moderator tools that do it for real arrive in Parts 9 and 10.
+- **The numbers assume the default settings** (5 counting reports inside 24 hours, an account at least 24 hours old).
+  The backend seeds them from your own `backend/.env` the first time, so check yours before step 6:
+
+  ```bash
+  python manage.py shell -c "from apps.core.services import get_platform_settings as g; c = g(); print(c.report_threshold, c.report_window_hours, c.report_min_account_age_hours)" | tail -1
+  ```
+
+  It should print `5 24 24`. If not, the counts in steps 6 and 7 shift by the difference.
+- **What Part 8 does and doesn't show:** a report is private and final (one per person and post, for life). It
+  **counts toward the threshold** only if the account is at least 24 hours old, or the person has already taken part
+  (a post that isn't removed or a comment that isn't hidden; posts and comments they deleted themselves still count).
+  When 5 counting reports arrive inside 24 hours the post goes to **UNDER REVIEW** but stays visible; nothing is
+  removed automatically. What moderators then do (Mark FALSE, Dismiss, Remove) is Part 10, the fact-check that gives
+  a post a label is Part 9, the credibility credit for a good report is 11B and the notification to the author is 13.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies the new migration,
+confirms there is no further one, then runs the whole backend test suite, the new tests, the linter and the
+formatter check.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                            # Applying reports.0001_initial... OK
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 2066 passed
+python -m pytest apps/reports apps/pipeline -q      # 182 passed
+ruff check . ; ruff format --check .                # All checks passed! / 181 files already formatted
+```
+
+**You should see:** `Applying reports.0001_initial... OK` (nothing to apply the second time), `No changes detected` and
+`System check identified no issues (0 silenced).`, then the full run ends with `2066 passed`, the new apps' run with
+`182 passed`, and the last line pair is `All checks passed!` and `181 files already formatted`. (Counts may grow
+later; what matters is that nothing fails.)
+
+- The 182 new tests: `apps/pipeline/tests/test_routing.py` (45: every `merge_flag` pair, `enter_review` from every
+  status, `apply_report_threshold` below, at and above the threshold, a removed post, an appeal), and in
+  `apps/reports/tests/`: `test_models.py` (12: the unique pair, the five named checks, cascades),
+  `test_counting.py` (23: the age rule at its exact edge, a young account with each kind of post and comment, deleted
+  ones counting and moderated ones not), `test_threshold.py` (36: the report that reaches the threshold, every
+  status it starts from, the window at its exact edge, dismissed and non-counting reports, every refusal),
+  `test_races.py` (6: real threads: two simultaneous reports by one person make one, six people are all counted, a report
+  waits for a concurrent delete or removal and is then a 404, and two reports waiting behind a held row lock still reach
+  the threshold), `test_api_report.py` (44, including the real 10-an-hour limit), `test_reported_by_me.py` (8),
+  `test_admin.py` (6) and `test_no_network.py` (2).
+- Some more in `apps/social/tests/` (the new repost refusal) and `test_engagement_counts.py` (`reported_by_me` is
+  read strictly like the other counts).
+- `PostQuerySet.for_list(viewer)` now also tells you whether you reported each post, in the same query; every list
+  keeps its query count.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 117 files, 1580 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 38 passed
+CI=1 npm run test:e2e                               # 38 passed (against the production build)
+cd ../backend                                       # back to backend/ for steps 3 to 9
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  117 passed (117)` and `Tests  1580 passed (1580)`. `npm run build` lists the same routes as in Part 7B
+(Part 8 adds no route). Each E2E run ends with `38 passed`: the 36 earlier tests and 2 new ones in
+`e2e/social.spec.ts` (one earlier phone test now checks five actions).
+
+- The new E2E tests reuse the two people that file already signs up (allauth limits sign-ups to 20 a minute per
+  address and the rest of the suite already uses most of that), so Part 8 adds **no** sign-up. A third person's post and
+  the reports that bring it one short of the threshold are made straight in the database (`seedReports()` in
+  `e2e/helpers.ts`, through the backend's own report service). The tests are: the form checks itself ("Choose a
+  reason.", then "Tell us what's wrong." for "Something else"), the report is sent, the flag turns into "You reported
+  this" and keeps focus, a reload shows the post UNDER REVIEW with its text still there, and the post page agrees; and
+  no Report on your own post, with a visitor's flag a link to log in.
+
+#### Step 3: Start the servers and make nine accounts and posts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 9.**
+
+**What this does:** Windows 1 and 3 run the two servers. In window 2 you sign up nine accounts through the API and
+mark eight of them verified (`dee` stays unverified), then `bo` posts an opinion and a fact with a DOI, and five
+people each post an opinion (so their later reports count: a brand-new account with no activity doesn't count, step 7).
+The helpers `mk` (make a post, print its id), `send` (any request, printing the status code and then the answer) and
+`get` (the same for a GET) are used by every later step.
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```bash
+cd frontend                                         # from the repo root
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend` with the venv active: steps 1 and 2 leave you there; needs `jq`). If you opened a new
+terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the addresses are new each run
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+signup() { jq -nc --arg e "$1" --arg u "$2" '{email: $e, username: $u, password: "correct-horse-battery-42", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/signup | jq -r .meta.access_token; }
+ada=$(signup "part8-ada-$id@example.test" "part8_ada_$id")      # $ada = ada's login token (reports, and the first reporter)
+bo=$(signup "part8-bo-$id@example.test" "part8_bo_$id")         # $bo = bo's login token (the author of the posts)
+cy=$(signup "part8-cy-$id@example.test" "part8_cy_$id")         # $cy .. $gus = four more people who report
+dee=$(signup "part8-dee-$id@example.test" "part8_dee_$id")      # $dee = never verified
+ed=$(signup "part8-ed-$id@example.test" "part8_ed_$id")
+fay=$(signup "part8-fay-$id@example.test" "part8_fay_$id")
+gus=$(signup "part8-gus-$id@example.test" "part8_gus_$id")
+hal=$(signup "part8-hal-$id@example.test" "part8_hal_$id")      # $hal = verified, but has never posted or commented
+ivy=$(signup "part8-ivy-$id@example.test" "part8_ivy_$id")      # $ivy = only used for the rate limit in step 9
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part8-', email__endswith='$id@example.test').exclude(username='part8_dee_$id').update(is_email_verified=True), 'accounts marked verified')" | tail -1
+api=http://localhost:8000/api/v1
+mk() { curl -s -H "Authorization: Bearer $1" -H "Content-Type: application/json" --data-binary "$2" $api/posts/ | jq -r .id; }   # mk <token> <json>: makes a post, prints its id
+get() { local out; out=$(curl -s -w '\n%{http_code}' ${2:+-H "Authorization: Bearer $2"} "$api$1"); printf '%s  ' "${out##*$'\n'}"; printf '%s' "${out%$'\n'*}" | jq -c "${3:-.}"; }   # get <path> [token] [jq filter]: prints the status code, then the answer
+send() { local out; out=$(curl -s -w '\n%{http_code}' -X "$1" ${3:+-H "Authorization: Bearer $3"} ${4:+-H "Content-Type: application/json" --data-binary "$4"} "$api$2"); printf '%s  %s\n' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | jq -c "${5:-.}" 2>/dev/null)"; }   # send <METHOD> <path> [token] [json body] [jq filter]: prints the status code, then the answer
+op1=$(mk "$bo" '{"content":"I think the new tram line will change how the city moves.","post_type":"opinion"}')
+fact1=$(mk "$bo" '{"content":"Solar capacity grew by roughly 30% worldwide last year.","post_type":"fact","sources":["doi:10.1038/s41558-024-02102"]}')
+for t in "$ada" "$cy" "$ed" "$fay" "$gus"; do mk "$t" '{"content":"I enjoy the rain.","post_type":"opinion"}' > /dev/null; done   # five people who have taken part
+echo ${ada:0:10} ${bo:0:10} ${hal:0:10}                # three prefixes, not an empty line
+echo "op1=$op1"; echo "fact1=$fact1"                    # two ids, not empty
+```
+
+**You should see** (the number in the names is your `id`, and the ids differ):
+
+```text
+8 accounts marked verified
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+op1=1b699450-7e9d-44ea-a24c-6a991dbb282a
+fact1=9ed9ca08-f00a-416b-bee5-856a3bfd45d6
+```
+
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet. Nine sign-ups fit.
+
+**If it differs:** an empty token or an `id` of `null` means the sign-up or the post failed: `runserver` isn't
+running, `jq` is missing, or you signed up more than 20 times in a minute. Fix that and run this step again
+from `id=$(date +%H%M%S)`.
+
+#### Step 4: Report a post, and everything that is refused
+
+**Where:** Terminal window 2 (the same terminal as step 3).
+
+**What this does:** Reports a post through `POST /api/v1/posts/{id}/report/` and tries every refusal: one report per
+person, a login, a verified email, your own post, a post that isn't there, and the three ways the body can be wrong.
+
+```bash
+report() { send POST /posts/$1/report/ "$2" "$3"; }   # report <post id> <token> <json body>
+report $op1 "$ada" '{"reason":"inaccurate"}'                  # 1: ada's first report is 201
+report $op1 "$ada" '{"reason":"spam"}'                        # 2: the same person again: 409, for life
+report $op1 "" '{"reason":"spam"}'                            # 3: nobody logged in
+report $op1 "$dee" '{"reason":"spam"}'                        # 4: an unverified email
+report $op1 "$bo" '{"reason":"spam"}'                         # 5: bo can't report his own post
+report 00000000-0000-4000-8000-000000000000 "$hal" '{"reason":"spam"}'   # 6: no such post
+report not-a-uuid "$hal" '{"reason":"spam"}'                  # 7: not even an id
+report $op1 "$hal" '{}'                                       # 8: no reason
+report $op1 "$hal" '{"reason":"nonsense"}'                    # 9: not one of the five
+report $op1 "$hal" '{"reason":"other"}'                       # 10: "something else" needs words
+report $op1 "$hal" '{"reason":"other","details":"   "}'       # 11: and spaces are not words
+report $op1 "$hal" "$(jq -nc --arg d "$(printf 'x%.0s' $(seq 501))" '{reason:"other",details:$d}')"   # 12: 501 characters
+report $op1 "$cy" '{"reason":"other","details":"  It makes a claim about me that is not true.  "}'      # 13: cy's report, with details: 201
+```
+
+**You should see** (thirteen commands, thirteen answers):
+
+```text
+201  {"reported":true}
+409  {"detail":"You already reported this post.","code":"already_reported"}
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+403  {"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}
+403  {"detail":"You can't report your own post.","code":"cannot_report_own"}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+400  {"reason":["Choose a reason."]}
+400  {"reason":["Choose a reason."]}
+400  {"details":["Tell us what's wrong."]}
+400  {"details":["Tell us what's wrong."]}
+400  {"details":["Keep it to 500 characters."]}
+201  {"reported":true}
+```
+
+- A report is always the same `201 {"reported":true}`: the answer never says whether it sent the post to review.
+- The second report by `ada` is `409`, and would be even if a moderator had dismissed her first one: one report
+  per person and post, **for life**.
+- Your own post is `403` (`cannot_report_own`); a removed or deleted post is the plain `404` of a post that never
+  existed, **its author included**.
+- Missing, `null` or unknown reasons all say "Choose a reason."; "Something else" needs words (`null`, empty and
+  spaces don't count); details are trimmed and counted in characters, so an emoji is one.
+- A 401 or an unverified email doesn't use up the allowance of 10 reports an hour (step 9); every other answer does,
+  a 400 or a 409 included.
+
+#### Step 5: `reported_by_me`, and what stays private
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads the post as the person who reported it, as its author, as another person and as a
+visitor, then checks that nothing else about reports shows in the post.
+
+```bash
+get /posts/$op1/ "$ada" '{reported_by_me}'            # 1: ada reported it: true
+get /posts/$op1/ "$bo" '{reported_by_me}'             # 2: the author: false
+get /posts/$op1/ "" '{reported_by_me}'                # 3: a visitor: false
+get /posts/ "$cy" '[.results[].post | select(.id == "'$op1'") | .reported_by_me]'   # 4: in the Recent list, for cy: true
+get /posts/ "$ed" '[.results[].post | select(.id == "'$op1'") | .reported_by_me]'   # 5: in the same list, for ed (who has not reported): false
+get /posts/$op1/ "$bo" 'keys | map(select(test("report|flag")))'                    # 6: nothing about reports leaks except your own flag
+```
+
+**You should see:**
+
+```text
+200  {"reported_by_me":true}
+200  {"reported_by_me":false}
+200  {"reported_by_me":false}
+200  [true]
+200  [false]
+200  ["reported_by_me"]
+```
+
+- Only the person who reported sees `true` (1, 4); the author, someone else and a visitor see `false`. It is the
+  same flag in Recent, the Following feed, a profile's posts, your bookmarks and the post page.
+- The post has no report count, no reasons and no reporter: the only key that mentions reports is your own flag (6).
+
+#### Step 6: Five counting reports send a post to review, and it stays visible
+
+**Where:** Terminal window 2.
+
+**What this does:** Adds three more reports to the tram post (it has two from step 4) and watches its status after
+each stage. The `state` helper prints the post's status, why it is under review, what it was before, and the lifetime
+report counter.
+
+```bash
+state() { python manage.py shell -c "from apps.posts.models import Post; p = Post.objects.get(pk='$1'); print(p.status, p.flagged_reason, p.pre_review_status, 'report_count=%d' % p.report_count)" | tail -1; }   # state <post id>
+state $op1                                            # 1: two reports so far (ada and cy)
+report $op1 "$ed" '{"reason":"misleading"}'           # 2: the third
+report $op1 "$fay" '{"reason":"spam"}'                # 3: the fourth
+state $op1                                            # 4: still published
+report $op1 "$gus" '{"reason":"harassment"}'          # 5: the fifth: the same answer as any other report
+state $op1                                            # 6: now under review
+get /posts/$op1/ "" '{status, content}'               # 7: but it is still visible, with its text, to a visitor
+get /posts/ "" '[.results[].post | select(.id == "'$op1'") | .status]'   # 8: and still in Recent
+```
+
+**You should see:**
+
+```text
+published None None report_count=2
+201  {"reported":true}
+201  {"reported":true}
+published None None report_count=4
+201  {"reported":true}
+under_review reports published report_count=5
+200  {"status":"under_review","content":"I think the new tram line will change how the city moves."}
+200  ["under_review"]
+```
+
+- Four counting reports leave the post as it was; the fifth moves it to `under_review` with `flagged_reason` `reports`
+  and remembers it was `published`, so a moderator's **Dismiss** (Part 10) can put it back.
+- The post **stays visible**: a visitor still reads its text (7) and it is still in Recent (8). Reports never hide
+  a post; a moderator decides.
+- `report_count` is the lifetime counter of every report, counting or not.
+
+#### Step 7: What counts
+
+**Where:** Terminal window 2.
+
+**What this does:** Shows the two rules that decide whether a report counts: a brand-new account with no activity
+doesn't, and a report older than the window stops counting. The `flags` helper lists each reporter and whether their
+report counts; `counting` counts the open, counting reports inside the window.
+
+```bash
+flags() { python manage.py shell -c "from apps.reports.models import Report; print(sorted((r.reporter.username.rsplit('_', 2)[1], r.counts_toward_threshold) for r in Report.objects.filter(post_id='$1')))" | tail -1; }   # flags <post id>
+counting() { python manage.py shell -c "import datetime; from django.utils import timezone; from apps.core.services import get_platform_settings; from apps.reports.models import Report; c = get_platform_settings(); n = Report.objects.filter(post_id='$1', status='open', counts_toward_threshold=True, created_at__gte=timezone.now() - datetime.timedelta(hours=c.report_window_hours)).count(); print('counting reports in the window:', n, 'of', Report.objects.filter(post_id='$1').count())" | tail -1; }   # counting <post id>
+report $fact1 "$hal" '{"reason":"inaccurate"}'        # 1: hal has never posted or commented, and the account is new
+flags $fact1                                          # 2: stored as "does not count"
+get /posts/$fact1/ "" '{status}'                      # 3: so it does not move the post
+hal1=$(mk "$hal" '{"content":"My first post.","post_type":"opinion"}')   # 4: hal takes part
+report $op1 "$hal" '{"reason":"spam"}'                # 5: now a report by hal counts
+flags $op1                                            # 6: six reports, all counting
+counting $op1                                         # 7: inside the 24-hour window
+python manage.py shell -c "import datetime; from django.utils import timezone; from apps.reports.models import Report; r = Report.objects.filter(post_id='$op1', reporter__username='part8_ada_$id').get(); r.created_at = timezone.now() - datetime.timedelta(hours=25); r.save(); print('one report moved 25 hours back')" | tail -1
+counting $op1                                         # 8: it fell out of the window
+```
+
+**You should see** (the order of the list is by name):
+
+```text
+201  {"reported":true}
+[('hal', False)]
+200  {"status":"pending"}
+201  {"reported":true}
+[('ada', True), ('cy', True), ('ed', True), ('fay', True), ('gus', True), ('hal', True)]
+counting reports in the window: 6 of 6
+one report moved 25 hours back
+counting reports in the window: 5 of 6
+```
+
+- `hal`'s first report is stored as "does not count" (2): the account is under 24 hours old and has no post or
+  comment, which is how a crowd of fresh sign-ups is kept from sending a post to review. It still adds to the
+  lifetime counter, but the post doesn't move (3).
+- After `hal` posts something (4) a report from `hal` counts (6). A post or comment the person **deleted** still counts;
+  one a moderator removed or hid doesn't.
+- A report older than 24 hours (the window, from the settings) stops counting toward the threshold (8). It stays on
+  record. Once a post is under review it stays there; only a moderator moves it back.
+
+#### Step 8: A FALSE post goes to review too, and can't be reposted meanwhile
+
+**Where:** Terminal window 2.
+
+**What this does:** Labels a fact FALSE (a shell command stands in for the moderator tools of Part 10), has five people
+report it, and then tries to repost it. Reports can move a post that is labelled FALSE to review, which shows
+UNDER REVIEW instead of FALSE; the page remembers what it was.
+
+```bash
+false1=$(mk "$bo" '{"content":"The moon is made of green cheese.","post_type":"fact"}')
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$false1').update(status='verified_false', verdict_source='moderator'), 'post marked FALSE')" | tail -1
+get /posts/$false1/ "" '{status}'                     # 1: labelled FALSE
+for t in "$ada" "$cy" "$ed" "$fay" "$gus"; do report $false1 "$t" '{"reason":"inaccurate"}'; done   # 2: five people report it
+get /posts/$false1/ "" '{status}'                     # 3: now UNDER REVIEW (it was FALSE until the reports)
+state $false1                                         # 4: and it remembers it was FALSE
+send POST /posts/$false1/repost/ "$hal"               # 5: it can't be reposted meanwhile, as before
+send POST /posts/$op1/repost/ "$hal"                  # 6: a post that was never FALSE can be reposted while under review
+```
+
+**You should see:**
+
+```text
+1 post marked FALSE
+200  {"status":"verified_false"}
+201  {"reported":true}
+201  {"reported":true}
+201  {"reported":true}
+201  {"reported":true}
+201  {"reported":true}
+200  {"status":"under_review"}
+under_review reports verified_false report_count=5
+409  {"detail":"Posts labelled FALSE can't be reposted.","code":"cannot_repost_false"}
+201  {"reposted":true}
+```
+
+- After the fifth report the post shows UNDER REVIEW (3), with `pre_review_status` `verified_false` (4): a moderator's
+  **Dismiss** puts the FALSE label back (Part 10).
+- It can't be reposted meanwhile (5): otherwise a group could report a FALSE post to reopen it to reposts. The check
+  is the same `409` `cannot_repost_false` as for a FALSE post. The page can't know this in advance (the earlier status
+  is never public), so the repost button answers with the toast "Posts labelled FALSE can't be reposted."
+- A post that was never FALSE can be reposted while it is under review (6), as in Part 7B.
+
+#### Step 9: Reporting is rate limited
+
+**Where:** Terminal window 2.
+
+**What this does:** Uses up `ivy`'s allowance of 10 reports an hour. `bo` makes 11 posts for her to report; the
+eleventh request is refused.
+
+```bash
+for i in $(seq 11); do ids[$i]=$(mk "$bo" "{\"content\":\"Post number $i for the limit.\",\"post_type\":\"opinion\"}"); done   # bo makes 11 posts
+for i in $(seq 10); do report ${ids[$i]} "$ivy" '{"reason":"spam"}'; done | sort | uniq -c    # 1: ivy reports ten of them
+report ${ids[11]} "$ivy" '{"reason":"spam"}'          # 2: the eleventh in an hour
+curl -si -X POST -H "Authorization: Bearer $ivy" -H "Content-Type: application/json" --data-binary '{"reason":"spam"}' $api/posts/${ids[11]}/report/ | grep -i '^retry-after'   # 3: how long to wait
+send POST /posts/${ids[11]}/like/ "$ivy"              # 4: likes have their own allowance
+```
+
+**You should see** (the seconds differ):
+
+```text
+     10 201  {"reported":true}
+429  {"detail":"Request was throttled. Expected available in 3600 seconds.","code":"throttled"}
+Retry-After: 3600
+201  {"liked":true}
+```
+
+- Ten reports went through, the eleventh was refused with `429`, `"code":"throttled"` and a `Retry-After` in seconds.
+- Likes have their own allowance (4), so a like still works. A 401 or an unverified email never counts; a 400 does
+  (the tests cover both, with the real 10 requests).
+
+#### Step 10: The flag and the report dialog
+
+**Where:** Browser, with `runserver` (window 1) and `npm run dev` (window 3) running. Log in at
+http://localhost:3000/login as `part8-cy-<id>@example.test` (use the `id` from step 3: `echo $id`) with the password
+`correct-horse-battery-42` (`cy` was verified in step 3).
+
+**What this does:** Looks at the flag on the cards and walks through the dialog, as a signed-in reader.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home | Every card ends with a hairline, then (left) a **heart**, a **speech bubble** and a **two-arrow repost glyph** with counts, and (right) a small **bookmark** glyph and a small **flag**. `cy`'s own post ("I enjoy the rain.") has **no flag**. The tram post (`cy` reported it in step 4) has a **filled blue flag**, and shows **UNDER REVIEW** with its text. |
+| Click the flag on "Solar capacity grew by roughly 30% worldwide last year." | A dialog **"Report this post"** with a small label "REPORT" above its title and a flag glyph beside it. It quotes the post in a grey card (author, handle, the claim in serif). Below: **"Why are you reporting this post?"** with five cards: **False or inaccurate**, **Missing context or misleading**, **Harassment or defamation**, **Spam or fake accounts**, **Something else**, each with one plain line. **None is chosen.** The first radio has the focus ring. Under them a **Details** box with "0 / 500 characters" and "Optional.". At the bottom a light-blue note **"What happens next"** (scroll the dialog if you can't see it), and in the footer a fingerprint and "Reports are private. The author is never told who reported.", **Cancel** and **Submit report**. |
+| Click **Submit report** with nothing chosen | A red **"Choose a reason."** under the five cards; the focus goes to the first one; nothing is sent. |
+| Choose **Something else** (the Details hint becomes "Required for “Something else”."), click **Submit report** | A red **"Tell us what's wrong."** under the box, and the focus goes to the box. Typing clears it. |
+| Type a sentence in Details and click **Submit report** | The button shows a spinner for a moment, then the dialog closes and a toast says **"Report sent. Thank you."** The flag is now **filled and blue**, and **keyboard focus is on it**. |
+| Click the filled flag | Nothing opens; a toast says "You already reported this post." Hover it: the tooltip says "You reported this". |
+| Reload the page | The flag is still filled. The post is **not** under review: it has two reports (`hal`'s and `cy`'s) and only one of them counts. |
+| Open a private window and go to /home (a visitor) | The same cards. The flag is a **link**: it points to `/login?next=%2Fp%2F<id>` and its tooltip says "Log in to report". |
+| In another window log in as `dee` (`part8-dee-<id>@example.test`, same password: never verified) and click a flag | It looks dimmed and no dialog opens; a toast says "Verify your email to report posts. Check your inbox for the link." |
+
+- Choosing a reason clears its error; the dialog can't be closed (Esc, ×, Cancel) while a report is being sent, and its
+  fields are locked meanwhile.
+- If the server refuses after the request (a 429 after ten reports, a network error), the dialog stays open with your
+  choices and says so, for example "You're reporting too fast. Try again in about 60 minutes." (the unit tests cover every
+  answer; step 9 shows the 429 itself).
+- Covered by `ReportModal.test.tsx` (every state above, each server answer, the locked form, the focus after a server error),
+  `ReportButton.test.tsx` (visitor, loading, own post, unverified, reported, resync from the server, the same button
+  keeping focus), `PostActions.test.tsx`, `FeedList.test.tsx` and the new E2E tests.
+- No dialog exists until a flag is clicked: a feed of 20 cards carries 20 flags and no dialog.
+
+#### Step 11: The post page, your own posts and the under-review badge
+
+**Where:** Browser, logged in as `cy`, with both servers running.
+
+**What this does:** Opens the post page, where the flag has a word, and checks the places where there must be no flag.
+
+| Do this | Expect |
+|---|---|
+| Click the tram post's text on /home | The post page. The claim card shows **UNDER REVIEW** and the full text. The action row reads **Like, Comments, Repost** with words (from 640 px up), the **bookmark** glyph, then a **filled blue flag with the word "Reported"**, and **Copy link**. |
+| Open the page of "Solar capacity grew …" (the post you reported in step 10) | The same row with **"Reported"**. |
+| Open a post that `cy` has not reported (for example the first "Post number 1 for the limit.") | The row ends with an outline flag and **"Report"**. Click it: the same dialog opens. Press **Esc**: it closes and focus returns to the flag. |
+| Open the page of `cy`'s own post (click "I enjoy the rain." on /home, the one by `cy`) | The row has **no flag and no Report**, only the other buttons and a **Delete** button. |
+
+- A removed post can't be made here (moderator removal arrives with Part 10); its page has no Report, covered by
+  `PostDetail.test.tsx` along with a Report for a reader, a log-in link for a visitor, "You reported this" from the
+  signed-in view and none on your own post. The E2E tests cover the rest.
+
+#### Step 12: A phone-sized window
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Checks the new parts at phone width. In Firefox or Chrome press `F12`, then the "responsive
+design" / device toolbar button, and set the width to 390.
+
+| Do this | Expect |
+|---|---|
+| Open /home | Each card's bar (heart, count, bubble, count, repost, count, and the bookmark and flag at the right) fits on one line under the claim. **No sideways scrolling.** |
+| Click a flag | The dialog fits the screen: its body scrolls, the footer (the privacy line, then **Cancel** and **Submit report**) stays at the bottom, and there is **no sideways scrolling**. A long claim in the quote is cut after three lines. |
+| Open a post's page | The action row holds the glyphs with their counts only (the words are hidden below 640 px), the bookmark, the flag and **Copy link**, wrapping to a second line if needed. |
+
+- Measured with headless Chromium at 390 px: 0 px of horizontal overflow on `/home`, in the open dialog and on a post's
+  page.
+
+#### Step 13: Django Admin: reports
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Opens the new admin list as a superuser. Reports are read-only: they are written only by the
+report service (it holds the row lock and works out whether the report counts); resolving them is Part 10.
+
+| URL / action | Expect |
+|---|---|
+| http://localhost:8000/admin/ (superuser from Part 0A; if it 404s, `ADMIN_URL_PATH` in `backend/.env` isn't `admin/`: use that path) | **Reports** is listed in the sidebar. |
+| http://localhost:8000/admin/reports/report/ | **Select report to view**: post, reporter, **Reason**, status, whether it counts toward the threshold and the time, newest first; a search box (reporter username) and filters **By status**, **By reason**, **By counts toward threshold** and **By created at**. The list **never shows the details text**. No **Add report** button. |
+| Click a report whose reason is **Something else** | Its page shows the details you typed, read-only: no **Save**, no **Delete**. http://localhost:8000/admin/reports/report/add/ answers **403**. |
+
+- A moderator gets no permissions at all until Part 10 (it also adds the review queue and **Dismiss**), so a moderator who opens
+  the list is refused (403) today; with only `view_report` they could read it but not change anything. Covered by
+  `test_admin.py`; the superuser clicks above were run with a scripted browser, not by a person.
+
+#### Step 14: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts, their posts, reposts, likes and reports (all go with the accounts). In window 2, in `backend/` with
+  the venv active:
+
+  ```bash
+  python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part8-').delete())" | tail -1
+  ```
+
+  After one clean run of steps 3 to 9 of this guide it prints `(62, {'social.Like': 1, 'social.Repost': 1, 'reports.Report': 22, 'account.EmailAddress': 9, 'posts.Post': 20, 'accounts.User': 9})`:
+  how many rows went in all, and per table (22 reports: 2 and then 3 on the tram post, 2 by `hal`, 5 on the FALSE post and
+  10 by `ivy`; 20 posts: 14 by `bo` (the tram post, the solar fact, the FALSE one and the 11 for the limit), `hal`'s one and
+  the five opinions; 1 repost, `hal`'s of the tram post; 1 like, `ivy`'s). Your count differs if you did the browser steps
+  (more reports) or made other accounts. Nothing else is touched.
+  (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
   wipes the whole local database, which is destructive.
 - No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
@@ -11606,6 +12132,563 @@ python manage.py shell -c "from apps.accounts.models import User; print(User.obj
   likes) or step 18 (one more account, with its permissions). Nothing else is touched.
   (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
   If you made a throwaway moderator for step 18, that goes too (same prefix).
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No secret was used or printed in this part: the only values in the commands are Cloudflare's public test
+  token and the throwaway password of the test accounts.
+
+### Part 8: Reporting & threshold
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
+`frontend\.env.local`. Part 8 adds **one migration** (`reports.0001_initial`: the reports table), **two new Django
+apps** (`apps/reports` and `apps/pipeline`, which holds only `routing.py` so far), **no dependency** and **no new
+variable** (the `report` rate of 10 an hour and the four report settings were already there). It adds the endpoint
+`POST /api/v1/posts/{id}/report/`, fills `reported_by_me` in every post, adds the **flag button** and the **report
+dialog**, and closes one gap in Part 7B: a post under review that was FALSE before the review can't be reposted.
+
+**Which terminal window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 13 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for steps 3 to 9**: the variables and functions you set in step 3 (`$id`, `$ada`, `$bo`, `$cy`, `$dee`, `$ed`, `$fay`, `$gus`, `$hal`, `$ivy`, `$api`, `$op1`, `$fact1`, `Mk`, `Send`, `Fetch`, and the helpers later steps add) only live in that one terminal. If you close it, redo step 3. | 1 to 9, 14 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 10 to 13 |
+| Browser | Steps 10 to 13 | 10 to 13 |
+
+Things to know first:
+
+- Steps 3 to 9 talk to the API directly with `curl.exe` (with `.exe`: in PowerShell 5.1 plain `curl` is a different command). Steps 10 to 13 use the
+  browser. Step 3 makes nine accounts: `bo` writes the posts, five people (`ada`, `cy`, `ed`, `fay`, `gus`) each post
+  once and then report, `hal` is verified but has **never posted or commented**, `dee` is never verified, and `ivy`
+  is only there for the rate limit in step 9.
+- **The PowerShell blocks below were not run on Windows.** The agent works on the Linux PC; it ran the bash twin of every command in the Linux guide on 2026-10-10, and the outputs below are those. The PowerShell commands follow the patterns Parts 1 to 7B proved on Windows (JSON written to a file and sent with `--data-binary "@file"`, `curl.exe`, no `&&`). If one behaves differently, tell the agent which.
+- The API and page outputs below were recorded on Linux on 2026-10-10. The browser steps were checked the same
+  day with headless Chromium (screenshots at 1280 and 390 px) and Django Admin with a scripted browser, not by a
+  person at a keyboard. Ids, numbers in names, times and seconds differ on every run.
+- Nothing here sends an email: step 3 marks the accounts verified with a shell command, which stands in for
+  clicking the link (Part 2 shows the real flow). Steps 7 and 8 set a post's status or move a report's time the same
+  way, because the pipeline and the moderator tools that do it for real arrive in Parts 9 and 10.
+- **The numbers assume the default settings** (5 counting reports inside 24 hours, an account at least 24 hours old).
+  The backend seeds them from your own `backend\.env` the first time, so check yours before step 6:
+
+  ```powershell
+  python manage.py shell -c "from apps.core.services import get_platform_settings as g; c = g(); print(c.report_threshold, c.report_window_hours, c.report_min_account_age_hours)" | Select-Object -Last 1
+  ```
+
+  It should print `5 24 24`. If not, the counts in steps 6 and 7 shift by the difference.
+- **What Part 8 does and doesn't show:** a report is private and final (one per person and post, for life). It
+  **counts toward the threshold** only if the account is at least 24 hours old, or the person has already taken part
+  (a post that isn't removed or a comment that isn't hidden; posts and comments they deleted themselves still count).
+  When 5 counting reports arrive inside 24 hours the post goes to **UNDER REVIEW** but stays visible; nothing is
+  removed automatically. What moderators then do (Mark FALSE, Dismiss, Remove) is Part 10, the fact-check that gives
+  a post a label is Part 9, the credibility credit for a good report is 11B and the notification to the author is 13.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies the new migration,
+confirms there is no further one, then runs the whole backend test suite, the new tests, the linter and the
+formatter check.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                            # Applying reports.0001_initial... OK
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 2066 passed
+python -m pytest apps/reports apps/pipeline -q      # 182 passed
+ruff check . ; ruff format --check .                # All checks passed! / 181 files already formatted
+```
+
+**You should see:** `Applying reports.0001_initial... OK` (nothing to apply the second time), `No changes detected` and
+`System check identified no issues (0 silenced).`, then the full run ends with `2066 passed`, the new apps' run with
+`182 passed`, and the last line pair is `All checks passed!` and `181 files already formatted`. (Counts may grow
+later; what matters is that nothing fails.)
+
+- The 182 new tests: `apps/pipeline/tests/test_routing.py` (45: every `merge_flag` pair, `enter_review` from every
+  status, `apply_report_threshold` below, at and above the threshold, a removed post, an appeal), and in
+  `apps/reports/tests/`: `test_models.py` (12: the unique pair, the five named checks, cascades),
+  `test_counting.py` (23: the age rule at its exact edge, a young account with each kind of post and comment, deleted
+  ones counting and moderated ones not), `test_threshold.py` (36: the report that reaches the threshold, every
+  status it starts from, the window at its exact edge, dismissed and non-counting reports, every refusal),
+  `test_races.py` (6: real threads: two simultaneous reports by one person make one, six people are all counted, a report
+  waits for a concurrent delete or removal and is then a 404, and two reports waiting behind a held row lock still reach
+  the threshold), `test_api_report.py` (44, including the real 10-an-hour limit), `test_reported_by_me.py` (8),
+  `test_admin.py` (6) and `test_no_network.py` (2).
+- Some more in `apps/social/tests/` (the new repost refusal) and `test_engagement_counts.py` (`reported_by_me` is
+  read strictly like the other counts).
+- `PostQuerySet.for_list(viewer)` now also tells you whether you reported each post, in the same query; every list
+  keeps its query count.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last two commands) starts Django and
+Next itself, so **no servers may be running on ports 3000 and 8000** (it reuses them if they are, with
+whatever settings they have).
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the
+end-to-end tests.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 117 files, 1580 tests passed
+npm run build
+npm run test:e2e                                    # 38 passed
+$env:CI = "1" ; npm run test:e2e ; Remove-Item Env:CI   # 38 passed (against the production build)
+cd ..\backend                                       # back to backend\ for steps 3 to 9
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with
+`lint:tokens OK (…)` and `All matched files use Prettier code style!`. `npm test` ends with
+`Test Files  117 passed (117)` and `Tests  1580 passed (1580)`. `npm run build` lists the same routes as in Part 7B
+(Part 8 adds no route). Each E2E run ends with `38 passed`: the 36 earlier tests and 2 new ones in
+`e2e/social.spec.ts` (one earlier phone test now checks five actions).
+
+- On Windows `npm run build` can't blank `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (PowerShell's `$env:NAME = ""` *deletes* the
+  variable), so a `frontend\.env.local` with your real client ID is baked into that build and the CI-mode run is less
+  representative than on Linux. The default run pins an empty client ID for both servers, so it is unaffected.
+- The new E2E tests reuse the two people that file already signs up (allauth limits sign-ups to 20 a minute per
+  address and the rest of the suite already uses most of that), so Part 8 adds **no** sign-up. A third person's post and
+  the reports that bring it one short of the threshold are made straight in the database (`seedReports()` in
+  `e2e/helpers.ts`, through the backend's own report service). The tests are: the form checks itself ("Choose a
+  reason.", then "Tell us what's wrong." for "Something else"), the report is sent, the flag turns into "You reported
+  this" and keeps focus, a reload shows the post UNDER REVIEW with its text still there, and the post page agrees; and
+  no Report on your own post, with a visitor's flag a link to log in.
+
+#### Step 3: Start the servers and make nine accounts and posts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 9.**
+
+**What this does:** Windows 1 and 3 run the two servers. In window 2 you sign up nine accounts through the API and
+mark eight of them verified (`dee` stays unverified), then `bo` posts an opinion and a fact with a DOI, and five
+people each post an opinion (so their later reports count: a brand-new account with no activity doesn't count, step 7).
+The helpers `mk` (make a post, print its id), `send` (any request, printing the status code and then the answer) and
+`get` (the same for a GET) are used by every later step.
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 and 2 leave you there). If you opened a new
+terminal, first run `cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the addresses are new each run
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+function Signup($email, $username) {
+@"
+{"email": "$email", "username": "$username", "password": "correct-horse-battery-42", "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-signup.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-signup.json" http://localhost:8000/api/auth/app/v1/auth/signup | ConvertFrom-Json).meta.access_token
+}
+$ada = Signup "part8-ada-$id@example.test" "part8_ada_$id"      # $ada = ada's login token (reports, and the first reporter)
+$bo = Signup "part8-bo-$id@example.test" "part8_bo_$id"         # $bo = bo's login token (the author of the posts)
+$cy = Signup "part8-cy-$id@example.test" "part8_cy_$id"         # $cy .. $gus = four more people who report
+$dee = Signup "part8-dee-$id@example.test" "part8_dee_$id"      # $dee = never verified
+$ed = Signup "part8-ed-$id@example.test" "part8_ed_$id"
+$fay = Signup "part8-fay-$id@example.test" "part8_fay_$id"
+$gus = Signup "part8-gus-$id@example.test" "part8_gus_$id"
+$hal = Signup "part8-hal-$id@example.test" "part8_hal_$id"      # $hal = verified, but has never posted or commented
+$ivy = Signup "part8-ivy-$id@example.test" "part8_ivy_$id"      # $ivy = only used for the rate limit in step 9
+python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part8-', email__endswith='$id@example.test').exclude(username='part8_dee_$id').update(is_email_verified=True), 'accounts marked verified')" | Select-Object -Last 1
+$api = 'http://localhost:8000/api/v1'
+# Mk <token> <json>: makes a post, prints its id
+function Mk($token, $json) {
+  $json | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+  (curl.exe -s -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | ConvertFrom-Json).id
+}
+# Send <METHOD> <path> [token] [json body] [fields]: prints the HTTP status, then the answer. `fields` is a list
+# of property names to keep, or a script block `{ param($r) ... }` that picks what to show from the answer.
+function Send($method, $path, $token, $json, $show) {
+  $a = @()
+  if ($token) { $a += '-H', "Authorization: Bearer $token" }
+  if ($json) {
+    $json | Set-Content -Encoding ascii $env:TEMP\rz-body.json
+    $a += '-H', 'Content-Type: application/json', '--data-binary', "@$env:TEMP\rz-body.json"
+  }
+  $out = curl.exe -s -w "`n%{http_code}" -X $method @a "$api$path"
+  $body = if ($out.Count -gt 1) { $out[0..($out.Count - 2)] -join '' } else { '' }
+  if ($show -and $body) {
+    $r = $body | ConvertFrom-Json
+    $shown = if ($show -is [scriptblock]) { & $show $r } else { $r | Select-Object $show }
+    $body = ConvertTo-Json -InputObject $shown -Depth 5 -Compress
+  }
+  "$($out[-1])  $body"
+}
+function Fetch($path, $token, $show) { Send GET $path $token $null $show }   # Fetch <path> [token] [fields]
+$op1 = Mk $bo '{"content":"I think the new tram line will change how the city moves.","post_type":"opinion"}'
+$fact1 = Mk $bo '{"content":"Solar capacity grew by roughly 30% worldwide last year.","post_type":"fact","sources":["doi:10.1038/s41558-024-02102"]}'
+foreach ($t in $ada, $cy, $ed, $fay, $gus) { Mk $t '{"content":"I enjoy the rain.","post_type":"opinion"}' | Out-Null }   # five people who have taken part
+"$($ada.Substring(0,10)) $($bo.Substring(0,10)) $($hal.Substring(0,10))"      # three prefixes, not an error
+"op1=$op1"; "fact1=$fact1"                                                    # two ids, not empty
+```
+
+**You should see** (the number in the names is your `id`, and the ids differ):
+
+```text
+8 accounts marked verified
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+op1=1b699450-7e9d-44ea-a24c-6a991dbb282a
+fact1=9ed9ca08-f00a-416b-bee5-856a3bfd45d6
+```
+
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it
+  needs internet. Nine sign-ups fit.
+
+**If it differs:** an empty token or an `id` of `null` means the sign-up or the post failed: `runserver` isn't
+running, or you signed up more than 20 times in a minute. Fix that and run this step again
+from `$id = Get-Date …`.
+
+#### Step 4: Report a post, and everything that is refused
+
+**Where:** Terminal window 2 (the same terminal as step 3).
+
+**What this does:** Reports a post through `POST /api/v1/posts/{id}/report/` and tries every refusal: one report per
+person, a login, a verified email, your own post, a post that isn't there, and the three ways the body can be wrong.
+
+```powershell
+function Report($post, $token, $json) { Send POST "/posts/$post/report/" $token $json }   # Report <post id> <token> <json body>
+Report $op1 $ada '{"reason":"inaccurate"}'                    # 1: ada's first report is 201
+Report $op1 $ada '{"reason":"spam"}'                          # 2: the same person again: 409, for life
+Report $op1 $null '{"reason":"spam"}'                         # 3: nobody logged in
+Report $op1 $dee '{"reason":"spam"}'                          # 4: an unverified email
+Report $op1 $bo '{"reason":"spam"}'                           # 5: bo can't report his own post
+Report 00000000-0000-4000-8000-000000000000 $hal '{"reason":"spam"}'   # 6: no such post
+Report not-a-uuid $hal '{"reason":"spam"}'                    # 7: not even an id
+Report $op1 $hal '{}'                                         # 8: no reason
+Report $op1 $hal '{"reason":"nonsense"}'                      # 9: not one of the five
+Report $op1 $hal '{"reason":"other"}'                         # 10: "something else" needs words
+Report $op1 $hal '{"reason":"other","details":"   "}'         # 11: and spaces are not words
+Report $op1 $hal ('{"reason":"other","details":"' + ('x' * 501) + '"}')   # 12: 501 characters
+Report $op1 $cy '{"reason":"other","details":"  It makes a claim about me that is not true.  "}'      # 13: cy's report, with details: 201
+```
+
+**You should see** (thirteen commands, thirteen answers):
+
+```text
+201  {"reported":true}
+409  {"detail":"You already reported this post.","code":"already_reported"}
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+403  {"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}
+403  {"detail":"You can't report your own post.","code":"cannot_report_own"}
+404  {"detail":"Not found.","code":"not_found"}
+404  {"detail":"Not found.","code":"not_found"}
+400  {"reason":["Choose a reason."]}
+400  {"reason":["Choose a reason."]}
+400  {"details":["Tell us what's wrong."]}
+400  {"details":["Tell us what's wrong."]}
+400  {"details":["Keep it to 500 characters."]}
+201  {"reported":true}
+```
+
+- A report is always the same `201 {"reported":true}`: the answer never says whether it sent the post to review.
+- The second report by `ada` is `409`, and would be even if a moderator had dismissed her first one: one report
+  per person and post, **for life**.
+- Your own post is `403` (`cannot_report_own`); a removed or deleted post is the plain `404` of a post that never
+  existed, **its author included**.
+- Missing, `null` or unknown reasons all say "Choose a reason."; "Something else" needs words (`null`, empty and
+  spaces don't count); details are trimmed and counted in characters, so an emoji is one.
+- A 401 or an unverified email doesn't use up the allowance of 10 reports an hour (step 9); every other answer does,
+  a 400 or a 409 included.
+
+#### Step 5: `reported_by_me`, and what stays private
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads the post as the person who reported it, as its author, as another person and as a
+visitor, then checks that nothing else about reports shows in the post.
+
+```powershell
+Fetch "/posts/$op1/" $ada 'reported_by_me'            # 1: ada reported it: true
+Fetch "/posts/$op1/" $bo 'reported_by_me'             # 2: the author: false
+Fetch "/posts/$op1/" $null 'reported_by_me'           # 3: a visitor: false
+Fetch "/posts/" $cy { param($r) @($r.results | Where-Object { $_.post.id -eq $op1 } | ForEach-Object { $_.post.reported_by_me }) }   # 4: in the Recent list, for cy: true
+Fetch "/posts/" $ed { param($r) @($r.results | Where-Object { $_.post.id -eq $op1 } | ForEach-Object { $_.post.reported_by_me }) }   # 5: in the same list, for ed (who has not reported): false
+Fetch "/posts/$op1/" $bo { param($r) @($r.PSObject.Properties.Name | Where-Object { $_ -match 'report|flag' }) }                      # 6: nothing about reports leaks except your own flag
+```
+
+**You should see:**
+
+```text
+200  {"reported_by_me":true}
+200  {"reported_by_me":false}
+200  {"reported_by_me":false}
+200  [true]
+200  [false]
+200  ["reported_by_me"]
+```
+
+- Only the person who reported sees `true` (1, 4); the author, someone else and a visitor see `false`. It is the
+  same flag in Recent, the Following feed, a profile's posts, your bookmarks and the post page.
+- The post has no report count, no reasons and no reporter: the only key that mentions reports is your own flag (6).
+
+#### Step 6: Five counting reports send a post to review, and it stays visible
+
+**Where:** Terminal window 2.
+
+**What this does:** Adds three more reports to the tram post (it has two from step 4) and watches its status after
+each stage. The `state` helper prints the post's status, why it is under review, what it was before, and the lifetime
+report counter.
+
+```powershell
+function State($post) { python manage.py shell -c "from apps.posts.models import Post; p = Post.objects.get(pk='$post'); print(p.status, p.flagged_reason, p.pre_review_status, 'report_count=%d' % p.report_count)" | Select-Object -Last 1 }   # State <post id>
+State $op1                                            # 1: two reports so far (ada and cy)
+Report $op1 $ed '{"reason":"misleading"}'             # 2: the third
+Report $op1 $fay '{"reason":"spam"}'                  # 3: the fourth
+State $op1                                            # 4: still published
+Report $op1 $gus '{"reason":"harassment"}'            # 5: the fifth: the same answer as any other report
+State $op1                                            # 6: now under review
+Fetch "/posts/$op1/" $null 'status', 'content'        # 7: but it is still visible, with its text, to a visitor
+Fetch "/posts/" $null { param($r) @($r.results | Where-Object { $_.post.id -eq $op1 } | ForEach-Object { $_.post.status }) }   # 8: and still in Recent
+```
+
+**You should see:**
+
+```text
+published None None report_count=2
+201  {"reported":true}
+201  {"reported":true}
+published None None report_count=4
+201  {"reported":true}
+under_review reports published report_count=5
+200  {"status":"under_review","content":"I think the new tram line will change how the city moves."}
+200  ["under_review"]
+```
+
+- Four counting reports leave the post as it was; the fifth moves it to `under_review` with `flagged_reason` `reports`
+  and remembers it was `published`, so a moderator's **Dismiss** (Part 10) can put it back.
+- The post **stays visible**: a visitor still reads its text (7) and it is still in Recent (8). Reports never hide
+  a post; a moderator decides.
+- `report_count` is the lifetime counter of every report, counting or not.
+
+#### Step 7: What counts
+
+**Where:** Terminal window 2.
+
+**What this does:** Shows the two rules that decide whether a report counts: a brand-new account with no activity
+doesn't, and a report older than the window stops counting. The `flags` helper lists each reporter and whether their
+report counts; `counting` counts the open, counting reports inside the window.
+
+```powershell
+function Flags($post) { python manage.py shell -c "from apps.reports.models import Report; print(sorted((r.reporter.username.rsplit('_', 2)[1], r.counts_toward_threshold) for r in Report.objects.filter(post_id='$post')))" | Select-Object -Last 1 }   # Flags <post id>
+function Counting($post) { python manage.py shell -c "import datetime; from django.utils import timezone; from apps.core.services import get_platform_settings; from apps.reports.models import Report; c = get_platform_settings(); n = Report.objects.filter(post_id='$post', status='open', counts_toward_threshold=True, created_at__gte=timezone.now() - datetime.timedelta(hours=c.report_window_hours)).count(); print('counting reports in the window:', n, 'of', Report.objects.filter(post_id='$post').count())" | Select-Object -Last 1 }   # Counting <post id>
+Report $fact1 $hal '{"reason":"inaccurate"}'          # 1: hal has never posted or commented, and the account is new
+Flags $fact1                                          # 2: stored as "does not count"
+Fetch "/posts/$fact1/" $null 'status'                 # 3: so it does not move the post
+$hal1 = Mk $hal '{"content":"My first post.","post_type":"opinion"}'   # 4: hal takes part
+Report $op1 $hal '{"reason":"spam"}'                  # 5: now a report by hal counts
+Flags $op1                                            # 6: six reports, all counting
+Counting $op1                                         # 7: inside the 24-hour window
+python manage.py shell -c "import datetime; from django.utils import timezone; from apps.reports.models import Report; r = Report.objects.filter(post_id='$op1', reporter__username='part8_ada_$id').get(); r.created_at = timezone.now() - datetime.timedelta(hours=25); r.save(); print('one report moved 25 hours back')" | Select-Object -Last 1
+Counting $op1                                         # 8: it fell out of the window
+```
+
+**You should see** (the order of the list is by name):
+
+```text
+201  {"reported":true}
+[('hal', False)]
+200  {"status":"pending"}
+201  {"reported":true}
+[('ada', True), ('cy', True), ('ed', True), ('fay', True), ('gus', True), ('hal', True)]
+counting reports in the window: 6 of 6
+one report moved 25 hours back
+counting reports in the window: 5 of 6
+```
+
+- `hal`'s first report is stored as "does not count" (2): the account is under 24 hours old and has no post or
+  comment, which is how a crowd of fresh sign-ups is kept from sending a post to review. It still adds to the
+  lifetime counter, but the post doesn't move (3).
+- After `hal` posts something (4) a report from `hal` counts (6). A post or comment the person **deleted** still counts;
+  one a moderator removed or hid doesn't.
+- A report older than 24 hours (the window, from the settings) stops counting toward the threshold (8). It stays on
+  record. Once a post is under review it stays there; only a moderator moves it back.
+
+#### Step 8: A FALSE post goes to review too, and can't be reposted meanwhile
+
+**Where:** Terminal window 2.
+
+**What this does:** Labels a fact FALSE (a shell command stands in for the moderator tools of Part 10), has five people
+report it, and then tries to repost it. Reports can move a post that is labelled FALSE to review, which shows
+UNDER REVIEW instead of FALSE; the page remembers what it was.
+
+```powershell
+$false1 = Mk $bo '{"content":"The moon is made of green cheese.","post_type":"fact"}'
+python manage.py shell -c "from apps.posts.models import Post; print(Post.objects.filter(pk='$false1').update(status='verified_false', verdict_source='moderator'), 'post marked FALSE')" | Select-Object -Last 1
+Fetch "/posts/$false1/" $null 'status'                # 1: labelled FALSE
+foreach ($t in $ada, $cy, $ed, $fay, $gus) { Report $false1 $t '{"reason":"inaccurate"}' }   # 2: five people report it
+Fetch "/posts/$false1/" $null 'status'                # 3: now UNDER REVIEW (it was FALSE until the reports)
+State $false1                                         # 4: and it remembers it was FALSE
+Send POST "/posts/$false1/repost/" $hal               # 5: it can't be reposted meanwhile, as before
+Send POST "/posts/$op1/repost/" $hal                  # 6: a post that was never FALSE can be reposted while under review
+```
+
+**You should see:**
+
+```text
+1 post marked FALSE
+200  {"status":"verified_false"}
+201  {"reported":true}
+201  {"reported":true}
+201  {"reported":true}
+201  {"reported":true}
+201  {"reported":true}
+200  {"status":"under_review"}
+under_review reports verified_false report_count=5
+409  {"detail":"Posts labelled FALSE can't be reposted.","code":"cannot_repost_false"}
+201  {"reposted":true}
+```
+
+- After the fifth report the post shows UNDER REVIEW (3), with `pre_review_status` `verified_false` (4): a moderator's
+  **Dismiss** puts the FALSE label back (Part 10).
+- It can't be reposted meanwhile (5): otherwise a group could report a FALSE post to reopen it to reposts. The check
+  is the same `409` `cannot_repost_false` as for a FALSE post. The page can't know this in advance (the earlier status
+  is never public), so the repost button answers with the toast "Posts labelled FALSE can't be reposted."
+- A post that was never FALSE can be reposted while it is under review (6), as in Part 7B.
+
+#### Step 9: Reporting is rate limited
+
+**Where:** Terminal window 2.
+
+**What this does:** Uses up `ivy`'s allowance of 10 reports an hour. `bo` makes 11 posts for her to report; the
+eleventh request is refused.
+
+```powershell
+$ids = 1..11 | ForEach-Object { Mk $bo "{`"content`":`"Post number $_ for the limit.`",`"post_type`":`"opinion`"}" }   # bo makes 11 posts
+1..10 | ForEach-Object { Report $ids[$_ - 1] $ivy '{"reason":"spam"}' } | Group-Object | ForEach-Object { "$($_.Count) $($_.Name)" }   # 1: ivy reports ten of them
+Report $ids[10] $ivy '{"reason":"spam"}'              # 2: the eleventh in an hour
+'{"reason":"spam"}' | Set-Content -Encoding ascii $env:TEMP\rz-report.json
+curl.exe -s -i -X POST -H "Authorization: Bearer $ivy" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-report.json" "$api/posts/$($ids[10])/report/" | Select-String -Pattern '^Retry-After'   # 3: how long to wait
+Send POST "/posts/$($ids[10])/like/" $ivy             # 4: likes have their own allowance
+```
+
+**You should see** (the seconds differ):
+
+```text
+     10 201  {"reported":true}
+429  {"detail":"Request was throttled. Expected available in 3600 seconds.","code":"throttled"}
+Retry-After: 3600
+201  {"liked":true}
+```
+
+- Ten reports went through, the eleventh was refused with `429`, `"code":"throttled"` and a `Retry-After` in seconds.
+- Likes have their own allowance (4), so a like still works. A 401 or an unverified email never counts; a 400 does
+  (the tests cover both, with the real 10 requests).
+
+#### Step 10: The flag and the report dialog
+
+**Where:** Browser, with `runserver` (window 1) and `npm run dev` (window 3) running. Log in at
+http://localhost:3000/login as `part8-cy-<id>@example.test` (use the `id` from step 3: type `$id`) with the password
+`correct-horse-battery-42` (`cy` was verified in step 3).
+
+**What this does:** Looks at the flag on the cards and walks through the dialog, as a signed-in reader.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/home | Every card ends with a hairline, then (left) a **heart**, a **speech bubble** and a **two-arrow repost glyph** with counts, and (right) a small **bookmark** glyph and a small **flag**. `cy`'s own post ("I enjoy the rain.") has **no flag**. The tram post (`cy` reported it in step 4) has a **filled blue flag**, and shows **UNDER REVIEW** with its text. |
+| Click the flag on "Solar capacity grew by roughly 30% worldwide last year." | A dialog **"Report this post"** with a small label "REPORT" above its title and a flag glyph beside it. It quotes the post in a grey card (author, handle, the claim in serif). Below: **"Why are you reporting this post?"** with five cards: **False or inaccurate**, **Missing context or misleading**, **Harassment or defamation**, **Spam or fake accounts**, **Something else**, each with one plain line. **None is chosen.** The first radio has the focus ring. Under them a **Details** box with "0 / 500 characters" and "Optional.". At the bottom a light-blue note **"What happens next"** (scroll the dialog if you can't see it), and in the footer a fingerprint and "Reports are private. The author is never told who reported.", **Cancel** and **Submit report**. |
+| Click **Submit report** with nothing chosen | A red **"Choose a reason."** under the five cards; the focus goes to the first one; nothing is sent. |
+| Choose **Something else** (the Details hint becomes "Required for “Something else”."), click **Submit report** | A red **"Tell us what's wrong."** under the box, and the focus goes to the box. Typing clears it. |
+| Type a sentence in Details and click **Submit report** | The button shows a spinner for a moment, then the dialog closes and a toast says **"Report sent. Thank you."** The flag is now **filled and blue**, and **keyboard focus is on it**. |
+| Click the filled flag | Nothing opens; a toast says "You already reported this post." Hover it: the tooltip says "You reported this". |
+| Reload the page | The flag is still filled. The post is **not** under review: it has two reports (`hal`'s and `cy`'s) and only one of them counts. |
+| Open a private window and go to /home (a visitor) | The same cards. The flag is a **link**: it points to `/login?next=%2Fp%2F<id>` and its tooltip says "Log in to report". |
+| In another window log in as `dee` (`part8-dee-<id>@example.test`, same password: never verified) and click a flag | It looks dimmed and no dialog opens; a toast says "Verify your email to report posts. Check your inbox for the link." |
+
+- Choosing a reason clears its error; the dialog can't be closed (Esc, ×, Cancel) while a report is being sent, and its
+  fields are locked meanwhile.
+- If the server refuses after the request (a 429 after ten reports, a network error), the dialog stays open with your
+  choices and says so, for example "You're reporting too fast. Try again in about 60 minutes." (the unit tests cover every
+  answer; step 9 shows the 429 itself).
+- Covered by `ReportModal.test.tsx` (every state above, each server answer, the locked form, the focus after a server error),
+  `ReportButton.test.tsx` (visitor, loading, own post, unverified, reported, resync from the server, the same button
+  keeping focus), `PostActions.test.tsx`, `FeedList.test.tsx` and the new E2E tests.
+- No dialog exists until a flag is clicked: a feed of 20 cards carries 20 flags and no dialog.
+
+#### Step 11: The post page, your own posts and the under-review badge
+
+**Where:** Browser, logged in as `cy`, with both servers running.
+
+**What this does:** Opens the post page, where the flag has a word, and checks the places where there must be no flag.
+
+| Do this | Expect |
+|---|---|
+| Click the tram post's text on /home | The post page. The claim card shows **UNDER REVIEW** and the full text. The action row reads **Like, Comments, Repost** with words (from 640 px up), the **bookmark** glyph, then a **filled blue flag with the word "Reported"**, and **Copy link**. |
+| Open the page of "Solar capacity grew …" (the post you reported in step 10) | The same row with **"Reported"**. |
+| Open a post that `cy` has not reported (for example the first "Post number 1 for the limit.") | The row ends with an outline flag and **"Report"**. Click it: the same dialog opens. Press **Esc**: it closes and focus returns to the flag. |
+| Open the page of `cy`'s own post (click "I enjoy the rain." on /home, the one by `cy`) | The row has **no flag and no Report**, only the other buttons and a **Delete** button. |
+
+- A removed post can't be made here (moderator removal arrives with Part 10); its page has no Report, covered by
+  `PostDetail.test.tsx` along with a Report for a reader, a log-in link for a visitor, "You reported this" from the
+  signed-in view and none on your own post. The E2E tests cover the rest.
+
+#### Step 12: A phone-sized window
+
+**Where:** Browser, logged in as `cy`.
+
+**What this does:** Checks the new parts at phone width. In Firefox or Chrome press `F12`, then the "responsive
+design" / device toolbar button, and set the width to 390.
+
+| Do this | Expect |
+|---|---|
+| Open /home | Each card's bar (heart, count, bubble, count, repost, count, and the bookmark and flag at the right) fits on one line under the claim. **No sideways scrolling.** |
+| Click a flag | The dialog fits the screen: its body scrolls, the footer (the privacy line, then **Cancel** and **Submit report**) stays at the bottom, and there is **no sideways scrolling**. A long claim in the quote is cut after three lines. |
+| Open a post's page | The action row holds the glyphs with their counts only (the words are hidden below 640 px), the bookmark, the flag and **Copy link**, wrapping to a second line if needed. |
+
+- Measured with headless Chromium at 390 px: 0 px of horizontal overflow on `/home`, in the open dialog and on a post's
+  page.
+
+#### Step 13: Django Admin: reports
+
+**Where:** Browser, while `runserver` is running in window 1.
+
+**What this does:** Opens the new admin list as a superuser. Reports are read-only: they are written only by the
+report service (it holds the row lock and works out whether the report counts); resolving them is Part 10.
+
+| URL / action | Expect |
+|---|---|
+| http://localhost:8000/admin/ (superuser from Part 0A; if it 404s, `ADMIN_URL_PATH` in `backend\.env` isn't `admin/`: use that path) | **Reports** is listed in the sidebar. |
+| http://localhost:8000/admin/reports/report/ | **Select report to view**: post, reporter, **Reason**, status, whether it counts toward the threshold and the time, newest first; a search box (reporter username) and filters **By status**, **By reason**, **By counts toward threshold** and **By created at**. The list **never shows the details text**. No **Add report** button. |
+| Click a report whose reason is **Something else** | Its page shows the details you typed, read-only: no **Save**, no **Delete**. http://localhost:8000/admin/reports/report/add/ answers **403**. |
+
+- A moderator gets no permissions at all until Part 10 (it also adds the review queue and **Dismiss**), so a moderator who opens
+  the list is refused (403) today; with only `view_report` they could read it but not change anything. Covered by
+  `test_admin.py`; the superuser clicks above were run with a scripted browser, not by a person.
+
+#### Step 14: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts, their posts, reposts, likes and reports (all go with the accounts). In window 2, in `backend\` with
+  the venv active:
+
+  ```powershell
+  python manage.py shell -c "from apps.accounts.models import User; print(User.objects.filter(email__startswith='part8-').delete())" | Select-Object -Last 1
+  ```
+
+  After one clean run of steps 3 to 9 of this guide it prints `(62, {'social.Like': 1, 'social.Repost': 1, 'reports.Report': 22, 'account.EmailAddress': 9, 'posts.Post': 20, 'accounts.User': 9})`:
+  how many rows went in all, and per table (22 reports: 2 and then 3 on the tram post, 2 by `hal`, 5 on the FALSE post and
+  10 by `ivy`; 20 posts: 14 by `bo` (the tram post, the solar fact, the FALSE one and the 11 for the limit), `hal`'s one and
+  the five opinions; 1 repost, `hal`'s of the tram post; 1 like, `ivy`'s). Your count differs if you did the browser steps
+  (more reports) or made other accounts. Nothing else is touched.
+  (The E2E tests' accounts stay in your local database, as in earlier parts: Django Admin → Users deletes them.)
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
   wipes the whole local database, which is destructive.
 - No secret was used or printed in this part: the only values in the commands are Cloudflare's public test

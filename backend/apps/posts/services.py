@@ -1,4 +1,4 @@
-"""Creating and deleting posts, and the fact quota (ARCHITECTURE §3, §4, §4b).
+"""Creating, deleting and reporting posts, and the fact quota (ARCHITECTURE §3, §4, §4b, §5).
 
 Only this module and `apps/moderation/services.py` (Part 10) change `Post.status`. There is no HTTP
 here: the views turn these domain errors into responses.
@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.core.services import get_platform_settings
+from apps.pipeline import routing
 from apps.posts.models import Post, PostStatus, PostType
 from apps.social.feed import bust_following_feed
 
@@ -146,3 +147,28 @@ def delete_post(*, post_id, user, now=None):
         post.deleted_at = now
         post.save(update_fields=["deleted_at", "updated_at"])
     return post
+
+
+def record_report(post, *, counting_reports, cfg, now):
+    """Count one more report on `post` and send it to review if the threshold is reached (§5).
+
+    `report_count` is the lifetime counter (every report, counting or not); `counting_reports` is
+    the windowed count of open, counting ones that `apps/reports/services.py` just worked out, the
+    new report included. The routing is the pure `apply_report_threshold`; this function owns the
+    write, so every status change stays in `posts` and `moderation`. **The caller must hold the
+    post's row lock inside `transaction.atomic()`:** two reports would otherwise both read the
+    same `report_count` and miss the threshold together. Returns True when the post entered
+    review on this call (Part 13 notifies its author then).
+    """
+    post.report_count += 1
+    entered = routing.apply_report_threshold(post, counting_reports, cfg, now)
+    post.save(
+        update_fields=[
+            "report_count",
+            "status",
+            "flagged_reason",
+            "pre_review_status",
+            "updated_at",
+        ]
+    )
+    return entered

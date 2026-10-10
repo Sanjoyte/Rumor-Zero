@@ -75,6 +75,18 @@ def test_a_false_post_is_409_cannot_repost_false(auth_client, ada):
     assert Repost.objects.count() == 0
 
 
+def test_a_post_under_review_after_being_false_is_409_cannot_repost_false(auth_client, ada):
+    reviewed = PostFactory(
+        moderator_verdict=True,
+        status=PostStatus.UNDER_REVIEW,
+        pre_review_status=PostStatus.VERIFIED_FALSE,
+    )
+    response = auth_client(ada).post(url(reviewed.pk))
+    assert response.status_code == 409
+    assert response.json()["code"] == "cannot_repost_false"
+    assert Repost.objects.count() == 0
+
+
 @pytest.mark.parametrize("trait", ["fact", "under_review", "verified_pipeline"])
 def test_every_other_visible_status_can_be_reposted(auth_client, ada, trait):
     assert auth_client(ada).post(url(PostFactory(**{trait: True}).pk)).status_code == 201

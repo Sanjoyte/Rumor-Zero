@@ -1,3 +1,4 @@
+import { ReportButton } from "@/features/reports/ReportButton";
 import type { Post } from "@/lib/api/types";
 import { cn } from "@/lib/cn";
 import { BookmarkButton } from "./BookmarkButton";
@@ -18,16 +19,21 @@ export interface PostActionsProps {
     | "reposted_by_me"
     | "repost_count"
     | "bookmarked_by_me"
+    | "reported_by_me"
+    | "author"
+    | "content"
+    | "post_type"
   >;
   /** "card" is the feed card's footer (Stitch b1); "detail" sits in the post page's action row. */
   variant?: "card" | "detail";
 }
 
 /**
- * The action bar: like, comment, repost, and the private bookmark (Stitch b1/b3). On a card the
- * bookmark sits at the right (b1's `justify-between`) and the comment link goes to the post's
- * discussion; on the post page everything is one row and the link jumps to the section below. A
- * repost item's buttons act on the original post (`post.id`): there is no id for the repost itself.
+ * The action bar: like, comment, repost, the private bookmark and the report flag (Stitch b1/b3).
+ * On a card the bookmark and the flag sit together at the right (b1's `justify-between`) and the
+ * comment link goes to the post's discussion; on the post page everything is one row and the link
+ * jumps to the section below. A repost item's buttons act on the original post (`post.id`): there
+ * is no id for the repost itself. Your own post has no flag.
  */
 export function PostActions({ post, variant = "card" }: PostActionsProps) {
   const detail = variant === "detail";
@@ -53,6 +59,7 @@ export function PostActions({ post, variant = "card" }: PostActionsProps) {
         showLabel={detail}
       />
       {detail && <BookmarkButton postId={post.id} initialBookmarked={post.bookmarked_by_me} />}
+      {detail && <ReportButton post={post} showLabel />}
     </div>
   );
   if (detail) {
@@ -70,7 +77,10 @@ export function PostActions({ post, variant = "card" }: PostActionsProps) {
       )}
     >
       {buttons}
-      <BookmarkButton postId={post.id} initialBookmarked={post.bookmarked_by_me} />
+      <div className="flex items-center gap-space-md">
+        <BookmarkButton postId={post.id} initialBookmarked={post.bookmarked_by_me} />
+        <ReportButton post={post} />
+      </div>
     </div>
   );
 }

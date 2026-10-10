@@ -6,18 +6,19 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **8 (Reporting & threshold), planned and approved** (2026-10-10); implementation not started. Parts 0A, 0B,
-  0D, 0C, 1, 2, 3, 4, 5, 6, 7 and 7B are done (7B committed by the user as `416fcae`). Part 1 CI is green (user-reported
-  2026-10-06); **Part 2, 3, 4, 5, 6, 7 and 7B CI have not been reported yet.**
+- **Part:** none. **Part 8 (Reporting & threshold) is done** (2026-10-10; built from the approved plan; every required
+  test and check green; `task.md` updated). Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B and 8 are done (7B committed by
+  the user as `416fcae`, the Part 8 plan as `466c095`). Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6,
+  7, 7B and 8 CI have not been reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after saving the Part 8 plan; no Part 8 code exists yet).
-- **Phase:** planned and approved; the plan file and this file are uncommitted.
+- **Owner:** none (Claude stopped after finishing Part 8; Part 9 is not started).
+- **Phase:** done, uncommitted. The user reviews and commits.
 - **Approved plan:**
-  [`docs/agents/plans/part-8-reporting-threshold.md`](plans/part-8-reporting-threshold.md). **Read its appendix
-  first:** design-review findings that arrived after approval; two of them (A1, A2) need the user's answer before step 2.
+  [`docs/agents/plans/part-8-reporting-threshold.md`](plans/part-8-reporting-threshold.md) (status line now says
+  IMPLEMENTED; its appendix records the design-review findings that arrived after approval, **not adopted**)
 - **Previous plans:**
   - [`part-7b-bookmarks-reposts.md`](plans/part-7b-bookmarks-reposts.md), implemented 2026-10-10 (committed as `416fcae`);
   - [`part-7-likes-comments.md`](plans/part-7-likes-comments.md), implemented 2026-10-10 (committed as `c562e70`);
@@ -33,9 +34,48 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-10 by Claude (Opus 5.5), Part 8 planning.
+- **Last updated:** 2026-10-10 by Claude (Sonnet 5.5), Part 8 implementation.
 
 ## Completed checkpoints
+
+- 2026-10-10 (Claude, Sonnet 5.5): **Part 8 implemented** (uncommitted). Started from HEAD `466c095` ("Plan Part 8", committed
+  by the user), a clean tree that matched this file; Docker was already healthy, ports free. The `<ID>` in the brief was blank;
+  Part 8 was the only approved, unimplemented plan and the recorded next action.
+  - **Backend** (`backend/`):
+    - New app `apps/reports/`: `models.py` (`Report`, five named checks, `reports_post_created_idx`), `services.py` (`file_report`,
+      `counts_toward_threshold`, `counting_reports`), `serializers.py`, `exceptions.py` (`cannot_report_own`, `already_reported`),
+      `views.py` (`ReportView`), `urls.py`, read-only `admin.py`, `migrations/0001_initial.py`, `tests/` (8 files, 137 tests).
+    - New app `apps/pipeline/`: only `routing.py` (`merge_flag`, `enter_review`, `apply_report_threshold`) and `tests/test_routing.py` (45).
+    - Changed: `rumor_zero/{settings,urls}.py`, `apps/posts/services.py` (`record_report`), `apps/posts/serializers.py` (strict
+      `reported_by_me`), `apps/posts/emergency.py` (docstring), `apps/social/engagement.py` (`reported_by_me`),
+      `apps/social/services.py` (a post under review after FALSE can't be reposted), and three social test files.
+  - **Frontend** (`frontend/`):
+    - New `src/features/reports/`: `ReportButton`, `ReportModal`, `reasons`, `reports-api`, `messages` and a test for each.
+    - Changed: `features/social/PostActions` (the flag joins the card's right group and the post page's row),
+      `features/posts/PostDetail` (a comment), their tests, `FeedList.test`, `e2e/{helpers,social.spec}.ts` (+2 tests,
+      `seedReports`, one phone test now checks five actions).
+  - **Docs:** ARCHITECTURE §2/§3/§4/§4d/§5/§8/§9/§10, ANALYSIS c-40 (+ two component rows), STRUCTURE, MEMORY (2 entries), `task.md`
+    (criteria, deviations, both status spots), the plan's status line, and `docs/test-command.md`: a "Part 8" section in **both**
+    guides (14 steps each) and one number in its intro line; nothing else touched.
+  - One migration (`reports.0001_initial`), no new dependency, service or env variable; no env file was read or edited (the admin
+    path for the browser check was read by Django itself and never printed); `design/` untouched.
+  - **User decisions and defaults** are in `task.md` Part 8 and the plan. The plan's appendix (A1, A2) was **not adopted**: the
+    approved plan was built as written; A2 is a Part 9 follow-up.
+  - **Found and fixed on the way:** a server field error can't take focus while the fieldset is disabled (an effect now does it);
+    the test session's user id equals `makePost`'s default author, which hid the flag in tests until the post got another author;
+    the mutation run found three weak tests (a vacuous Escape test, an unasserted filled glyph, a pattern that didn't match), all
+    fixed with tests; the test helper that seeds report rows must also set `Post.report_count`.
+  - **Test-command notes:**
+    - The section is `### Part 8` inside each guide.
+    - The file has **no comment marker** at its bottom (as in Parts 3 to 7B): it ends with the last bullet of the Windows Part 8
+      section. (The brief asked to keep one; there is none to keep.)
+    - The Linux bash blocks of steps 3 to 9 were **extracted from the finished doc by script and run verbatim** against live Django;
+      their output was diffed against the doc's expected-output blocks (uuids and seconds normalised): **all seven steps matched**,
+      twice (the second run after the browser checks). The settings check printed `5 24 24`. The cleanup command printed
+      `(62, {'social.Like': 1, 'social.Repost': 1, 'reports.Report': 22, 'account.EmailAddress': 9, 'posts.Post': 20,
+      'accounts.User': 9})` after a bare run of steps 3 to 9. The browser steps 10 to 12 were checked row by row with headless
+      Chromium scripts (screenshots at 1280 and 390 px, 38 checks) and Django Admin (step 13) with a scripted browser, plus the E2E
+      suite, not by a person. The **PowerShell blocks were not run** (no PowerShell here).
 
 - 2026-10-10 (Claude, Opus 5.5): **Part 8 planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `416fcae` ("Implemented Part 7B…", committed by the user), a clean tree. (The older text of this
@@ -612,16 +652,51 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `416fcae` ("Implemented Part 7B: Bookmarks & reposts", committed by the user). **Uncommitted:** the new
-  `docs/agents/plans/part-8-reporting-threshold.md` and this file (`git status --short`).
-- Docker (Postgres 18 + Redis) is up and healthy; no dev server is running.
-- The local database has `social.0003_repost_bookmark` applied. The guide's `part7b-*` test accounts (and the throwaway
-  admin and moderator) with their posts, reposts, bookmarks and follows were deleted at the end; so were Part 7's; accounts from the
-  E2E runs (`fan_*`, `star_*`, `post_*`, `seed_*` (the new `seedPost()` helper's third authors), …) and their data remain (Django Admin → Users deletes them).
+- HEAD is `466c095` ("Plan Part 8", committed by the user). **Uncommitted:** the whole Part 8 implementation: 23 modified files
+  (this file included) and 3 new folders: `backend/apps/reports/`, `backend/apps/pipeline/` and `frontend/src/features/reports/`
+  (`git status --short`).
+- Docker (Postgres 18 + Redis) is up and healthy; no dev server is running (the ones started for the checks were stopped); ports
+  3000/8000 are free.
+- The local database has `reports.0001_initial` applied. The guide's `part8-*` accounts (and the scripted checks' `p8shot_*`
+  ones, with their posts, reports, reposts and likes) were deleted at the end; accounts from the E2E runs (`fan_*`, `star_*`,
+  `post_*`, `seed_*` and the new `rep_*` reporters made by `seedReports()`) and their data remain (Django Admin → Users deletes them).
 - Ignored artifacts from the checks: `backend/tmp/mail/*.log`, `frontend/test-results/`,
   `frontend/playwright-report/`, and a production build in `frontend/.next/` made with an empty Google client ID
   (the last `npm run build` before the CI-mode E2E runs). Scratch scripts and screenshots are in the session's
   scratchpad, not the repo.
+
+## Validation of Part 8 (2026-10-10)
+
+- **Backend** (`backend/`, venv, Postgres + Redis up), each exit 0:
+  - `python -m pytest` → **2066 passed** (was 1875); `pytest apps/reports apps/pipeline` → **182 passed**: `apps/pipeline/tests/test_routing` 45,
+    `apps/reports/tests/`: `test_models` 12, `test_counting` 23, `test_threshold` 36, `test_races` 6, `test_api_report` 44,
+    `test_reported_by_me` 8, `test_admin` 6, `test_no_network` 2; the rest are in `apps/social/tests/` (the new repost refusal and the
+    seventh strict attribute).
+  - `ruff check .` → "All checks passed!"; `ruff format --check .` → "181 files already formatted".
+  - `makemigrations --check --dry-run` → "No changes detected"; `manage.py check` → no issues; `sqlmigrate reports 0001` reviewed (the five
+    checks, the unique pair, `reports_post_created_idx`, deferrable foreign keys).
+  - **Mutation checks** (a rule removed by hand, a test must fail), **46, all caught on the first pass**: the row lock, the `visible`
+    filter (removed and deleted), the own and duplicate checks, each counting branch and its exclusions (removed posts, hidden and
+    deleted comments), the inclusive age and window edges, the window's missing upper bound, the `open` and counting filters, the
+    stored `created_at` and counting flag, `report_count`, each `update_fields` entry, each `merge_flag` rule, the removed guard, `>=`,
+    the "entered" return value, the throttle scope, the verified permission, 201, the other-needs-details and length rules, the
+    invalid-reason message, `reported_by_me`, both directions of the new repost condition, both error codes and the admin permissions.
+- **Frontend** (`frontend/`), each exit 0:
+  - `npm run lint`, `lint:tokens`, `typecheck`, `format:check` clean; `npm test` → **117 files, 1580 tests passed** (was 113 / 1510): `ReportModal` 25,
+    `ReportButton` 19, `reports-api` 2, `messages` 8, plus `PostActions`, `PostDetail` and `FeedList`.
+  - `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` lists the same routes as Part 7B (Part 8 adds none).
+  - `npm run test:e2e` → **38 passed** in dev mode and `CI=1 npm run test:e2e` → **38 passed** against the production build (the 36 earlier
+    tests and 2 new ones; one phone test now checks five actions).
+  - **Mutation checks, 36, all caught** (32 on the first pass; three survivors were weak tests and were fixed, then re-run, plus one
+    extra): no reason preselected, the reason, other-needs-details and length checks, trimming, the posted id, closing while sending, the
+    locked fieldset, Cancel and the busy button, `already` and `gone` outcomes, the focus after a server error and on open, both error
+    clears, the warning tone, the fact and opinion faces, the clamp, both own-post rules, the unverified block, the reported click, "gone
+    is not reported", the lazily built dialog, the resync from the server, the visitor link, the stretched-link layer, the reported
+    styling and filled glyph, the card and detail flags, and four `reportFailure` branches.
+- **Live checks:** `curl` against Django for steps 3 to 9 of the guide (the blocks run verbatim from the doc, outputs matched); headless
+  Chromium at 1280 and 390 px for the card, the dialog (empty, "Something else", success, the focus), the post page, a visitor, an
+  unverified account and the phone (0 px of horizontal overflow on `/home`, in the open dialog and on a post page); Django Admin as a
+  throwaway superuser (list, filters, search, the read-only detail page, add is 403), deleted afterwards.
 
 ## Validation of Part 7B (2026-10-10)
 
@@ -1038,21 +1113,20 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-**Implement Part 8 from the approved plan** ([`plans/part-8-reporting-threshold.md`](plans/part-8-reporting-threshold.md)).
-
-- Fresh session; first `git status` and `docker compose ps` (start the containers with `docker compose up -d` if they are
-  down), and check that this file matches the tree.
-- Read the plan's **appendix** before coding and ask the user about **A1** (`enter_review` refusing a removed post) and **A2**
-  (decision 3 could reveal a hidden pipeline FALSE once Part 9 exists: a Part 9 follow-up, or narrow the condition now). The B
-  items only sharpen the plan.
-- Then follow the plan's steps 0 to 11 (Sonnet 5.5 · high).
-- Still open for the user: commit the plan, push so CI runs, and report the CI result (Part 2's to Part 7B's jobs); the
-  real-Google check from Part 3 (`docs/test-command.md` Part 3, steps 7 and 8).
+1. **User:** review the diff and the Part 8 section of `docs/test-command.md` (its Linux steps 3 to 9 take about two minutes; the
+   browser steps 10 to 12 need a Next dev server, and step 13 needs your own superuser from Part 0A). Then commit, and push so CI
+   runs; report the CI result (Part 2's to Part 8's jobs). Still open from Part 3: the real-Google check (`docs/test-command.md`
+   Part 3, steps 7 and 8).
+2. **Next part:** Part 9 (the fact-check pipeline stub and routing), from `task.md` (it depends on Part 8, done). Fresh session
+   (`/clear`), first `git status` and `docker compose ps` (start the containers with `docker compose up -d` if they are down).
+   Part 9 adds to `apps/pipeline/` (made in Part 8; `startapp` would refuse it) and must settle three things recorded in `task.md`
+   Part 8: the processor must also take under-review facts with `pre_review_status='pending'`, the late-FALSE-on-a-reported-post leak
+   through the repost refusal, and no post row lock across the 20 s call.
 
 ## Blockers or user decisions
 
-- **Open (Part 8, before step 2):** the plan appendix's A1 and A2 (design-review findings that arrived after approval).
-- User decisions for Part 8 (2026-10-10), to go into ARCHITECTURE §4d/§5/§9/§10 and ANALYSIS c-40 when built: the report action
+- None open. (The Part 8 plan appendix's A1 and A2 were not adopted: A1 is not needed, A2 is a Part 9 follow-up.)
+- User decisions for Part 8 (2026-10-10), now in ARCHITECTURE §4d/§5/§9/§10 and ANALYSIS c-40: the report action
   is a flag button (not an overflow menu); a young account's report counts with a non-removed post or a non-hidden comment
   (deleted ones count); FALSE posts go to review at the threshold as the docs say, and a post under review after being FALSE
   can't be reposted.
@@ -1079,6 +1153,31 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
   (createsuperuser + backfill migration); Turnstile fails closed; the `rz_session=1` hint cookie.
 - User decisions for 0C (2026-10-01), in ARCHITECTURE §10: the reduced logged-out shell; phones get a
   top bar plus five bottom tabs with an account sheet; marketing links only to existing pages.
+
+## Follow-ups noted during Part 8 (still open)
+
+- **Part 9:** `apps/pipeline/` exists (only `routing.py`); add `contract.py`, `clients.py`, `processor.py`, `apply_pipeline_result` and
+  `process_pending` to it. The processor selects `status='pending'` only, so a pending fact that reports sent to review would never be
+  checked: also take under-review facts with `pre_review_status='pending'` and no `pipeline_checked_at`. A decisive late FALSE on a
+  reported post sets `pre_review_status=verified_false` without the label ever being public, which `social.services.repost`'s new
+  "under review after FALSE" refusal would reveal: narrow that condition or accept it. The processor must not hold the post row lock
+  across its 20 s call (reports, reposts and deletes would wait behind it).
+- **Part 10:** moderators get `reports.view_report` (and the `PostAdmin` inline); Dismiss and the other actions set `resolved_at` (and
+  `resolved_by`) together with `status` (`reports_resolution_consistent`), and mark open reports `dismissed` or `actioned`; the queue
+  orders by `report_count`.
+- **Part 11:** a label appeal on a post under review whose `pre_review_status` is `verified_false` must not be allowed, or `merge_flag`
+  (which raises for an appeal onto a post under review for the pipeline, reports or both) needs a rule for it.
+- **Part 11B:** `report_upheld` reads `reports` (open at the moment a moderator removes or marks FALSE, at most 4 per reporter per 30
+  days); keep the lock order post first, then users (sorted): foreign keys are deferrable, so their `KEY SHARE` locks are taken at commit.
+- **Part 11C:** `apply_report_threshold` gets the `emergency_report_threshold` branch (`now` is already its parameter).
+- **Part 13:** notify the post's author when `posts.services.record_report` returns True (it entered review), in the same transaction;
+  `reports.services.file_report` is the single write path to hook into.
+- **Part 14:** export and account deletion include reports (a deleted reporter's rows cascade but `report_count` and the post's review
+  state stay).
+- **Part 16:** the `report` rate (10/h) is a guess; the dev gallery has three copies of the reason list (`StitchSections`,
+  `FormSections`, `reasons.ts`); `FollowButton`'s constant hint id (from Part 7B).
+- **Known limits:** a report made in one list isn't copied into another mounted list showing the same post (every route change refetches);
+  the post page shows "Report" for a moment and then "Reported" once the signed-in view lands, for someone who reported before.
 
 ## Follow-ups noted during Part 7B (still open)
 
