@@ -6,20 +6,24 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none. **Part 8 (Reporting & threshold) is done** (2026-10-10; built from the approved plan; every required
-  test and check green; `task.md` updated). Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B and 8 are done (7B committed by
-  the user as `416fcae`, the Part 8 plan as `466c095`). Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6,
-  7, 7B and 8 CI have not been reported yet.**
+- **Part:** **9 (Fact-check pipeline stub + routing): planned and approved (2026-10-11), not started.** Parts 0A, 0B, 0D,
+  0C, 1, 2, 3, 4, 5, 6, 7, 7B and 8 are done (Part 8 committed by the user as `0d8c331`). Part 1 CI is green
+  (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B and 8 CI have not been reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after finishing Part 8; Part 9 is not started).
-- **Phase:** done, uncommitted. The user reviews and commits.
+- **Owner:** none (Claude stopped after saving the approved Part 9 plan).
+- **Phase:** planned; the plan file and this file are uncommitted. No code, no `task.md` edit.
+- **Next action:** **Implement Part 9 from the approved plan**
+  ([`docs/agents/plans/part-9-pipeline-stub-routing.md`](plans/part-9-pipeline-stub-routing.md)), starting at its step 0
+  (verify `git status` and `docker compose ps`, then step 1). Implement with Opus 5.5 · high (`task.md`).
 - **Approved plan:**
-  [`docs/agents/plans/part-8-reporting-threshold.md`](plans/part-8-reporting-threshold.md) (status line now says
-  IMPLEMENTED; its appendix records the design-review findings that arrived after approval, **not adopted**)
+  [`docs/agents/plans/part-9-pipeline-stub-routing.md`](plans/part-9-pipeline-stub-routing.md) (approved 2026-10-11 by
+  the user, with two decisions and the listed defaults; not implemented yet)
 - **Previous plans:**
+  - [`part-8-reporting-threshold.md`](plans/part-8-reporting-threshold.md), implemented 2026-10-10 (committed as
+    `0d8c331`; its appendix A2 is resolved by Part 9's decision 1);
   - [`part-7b-bookmarks-reposts.md`](plans/part-7b-bookmarks-reposts.md), implemented 2026-10-10 (committed as `416fcae`);
   - [`part-7-likes-comments.md`](plans/part-7-likes-comments.md), implemented 2026-10-10 (committed as `c562e70`);
   - [`part-6-profiles-follows-following-feed.md`](plans/part-6-profiles-follows-following-feed.md),
@@ -34,9 +38,38 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-10 by Claude (Sonnet 5.5), Part 8 implementation.
+- **Last updated:** 2026-10-11 by Claude (Opus 5.5), Part 9 planning.
 
 ## Completed checkpoints
+
+- 2026-10-11 (Claude, Opus 5.5): **Part 9 planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `0d8c331` ("Implemented Part 8…", committed by the user), a clean tree. (The older text of
+    this file said Part 8 was uncommitted; the user committed it in between.) `docker compose ps`: Postgres and Redis up
+    and healthy; ports 3000 and 8000 free.
+  - **Dependency check:** Part 9 depends only on Part 8 (Done 2026-10-10); its chain (5, 4, 1, 0C, 0A/0B/0D, plus 2, 3,
+    6, 7, 7B) is Done. Open but not blocking: Part 3 criterion 4, and CI for Parts 2 to 8.
+  - **Research:** read-only only: two Explore agents (frontend verdict copy, polling and the E2E suite; backend test
+    helpers), direct reads of ARCHITECTURE §1–§4b/§6/§9–§13, ANALYSIS, STRUCTURE, ENV_GUIDE, `.env.example` and the code
+    the plan changes, and a Plan-agent design review that finished **before** approval (its findings are in the plan).
+  - **Changed this session:** only the new plan file and this file. No code, no setup command, no `task.md` edit, no
+    env file read, `design/` untouched.
+  - **User decisions (2026-10-11):**
+    - **A decisive FALSE that arrives while the post is already under review for reports goes to a moderator**
+      (`flagged_reason` → `both`, `pre_review_status` stays `pending`); a late TRUE follows the docs. This closes Part 8's
+      appendix A2 and changes one ARCHITECTURE §4 row.
+    - **The stub in production is recorded as a launch blocker for Part 17** (any author can write `#true`; untagged
+      facts get hash-chosen labels); the stub is built as §6 says.
+  - **Defaults approved with the plan** are in its "Defaults" section: claim → call → apply with a 5-minute lease and a
+    claim token (attempts counted at claim), one "awaiting a check" predicate for the queue and the apply guard,
+    `durable=True`, SKIP LOCKED for the sweeper and a waiting claim for the kick, an exception-safe kick (≤ 4 threads per
+    process), the tick's "first claim always, then a 25 s budget", `verdict_source` public only with `verified_*`, the
+    stdlib HTTP client, the E2E backend with the kick off and one post processed by `processPost`, no migration.
+  - **Found during planning** (all handled in the plan): `settings.py` reads no `PIPELINE_*` variable yet and nothing
+    turns the kick off in tests; `apps/reports/tests/test_no_network.py` bans network imports in every
+    `apps/pipeline/*.py` (the plan allows `clients.py` only); MEMORY's suggested selection for reported pending facts
+    would loop on a given-up post (the plan uses `under_review` + `reports` + `pre_review_status='pending'`); three E2E
+    tests break if the E2E backend checks facts inline; the review found that a second result could corrupt a finished
+    post, that the tick would process 0 posts over HTTP, and that a kick failing after commit would be a 500.
 
 - 2026-10-10 (Claude, Sonnet 5.5): **Part 8 implemented** (uncommitted). Started from HEAD `466c095` ("Plan Part 8", committed
   by the user), a clean tree that matched this file; Docker was already healthy, ports free. The `<ID>` in the brief was blank;
