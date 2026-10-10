@@ -6,19 +6,20 @@ read-only git output.
 
 ## Active work
 
-- **Part:** none. **Part 7B (Bookmarks & reposts) is done** (2026-10-10; built from the approved plan; every required
-  test and check green; `task.md` updated). Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7 and 7B are done. Part 1 CI is
-  green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7 and 7B CI have not run yet.**
+- **Part:** **8 (Reporting & threshold), planned and approved** (2026-10-10); implementation not started. Parts 0A, 0B,
+  0D, 0C, 1, 2, 3, 4, 5, 6, 7 and 7B are done (7B committed by the user as `416fcae`). Part 1 CI is green (user-reported
+  2026-10-06); **Part 2, 3, 4, 5, 6, 7 and 7B CI have not been reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after finishing Part 7B; Part 8 is not started).
-- **Phase:** done, uncommitted. The user reviews and commits.
+- **Owner:** none (Claude stopped after saving the Part 8 plan; no Part 8 code exists yet).
+- **Phase:** planned and approved; the plan file and this file are uncommitted.
 - **Approved plan:**
-  [`docs/agents/plans/part-7b-bookmarks-reposts.md`](plans/part-7b-bookmarks-reposts.md)
-  (status line now says IMPLEMENTED)
+  [`docs/agents/plans/part-8-reporting-threshold.md`](plans/part-8-reporting-threshold.md). **Read its appendix
+  first:** design-review findings that arrived after approval; two of them (A1, A2) need the user's answer before step 2.
 - **Previous plans:**
+  - [`part-7b-bookmarks-reposts.md`](plans/part-7b-bookmarks-reposts.md), implemented 2026-10-10 (committed as `416fcae`);
   - [`part-7-likes-comments.md`](plans/part-7-likes-comments.md), implemented 2026-10-10 (committed as `c562e70`);
   - [`part-6-profiles-follows-following-feed.md`](plans/part-6-profiles-follows-following-feed.md),
     implemented 2026-10-09 (committed as `15c1d8a`);
@@ -32,9 +33,38 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-10 by Claude (Sonnet 5.5), Part 7B implementation.
+- **Last updated:** 2026-10-10 by Claude (Opus 5.5), Part 8 planning.
 
 ## Completed checkpoints
+
+- 2026-10-10 (Claude, Opus 5.5): **Part 8 planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `416fcae` ("Implemented Part 7B…", committed by the user), a clean tree. (The older text of this
+    file said Part 7B was uncommitted; the user committed it in between.) `docker compose ps`: Postgres and Redis up and healthy.
+  - **Dependency check:** Part 8 depends only on Part 5 (Done 2026-10-09); its chain (4, 1, 0C, 0A/0B/0D, plus 2 and 3) is Done,
+    and so are 6, 7 and 7B. Open but not blocking: Part 3 criterion 4, and CI for Parts 2 to 7B.
+  - **Research:** read-only only: two Explore agents (backend patterns; frontend primitives, buttons, E2E), direct reads of
+    ARCHITECTURE §2/§3/§4/§4d/§5/§8/§9/§10, ANALYSIS b-5/c-2/c-3/c-5, STRUCTURE, DESIGN.md, Stitch d1/b1/b3 and the code the plan
+    changes. A Plan-agent design review finished **after** the user approved; its findings are the plan's appendix, not part of
+    the approved plan.
+  - **Changed this session:** only the new plan file and this file. No code, no setup command, no `task.md` edit, no env file
+    read, `design/` untouched.
+  - **User decisions (2026-10-10):**
+    - **Report is a flag button** in the card's action bar (beside the bookmark, Stitch b1) and "Report" in the post page's
+      action row (b3), not an overflow menu as `task.md` says (recorded as a deviation when the part is closed).
+    - **A young account's report counts** if it has a post that isn't removed or a comment that isn't hidden; deleted posts and
+      comments still count, moderated ones don't.
+    - **FALSE posts follow the docs** (UNDER REVIEW at the threshold, `pre_review_status=verified_false`), **and a post under
+      review after being FALSE can't be reposted** (409 `cannot_repost_false`; one condition in `social.services.repost`).
+  - **Defaults approved with the plan** are in its "Design" and "Defaults" sections: `FOR NO KEY UPDATE` on the post, the check
+    order (401, 403 `email_unverified`, 429, 404, 400, 404, 403 `cannot_report_own`, 409 `already_reported`), 201
+    `{"reported": true}`, permanent reports, no preselected reason, `apps/pipeline` made with `startapp` now (only
+    `routing.py`), `posts.services.record_report` as the status write, `reported_by_me` in `with_engagement`, read-only
+    `ReportAdmin`, the emergency threshold left to 11C.
+  - **Found during planning** (handled in the plan): `apps/pipeline` must come from `startapp` (`posts/emergency.py` says a bare
+    folder would make Part 9's refuse); `RadioCardGroup` and `Modal`'s `footerTone="plain"` already exist for d1; `Modal` returns
+    focus only from the dialog's `close` event, so the report modal is mounted on first open and kept; `pre_review_status` is
+    never public, so the page can't pre-disable the new repost refusal (the existing rollback toast covers it); Part 9's processor
+    selects only `pending` facts, so a pending fact that reports send to review would never be checked (Part 9 follow-up).
 
 - 2026-10-10 (Claude, Sonnet 5.5): **Part 7B implemented** (uncommitted). Started from HEAD `753c3ff` ("Plan Part 7B",
   committed by the user), a clean tree that matched this file; Docker was already healthy, ports free.
@@ -582,12 +612,9 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `753c3ff` ("Plan Part 7B", committed by the user). **Uncommitted:** the whole Part 7B implementation: 43 modified
-  files (this file included) and 25 new ones: `backend/apps/social/timeline.py`, the `0003` migration, 10 backend test files,
-  `frontend/src/features/bookmarks/`, `features/posts/feed-items{,.test}.ts` and 10 files in `frontend/src/features/social/`
-  (`git status --short`).
-- Docker (Postgres 18 + Redis) is up; no dev server is running (the ones started for the checks were stopped); ports
-  3000/8000 are free.
+- HEAD is `416fcae` ("Implemented Part 7B: Bookmarks & reposts", committed by the user). **Uncommitted:** the new
+  `docs/agents/plans/part-8-reporting-threshold.md` and this file (`git status --short`).
+- Docker (Postgres 18 + Redis) is up and healthy; no dev server is running.
 - The local database has `social.0003_repost_bookmark` applied. The guide's `part7b-*` test accounts (and the throwaway
   admin and moderator) with their posts, reposts, bookmarks and follows were deleted at the end; so were Part 7's; accounts from the
   E2E runs (`fan_*`, `star_*`, `post_*`, `seed_*` (the new `seedPost()` helper's third authors), …) and their data remain (Django Admin → Users deletes them).
@@ -1011,18 +1038,24 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-1. **User:** review the diff and the Part 7B section of `docs/test-command.md` (its Linux steps 3 to 13 take about six minutes, one
-   of them a 31-second wait; the browser steps 14 to 17 need a Next dev server, and step 18 needs your own superuser from Part 0A).
-   Then commit, and push so CI runs; report the CI result (Part 2's to Part 7B's jobs). Still open from Part 3: the real-Google check
-   (`docs/test-command.md` Part 3, steps 7 and 8).
-2. **Next part:** Part 8 (reporting and the threshold), from `task.md` (it depends on Part 5, done). Fresh session (`/clear`), first
-   `git status` and `docker compose ps` (start the containers with `docker compose up -d` if they are down). Part 8 must decide
-   whether `counts_toward_threshold` ("≥1 post or comment") counts a soft-deleted comment (the principle used for posts says it does,
-   see the Part 7 follow-ups), and it adds the flag button to the action bar (`PostActions`, right group beside the bookmark).
+**Implement Part 8 from the approved plan** ([`plans/part-8-reporting-threshold.md`](plans/part-8-reporting-threshold.md)).
+
+- Fresh session; first `git status` and `docker compose ps` (start the containers with `docker compose up -d` if they are
+  down), and check that this file matches the tree.
+- Read the plan's **appendix** before coding and ask the user about **A1** (`enter_review` refusing a removed post) and **A2**
+  (decision 3 could reveal a hidden pipeline FALSE once Part 9 exists: a Part 9 follow-up, or narrow the condition now). The B
+  items only sharpen the plan.
+- Then follow the plan's steps 0 to 11 (Sonnet 5.5 · high).
+- Still open for the user: commit the plan, push so CI runs, and report the CI result (Part 2's to Part 7B's jobs); the
+  real-Google check from Part 3 (`docs/test-command.md` Part 3, steps 7 and 8).
 
 ## Blockers or user decisions
 
-- None open.
+- **Open (Part 8, before step 2):** the plan appendix's A1 and A2 (design-review findings that arrived after approval).
+- User decisions for Part 8 (2026-10-10), to go into ARCHITECTURE §4d/§5/§9/§10 and ANALYSIS c-40 when built: the report action
+  is a flag button (not an overflow menu); a young account's report counts with a non-removed post or a non-hidden comment
+  (deleted ones count); FALSE posts go to review at the threshold as the docs say, and a post under review after being FALSE
+  can't be reposted.
 - User decisions for Part 7B (2026-10-10), now in ARCHITECTURE §4d/§8/§9/§10 and ANALYSIS c-39: `BookmarkAdmin` is
   superuser-only; a repost of a deleted or removed original can be undone (204, and Undo repost on your own unavailable card); the
   page hides later repeats of a post across the pages of a list; profile chips filter reposts by the original's type.
@@ -1050,7 +1083,7 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 ## Follow-ups noted during Part 7B (still open)
 
 - **Part 8:** the flag button joins the action bar's right group; decide whether a soft-deleted comment counts toward
-  `counts_toward_threshold` (Part 7's follow-up).
+  `counts_toward_threshold` (Part 7's follow-up). **Both settled in the Part 8 plan (2026-10-10).**
 - **Part 10:** moderators get no permission on `social.Bookmark` (and never will: it is superuser-only); `social.view_repost` is theirs to
   grant if wanted. The Hide/Unhide permission is Part 7's.
 - **Part 11B:** repost score events read `status_at_repost` (always one of `pending`, `published`, `verified_true`, `under_review`); an
@@ -1075,7 +1108,7 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
   gets the two buttons; the like button's local state means a repost made in one list isn't copied into another mounted
   list either (same limit, same repair: a refetch).
 - **Part 8:** decide whether `counts_toward_threshold` ("≥1 post or comment") counts a soft-deleted comment (the
-  principle used for posts and the fact quota says it does; MEMORY).
+  principle used for posts and the fact quota says it does; MEMORY). **Settled 2026-10-10: it does (hidden ones don't).**
 - **Part 10:** grant `social.change_comment` to the Moderators group (Hide/Unhide are already gated on it); the review
   queues skip deleted comments; `moderation_actions` has no comment kind, so Hide/Unhide stay in Django's admin log
   unless Part 10 adds one.
