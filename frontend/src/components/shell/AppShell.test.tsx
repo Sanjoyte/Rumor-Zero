@@ -144,6 +144,18 @@ describe("AppShell, logged in", () => {
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps Moderation out of the phone account sheet for people who aren't staff", () => {
+    // The sheet is a closed popover, so its links are hidden from the default role queries (the
+    // rail test above can't see them): look at its entries directly.
+    renderShell({ user, onLogout: vi.fn() });
+    const trigger = screen.getByRole("button", { name: "Account menu" });
+    const sheet = document.getElementById(trigger.getAttribute("popovertarget") ?? "");
+    const entries = within(sheet as HTMLElement).getAllByRole("listitem", { hidden: true });
+    expect(entries.map(textOf)).toEqual(["Bookmarks", "Settings", "Log out"]);
+    expect(screen.queryByRole("link", { name: /Moderation/, hidden: true })).toBeNull();
+    expect(document.body.textContent).not.toContain("secret-admin");
+  });
+
   it("has no Log out entry without a handler", () => {
     renderShell({ user });
     expect(screen.queryByRole("button", { name: "Log out", hidden: true })).toBeNull();

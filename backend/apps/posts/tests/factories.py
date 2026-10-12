@@ -26,6 +26,11 @@ class PostFactory(factory.django.DjangoModelFactory):
     post_type = PostType.OPINION
     status = PostStatus.PUBLISHED
     created_at = factory.LazyFunction(timezone.now)
+    # The database holds this to "set exactly while under review", so a post made under review
+    # gets the moment the queue's clock started (the post's own `created_at` unless given).
+    review_started_at = factory.LazyAttribute(
+        lambda post: post.created_at if post.status == PostStatus.UNDER_REVIEW else None
+    )
 
     class Params:
         fact = factory.Trait(post_type=PostType.FACT, status=PostStatus.PENDING)

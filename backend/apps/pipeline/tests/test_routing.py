@@ -1,6 +1,6 @@
 """The pure routing functions of ARCHITECTURE §4 (Part 8's half): no database, no clock."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -13,9 +13,12 @@ NOW = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)
 CFG = SimpleNamespace(report_threshold=5, emergency_report_threshold=2)
 
 
-def post(status, flagged_reason=None, pre_review_status=None):
+def post(status, flagged_reason=None, pre_review_status=None, review_started_at=None):
     return SimpleNamespace(
-        status=status, flagged_reason=flagged_reason, pre_review_status=pre_review_status
+        status=status,
+        flagged_reason=flagged_reason,
+        pre_review_status=pre_review_status,
+        review_started_at=review_started_at,
     )
 
 
@@ -71,10 +74,11 @@ def test_merge_flag_refuses_an_unknown_existing_value():
 )
 def test_entering_review_remembers_the_old_status(status):
     target = post(status)
-    enter_review(target, Flag.REPORTS)
+    enter_review(target, Flag.REPORTS, NOW)
     assert target.status == Status.UNDER_REVIEW
     assert target.pre_review_status == status
     assert target.flagged_reason == Flag.REPORTS
+    assert target.review_started_at == NOW  # the queue's clock starts
 
 
 @pytest.mark.parametrize(
@@ -88,18 +92,26 @@ def test_entering_review_remembers_the_old_status(status):
     ],
 )
 def test_entering_review_again_only_merges_the_reason(flag, expected):
-    target = post(Status.UNDER_REVIEW, flagged_reason=flag, pre_review_status=Status.PENDING)
-    enter_review(target, Flag.REPORTS)
+    started = NOW - timedelta(hours=3)
+    target = post(
+        Status.UNDER_REVIEW,
+        flagged_reason=flag,
+        pre_review_status=Status.PENDING,
+        review_started_at=started,
+    )
+    enter_review(target, Flag.REPORTS, NOW)
     assert target.status == Status.UNDER_REVIEW
     assert target.pre_review_status == Status.PENDING  # the status it came from is kept
     assert target.flagged_reason == expected
+    assert target.review_started_at == started  # a merge never restarts the wait
 
 
 def test_entering_review_for_the_pipeline_on_a_fresh_post():
     target = post(Status.PENDING)
-    enter_review(target, Flag.PIPELINE)
+    enter_review(target, Flag.PIPELINE, NOW)
     assert (target.status, target.flagged_reason) == (Status.UNDER_REVIEW, Flag.PIPELINE)
     assert target.pre_review_status == Status.PENDING
+    assert target.review_started_at == NOW
 
 
 # ---------- apply_report_threshold ----------
@@ -123,6 +135,7 @@ def test_at_or_above_the_threshold_the_post_enters_review(count):
     assert target.status == Status.UNDER_REVIEW
     assert target.flagged_reason == Flag.REPORTS
     assert target.pre_review_status == Status.VERIFIED_TRUE
+    assert target.review_started_at == NOW
 
 
 def test_the_threshold_is_read_from_the_settings():

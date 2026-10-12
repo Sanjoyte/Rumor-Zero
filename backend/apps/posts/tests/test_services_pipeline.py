@@ -53,7 +53,9 @@ def test_the_threshold_comes_from_the_platform_settings(pipeline_cfg):  # noqa: 
         post.pk, TRUE_95, claimed_attempts=1, now=timezone.now()
     )
     assert outcome == Outcome.ENTERED_REVIEW
-    assert Post.objects.get(pk=post.pk).flagged_reason == FlaggedReason.PIPELINE
+    after = Post.objects.get(pk=post.pk)
+    assert after.flagged_reason == FlaggedReason.PIPELINE
+    assert after.review_started_at is not None  # saved: the check demands it
 
 
 @pytest.mark.parametrize("token", [0, 2])
@@ -156,6 +158,7 @@ def test_the_last_failed_try_sends_the_post_to_review():
     assert (after.status, after.flagged_reason) == (PostStatus.UNDER_REVIEW, FlaggedReason.PIPELINE)
     assert after.pre_review_status == PostStatus.PENDING
     assert after.pipeline_next_attempt_at is None
+    assert after.review_started_at is not None
 
 
 def test_the_write_locks_the_post_row_with_for_no_key_update():

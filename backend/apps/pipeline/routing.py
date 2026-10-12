@@ -61,10 +61,11 @@ def merge_flag(existing, new):
     return FlaggedReason.BOTH
 
 
-def enter_review(post, reason):
+def enter_review(post, reason, now):
     """Send `post` to the moderators, remembering what it was so a dismissal can restore it.
 
-    Already under review: only the reason is merged (the status it came from is kept).
+    Entering starts the queue's clock (`review_started_at = now`). Already under review: only the
+    reason is merged (the status it came from, and how long it has waited, are kept).
     """
     if post.status == PostStatus.UNDER_REVIEW:
         post.flagged_reason = merge_flag(post.flagged_reason, reason)
@@ -72,6 +73,7 @@ def enter_review(post, reason):
         post.pre_review_status = post.status
         post.status = PostStatus.UNDER_REVIEW
         post.flagged_reason = reason
+        post.review_started_at = now
 
 
 def apply_report_threshold(post, counting_reports, cfg, now):
@@ -80,13 +82,13 @@ def apply_report_threshold(post, counting_reports, cfg, now):
     `counting_reports` is the windowed count of its open, counting reports, the new one included
     (§5). A removed post is never touched. A post that is already under review only has its
     reason merged. Returns True when the post **entered** review on this call (the moment Part 13
-    tells its author), False otherwise. `now` is unused until Part 11C, where an active emergency
-    uses `cfg.emergency_report_threshold` instead.
+    tells its author), False otherwise. `now` starts the queue's clock; Part 11C also uses it,
+    where an active emergency uses `cfg.emergency_report_threshold` instead.
     """
     if post.status == PostStatus.REMOVED or counting_reports < cfg.report_threshold:
         return False
     was_under_review = post.status == PostStatus.UNDER_REVIEW
-    enter_review(post, FlaggedReason.REPORTS)
+    enter_review(post, FlaggedReason.REPORTS, now)
     return not was_under_review
 
 
@@ -159,7 +161,7 @@ def apply_pipeline_result(post, result, cfg, now):
     )
     if post.status == PostStatus.PENDING:
         if not decisive:
-            enter_review(post, FlaggedReason.PIPELINE)
+            enter_review(post, FlaggedReason.PIPELINE, now)
             return Outcome.ENTERED_REVIEW
         post.status = (
             PostStatus.VERIFIED_TRUE
@@ -196,7 +198,7 @@ def apply_pipeline_failure(post, error, now):
         return Outcome.RETRY
     post.pipeline_next_attempt_at = None
     if post.status == PostStatus.PENDING:
-        enter_review(post, FlaggedReason.PIPELINE)
+        enter_review(post, FlaggedReason.PIPELINE, now)
         return Outcome.ENTERED_REVIEW
     post.flagged_reason = merge_flag(post.flagged_reason, FlaggedReason.PIPELINE)
     return Outcome.UPDATED_REVIEW

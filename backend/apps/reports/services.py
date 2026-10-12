@@ -98,3 +98,19 @@ def file_report(*, reporter, post_id, reason, details, now=None):
             post, counting_reports=counting_reports(post, cfg, now), cfg=cfg, now=now
         )
     return report
+
+
+def resolve_open_reports(post, *, status, moderator, now):
+    """Close `post`'s open reports as `dismissed` or `actioned` (ARCHITECTURE §4); returns how many.
+
+    One `UPDATE` sets the status, `resolved_by` and `resolved_at` together, as the database check
+    `reports_resolution_consistent` demands. Reports that are already resolved, and other posts',
+    are untouched. A resolved report never counts toward the threshold again. Called by the
+    moderation services inside their transaction with the post's row lock held, so a report that
+    arrives meanwhile waits and is filed afterwards. Report writes stay in this module.
+    """
+    if status not in (ReportStatus.DISMISSED, ReportStatus.ACTIONED):
+        raise ValueError(f"a report is resolved as dismissed or actioned, not {status!r}")
+    return Report.objects.filter(post=post, status=ReportStatus.OPEN).update(
+        status=status, resolved_by=moderator, resolved_at=now
+    )

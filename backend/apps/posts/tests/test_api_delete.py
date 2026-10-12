@@ -54,11 +54,14 @@ def test_the_row_is_still_listed_in_the_admin(client):
     )
     services.delete_post(post_id=post.pk, user=post.author)
     client.force_login(root)
-    page = client.get(reverse("admin:posts_post_changelist"))
-    assert b"Deleted but audited" in page.content
-    only_deleted = client.get(reverse("admin:posts_post_changelist"), {"deleted_at__isempty": "0"})
+    changelist = reverse("admin:posts_post_changelist")
+    # The default view is the review queue, which never holds a post its author deleted...
+    assert b"Deleted but audited" not in client.get(changelist).content
+    # ...but the row is kept: the full list and "Deleted by author" find it.
+    assert b"Deleted but audited" in client.get(changelist, {"queue": "all"}).content
+    only_deleted = client.get(changelist, {"deleted_at__isempty": "0"})
     assert b"Deleted but audited" in only_deleted.content
-    not_deleted = client.get(reverse("admin:posts_post_changelist"), {"deleted_at__isempty": "1"})
+    not_deleted = client.get(changelist, {"deleted_at__isempty": "1"})
     assert b"Deleted but audited" not in not_deleted.content
 
 

@@ -24,14 +24,10 @@ def mark_email_verified(email_address):
     )
 
 
-def mark_email_verified_by_google(user, email):
-    """Mark `email` verified for `user`, who just linked a Google account that proved it.
-
-    Runs inside allauth's `connect()`, after `wipe_password`: an address that was unverified has
-    already cost its password. Creates the `EmailAddress` row when the user has none (accounts made
-    by `create_user` or in the admin have none).
-    """
-    email = email.strip().lower()
+def _verify_address(user, email):
+    """Make `email` a verified address of `user` and set `users.is_email_verified` when it is the
+    account's own. Creates the `EmailAddress` row when the user has none (accounts made by
+    `create_user` or in the admin have none). Returns the row."""
     address = EmailAddress.objects.filter(user_id=user.pk, email__iexact=email).first()
     if address is None:
         has_primary = EmailAddress.objects.filter(user_id=user.pk, primary=True).exists()
@@ -44,6 +40,26 @@ def mark_email_verified_by_google(user, email):
     if mark_email_verified(address):
         user.is_email_verified = True  # so a later full save in this request can't undo it
     return address
+
+
+def mark_email_verified_by_google(user, email):
+    """Mark `email` verified for `user`, who just linked a Google account that proved it.
+
+    Runs inside allauth's `connect()`, after `wipe_password`: an address that was unverified has
+    already cost its password.
+    """
+    return _verify_address(user, email.strip().lower())
+
+
+def verify_email_by_staff(user):
+    """A senior moderator marks `user`'s own address verified (Django Admin, Part 10; deferred from
+    Part 2: for the person who can't get the email, or whose provider lost it). Returns True when
+    something changed and False when the account already counts as verified. The caller logs it.
+    """
+    if user.is_email_verified:
+        return False
+    _verify_address(user, user.email)
+    return True
 
 
 def resend_verification_email(request, user):

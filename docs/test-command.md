@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -6826,6 +6826,925 @@ review queue and the moderator actions are Part 10.
 - The only secret used is `INTERNAL_CRON_SECRET` in step 8, read from `backend/.env` into a variable and never
   printed; `unset secret` forgets it. The other values in the commands are Cloudflare's public test token and the
   throwaway password of the test accounts.
+
+### Part 10: Human review panel (Django Admin)
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
+`frontend/.env.local`. Part 10 adds **three migrations** (`posts.0002_review_started_at`, `moderation.0001_initial`,
+`moderation.0002_role_groups`), **no dependency**, **no endpoint** and **no new variable**. It turns Django Admin
+into the moderation panel: two roles (moderators and senior moderators) with their permissions, the **review queue**
+(the posts list, showing what needs a human), five **actions** (Mark verified, Mark FALSE, Dismiss reports, Remove,
+Escalate) that ask for confirmation and write an audit trail, a **log** for seniors, account rules for seniors (role,
+suspension, "Mark email verified", delete) and seniors-only editing of the platform settings. The admin header shows
+the logo and "Rumor Zero moderation".
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 15 |
+| Window 2 (commands) | All the `curl`, `padm` and `python manage.py` commands. **Use the same window for steps 3 to 10**: the variables and functions you set in step 3 (`id`, `ada`, `bo`, `padm`, `mk`) and later (`f1` … `f5`, `o1`, `o2`, `own`) only live in that one terminal. If you close it, redo step 3. | 1 to 10, 15 |
+| Window 3 (frontend) | `npm run dev` in `frontend`. Leave it running. | 14 |
+| Browser | Steps 11 to 14 | 11 to 14 |
+
+Things to know first:
+
+- **Who may do what** (ARCHITECTURE §8). A *moderator* reviews the queue and uses the five actions (never on their own
+  posts), reads reports, hides comments and looks at accounts and the settings. A *senior moderator* can in addition
+  change an account's **role** and **suspend** it, **mark an email verified**, **delete** an account, **edit the
+  platform settings**, and read the full **moderation log** and Django's **admin log**. Nobody but a superuser can edit
+  an email, a password, a profile or `is_superuser`; seniors can't touch a superuser or themselves. A moderator's
+  role comes from `User.role`; the permissions come from two Django groups that migration `moderation.0002_role_groups`
+  creates.
+- **The helper.** Steps 3 to 10 talk to Django Admin as a logged-in person. Step 3 saves a short Python program,
+  `/tmp/part10_admin.py`, and a shell function `padm` that runs it. It logs in (with the throwaway password below),
+  sends what a browser would send and prints the answer in a few words. The top of the file lists its commands.
+  It uses the `requests` package that is already in the backend's virtualenv.
+- Steps 3 to 10 use `curl` (with `jq`: `sudo apt install jq`) for the sign-ups and `python manage.py shell` for what
+  Django Admin can't do. Steps 11 to 14 use the browser. Step 3 makes six accounts: `ada` and `bo` (people who post),
+  `mod1` (a moderator), `boss` (a senior moderator), `root` (a superuser) and `eve` (an account whose email never got
+  verified).
+- Nothing sends an email: step 3 marks the accounts verified with a shell command, which stands in for clicking the
+  link (Part 2 shows the real flow), and step 5 puts posts under review with reports from five aged accounts made by a
+  shell command, standing in for real reporters (Part 8 shows real ones).
+- **Your admin address** is `http://localhost:8000/admin/` unless `ADMIN_URL_PATH` in `backend/.env` says otherwise.
+  Step 3 reads it into a variable without printing it.
+- **The numbers assume the default settings** (report threshold 5, confidence threshold 85). The pipeline is the
+  stub (Part 9): `#unsure` in a fact sends it to UNDER REVIEW, `#true` to VERIFIED 95%, `#false` to FALSE 92%.
+- The outputs below were recorded on Linux on 2026-10-13. The browser steps were checked the same day with headless
+  Chromium (screenshots at 1280 px) and Django Admin with a scripted browser, not by a person at a keyboard. Ids,
+  numbers in names and times differ on every run. The leftover facts from earlier parts' tests and the end-to-end
+  tests in your local database don't show: every command filters on this run's `id`.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies Part 10's three
+migrations, confirms there is nothing more to make, then runs the whole backend test suite, Part 10's tests, the
+linter and the formatter check.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                            # 3 migrations the first time, then: No migrations to apply.
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 2709 passed
+python -m pytest apps/moderation apps/accounts/tests/test_admin_roles.py apps/core/tests/test_admin_settings.py apps/core/tests/test_admin_header.py -q   # 348 passed
+ruff check . ; ruff format --check .                # All checks passed! / 228 files already formatted
+```
+
+**You should see:** the first `migrate` prints three `Applying …` lines:
+
+```text
+  Applying posts.0002_review_started_at... OK
+  Applying moderation.0001_initial... OK
+  Applying moderation.0002_role_groups... OK
+```
+
+(a second run prints `No migrations to apply.`), then `No changes detected` and `System check identified no issues (0
+silenced).`; the full run ends with `2709 passed`, Part 10's with `348 passed`, and the last pair is `All checks passed!`
+and `228 files already formatted`. (Counts may grow later; what matters is that nothing fails.)
+
+- `posts.0002` adds `posts.review_started_at` (when a post entered review: the queue's "waiting" column) and gives
+  posts already under review in your database a value (their `updated_at`). `moderation.0001` makes the append-only
+  `moderation_actions` table and `moderation.0002` the two groups with their permissions. All three can be undone
+  with `python manage.py migrate posts 0001` (it rolls the other two back first) and re-applied.
+- The Part 10 run holds, in `apps/moderation/tests/`: `test_rules.py` (46: every action against every starting state,
+  compared with the ARCHITECTURE §4 table written a second way), `test_services.py` (83), `test_races.py` (7: real
+  threads: two moderators acting at once, an action waiting for the author's delete, a report against a removal),
+  `test_pipeline_interplay.py` (12), `test_models.py` (25: append-only), `test_roles.py` (36), `test_admin_queue.py`
+  (21), `test_admin_actions.py` (33), `test_permissions.py` (49: every page and button for a visitor, a moderator, a
+  senior and a superuser) and `test_admin_logs.py` (7); plus `accounts/tests/test_admin_roles.py` (18),
+  `core/tests/test_admin_settings.py` (6) and `core/tests/test_admin_header.py` (5).
+- Existing tests changed on purpose: moderators now hold permissions (a few admin tests that said "none until Part
+  10" were rewritten), posts under review need `review_started_at`, and `posts/tests/test_admin.py` moved into the
+  moderation tests.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last command) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 117 files, 1588 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 38 passed
+cd ../backend                                       # back to backend/ for steps 3 to 10
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  117 passed (117)` and `Tests  1588
+passed (1588)`. `npm run build` lists the same routes as in Part 9 (Part 10 adds no page). The end-to-end run ends
+with `38 passed`.
+
+- Part 10 changes no page: the "Moderation" link in the sidebar was built in Part 0C. One new component test checks
+  that the phone account sheet has no Moderation entry for people who aren't staff.
+- There is no end-to-end test for the admin (it is server-rendered); steps 11 to 14 are how you check it.
+
+#### Step 3: Start the servers, make six accounts and the helper
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 10.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you sign two people up through the API,
+make four more accounts with a shell command (a moderator, a senior moderator, a superuser and an account whose
+email is not verified), save the helper and prove that all three staff accounts can log in to the admin.
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend` with the venv active: steps 1 and 2 leave you there; needs `jq`). If you opened a new
+terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the addresses are new each run
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+signup() { jq -nc --arg e "$1" --arg u "$2" '{email: $e, username: $u, password: "correct-horse-battery-42", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/signup | jq -r .meta.access_token; }
+ada=$(signup "part10-ada-$id@example.test" "part10_ada_$id")      # $ada = ada's login token (author of two posts)
+bo=$(signup "part10-bo-$id@example.test" "part10_bo_$id")         # $bo = bo's (author of three)
+python manage.py shell -c "
+from apps.accounts.models import User, Role
+User.objects.filter(email__in=['part10-ada-$id@example.test', 'part10-bo-$id@example.test']).update(is_email_verified=True)
+people = (('mod1', Role.MODERATOR), ('boss', Role.SENIOR_MODERATOR), ('root', None), ('eve', Role.USER))
+for name, role in people:
+    kw = dict(email=f'part10-{name}-$id@example.test', username=f'part10_{name}_$id', password='correct-horse-battery-42', is_email_verified=name != 'eve')
+    User.objects.create_superuser(**kw) if role is None else User.objects.create_user(role=role, **kw)
+print(User.objects.filter(email__startswith='part10-', email__endswith='$id@example.test').count(), 'accounts made')
+" | tail -1
+echo ${ada:0:10} ${bo:0:10}                         # two token prefixes, not an empty line
+```
+
+**You should see:**
+
+```text
+6 accounts made
+eyJhbGciOi eyJhbGciOi
+```
+
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it needs
+  internet.
+
+**If it differs:** an empty token means the sign-up failed: `runserver` isn't running, `jq` is missing, or you signed
+up more than 20 times in a minute. Fix that and run this block again from `id=$(date +%H%M%S)`.
+
+Still window 2: save the helper, set its two variables and check that all three staff accounts can log in:
+
+```bash
+export P10=$id                                      # the suffix the helper builds the staff emails from
+export ADM=http://localhost:8000/$(python manage.py shell -c "from django.conf import settings; print(settings.ADMIN_URL_PATH)" | tail -1)   # your admin address (never printed)
+cat > /tmp/part10_admin.py <<'EOF'
+"""A small Django Admin client for docs/test-command.md, Part 10 (run it with the backend's Python).
+
+    python part10_admin.py queue  <who> [query]                       the posts list, as <who> sees it
+    python part10_admin.py codes  <who> <path>...                     the status code of each admin page
+    python part10_admin.py matrix <path>...                           the same for a moderator, a senior and a superuser
+    python part10_admin.py act    <who> <action> <public> <notes> <post id>...
+    python part10_admin.py edit   <who> <name> <role> <yes|no> [bio]  the user form, as a person sends it
+    python part10_admin.py users  <who> <action> <name>...            an action on the users list
+    python part10_admin.py grep   <who> <path> <regex>                what a page says (matches only)
+
+A note given as - is empty (PowerShell 5.1 drops an empty argument). <who> and <name> are the accounts step 3 made: mod1, boss, root, eve, ada, bo (email
+part10-<name>-<P10>@example.test). A path may hold {eve}, {boss}...: that account's id. Reads P10 (the
+suffix) and ADM (the admin address) from the environment."""
+
+import html
+import os
+import re
+import sys
+
+import requests
+
+SUFFIX = os.environ["P10"]
+BASE = os.environ["ADM"]
+PASSWORD = "correct-horse-battery-42"
+LOGIN = BASE + "login/"
+
+
+def email(name):
+    return f"part10-{name}-{SUFFIX}@example.test"
+
+
+def login(who):
+    session = requests.Session()
+    session.get(LOGIN)
+    data = {"username": email(who), "password": PASSWORD, "next": "/"}
+    data["csrfmiddlewaretoken"] = session.cookies["csrftoken"]
+    session.post(LOGIN, data=data, headers={"Referer": LOGIN})
+    return session
+
+
+def post(session, path, data):
+    fields = [("csrfmiddlewaretoken", session.cookies["csrftoken"]), *data]
+    return session.post(BASE + path, data=fields, headers={"Referer": BASE})
+
+
+def text(fragment):
+    plain = html.unescape(re.sub(r"<[^>]+>", "", fragment))
+    return plain.replace("\xa0", " ").strip()  # Django writes "0 minutes" with a no-break space
+
+
+def messages(page):
+    found = re.findall(r'<li class="(?:success|warning|error)">([^<]*)</li>', page)
+    return [html.unescape(message) for message in found]
+
+
+def user_id(session, name):
+    page = session.get(BASE + "accounts/user/?q=" + email(name)).text
+    return re.search(r"/accounts/user/([0-9a-f-]{36})/change/", page).group(1)
+
+
+def resolve(session, path):
+    return re.sub(r"\{(\w+)\}", lambda m: user_id(session, m.group(1)), path)
+
+
+def queue(session, query=""):
+    url = BASE + "posts/post/?q=_" + SUFFIX + ("&" + query if query else "")
+    table = re.search(r'<table id="result_list".*?</table>', session.get(url).text, re.S)
+    for row in re.findall(r"<tr[^>]*>(.*?)</tr>", table.group(0) if table else "", re.S)[1:]:
+        cells = [text(c) for c in re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", row, re.S)]
+        print(" | ".join(cells[1:8]))
+
+
+def codes(session, *paths):
+    for path in paths:
+        print(f"{path:<44} {session.get(BASE + resolve(session, path)).status_code}")
+
+
+def matrix(*paths):
+    people = (("moderator", "mod1"), ("senior", "boss"), ("superuser", "root"))
+    sessions = {label: login(who) for label, who in people}
+    for path in paths:
+        row = "   ".join(
+            f"{label} {session.get(BASE + resolve(session, path)).status_code}"
+            for label, session in sessions.items()
+        )
+        print(f"{path:<44} {row}")
+
+
+def act(session, action, public, notes, *ids):
+    public, notes = ("" if note == "-" else note for note in (public, notes))
+    chosen = [("_selected_action", pk) for pk in ids]
+    page = post(session, "posts/post/?queue=all", [("action", action), ("index", "0"), *chosen]).text
+    print("-- the confirmation page says:")
+    skipped = "opinion: no verdict|not under review|your own post|deleted by its author|already [a-z]+"
+    pattern = rf"<h2>([^<]*)</h2>|<td>({skipped})</td>|<p>(None of[^<]*)</p>"
+    for found in re.findall(pattern, page):
+        print("  ", next(part for part in found if part))
+    fields = [("action", action), ("apply", "1"), ("public_note", public), ("notes", notes)]
+    print("-- after you confirm:")
+    for message in messages(post(session, "posts/post/?queue=all", fields + chosen).text):
+        print("  ", message)
+
+
+def edit(session, name, role, active, bio=""):
+    path = f"accounts/user/{user_id(session, name)}/change/"
+    data = [("email", email(name)), ("username", f"part10_{name}_{SUFFIX}")]
+    data += [("display_name", ""), ("bio", bio), ("role", role)]
+    if active == "yes":
+        data.append(("is_active", "on"))
+    answer = post(session, path, data)
+    print("saved" if answer.history else answer.status_code)  # a redirect means it was saved
+
+
+def users(session, action, *names):
+    chosen = [("_selected_action", user_id(session, name)) for name in names]
+    answer = post(session, "accounts/user/", [("action", action), ("index", "0"), *chosen])
+    for message in messages(answer.text):
+        print(message)
+
+
+def grep(session, path, pattern):
+    page = html.unescape(session.get(BASE + resolve(session, path)).text)
+    for found in dict.fromkeys(re.findall(pattern, page)):
+        print(found)
+
+
+if __name__ == "__main__":
+    command, *rest = sys.argv[1:]
+    if command == "matrix":
+        matrix(*rest)
+    else:
+        who, *rest = rest
+        commands = {"queue": queue, "codes": codes, "act": act, "edit": edit, "users": users}
+        commands.get(command, grep)(login(who), *rest)
+EOF
+padm() { python /tmp/part10_admin.py "$@"; }        # padm <command> ...: the helper (the top of the file lists its commands)
+api=http://localhost:8000/api/v1
+mk() { curl -s -H "Authorization: Bearer $1" -H "Content-Type: application/json" --data-binary "$2" $api/posts/ | jq -r .id; }   # mk <token> <json>: makes a post, prints its id
+padm matrix posts/post/                             # all three can open the posts list
+```
+
+**You should see:**
+
+```text
+posts/post/                                  moderator 200   senior 200   superuser 200
+```
+
+- `matrix` logs in as `mod1`, `boss` and `root` and prints the status code each gets for a page: 200 is "opened",
+  403 is "logged in, but not allowed", 302 would be "sent to the login page". Step 6 uses it for a whole table.
+- The password of every account here is `correct-horse-battery-42`, the throwaway one used since Part 1.
+
+**If it differs:** `KeyError: 'P10'` means the two `export` lines weren't run in this terminal. A 302, or an error
+about a missing `csrftoken`, means `ADM` is wrong: your `ADMIN_URL_PATH` isn't the one in `backend/.env`, or Django
+isn't running.
+
+#### Step 4: The two groups
+
+**Where:** Terminal window 2.
+
+**What this does:** Prints what each group holds and which groups each staff account is in. A senior moderator is in
+both groups, so the senior group lists only the extras.
+
+```bash
+python manage.py shell -c "
+from django.contrib.auth.models import Group
+from apps.accounts.models import User
+for g in Group.objects.filter(name__in=['Moderators', 'Senior moderators']).order_by('name'):
+    print(g.name + ':', ' '.join(sorted(p.content_type.app_label + '.' + p.codename for p in g.permissions.all())))
+for name in ('mod1', 'boss', 'root'):
+    u = User.objects.get(email='part10-' + name + '-$id@example.test')
+    print(name, u.role, u.is_staff, u.is_superuser, sorted(u.groups.values_list('name', flat=True)))
+" | tail -5
+```
+
+**You should see:**
+
+```text
+Moderators: accounts.view_user core.view_platformsettings posts.change_post posts.view_post reports.view_report social.change_comment social.view_comment
+Senior moderators: accounts.change_user accounts.delete_user admin.view_logentry core.change_platformsettings moderation.view_moderationaction
+mod1 moderator True False ['Moderators']
+boss senior_moderator True False ['Moderators', 'Senior moderators']
+root user True True []
+```
+
+- `posts.change_post` is what lets a moderator use the five actions; the post's own page stays read-only for
+  everyone (nobody can edit a post's text or status by hand, a superuser included).
+- `root` has no group: a superuser needs none, and its `role` stays `user` (`is_staff` comes from `is_superuser`).
+
+#### Step 5: Fill the queue, and look at it
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` and `bo` post five things: three facts the stub can't decide (`#unsure`) or labels, a FALSE
+fact and an opinion. Then five accounts that are two days old report three of them five times each (five is the report
+threshold). `padm queue mod1` prints the posts list the way the moderator sees it, one line per post: claim, type,
+status, reason, the pipeline's verdict and confidence, number of reports and how long it has waited.
+
+```bash
+f1=$(mk "$ada" '{"content":"Water boils at 100 degrees Celsius at sea level. #true","post_type":"fact"}')
+f2=$(mk "$ada" '{"content":"Coffee stunts your growth. #unsure","post_type":"fact"}')
+f3=$(mk "$bo" '{"content":"The Moon is made of cheese. #unsure","post_type":"fact"}')
+f4=$(mk "$bo" '{"content":"Honey never spoils. #false","post_type":"fact"}')
+o1=$(mk "$bo" '{"content":"I think tea beats coffee.","post_type":"opinion"}')
+sleep 1                                             # the checks take a few milliseconds
+padm queue mod1                                     # 1: f2 and f3 are under review already (the pipeline could not decide)
+```
+
+**You should see:**
+
+```text
+Coffee stunts your growth. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+The Moon is made of cheese. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+```
+
+- The queue holds only posts under review. `f1` (VERIFIED 95%), `f4` (FALSE 92%) and `o1` (an opinion) are not in it
+  yet. Same-reports posts are ordered by how long they have waited, the longest first.
+
+```bash
+python manage.py shell -c "
+from datetime import timedelta
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.reports.services import file_report
+people = [User.objects.create_user(email=f'part10-rep{i}-$id@example.test', username=f'part10_rep{i}_$id', password='correct-horse-battery-42', is_email_verified=True, created_at=timezone.now() - timedelta(hours=48)) for i in range(1, 6)]
+for post in '$f1 $f2 $o1'.split():
+    for person in people:
+        file_report(reporter=person, post_id=post, reason='inaccurate', details='')
+print(len(people) * 3, 'reports filed')
+" | tail -1
+padm queue mod1                                     # 2: three posts have five reports each (most reported first, then the longest wait), f3 none
+```
+
+**You should see:**
+
+```text
+15 reports filed
+Coffee stunts your growth. #unsure | Fact | Under review | Both | Inconclusive 40% | 5 | 0 minutes
+Water boils at 100 degrees Celsius at sea level. #true | Fact | Under review | Reports | TRUE 95% | 5 | 0 minutes
+I think tea beats coffee. | Opinion | Under review | Reports | — | 5 | 0 minutes
+The Moon is made of cheese. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+```
+
+- The reason says why a post is here: `Pipeline` (the check couldn't decide), `Reports`, or `Both`. Order: most reports
+  first, then the longest wait: `f2` entered review first (the pipeline), then `f1` and `o1` (the fifth report).
+- The pipeline column keeps the pipeline's answer even for a post under review for reports: `f1` shows `TRUE 95%`, which
+  is what a dismissal would restore.
+
+```bash
+padm queue mod1 "queue=all"                         # 3: every post of ours, f4 (FALSE) too
+padm queue mod1 "q=part10_bo_$id"                   # 4: search: bo's posts that are in the queue
+padm queue mod1 "post_type__exact=opinion"          # 5: only opinions
+padm queue mod1 "flagged_reason__exact=both"        # 6: only posts flagged by the pipeline and by reports
+padm queue mod1 "escalated=yes"                     # 7: nothing escalated yet (no output)
+```
+
+**You should see:**
+
+```text
+Coffee stunts your growth. #unsure | Fact | Under review | Both | Inconclusive 40% | 5 | 0 minutes
+Water boils at 100 degrees Celsius at sea level. #true | Fact | Under review | Reports | TRUE 95% | 5 | 0 minutes
+I think tea beats coffee. | Opinion | Under review | Reports | — | 5 | 0 minutes
+The Moon is made of cheese. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+Honey never spoils. #false | Fact | Verified false | — | FALSE 92% | 0 | —
+I think tea beats coffee. | Opinion | Under review | Reports | — | 5 | 0 minutes
+The Moon is made of cheese. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+I think tea beats coffee. | Opinion | Under review | Reports | — | 5 | 0 minutes
+Coffee stunts your growth. #unsure | Fact | Under review | Both | Inconclusive 40% | 5 | 0 minutes
+```
+
+- 3 (five lines): "All posts" adds the FALSE fact, which is not under review. 4 (two lines): bo's posts that need a moderator. 5
+  (one line): only the opinion. 6 (one line): only `f2`. 7 prints nothing.
+- The queue never lists a post its author deleted: the default view hides them (the "Deleted by author" filter and "All
+  posts" still find them).
+
+#### Step 6: Who can open what
+
+**Where:** Terminal window 2.
+
+**What this does:** Opens nine admin pages as the moderator, the senior moderator and the superuser and prints the
+status code each gets.
+
+```bash
+padm matrix posts/post/ reports/report/ social/comment/ accounts/user/ core/platformsettings/1/change/ moderation/moderationaction/ admin/logentry/ social/bookmark/ posts/post/$f1/history/
+```
+
+**You should see** (the id in the last line differs):
+
+```text
+posts/post/                                  moderator 200   senior 200   superuser 200
+reports/report/                              moderator 200   senior 200   superuser 200
+social/comment/                              moderator 200   senior 200   superuser 200
+accounts/user/                               moderator 200   senior 200   superuser 200
+core/platformsettings/1/change/              moderator 200   senior 200   superuser 200
+moderation/moderationaction/                 moderator 403   senior 200   superuser 200
+admin/logentry/                              moderator 403   senior 200   superuser 200
+social/bookmark/                             moderator 403   senior 403   superuser 200
+posts/post/4c061490-b060-4462-969d-f4b72a63ccdb/history/ moderator 403   senior 200   superuser 200
+```
+
+- The first five pages open for everyone on the staff (a moderator's account and settings pages are read-only: step
+  11). The two **logs** (`moderation/moderationaction/` is the full moderation log, `admin/logentry/` is Django's admin
+  log) and every **History** page need the senior's `admin.view_logentry`: a moderator sees a post's own
+  moderation history on the post's page instead (step 12). **Bookmarks** are private (Part 7B) and open for a superuser
+  only.
+
+#### Step 7: The five actions, as the confirmation page does them
+
+**Where:** Terminal window 2.
+
+**What this does:** `padm act` does what a moderator does with the Go button: it selects posts, picks an action and
+reads the **confirmation page** (what would change and what would be skipped, and why), then **confirms** with a public
+note and internal notes and prints the green and yellow messages the admin shows. The five posts of step 5 go through
+the five actions.
+
+```bash
+padm act mod1 mark_false "Coffee does not stunt growth." "no source supports it" $f2 $o1     # 1: a verdict on a fact and an opinion
+```
+
+**You should see:**
+
+```text
+-- the confirmation page says:
+   1 post will change
+   1 will be skipped
+   opinion: no verdict
+-- after you confirm:
+   Marked 1 post FALSE.
+   Skipped 1: 1 opinion: no verdict.
+```
+
+- Opinions get no verdict: the fact (`f2`) is marked FALSE, the opinion (`o1`) is skipped, and nothing happens to it.
+
+```bash
+padm act mod1 dismiss_reports - "five reports, none upheld" $o1                       # 2
+padm act mod1 dismiss_reports - - $f1                                                # 3
+padm act mod1 escalate - "needs a second pair of eyes" $f3                            # 4
+padm act mod1 remove_posts "Not a claim we can host." "spam pattern" $f4               # 5
+```
+
+**You should see:**
+
+```text
+-- the confirmation page says:
+   1 post will change
+-- after you confirm:
+   Dismissed the reports on 1 post.
+-- the confirmation page says:
+   1 post will change
+-- after you confirm:
+   Dismissed the reports on 1 post.
+-- the confirmation page says:
+   1 post will change
+-- after you confirm:
+   Escalated 1 post to a senior moderator.
+-- the confirmation page says:
+   1 post will change
+-- after you confirm:
+   Removed 1 post.
+```
+
+- 5 is a **Remove on a post that isn't in the queue** (`f4` is FALSE, not under review): it works because the buttons
+  and the confirmation use the full list ("All posts"), not the queue.
+
+```bash
+padm queue mod1 "queue=all"                         # 6: what is left in the queue, and what is not
+```
+
+**You should see:**
+
+```text
+I think tea beats coffee. | Opinion | Published | — | — | 5 | —
+Coffee stunts your growth. #unsure | Fact | Verified false | — | Inconclusive 40% | 5 | —
+Water boils at 100 degrees Celsius at sea level. #true | Fact | Verified true | — | TRUE 95% | 5 | —
+The Moon is made of cheese. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+Honey never spoils. #false | Fact | Removed | — | FALSE 92% | 0 | —
+```
+
+- Only `f3` is still in the queue (escalated: it waits for a senior). Dismissing the reports sent the opinion back to
+  Published and the fact back to the status it had (VERIFIED, the pipeline's own label: it still shows `TRUE 95%`).
+
+```bash
+python manage.py shell -c "
+from apps.moderation.models import ModerationAction
+from apps.posts.models import Post
+from apps.reports.models import Report
+for r in ModerationAction.objects.filter(moderator__email__endswith='$id@example.test').order_by('created_at'):
+    print(r.get_action_display(), '|', r.post_snapshot[:26], '|', r.from_status, '->', r.to_status, '|', repr(r.public_note), '|', repr(r.notes))
+for pk in '$f1 $f2 $f3 $f4 $o1'.split():
+    p = Post.objects.get(pk=pk)
+    print(p.content[:26], '|', p.status, p.verdict_source, repr(p.verdict_note), p.pre_removal_status, 'escalated' if p.escalated_at else '-', 'in review' if p.review_started_at else '-')
+print(sorted(Report.objects.filter(post__author__email__endswith='$id@example.test').values_list('status', flat=True)))
+" | tail -11
+```
+
+**You should see:**
+
+```text
+Marked FALSE | Coffee stunts your growth. | under_review -> verified_false | 'Coffee does not stunt growth.' | 'no source supports it'
+Dismissed reports | I think tea beats coffee. | under_review -> published | '' | 'five reports, none upheld'
+Dismissed reports | Water boils at 100 degrees | under_review -> verified_true | '' | ''
+Escalated | The Moon is made of cheese | under_review -> under_review | '' | 'needs a second pair of eyes'
+Removed | Honey never spoils. #false | verified_false -> removed | 'Not a claim we can host.' | 'spam pattern'
+Water boils at 100 degrees | verified_true pipeline '' None - -
+Coffee stunts your growth. | verified_false moderator 'Coffee does not stunt growth.' None - -
+The Moon is made of cheese | under_review None '' None escalated in review
+Honey never spoils. #false | removed pipeline '' verified_false - -
+I think tea beats coffee. | published None '' None - -
+['actioned', 'actioned', 'actioned', 'actioned', 'actioned', 'dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed']
+```
+
+- **One audit row per post that changed** (the first five lines: what was done, to which text, from which status to which,
+  the public note and the internal notes). The opinion that Mark FALSE skipped has no row.
+- The next five lines are the posts: `f2` is now FALSE **by a moderator** (so with the moderator's public note and no
+  percentage on the badge), `f1` is back to VERIFIED by the pipeline, `f3` is still under review and escalated, `f4` is
+  removed and remembers it was `verified_false` (`pre_removal_status`, for the appeal part, Part 11), `o1` is
+  published. A post that leaves review also loses its escalation and its "waiting" clock.
+- The last line is the 15 reports: 5 **actioned** (the Mark FALSE on `f2`) and 10 **dismissed** (the two dismissals).
+  A resolved report never counts toward the threshold again.
+- A removal's reason (`'Not a claim we can host.'`) lives in the audit row only, never in the post's own `verdict_note`
+  (the author sees it from Part 11).
+
+#### Step 8: Nobody acts on their own post
+
+**Where:** Terminal window 2.
+
+**What this does:** The moderator `mod1` writes a fact of their own (the pipeline can't decide: it is under review).
+They can't act on it, but a senior moderator who didn't write it can.
+
+```bash
+own=$(python manage.py shell -c "
+from apps.accounts.models import User
+from apps.pipeline.processor import process_post
+from apps.posts.services import create_post
+post = create_post(author=User.objects.get(email='part10-mod1-$id@example.test'), content='A claim by the moderator herself. #unsure', post_type='fact')
+process_post(post.pk)
+print(post.pk)
+" | tail -1)
+padm queue mod1 "q=part10_mod1_$id"                 # 1: the moderator's own post is in the queue like any other
+padm act mod1 escalate - - $own                   # 2: she can't act on it
+padm act boss escalate - "someone else may" $own   # 3: a senior who didn't write it can
+```
+
+**You should see:**
+
+```text
+A claim by the moderator herself. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+-- the confirmation page says:
+   None of the selected posts can have this done to them.
+   1 will be skipped
+   your own post
+-- after you confirm:
+   Skipped 1: 1 your own post.
+-- the confirmation page says:
+   1 post will change
+-- after you confirm:
+   Escalated 1 post to a senior moderator.
+```
+
+- Only a superuser may act on their own post. The refusal is checked again, under the post's lock, when you confirm.
+- The same refusal list covers: `opinion: no verdict`, `not under review` (an action that needs a review, on a post
+  that isn't under review), `no reports to dismiss`, `no status to return to`, `already removed`, `already escalated`
+  and `deleted by its author`. A mixed selection changes what it can and lists the rest as skipped.
+
+#### Step 9: Seniors and accounts
+
+**Where:** Terminal window 2.
+
+**What this does:** Tries the account rules. `eve` is an ordinary account with an unverified email.
+
+```bash
+printf '%-8s%-12s%-12s%-12s%-12s%s\n' "" "eve page" "eve pwd" "delete eve" "boss page" "root page"
+for who in mod1 boss root; do printf '%-8s' $who; for p in accounts/user/{eve}/change/ accounts/user/{eve}/password/ accounts/user/{eve}/delete/ accounts/user/{boss}/change/ accounts/user/{root}/change/; do printf '%-12s' "$(padm codes $who $p | awk '{print $NF}')"; done; echo; done
+```
+
+**You should see:**
+
+```text
+        eve page    eve pwd     delete eve  boss page   root page
+mod1    200         403         403         200         200         
+boss    200         403         200         200         200         
+root    200         200         200         200         200         
+```
+
+- Everyone on the staff can **look** at an account page (200). Changing the password (`eve pwd`) is for a superuser only,
+  and deleting an account (`delete eve`) is for seniors and superusers. The senior can open their own page and the
+  superuser's, but as a read-only page: step 13 shows it.
+
+```bash
+padm edit mod1 eve moderator yes                    # 1: a moderator may not change a role
+padm edit boss eve moderator yes "hijacked"         # 2: a senior may: the role changes, the bio is ignored
+padm edit boss eve moderator no                     # 3: and may suspend
+python manage.py shell -c "
+from django.contrib.admin.models import LogEntry
+from apps.accounts.models import User
+u = User.objects.get(email='part10-eve-$id@example.test')
+print(u.role, u.is_staff, u.is_active, repr(u.bio))
+for e in LogEntry.objects.filter(object_id=str(u.pk)).order_by('action_time'): print(e.user.username[:11], '|', e.get_change_message())
+" | tail -3
+```
+
+**You should see:**
+
+```text
+403
+saved
+saved
+moderator True False ''
+part10_boss | Role: user → moderator.
+part10_boss | Active: yes → no.
+```
+
+- 1: refused (403). 2: saved: only `role` (and `is_active`) can be edited by a senior, so the `bio` they sent is ignored
+  (the last block shows `eve`'s bio is still empty). `is_staff` followed the new role by itself.
+- Every change is written to Django's admin log **with its old and new values**: "Role: user → moderator." and "Active:
+  yes → no.", under the senior's name. Setting `is_active` off is how you **suspend** an account.
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' "${h[@]}" -H "Content-Type: application/json" --data-binary "{\"email\":\"part10-eve-$id@example.test\",\"password\":\"correct-horse-battery-42\",\"turnstile_token\":\"XXXX.DUMMY.TOKEN.XXXX\"}" http://localhost:8000/api/auth/app/v1/auth/login   # 1: eve is suspended: no login
+padm users mod1 verify_email eve                    # 2: the action isn't a moderator's: nothing (no message)
+padm users boss verify_email eve                    # 3: a senior can
+padm users boss verify_email eve                    # 4: and a second time there is nothing to do
+python manage.py shell -c "
+from allauth.account.models import EmailAddress
+from apps.accounts.models import User
+u = User.objects.get(email='part10-eve-$id@example.test')
+print(u.is_email_verified, list(EmailAddress.objects.filter(user=u).values_list('verified', 'primary')))
+" | tail -1
+```
+
+**You should see:**
+
+```text
+401
+Marked the email verified on 1 account.
+Skipped 1: already verified, or an account you can't change (a superuser or yourself).
+True [(True, True)]
+```
+
+- 1: a suspended account can't log in (401), its access token stops working and its refresh fails; its posts stay up.
+  Nothing for 2: **Mark email verified** isn't offered to a moderator. 3 and 4: a senior marks `eve`'s own address verified
+  (it creates her `EmailAddress` row when she has none, as accounts made by `create_user` don't); the second time she
+  is skipped. The last line is `is_email_verified` and her address (`verified`, `primary`).
+- The action is logged too ("Marked email verified", step 9's last block).
+
+```bash
+padm grep boss 'accounts/user/{ada}/delete/' '<li>([A-Za-z ]+: [0-9]+)</li>'     # 1: what deleting ada would take with her: a summary, no text
+padm grep root 'accounts/user/{boss}/delete/' 'wrote admin log entries.*Active\)\.'   # 2: boss wrote log entries: not deletable, suspend instead
+```
+
+**You should see:**
+
+```text
+Users: 1
+Email addresses: 1
+Posts: 2
+Reports: 10
+wrote admin log entries, which would be deleted with the account. Suspend the account instead (clear Active).
+```
+
+- 1: the delete page for `ada` (who has two posts that got ten reports) is a **summary**: counts only, never the text of
+  a post, a comment or a bookmark (bookmarks are private). Deleting is one account at a time, from its page. 2:
+  `boss` changed accounts, so they wrote entries in the admin log; deleting them would delete those entries, so the
+  page refuses ("protected") and says to suspend instead. The delete button is missing there.
+
+```bash
+padm grep boss 'accounts/user/{eve}/history/' 'Role: [^<]*|Active: [^<]*|Marked email verified'     # 1: the History page shows the values (seniors only)
+padm grep boss "admin/logentry/?q=part10_eve_$id" 'Role: [^<]*|Active: [^<]*|Marked email verified'   # 2: and so does the admin log
+```
+
+**You should see:**
+
+```text
+Role: user → moderator.
+Active: yes → no.
+Marked email verified
+Marked email verified
+Active: yes → no.
+Role: user → moderator.
+```
+
+- The first three lines are the account's History page (oldest first), the last three the admin log filtered on `eve`
+  (newest first). A moderator gets a 403 on both (step 6).
+
+#### Step 10: Two more posts for the browser
+
+**Where:** Terminal window 2.
+
+**What this does:** Steps 7 and 8 used up the queue, so `bo` posts a fact and an opinion and the same five aged
+accounts report both five times each. The browser steps use them.
+
+```bash
+f5=$(mk "$bo" '{"content":"Cracking your knuckles causes arthritis. #unsure","post_type":"fact"}')
+o2=$(mk "$bo" '{"content":"I think cats are better than dogs.","post_type":"opinion"}')
+sleep 1
+python manage.py shell -c "
+from apps.accounts.models import User
+from apps.reports.services import file_report
+people = User.objects.filter(email__startswith='part10-rep', email__endswith='$id@example.test')
+for post in '$f5 $o2'.split():
+    for person in people:
+        file_report(reporter=person, post_id=post, reason='inaccurate', details='')
+print(people.count() * 2, 'reports filed')
+" | tail -1
+padm queue mod1                                     # the queue the browser will show: f5 and o2 are new, f3 and the moderator's own post wait for a senior
+```
+
+**You should see:**
+
+```text
+10 reports filed
+Cracking your knuckles causes arthritis. #unsure | Fact | Under review | Both | Inconclusive 40% | 5 | 0 minutes
+I think cats are better than dogs. | Opinion | Under review | Reports | — | 5 | 0 minutes
+The Moon is made of cheese. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+A claim by the moderator herself. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+```
+
+Keep window 1 (Django) running, and start the frontend in window 3 now (step 14 needs it):
+
+```bash
+cd frontend                                         # from the repo root
+npm run dev                                         # leave it running
+```
+
+#### Step 11: In the browser, the header and a moderator's first look
+
+**Where:** Browser, with `runserver` running in window 1. Use a private window so nothing is logged in. The admin
+address is http://localhost:8000/admin/ (if it 404s, `ADMIN_URL_PATH` in `backend/.env` isn't `admin/`: use that
+path). `echo $id` in window 2 prints the id for the accounts below.
+
+**What this does:** Checks the branded header, logs in as the moderator and reads the queue.
+
+| Do this | Expect |
+|---|---|
+| Open the admin address | The login page. A dark navy header bar with the **Rumor Zero logo image** (grey and cyan wordmark on its navy plate) and **"Rumor Zero moderation"** beside it in yellow. The tab title is **"Log in \| Rumor Zero moderation"**. |
+| Log in as `part10-mod1-<id>@example.test`, password `correct-horse-battery-42` | The index, titled **Moderation**. Its boxes are **Accounts** (Users), **Core** (Platform settings), **Posts** (Posts), **Reports** (Reports) and **Social** (Comments). There is **no** Moderation actions, Log entries or Bookmarks. |
+| Click **Users**, then any user | **View user**, read-only: no **Save** button, and no **Password** row (only a superuser sees the password page). |
+| Click **Platform settings** | **View platform settings**: the eleven thresholds, read-only. A moderator can read them but not change them. |
+| Open **Posts**, type `_` and your id (`echo $id`) in the search box and press **Search** | The right side has a **By show** filter with **Review queue** selected and **All posts**; there are also filters by flagged reason, type, status, escalated and deleted. The list shows **four** posts under review, most reported first: "Cracking your knuckles…" (Reason **Both**, Pipeline **Inconclusive 40%**, Reports **5**), "I think cats are better than dogs." (Reports 5), "The Moon is made of cheese. #unsure" (Pipeline, 0 reports) and "A claim by the moderator herself." Its columns are **Post, Type, Status, Reason, Pipeline, Reports, Waiting, Posted, Escalated, Emergency, Author** (Reports, Waiting and Posted sort when you click them). |
+| Click **All posts** | The posts of this run's earlier steps appear too (the FALSE-by-a-moderator fact, the removed one, …). Click **Review queue** to go back. |
+| Open the **Action** drop-down | **Mark verified (facts only)**, **Mark FALSE (facts only)**, **Dismiss reports**, **Remove posts**, **Escalate to senior**. There is no "Delete selected posts". |
+
+- Measured with headless Chromium at 1280 px. The posts list is wide: with the filters open, the Escalated, Emergency and
+  Author columns sit to the right and the table scrolls sideways.
+- The list shows 100 posts a page and always uses the same number of queries (a test compares 5 and 100 posts).
+
+#### Step 12: A post's page, the buttons and a bulk action
+
+**Where:** Browser, logged in as `mod1`.
+
+**What this does:** Opens a fact and an opinion, then does a bulk **Mark FALSE** on both with the confirmation page, and
+escalates the opinion with a button.
+
+| Do this | Expect |
+|---|---|
+| Click "Cracking your knuckles causes arthritis. #unsure" | **View post**, read-only: five small buttons in the top right: **Mark verified, Mark FALSE, Dismiss reports, Remove post, Escalate to senior**; no **Save**. The fields are in four boxes: **Post, Review, Pipeline, Emergency** (the pipeline's verdict, confidence and raw answer are here). Below are a **Reports** box listing the five reports (time, reporter, **"Reporter's account was 2 days"**, reason, details, whether it counts, status) and a **Moderation history** box with no rows. There is no **History** link: that is for seniors. |
+| Go back and open "I think cats are better than dogs." | The same page for an opinion with **only three buttons**: Dismiss reports, Remove post, Escalate to senior. An opinion gets no verdict. |
+| Back on the list tick both rows, choose **Mark FALSE (facts only)** in the **Action** drop-down and click **Go** | The confirmation page **"Mark FALSE: are you sure?"**: **"1 post will change"** (the fact: Under review → Verified false, with its reason, reports and pipeline answer), **"1 will be skipped"** (the opinion, **"opinion: no verdict"**), a **Public note** box ("Shown with the label on the post"), an **Internal notes** box and two buttons. |
+| Type `Cracking knuckles does not cause arthritis.` as the public note and `checked with a clinic's page` as the internal notes, then click **Yes, mark false** | Back on the list with a green **"Marked 1 post FALSE."** and a yellow **"Skipped 1: 1 opinion: no verdict."**. |
+| Choose **All posts**, open the fact | **Status** Verified false, **Verdict source** Moderator, **Verdict note** "Cracking knuckles does not cause arthritis.", **Moderated by** `part10_mod1_<id>`. The **Moderation history** box now has one row: **Marked FALSE**, `part10_mod1_<id>`, `under_review → verified_false`, the public note and the internal notes. The five reports show **Actioned**. |
+| Open "I think cats are better than dogs." and click **Escalate to senior** | The confirmation page for one post (**"Escalate to senior: are you sure?"**). Click **Yes, escalate to senior**: you are back **on the opinion's page** with a green **"Escalated 1 post to a senior moderator."** and, in its Review box, **Escalated at** set. |
+| In the address bar open `…/moderation/moderationaction/` and `…/admin/logentry/` (the same admin address) | Both show **403 Forbidden**: a moderator can't read the logs. |
+
+- The buttons sit above the page's own form on purpose (a form inside a form is dropped by the browser) and send you
+  back to the post after the confirmation. The five actions on a post that isn't in the queue (a Remove on a
+  VERIFIED post) work from the post's page or from **All posts**.
+- A moderator never gets a button or a row action that would be refused for this post (an opinion has no verdict
+  button, a removed post has no buttons).
+- Measured with headless Chromium at 1280 px.
+
+#### Step 13: What a senior moderator sees
+
+**Where:** A second browser window (or a private one), logged in as `part10-boss-<id>@example.test`, same password.
+
+**What this does:** Opens the logs, an account and the settings.
+
+| Do this | Expect |
+|---|---|
+| Open the index | Two more boxes than the moderator saw: **Administration** (**Log entries**) and **Moderation** (**Moderation actions**). Still no Bookmarks. |
+| Click **Moderation actions** | The **moderation log**: one row per action of this run, newest first: time, action (Escalated, Marked FALSE, …), moderator, the post's text (a link while the post exists) and `from → to` status. You can filter by action and time and search the text or the moderator's name. Click a row: a read-only page with the public note and the internal notes. There is no **Add** and no **Delete**. |
+| Click **Log entries** | Django's admin log: the role, suspension and email changes of step 9 with their values ("Role: user → moderator."). Read-only. |
+| Open **Users**, search `part10-eve-<id>` and open `eve` | **Change user**, with only **Role** and **Active** as editable fields (everything else is shown as text), no password row, and a **History** link. Don't save. |
+| Open `…/accounts/user/` and tick two users | The Action drop-down has **Mark email verified** and no "Delete selected users". |
+| Open **Platform settings**, change **Report threshold** from 5 to 6 and click **Save** | You land on the Platform settings list with a green **"The platform settings “Platform settings” was changed successfully."** A senior may edit all eleven fields, the six emergency limits included. |
+| Open the page again and click **History** | One row: your name, the time and **"Report threshold: 5 → 6."** Now set the threshold **back to 5** and **Save** (the thresholds are yours: leave them as you found them). |
+| In the other window (the moderator), open Platform settings | Read-only, no Save, in both states. |
+
+- Measured with headless Chromium at 1280 px; the settings were restored to 5 afterwards.
+
+#### Step 14: The sidebar link in the app
+
+**Where:** Browser, with `npm run dev` running in window 3 (and `runserver` in window 1).
+
+**What this does:** Checks that the "Moderation" link is there for staff and nobody else.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/login and log in as `part10-mod1-<id>@example.test` | The home page. In the left sidebar, under the main items, is **Moderation** (with a fact-check glyph). |
+| Click **Moderation** | The admin opens in a **new tab** (the link has `target="_blank"`). The admin has its own login: use the same email and password. |
+| Log out, then log in as `part10-ada-<id>@example.test` (an ordinary person) | No **Moderation** link in the sidebar. On a phone-sized window the account sheet (the avatar button) lists **Bookmarks**, **Settings**, **Log out** only. |
+
+- The link comes from `/api/v1/me/`, which gives the admin address to staff only, so an ordinary account never sees it
+  (Part 0C built it; Part 10 adds the admin behind it).
+
+#### Step 15: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts and everything that belongs to them. The moderation log is append-only: its rows can't be
+  deleted one by one (`row.delete()` raises), so the cleanup deletes them with one query, then deletes the accounts
+  (their posts, reports and admin log entries go with them). In window 2, in `backend/` with the venv active:
+
+  ```bash
+  python manage.py shell -c "
+  from apps.moderation.models import ModerationAction
+  from apps.accounts.models import User
+  print(ModerationAction.objects.filter(moderator__email__startswith='part10-').delete())
+  print(User.objects.filter(email__startswith='part10-').delete())
+  " | tail -2
+  rm /tmp/part10_admin.py
+  ```
+
+  After one clean run of steps 3 to 10 of this guide it prints two lines:
+
+  ```text
+  (6, {'moderation.ModerationAction': 6})
+  (55, {'reports.Report': 25, 'admin.LogEntry': 3, 'accounts.User_groups': 4, 'account.EmailAddress': 4, 'posts.Post': 8, 'accounts.User': 11})
+  ```
+
+  That is how many rows went in all, and per table: the 6 audit rows of steps 7 and 8; then the 11 accounts (`ada`,
+  `bo`, `mod1`, `boss`, `root`, `eve` and the five reporters), their 8 posts (5 from step 5, the
+  moderator's own from step 8, 2 from step 10), the 25 reports on five of those posts, 4 address rows (a sign-up or the superuser makes
+  one; `eve`'s came from step 9), 4 group memberships and the 3 admin log entries `boss` wrote. Your numbers differ if
+  you did the browser steps or made other accounts. A row of the log whose moderator you deleted would otherwise
+  stay with a blank moderator: the log keeps its history when an account goes.
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway, and `ADMIN_URL_PATH` was read into a
+  variable and never printed (`unset ADM P10` forgets them).
 
 ---
 
@@ -13891,3 +14810,940 @@ review queue and the moderator actions are Part 10.
 - The only secret used is `INTERNAL_CRON_SECRET` in step 8, read from `backend\.env` into a variable and never
   printed; `Remove-Variable secret` forgets it. The other values in the commands are Cloudflare's public test token
   and the throwaway password of the test accounts.
+
+### Part 10: Human review panel (Django Admin)
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
+`frontend\.env.local`. Part 10 adds **three migrations** (`posts.0002_review_started_at`, `moderation.0001_initial`,
+`moderation.0002_role_groups`), **no dependency**, **no endpoint** and **no new variable**. It turns Django Admin
+into the moderation panel: two roles (moderators and senior moderators) with their permissions, the **review queue**
+(the posts list, showing what needs a human), five **actions** (Mark verified, Mark FALSE, Dismiss reports, Remove,
+Escalate) that ask for confirmation and write an audit trail, a **log** for seniors, account rules for seniors (role,
+suspension, "Mark email verified", delete) and seniors-only editing of the platform settings. The admin header shows
+the logo and "Rumor Zero moderation".
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 15 |
+| Window 2 (commands) | All the `curl.exe`, `Padm` and `python manage.py` commands. **Use the same window for steps 3 to 10**: the variables and functions you set in step 3 (`$id`, `$ada`, `$bo`, `Padm`, `Mk`) and later (`$f1` … `$f5`, `$o1`, `$o2`, `$own`) only live in that one terminal. If you close it, redo step 3. | 1 to 10, 15 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 14 |
+| Browser | Steps 11 to 14 | 11 to 14 |
+
+Things to know first:
+
+- **Who may do what** (ARCHITECTURE §8). A *moderator* reviews the queue and uses the five actions (never on their own
+  posts), reads reports, hides comments and looks at accounts and the settings. A *senior moderator* can in addition
+  change an account's **role** and **suspend** it, **mark an email verified**, **delete** an account, **edit the
+  platform settings**, and read the full **moderation log** and Django's **admin log**. Nobody but a superuser can edit
+  an email, a password, a profile or `is_superuser`; seniors can't touch a superuser or themselves. A moderator's
+  role comes from `User.role`; the permissions come from two Django groups that migration `moderation.0002_role_groups`
+  creates.
+- **The helper.** Steps 3 to 10 talk to Django Admin as a logged-in person. Step 3 saves a short Python program,
+  `$env:TEMP\part10_admin.py`, and a PowerShell function `Padm` that runs it. It logs in (with the throwaway password below),
+  sends what a browser would send and prints the answer in a few words. The top of the file lists its commands.
+  It uses the `requests` package that is already in the backend's virtualenv. A note that is `-` means "empty" (PowerShell 5.1 drops an empty argument).
+- Steps 3 to 10 use `curl.exe` (with `.exe`: in PowerShell 5.1 plain `curl` is a different command) for the sign-ups and
+  `python manage.py shell` for what Django Admin can't do. Steps 11 to 14 use the browser. Step 3 makes six accounts: `ada` and `bo` (people who post),
+  `mod1` (a moderator), `boss` (a senior moderator), `root` (a superuser) and `eve` (an account whose email never got
+  verified).
+- The helper prints arrows and dashes: step 3 sets `PYTHONUTF8` and the console's output encoding so PowerShell shows them (and `Select-Object` can read them). The texts of the posts are plain ASCII on purpose.
+- Nothing sends an email: step 3 marks the accounts verified with a shell command, which stands in for clicking the
+  link (Part 2 shows the real flow), and step 5 puts posts under review with reports from five aged accounts made by a
+  shell command, standing in for real reporters (Part 8 shows real ones).
+- **Your admin address** is `http://localhost:8000/admin/` unless `ADMIN_URL_PATH` in `backend\.env` says otherwise.
+  Step 3 reads it into a variable without printing it.
+- **The numbers assume the default settings** (report threshold 5, confidence threshold 85). The pipeline is the
+  stub (Part 9): `#unsure` in a fact sends it to UNDER REVIEW, `#true` to VERIFIED 95%, `#false` to FALSE 92%.
+- **The PowerShell blocks below were not run on Windows.** The agent works on the Linux PC; it ran the bash twin of every command in the Linux guide on 2026-10-13, and the outputs below are those. The PowerShell commands follow the same steps with the same shape as the earlier parts' blocks (`curl.exe`, `ConvertFrom-Json`, here-strings piped into `python manage.py shell`).
+- The outputs below were recorded on Linux on 2026-10-13. The browser steps were checked the same day with headless
+  Chromium (screenshots at 1280 px) and Django Admin with a scripted browser, not by a person at a keyboard. Ids,
+  numbers in names and times differ on every run. The leftover facts from earlier parts' tests and the end-to-end
+  tests in your local database don't show: every command filters on this run's `id`.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies Part 10's three
+migrations, confirms there is nothing more to make, then runs the whole backend test suite, Part 10's tests, the
+linter and the formatter check.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                            # 3 migrations the first time, then: No migrations to apply.
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 2709 passed
+python -m pytest apps/moderation apps/accounts/tests/test_admin_roles.py apps/core/tests/test_admin_settings.py apps/core/tests/test_admin_header.py -q   # 348 passed
+ruff check . ; ruff format --check .                # All checks passed! / 228 files already formatted
+```
+
+**You should see:** the first `migrate` prints three `Applying …` lines:
+
+```text
+  Applying posts.0002_review_started_at... OK
+  Applying moderation.0001_initial... OK
+  Applying moderation.0002_role_groups... OK
+```
+
+(a second run prints `No migrations to apply.`), then `No changes detected` and `System check identified no issues (0
+silenced).`; the full run ends with `2709 passed`, Part 10's with `348 passed`, and the last pair is `All checks passed!`
+and `228 files already formatted`. (Counts may grow later; what matters is that nothing fails.)
+
+- `posts.0002` adds `posts.review_started_at` (when a post entered review: the queue's "waiting" column) and gives
+  posts already under review in your database a value (their `updated_at`). `moderation.0001` makes the append-only
+  `moderation_actions` table and `moderation.0002` the two groups with their permissions. All three can be undone
+  with `python manage.py migrate posts 0001` (it rolls the other two back first) and re-applied.
+- The Part 10 run holds, in `apps\moderation\tests\`: `test_rules.py` (46: every action against every starting state,
+  compared with the ARCHITECTURE §4 table written a second way), `test_services.py` (83), `test_races.py` (7: real
+  threads: two moderators acting at once, an action waiting for the author's delete, a report against a removal),
+  `test_pipeline_interplay.py` (12), `test_models.py` (25: append-only), `test_roles.py` (36), `test_admin_queue.py`
+  (21), `test_admin_actions.py` (33), `test_permissions.py` (49: every page and button for a visitor, a moderator, a
+  senior and a superuser) and `test_admin_logs.py` (7); plus `accounts\tests\test_admin_roles.py` (18),
+  `core\tests\test_admin_settings.py` (6) and `core\tests\test_admin_header.py` (5).
+- Existing tests changed on purpose: moderators now hold permissions (a few admin tests that said "none until Part
+  10" were rewritten), posts under review need `review_started_at`, and `posts/tests/test_admin.py` moved into the
+  moderation tests.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last command) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 117 files, 1588 tests passed
+npm run build
+npm run test:e2e                                    # 38 passed
+cd ..\backend                                       # back to backend\ for steps 3 to 10
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  117 passed (117)` and `Tests  1588
+passed (1588)`. `npm run build` lists the same routes as in Part 9 (Part 10 adds no page). The end-to-end run ends
+with `38 passed`.
+
+- On Windows `npm run build` can't blank `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (PowerShell's `$env:NAME = ""` *deletes* the variable), so a `frontend\.env.local` with your real client ID is baked into that build. The end-to-end run pins an empty client ID for both servers, so it is unaffected.
+- Part 10 changes no page: the "Moderation" link in the sidebar was built in Part 0C. One new component test checks
+  that the phone account sheet has no Moderation entry for people who aren't staff.
+- There is no end-to-end test for the admin (it is server-rendered); steps 11 to 14 are how you check it.
+
+#### Step 3: Start the servers, make six accounts and the helper
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 10.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you sign two people up through the API,
+make four more accounts with a shell command (a moderator, a senior moderator, a superuser and an account whose
+email is not verified), save the helper and prove that all three staff accounts can log in to the admin.
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 and 2 leave you there). If you opened a new
+terminal, first run `cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the addresses are new each run
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+function Signup($email, $username) {
+@"
+{"email": "$email", "username": "$username", "password": "correct-horse-battery-42", "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-signup.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-signup.json" http://localhost:8000/api/auth/app/v1/auth/signup | ConvertFrom-Json).meta.access_token
+}
+$ada = Signup "part10-ada-$id@example.test" "part10_ada_$id"      # $ada = ada's login token (author of two posts)
+$bo = Signup "part10-bo-$id@example.test" "part10_bo_$id"         # $bo = bo's (author of three)
+@"
+from apps.accounts.models import User, Role
+User.objects.filter(email__in=['part10-ada-$id@example.test', 'part10-bo-$id@example.test']).update(is_email_verified=True)
+people = (('mod1', Role.MODERATOR), ('boss', Role.SENIOR_MODERATOR), ('root', None), ('eve', Role.USER))
+for name, role in people:
+    kw = dict(email=f'part10-{name}-$id@example.test', username=f'part10_{name}_$id', password='correct-horse-battery-42', is_email_verified=name != 'eve')
+    User.objects.create_superuser(**kw) if role is None else User.objects.create_user(role=role, **kw)
+print(User.objects.filter(email__startswith='part10-', email__endswith='$id@example.test').count(), 'accounts made')
+"@ | python manage.py shell | Select-Object -Last 1
+"$($ada.Substring(0,10)) $($bo.Substring(0,10))"    # two token prefixes, not an error
+```
+
+**You should see:**
+
+```text
+6 accounts made
+eyJhbGciOi eyJhbGciOi
+```
+
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it needs
+  internet.
+
+**If it differs:** an empty token means the sign-up failed: `runserver` isn't running, or you signed up more than 20
+times in a minute. Fix that and run this block again from `$id = Get-Date …`.
+
+Still window 2: save the helper, set its two variables and check that all three staff accounts can log in:
+
+```powershell
+$env:P10 = $id                                      # the suffix the helper builds the staff emails from
+$env:PYTHONUTF8 = "1"                               # the helper prints arrows and dashes: make Python and the console agree on UTF-8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:ADM = "http://localhost:8000/" + (python manage.py shell -c "from django.conf import settings; print(settings.ADMIN_URL_PATH)" | Select-Object -Last 1)   # your admin address (never printed)
+@'
+"""A small Django Admin client for docs/test-command.md, Part 10 (run it with the backend's Python).
+
+    python part10_admin.py queue  <who> [query]                       the posts list, as <who> sees it
+    python part10_admin.py codes  <who> <path>...                     the status code of each admin page
+    python part10_admin.py matrix <path>...                           the same for a moderator, a senior and a superuser
+    python part10_admin.py act    <who> <action> <public> <notes> <post id>...
+    python part10_admin.py edit   <who> <name> <role> <yes|no> [bio]  the user form, as a person sends it
+    python part10_admin.py users  <who> <action> <name>...            an action on the users list
+    python part10_admin.py grep   <who> <path> <regex>                what a page says (matches only)
+
+A note given as - is empty (PowerShell 5.1 drops an empty argument). <who> and <name> are the accounts step 3 made: mod1, boss, root, eve, ada, bo (email
+part10-<name>-<P10>@example.test). A path may hold {eve}, {boss}...: that account's id. Reads P10 (the
+suffix) and ADM (the admin address) from the environment."""
+
+import html
+import os
+import re
+import sys
+
+import requests
+
+SUFFIX = os.environ["P10"]
+BASE = os.environ["ADM"]
+PASSWORD = "correct-horse-battery-42"
+LOGIN = BASE + "login/"
+
+
+def email(name):
+    return f"part10-{name}-{SUFFIX}@example.test"
+
+
+def login(who):
+    session = requests.Session()
+    session.get(LOGIN)
+    data = {"username": email(who), "password": PASSWORD, "next": "/"}
+    data["csrfmiddlewaretoken"] = session.cookies["csrftoken"]
+    session.post(LOGIN, data=data, headers={"Referer": LOGIN})
+    return session
+
+
+def post(session, path, data):
+    fields = [("csrfmiddlewaretoken", session.cookies["csrftoken"]), *data]
+    return session.post(BASE + path, data=fields, headers={"Referer": BASE})
+
+
+def text(fragment):
+    plain = html.unescape(re.sub(r"<[^>]+>", "", fragment))
+    return plain.replace("\xa0", " ").strip()  # Django writes "0 minutes" with a no-break space
+
+
+def messages(page):
+    found = re.findall(r'<li class="(?:success|warning|error)">([^<]*)</li>', page)
+    return [html.unescape(message) for message in found]
+
+
+def user_id(session, name):
+    page = session.get(BASE + "accounts/user/?q=" + email(name)).text
+    return re.search(r"/accounts/user/([0-9a-f-]{36})/change/", page).group(1)
+
+
+def resolve(session, path):
+    return re.sub(r"\{(\w+)\}", lambda m: user_id(session, m.group(1)), path)
+
+
+def queue(session, query=""):
+    url = BASE + "posts/post/?q=_" + SUFFIX + ("&" + query if query else "")
+    table = re.search(r'<table id="result_list".*?</table>', session.get(url).text, re.S)
+    for row in re.findall(r"<tr[^>]*>(.*?)</tr>", table.group(0) if table else "", re.S)[1:]:
+        cells = [text(c) for c in re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", row, re.S)]
+        print(" | ".join(cells[1:8]))
+
+
+def codes(session, *paths):
+    for path in paths:
+        print(f"{path:<44} {session.get(BASE + resolve(session, path)).status_code}")
+
+
+def matrix(*paths):
+    people = (("moderator", "mod1"), ("senior", "boss"), ("superuser", "root"))
+    sessions = {label: login(who) for label, who in people}
+    for path in paths:
+        row = "   ".join(
+            f"{label} {session.get(BASE + resolve(session, path)).status_code}"
+            for label, session in sessions.items()
+        )
+        print(f"{path:<44} {row}")
+
+
+def act(session, action, public, notes, *ids):
+    public, notes = ("" if note == "-" else note for note in (public, notes))
+    chosen = [("_selected_action", pk) for pk in ids]
+    page = post(session, "posts/post/?queue=all", [("action", action), ("index", "0"), *chosen]).text
+    print("-- the confirmation page says:")
+    skipped = "opinion: no verdict|not under review|your own post|deleted by its author|already [a-z]+"
+    pattern = rf"<h2>([^<]*)</h2>|<td>({skipped})</td>|<p>(None of[^<]*)</p>"
+    for found in re.findall(pattern, page):
+        print("  ", next(part for part in found if part))
+    fields = [("action", action), ("apply", "1"), ("public_note", public), ("notes", notes)]
+    print("-- after you confirm:")
+    for message in messages(post(session, "posts/post/?queue=all", fields + chosen).text):
+        print("  ", message)
+
+
+def edit(session, name, role, active, bio=""):
+    path = f"accounts/user/{user_id(session, name)}/change/"
+    data = [("email", email(name)), ("username", f"part10_{name}_{SUFFIX}")]
+    data += [("display_name", ""), ("bio", bio), ("role", role)]
+    if active == "yes":
+        data.append(("is_active", "on"))
+    answer = post(session, path, data)
+    print("saved" if answer.history else answer.status_code)  # a redirect means it was saved
+
+
+def users(session, action, *names):
+    chosen = [("_selected_action", user_id(session, name)) for name in names]
+    answer = post(session, "accounts/user/", [("action", action), ("index", "0"), *chosen])
+    for message in messages(answer.text):
+        print(message)
+
+
+def grep(session, path, pattern):
+    page = html.unescape(session.get(BASE + resolve(session, path)).text)
+    for found in dict.fromkeys(re.findall(pattern, page)):
+        print(found)
+
+
+if __name__ == "__main__":
+    command, *rest = sys.argv[1:]
+    if command == "matrix":
+        matrix(*rest)
+    else:
+        who, *rest = rest
+        commands = {"queue": queue, "codes": codes, "act": act, "edit": edit, "users": users}
+        commands.get(command, grep)(login(who), *rest)
+'@ | Set-Content -Encoding ascii $env:TEMP\part10_admin.py
+function Padm { python $env:TEMP\part10_admin.py @args }   # Padm <command> ...: the helper (the top of the file lists its commands)
+$api = 'http://localhost:8000/api/v1'
+# Mk <token> <json>: makes a post, prints its id
+function Mk($token, $json) {
+  $json | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+  (curl.exe -s -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | ConvertFrom-Json).id
+}
+Padm matrix posts/post/                             # all three can open the posts list
+```
+
+**You should see:**
+
+```text
+posts/post/                                  moderator 200   senior 200   superuser 200
+```
+
+- `matrix` logs in as `mod1`, `boss` and `root` and prints the status code each gets for a page: 200 is "opened",
+  403 is "logged in, but not allowed", 302 would be "sent to the login page". Step 6 uses it for a whole table.
+- The password of every account here is `correct-horse-battery-42`, the throwaway one used since Part 1.
+
+**If it differs:** `KeyError: 'P10'` means the `$env:P10` and `$env:ADM` lines weren't run in this terminal. A 302, or an error
+about a missing `csrftoken`, means `ADM` is wrong: your `ADMIN_URL_PATH` isn't the one in `backend\.env`, or Django
+isn't running.
+
+#### Step 4: The two groups
+
+**Where:** Terminal window 2.
+
+**What this does:** Prints what each group holds and which groups each staff account is in. A senior moderator is in
+both groups, so the senior group lists only the extras.
+
+```powershell
+@"
+from django.contrib.auth.models import Group
+from apps.accounts.models import User
+for g in Group.objects.filter(name__in=['Moderators', 'Senior moderators']).order_by('name'):
+    print(g.name + ':', ' '.join(sorted(p.content_type.app_label + '.' + p.codename for p in g.permissions.all())))
+for name in ('mod1', 'boss', 'root'):
+    u = User.objects.get(email='part10-' + name + '-$id@example.test')
+    print(name, u.role, u.is_staff, u.is_superuser, sorted(u.groups.values_list('name', flat=True)))
+"@ | python manage.py shell | Select-Object -Last 5
+```
+
+**You should see:**
+
+```text
+Moderators: accounts.view_user core.view_platformsettings posts.change_post posts.view_post reports.view_report social.change_comment social.view_comment
+Senior moderators: accounts.change_user accounts.delete_user admin.view_logentry core.change_platformsettings moderation.view_moderationaction
+mod1 moderator True False ['Moderators']
+boss senior_moderator True False ['Moderators', 'Senior moderators']
+root user True True []
+```
+
+- `posts.change_post` is what lets a moderator use the five actions; the post's own page stays read-only for
+  everyone (nobody can edit a post's text or status by hand, a superuser included).
+- `root` has no group: a superuser needs none, and its `role` stays `user` (`is_staff` comes from `is_superuser`).
+
+#### Step 5: Fill the queue, and look at it
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` and `bo` post five things: three facts the stub can't decide (`#unsure`) or labels, a FALSE
+fact and an opinion. Then five accounts that are two days old report three of them five times each (five is the report
+threshold). `Padm queue mod1` prints the posts list the way the moderator sees it, one line per post: claim, type,
+status, reason, the pipeline's verdict and confidence, number of reports and how long it has waited.
+
+```powershell
+$f1 = Mk $ada '{"content":"Water boils at 100 degrees Celsius at sea level. #true","post_type":"fact"}'
+$f2 = Mk $ada '{"content":"Coffee stunts your growth. #unsure","post_type":"fact"}'
+$f3 = Mk $bo '{"content":"The Moon is made of cheese. #unsure","post_type":"fact"}'
+$f4 = Mk $bo '{"content":"Honey never spoils. #false","post_type":"fact"}'
+$o1 = Mk $bo '{"content":"I think tea beats coffee.","post_type":"opinion"}'
+Start-Sleep 1                                       # the checks take a few milliseconds
+Padm queue mod1                                     # 1: f2 and f3 are under review already (the pipeline could not decide)
+```
+
+**You should see:**
+
+```text
+Coffee stunts your growth. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+The Moon is made of cheese. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+```
+
+- The queue holds only posts under review. `f1` (VERIFIED 95%), `f4` (FALSE 92%) and `o1` (an opinion) are not in it
+  yet. Same-reports posts are ordered by how long they have waited, the longest first.
+
+```powershell
+@"
+from datetime import timedelta
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.reports.services import file_report
+people = [User.objects.create_user(email=f'part10-rep{i}-$id@example.test', username=f'part10_rep{i}_$id', password='correct-horse-battery-42', is_email_verified=True, created_at=timezone.now() - timedelta(hours=48)) for i in range(1, 6)]
+for post in '$f1 $f2 $o1'.split():
+    for person in people:
+        file_report(reporter=person, post_id=post, reason='inaccurate', details='')
+print(len(people) * 3, 'reports filed')
+"@ | python manage.py shell | Select-Object -Last 1
+Padm queue mod1                                     # 2: three posts have five reports each (most reported first, then the longest wait), f3 none
+```
+
+**You should see:**
+
+```text
+15 reports filed
+Coffee stunts your growth. #unsure | Fact | Under review | Both | Inconclusive 40% | 5 | 0 minutes
+Water boils at 100 degrees Celsius at sea level. #true | Fact | Under review | Reports | TRUE 95% | 5 | 0 minutes
+I think tea beats coffee. | Opinion | Under review | Reports | — | 5 | 0 minutes
+The Moon is made of cheese. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+```
+
+- The reason says why a post is here: `Pipeline` (the check couldn't decide), `Reports`, or `Both`. Order: most reports
+  first, then the longest wait: `f2` entered review first (the pipeline), then `f1` and `o1` (the fifth report).
+- The pipeline column keeps the pipeline's answer even for a post under review for reports: `f1` shows `TRUE 95%`, which
+  is what a dismissal would restore.
+
+```powershell
+Padm queue mod1 "queue=all"                         # 3: every post of ours, f4 (FALSE) too
+Padm queue mod1 "q=part10_bo_$id"                   # 4: search: bo's posts that are in the queue
+Padm queue mod1 "post_type__exact=opinion"          # 5: only opinions
+Padm queue mod1 "flagged_reason__exact=both"        # 6: only posts flagged by the pipeline and by reports
+Padm queue mod1 "escalated=yes"                     # 7: nothing escalated yet (no output)
+```
+
+**You should see:**
+
+```text
+Coffee stunts your growth. #unsure | Fact | Under review | Both | Inconclusive 40% | 5 | 0 minutes
+Water boils at 100 degrees Celsius at sea level. #true | Fact | Under review | Reports | TRUE 95% | 5 | 0 minutes
+I think tea beats coffee. | Opinion | Under review | Reports | — | 5 | 0 minutes
+The Moon is made of cheese. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+Honey never spoils. #false | Fact | Verified false | — | FALSE 92% | 0 | —
+I think tea beats coffee. | Opinion | Under review | Reports | — | 5 | 0 minutes
+The Moon is made of cheese. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+I think tea beats coffee. | Opinion | Under review | Reports | — | 5 | 0 minutes
+Coffee stunts your growth. #unsure | Fact | Under review | Both | Inconclusive 40% | 5 | 0 minutes
+```
+
+- 3 (five lines): "All posts" adds the FALSE fact, which is not under review. 4 (two lines): bo's posts that need a moderator. 5
+  (one line): only the opinion. 6 (one line): only `f2`. 7 prints nothing.
+- The queue never lists a post its author deleted: the default view hides them (the "Deleted by author" filter and "All
+  posts" still find them).
+
+#### Step 6: Who can open what
+
+**Where:** Terminal window 2.
+
+**What this does:** Opens nine admin pages as the moderator, the senior moderator and the superuser and prints the
+status code each gets.
+
+```powershell
+Padm matrix posts/post/ reports/report/ social/comment/ accounts/user/ core/platformsettings/1/change/ moderation/moderationaction/ admin/logentry/ social/bookmark/ "posts/post/$f1/history/"
+```
+
+**You should see** (the id in the last line differs):
+
+```text
+posts/post/                                  moderator 200   senior 200   superuser 200
+reports/report/                              moderator 200   senior 200   superuser 200
+social/comment/                              moderator 200   senior 200   superuser 200
+accounts/user/                               moderator 200   senior 200   superuser 200
+core/platformsettings/1/change/              moderator 200   senior 200   superuser 200
+moderation/moderationaction/                 moderator 403   senior 200   superuser 200
+admin/logentry/                              moderator 403   senior 200   superuser 200
+social/bookmark/                             moderator 403   senior 403   superuser 200
+posts/post/4c061490-b060-4462-969d-f4b72a63ccdb/history/ moderator 403   senior 200   superuser 200
+```
+
+- The first five pages open for everyone on the staff (a moderator's account and settings pages are read-only: step
+  11). The two **logs** (`moderation/moderationaction/` is the full moderation log, `admin/logentry/` is Django's admin
+  log) and every **History** page need the senior's `admin.view_logentry`: a moderator sees a post's own
+  moderation history on the post's page instead (step 12). **Bookmarks** are private (Part 7B) and open for a superuser
+  only.
+
+#### Step 7: The five actions, as the confirmation page does them
+
+**Where:** Terminal window 2.
+
+**What this does:** `Padm act` does what a moderator does with the Go button: it selects posts, picks an action and
+reads the **confirmation page** (what would change and what would be skipped, and why), then **confirms** with a public
+note and internal notes and prints the green and yellow messages the admin shows. The five posts of step 5 go through
+the five actions.
+
+```powershell
+Padm act mod1 mark_false "Coffee does not stunt growth." "no source supports it" $f2 $o1     # 1: a verdict on a fact and an opinion
+```
+
+**You should see:**
+
+```text
+-- the confirmation page says:
+   1 post will change
+   1 will be skipped
+   opinion: no verdict
+-- after you confirm:
+   Marked 1 post FALSE.
+   Skipped 1: 1 opinion: no verdict.
+```
+
+- Opinions get no verdict: the fact (`f2`) is marked FALSE, the opinion (`o1`) is skipped, and nothing happens to it.
+
+```powershell
+Padm act mod1 dismiss_reports - "five reports, none upheld" $o1                       # 2
+Padm act mod1 dismiss_reports - - $f1                                                  # 3
+Padm act mod1 escalate - "needs a second pair of eyes" $f3                             # 4
+Padm act mod1 remove_posts "Not a claim we can host." "spam pattern" $f4               # 5
+```
+
+**You should see:**
+
+```text
+-- the confirmation page says:
+   1 post will change
+-- after you confirm:
+   Dismissed the reports on 1 post.
+-- the confirmation page says:
+   1 post will change
+-- after you confirm:
+   Dismissed the reports on 1 post.
+-- the confirmation page says:
+   1 post will change
+-- after you confirm:
+   Escalated 1 post to a senior moderator.
+-- the confirmation page says:
+   1 post will change
+-- after you confirm:
+   Removed 1 post.
+```
+
+- 5 is a **Remove on a post that isn't in the queue** (`f4` is FALSE, not under review): it works because the buttons
+  and the confirmation use the full list ("All posts"), not the queue.
+
+```powershell
+Padm queue mod1 "queue=all"                         # 6: what is left in the queue, and what is not
+```
+
+**You should see:**
+
+```text
+I think tea beats coffee. | Opinion | Published | — | — | 5 | —
+Coffee stunts your growth. #unsure | Fact | Verified false | — | Inconclusive 40% | 5 | —
+Water boils at 100 degrees Celsius at sea level. #true | Fact | Verified true | — | TRUE 95% | 5 | —
+The Moon is made of cheese. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+Honey never spoils. #false | Fact | Removed | — | FALSE 92% | 0 | —
+```
+
+- Only `f3` is still in the queue (escalated: it waits for a senior). Dismissing the reports sent the opinion back to
+  Published and the fact back to the status it had (VERIFIED, the pipeline's own label: it still shows `TRUE 95%`).
+
+```powershell
+@"
+from apps.moderation.models import ModerationAction
+from apps.posts.models import Post
+from apps.reports.models import Report
+for r in ModerationAction.objects.filter(moderator__email__endswith='$id@example.test').order_by('created_at'):
+    print(r.get_action_display(), '|', r.post_snapshot[:26], '|', r.from_status, '->', r.to_status, '|', repr(r.public_note), '|', repr(r.notes))
+for pk in '$f1 $f2 $f3 $f4 $o1'.split():
+    p = Post.objects.get(pk=pk)
+    print(p.content[:26], '|', p.status, p.verdict_source, repr(p.verdict_note), p.pre_removal_status, 'escalated' if p.escalated_at else '-', 'in review' if p.review_started_at else '-')
+print(sorted(Report.objects.filter(post__author__email__endswith='$id@example.test').values_list('status', flat=True)))
+"@ | python manage.py shell | Select-Object -Last 11
+```
+
+**You should see:**
+
+```text
+Marked FALSE | Coffee stunts your growth. | under_review -> verified_false | 'Coffee does not stunt growth.' | 'no source supports it'
+Dismissed reports | I think tea beats coffee. | under_review -> published | '' | 'five reports, none upheld'
+Dismissed reports | Water boils at 100 degrees | under_review -> verified_true | '' | ''
+Escalated | The Moon is made of cheese | under_review -> under_review | '' | 'needs a second pair of eyes'
+Removed | Honey never spoils. #false | verified_false -> removed | 'Not a claim we can host.' | 'spam pattern'
+Water boils at 100 degrees | verified_true pipeline '' None - -
+Coffee stunts your growth. | verified_false moderator 'Coffee does not stunt growth.' None - -
+The Moon is made of cheese | under_review None '' None escalated in review
+Honey never spoils. #false | removed pipeline '' verified_false - -
+I think tea beats coffee. | published None '' None - -
+['actioned', 'actioned', 'actioned', 'actioned', 'actioned', 'dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed', 'dismissed']
+```
+
+- **One audit row per post that changed** (the first five lines: what was done, to which text, from which status to which,
+  the public note and the internal notes). The opinion that Mark FALSE skipped has no row.
+- The next five lines are the posts: `f2` is now FALSE **by a moderator** (so with the moderator's public note and no
+  percentage on the badge), `f1` is back to VERIFIED by the pipeline, `f3` is still under review and escalated, `f4` is
+  removed and remembers it was `verified_false` (`pre_removal_status`, for the appeal part, Part 11), `o1` is
+  published. A post that leaves review also loses its escalation and its "waiting" clock.
+- The last line is the 15 reports: 5 **actioned** (the Mark FALSE on `f2`) and 10 **dismissed** (the two dismissals).
+  A resolved report never counts toward the threshold again.
+- A removal's reason (`'Not a claim we can host.'`) lives in the audit row only, never in the post's own `verdict_note`
+  (the author sees it from Part 11).
+
+#### Step 8: Nobody acts on their own post
+
+**Where:** Terminal window 2.
+
+**What this does:** The moderator `mod1` writes a fact of their own (the pipeline can't decide: it is under review).
+They can't act on it, but a senior moderator who didn't write it can.
+
+```powershell
+$own = @"
+from apps.accounts.models import User
+from apps.pipeline.processor import process_post
+from apps.posts.services import create_post
+post = create_post(author=User.objects.get(email='part10-mod1-$id@example.test'), content='A claim by the moderator herself. #unsure', post_type='fact')
+process_post(post.pk)
+print(post.pk)
+"@ | python manage.py shell | Select-Object -Last 1
+Padm queue mod1 "q=part10_mod1_$id"                 # 1: the moderator's own post is in the queue like any other
+Padm act mod1 escalate - - $own                     # 2: she can't act on it
+Padm act boss escalate - "someone else may" $own    # 3: a senior who didn't write it can
+```
+
+**You should see:**
+
+```text
+A claim by the moderator herself. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+-- the confirmation page says:
+   None of the selected posts can have this done to them.
+   1 will be skipped
+   your own post
+-- after you confirm:
+   Skipped 1: 1 your own post.
+-- the confirmation page says:
+   1 post will change
+-- after you confirm:
+   Escalated 1 post to a senior moderator.
+```
+
+- Only a superuser may act on their own post. The refusal is checked again, under the post's lock, when you confirm.
+- The same refusal list covers: `opinion: no verdict`, `not under review` (an action that needs a review, on a post
+  that isn't under review), `no reports to dismiss`, `no status to return to`, `already removed`, `already escalated`
+  and `deleted by its author`. A mixed selection changes what it can and lists the rest as skipped.
+
+#### Step 9: Seniors and accounts
+
+**Where:** Terminal window 2.
+
+**What this does:** Tries the account rules. `eve` is an ordinary account with an unverified email.
+
+```powershell
+'{0,-8}{1,-12}{2,-12}{3,-12}{4,-12}{5}' -f '', 'eve page', 'eve pwd', 'delete eve', 'boss page', 'root page'
+foreach ($who in 'mod1', 'boss', 'root') {
+  $cells = foreach ($p in 'accounts/user/{eve}/change/', 'accounts/user/{eve}/password/', 'accounts/user/{eve}/delete/', 'accounts/user/{boss}/change/', 'accounts/user/{root}/change/') { '{0,-12}' -f ((Padm codes $who $p) -split '\s+')[-1] }
+  ('{0,-8}' -f $who) + ($cells -join '')
+}
+```
+
+**You should see:**
+
+```text
+        eve page    eve pwd     delete eve  boss page   root page
+mod1    200         403         403         200         200         
+boss    200         403         200         200         200         
+root    200         200         200         200         200         
+```
+
+- Everyone on the staff can **look** at an account page (200). Changing the password (`eve pwd`) is for a superuser only,
+  and deleting an account (`delete eve`) is for seniors and superusers. The senior can open their own page and the
+  superuser's, but as a read-only page: step 13 shows it.
+
+```powershell
+Padm edit mod1 eve moderator yes                    # 1: a moderator may not change a role
+Padm edit boss eve moderator yes "hijacked"         # 2: a senior may: the role changes, the bio is ignored
+Padm edit boss eve moderator no                     # 3: and may suspend
+@"
+from django.contrib.admin.models import LogEntry
+from apps.accounts.models import User
+u = User.objects.get(email='part10-eve-$id@example.test')
+print(u.role, u.is_staff, u.is_active, repr(u.bio))
+for e in LogEntry.objects.filter(object_id=str(u.pk)).order_by('action_time'): print(e.user.username[:11], '|', e.get_change_message())
+"@ | python manage.py shell | Select-Object -Last 3
+```
+
+**You should see:**
+
+```text
+403
+saved
+saved
+moderator True False ''
+part10_boss | Role: user → moderator.
+part10_boss | Active: yes → no.
+```
+
+- 1: refused (403). 2: saved: only `role` (and `is_active`) can be edited by a senior, so the `bio` they sent is ignored
+  (the last block shows `eve`'s bio is still empty). `is_staff` followed the new role by itself.
+- Every change is written to Django's admin log **with its old and new values**: "Role: user → moderator." and "Active:
+  yes → no.", under the senior's name. Setting `is_active` off is how you **suspend** an account.
+
+```powershell
+"{`"email`":`"part10-eve-$id@example.test`",`"password`":`"correct-horse-battery-42`",`"turnstile_token`":`"XXXX.DUMMY.TOKEN.XXXX`"}" | Set-Content -Encoding ascii $env:TEMP\rz-login.json
+curl.exe -s -o NUL -w "%{http_code}`n" @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-login.json" http://localhost:8000/api/auth/app/v1/auth/login   # 1: eve is suspended: no login
+Padm users mod1 verify_email eve                    # 2: the action isn't a moderator's: nothing (no message)
+Padm users boss verify_email eve                    # 3: a senior can
+Padm users boss verify_email eve                    # 4: and a second time there is nothing to do
+@"
+from allauth.account.models import EmailAddress
+from apps.accounts.models import User
+u = User.objects.get(email='part10-eve-$id@example.test')
+print(u.is_email_verified, list(EmailAddress.objects.filter(user=u).values_list('verified', 'primary')))
+"@ | python manage.py shell | Select-Object -Last 1
+```
+
+**You should see:**
+
+```text
+401
+Marked the email verified on 1 account.
+Skipped 1: already verified, or an account you can't change (a superuser or yourself).
+True [(True, True)]
+```
+
+- 1: a suspended account can't log in (401), its access token stops working and its refresh fails; its posts stay up.
+  Nothing for 2: **Mark email verified** isn't offered to a moderator. 3 and 4: a senior marks `eve`'s own address verified
+  (it creates her `EmailAddress` row when she has none, as accounts made by `create_user` don't); the second time she
+  is skipped. The last line is `is_email_verified` and her address (`verified`, `primary`).
+- The action is logged too ("Marked email verified", step 9's last block).
+
+```powershell
+Padm grep boss 'accounts/user/{ada}/delete/' '<li>([A-Za-z ]+: [0-9]+)</li>'     # 1: what deleting ada would take with her: a summary, no text
+Padm grep root 'accounts/user/{boss}/delete/' 'wrote admin log entries.*Active\)\.'   # 2: boss wrote log entries: not deletable, suspend instead
+```
+
+**You should see:**
+
+```text
+Users: 1
+Email addresses: 1
+Posts: 2
+Reports: 10
+wrote admin log entries, which would be deleted with the account. Suspend the account instead (clear Active).
+```
+
+- 1: the delete page for `ada` (who has two posts that got ten reports) is a **summary**: counts only, never the text of
+  a post, a comment or a bookmark (bookmarks are private). Deleting is one account at a time, from its page. 2:
+  `boss` changed accounts, so they wrote entries in the admin log; deleting them would delete those entries, so the
+  page refuses ("protected") and says to suspend instead. The delete button is missing there.
+
+```powershell
+Padm grep boss 'accounts/user/{eve}/history/' 'Role: [^<]*|Active: [^<]*|Marked email verified'     # 1: the History page shows the values (seniors only)
+Padm grep boss "admin/logentry/?q=part10_eve_$id" 'Role: [^<]*|Active: [^<]*|Marked email verified'   # 2: and so does the admin log
+```
+
+**You should see:**
+
+```text
+Role: user → moderator.
+Active: yes → no.
+Marked email verified
+Marked email verified
+Active: yes → no.
+Role: user → moderator.
+```
+
+- The first three lines are the account's History page (oldest first), the last three the admin log filtered on `eve`
+  (newest first). A moderator gets a 403 on both (step 6).
+
+#### Step 10: Two more posts for the browser
+
+**Where:** Terminal window 2.
+
+**What this does:** Steps 7 and 8 used up the queue, so `bo` posts a fact and an opinion and the same five aged
+accounts report both five times each. The browser steps use them.
+
+```powershell
+$f5 = Mk $bo '{"content":"Cracking your knuckles causes arthritis. #unsure","post_type":"fact"}'
+$o2 = Mk $bo '{"content":"I think cats are better than dogs.","post_type":"opinion"}'
+Start-Sleep 1
+@"
+from apps.accounts.models import User
+from apps.reports.services import file_report
+people = User.objects.filter(email__startswith='part10-rep', email__endswith='$id@example.test')
+for post in '$f5 $o2'.split():
+    for person in people:
+        file_report(reporter=person, post_id=post, reason='inaccurate', details='')
+print(people.count() * 2, 'reports filed')
+"@ | python manage.py shell | Select-Object -Last 1
+Padm queue mod1                                     # the queue the browser will show: f5 and o2 are new, f3 and the moderator's own post wait for a senior
+```
+
+**You should see:**
+
+```text
+10 reports filed
+Cracking your knuckles causes arthritis. #unsure | Fact | Under review | Both | Inconclusive 40% | 5 | 0 minutes
+I think cats are better than dogs. | Opinion | Under review | Reports | — | 5 | 0 minutes
+The Moon is made of cheese. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+A claim by the moderator herself. #unsure | Fact | Under review | Pipeline | Inconclusive 40% | 0 | 0 minutes
+```
+
+Keep window 1 (Django) running, and start the frontend in window 3 now (step 14 needs it):
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run dev                                         # leave it running
+```
+
+#### Step 11: In the browser, the header and a moderator's first look
+
+**Where:** Browser, with `runserver` running in window 1. Use a private window so nothing is logged in. The admin
+address is http://localhost:8000/admin/ (if it 404s, `ADMIN_URL_PATH` in `backend\.env` isn't `admin/`: use that
+path). `$id` in window 2 prints the id for the accounts below.
+
+**What this does:** Checks the branded header, logs in as the moderator and reads the queue.
+
+| Do this | Expect |
+|---|---|
+| Open the admin address | The login page. A dark navy header bar with the **Rumor Zero logo image** (grey and cyan wordmark on its navy plate) and **"Rumor Zero moderation"** beside it in yellow. The tab title is **"Log in \| Rumor Zero moderation"**. |
+| Log in as `part10-mod1-<id>@example.test`, password `correct-horse-battery-42` | The index, titled **Moderation**. Its boxes are **Accounts** (Users), **Core** (Platform settings), **Posts** (Posts), **Reports** (Reports) and **Social** (Comments). There is **no** Moderation actions, Log entries or Bookmarks. |
+| Click **Users**, then any user | **View user**, read-only: no **Save** button, and no **Password** row (only a superuser sees the password page). |
+| Click **Platform settings** | **View platform settings**: the eleven thresholds, read-only. A moderator can read them but not change them. |
+| Open **Posts**, type `_` and your id (`$id`) in the search box and press **Search** | The right side has a **By show** filter with **Review queue** selected and **All posts**; there are also filters by flagged reason, type, status, escalated and deleted. The list shows **four** posts under review, most reported first: "Cracking your knuckles…" (Reason **Both**, Pipeline **Inconclusive 40%**, Reports **5**), "I think cats are better than dogs." (Reports 5), "The Moon is made of cheese. #unsure" (Pipeline, 0 reports) and "A claim by the moderator herself." Its columns are **Post, Type, Status, Reason, Pipeline, Reports, Waiting, Posted, Escalated, Emergency, Author** (Reports, Waiting and Posted sort when you click them). |
+| Click **All posts** | The posts of this run's earlier steps appear too (the FALSE-by-a-moderator fact, the removed one, …). Click **Review queue** to go back. |
+| Open the **Action** drop-down | **Mark verified (facts only)**, **Mark FALSE (facts only)**, **Dismiss reports**, **Remove posts**, **Escalate to senior**. There is no "Delete selected posts". |
+
+- Measured with headless Chromium at 1280 px. The posts list is wide: with the filters open, the Escalated, Emergency and
+  Author columns sit to the right and the table scrolls sideways.
+- The list shows 100 posts a page and always uses the same number of queries (a test compares 5 and 100 posts).
+
+#### Step 12: A post's page, the buttons and a bulk action
+
+**Where:** Browser, logged in as `mod1`.
+
+**What this does:** Opens a fact and an opinion, then does a bulk **Mark FALSE** on both with the confirmation page, and
+escalates the opinion with a button.
+
+| Do this | Expect |
+|---|---|
+| Click "Cracking your knuckles causes arthritis. #unsure" | **View post**, read-only: five small buttons in the top right: **Mark verified, Mark FALSE, Dismiss reports, Remove post, Escalate to senior**; no **Save**. The fields are in four boxes: **Post, Review, Pipeline, Emergency** (the pipeline's verdict, confidence and raw answer are here). Below are a **Reports** box listing the five reports (time, reporter, **"Reporter's account was 2 days"**, reason, details, whether it counts, status) and a **Moderation history** box with no rows. There is no **History** link: that is for seniors. |
+| Go back and open "I think cats are better than dogs." | The same page for an opinion with **only three buttons**: Dismiss reports, Remove post, Escalate to senior. An opinion gets no verdict. |
+| Back on the list tick both rows, choose **Mark FALSE (facts only)** in the **Action** drop-down and click **Go** | The confirmation page **"Mark FALSE: are you sure?"**: **"1 post will change"** (the fact: Under review → Verified false, with its reason, reports and pipeline answer), **"1 will be skipped"** (the opinion, **"opinion: no verdict"**), a **Public note** box ("Shown with the label on the post"), an **Internal notes** box and two buttons. |
+| Type `Cracking knuckles does not cause arthritis.` as the public note and `checked with a clinic's page` as the internal notes, then click **Yes, mark false** | Back on the list with a green **"Marked 1 post FALSE."** and a yellow **"Skipped 1: 1 opinion: no verdict."**. |
+| Choose **All posts**, open the fact | **Status** Verified false, **Verdict source** Moderator, **Verdict note** "Cracking knuckles does not cause arthritis.", **Moderated by** `part10_mod1_<id>`. The **Moderation history** box now has one row: **Marked FALSE**, `part10_mod1_<id>`, `under_review → verified_false`, the public note and the internal notes. The five reports show **Actioned**. |
+| Open "I think cats are better than dogs." and click **Escalate to senior** | The confirmation page for one post (**"Escalate to senior: are you sure?"**). Click **Yes, escalate to senior**: you are back **on the opinion's page** with a green **"Escalated 1 post to a senior moderator."** and, in its Review box, **Escalated at** set. |
+| In the address bar open `…/moderation/moderationaction/` and `…/admin/logentry/` (the same admin address) | Both show **403 Forbidden**: a moderator can't read the logs. |
+
+- The buttons sit above the page's own form on purpose (a form inside a form is dropped by the browser) and send you
+  back to the post after the confirmation. The five actions on a post that isn't in the queue (a Remove on a
+  VERIFIED post) work from the post's page or from **All posts**.
+- A moderator never gets a button or a row action that would be refused for this post (an opinion has no verdict
+  button, a removed post has no buttons).
+- Measured with headless Chromium at 1280 px.
+
+#### Step 13: What a senior moderator sees
+
+**Where:** A second browser window (or a private one), logged in as `part10-boss-<id>@example.test`, same password.
+
+**What this does:** Opens the logs, an account and the settings.
+
+| Do this | Expect |
+|---|---|
+| Open the index | Two more boxes than the moderator saw: **Administration** (**Log entries**) and **Moderation** (**Moderation actions**). Still no Bookmarks. |
+| Click **Moderation actions** | The **moderation log**: one row per action of this run, newest first: time, action (Escalated, Marked FALSE, …), moderator, the post's text (a link while the post exists) and `from → to` status. You can filter by action and time and search the text or the moderator's name. Click a row: a read-only page with the public note and the internal notes. There is no **Add** and no **Delete**. |
+| Click **Log entries** | Django's admin log: the role, suspension and email changes of step 9 with their values ("Role: user → moderator."). Read-only. |
+| Open **Users**, search `part10-eve-<id>` and open `eve` | **Change user**, with only **Role** and **Active** as editable fields (everything else is shown as text), no password row, and a **History** link. Don't save. |
+| Open `…/accounts/user/` and tick two users | The Action drop-down has **Mark email verified** and no "Delete selected users". |
+| Open **Platform settings**, change **Report threshold** from 5 to 6 and click **Save** | You land on the Platform settings list with a green **"The platform settings “Platform settings” was changed successfully."** A senior may edit all eleven fields, the six emergency limits included. |
+| Open the page again and click **History** | One row: your name, the time and **"Report threshold: 5 → 6."** Now set the threshold **back to 5** and **Save** (the thresholds are yours: leave them as you found them). |
+| In the other window (the moderator), open Platform settings | Read-only, no Save, in both states. |
+
+- Measured with headless Chromium at 1280 px; the settings were restored to 5 afterwards.
+
+#### Step 14: The sidebar link in the app
+
+**Where:** Browser, with `npm run dev` running in window 3 (and `runserver` in window 1).
+
+**What this does:** Checks that the "Moderation" link is there for staff and nobody else.
+
+| Do this | Expect |
+|---|---|
+| Open http://localhost:3000/login and log in as `part10-mod1-<id>@example.test` | The home page. In the left sidebar, under the main items, is **Moderation** (with a fact-check glyph). |
+| Click **Moderation** | The admin opens in a **new tab** (the link has `target="_blank"`). The admin has its own login: use the same email and password. |
+| Log out, then log in as `part10-ada-<id>@example.test` (an ordinary person) | No **Moderation** link in the sidebar. On a phone-sized window the account sheet (the avatar button) lists **Bookmarks**, **Settings**, **Log out** only. |
+
+- The link comes from `/api/v1/me/`, which gives the admin address to staff only, so an ordinary account never sees it
+  (Part 0C built it; Part 10 adds the admin behind it).
+
+#### Step 15: Stop and clean up
+
+**Where:** Every terminal window, plus the browser.
+
+- Stop the servers: `Ctrl+C` in windows 1 and 3 (a leftover `next dev`: step 12 of Part 1).
+- Delete the test accounts and everything that belongs to them. The moderation log is append-only: its rows can't be
+  deleted one by one (`row.delete()` raises), so the cleanup deletes them with one query, then deletes the accounts
+  (their posts, reports and admin log entries go with them). In window 2, in `backend\` with the venv active:
+
+  ```powershell
+  @"
+  from apps.moderation.models import ModerationAction
+  from apps.accounts.models import User
+  print(ModerationAction.objects.filter(moderator__email__startswith='part10-').delete())
+  print(User.objects.filter(email__startswith='part10-').delete())
+  "@ | python manage.py shell | Select-Object -Last 2
+  Remove-Item $env:TEMP\part10_admin.py
+  ```
+
+  After one clean run of steps 3 to 10 of this guide it prints two lines:
+
+  ```text
+  (6, {'moderation.ModerationAction': 6})
+  (55, {'reports.Report': 25, 'admin.LogEntry': 3, 'accounts.User_groups': 4, 'account.EmailAddress': 4, 'posts.Post': 8, 'accounts.User': 11})
+  ```
+
+  That is how many rows went in all, and per table: the 6 audit rows of steps 7 and 8; then the 11 accounts (`ada`,
+  `bo`, `mod1`, `boss`, `root`, `eve` and the five reporters), their 8 posts (5 from step 5, the
+  moderator's own from step 8, 2 from step 10), the 25 reports on five of those posts, 4 address rows (a sign-up or the superuser makes
+  one; `eve`'s came from step 9), 4 group memberships and the 3 admin log entries `boss` wrote. Your numbers differ if
+  you did the browser steps or made other accounts. A row of the log whose moderator you deleted would otherwise
+  stay with a blank moderator: the log keeps its history when an account goes.
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v`
+  wipes the whole local database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway, and `ADMIN_URL_PATH` was read into a
+  variable and never printed (`Remove-Item Env:ADM, Env:P10` forgets them).

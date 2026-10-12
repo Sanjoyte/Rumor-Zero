@@ -101,6 +101,7 @@ def test_a_repost_you_already_made_survives_the_post_going_to_review_after_false
     post = PostFactory(fact=True)
     services.repost(user=me, post_id=post.pk)
     post.status, post.pre_review_status = PostStatus.UNDER_REVIEW, PostStatus.VERIFIED_FALSE
+    post.review_started_at = timezone.now()
     post.save()
     assert services.repost(user=me, post_id=post.pk) is False  # a quiet 200, as for a FALSE post
 

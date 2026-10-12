@@ -1,0 +1,38 @@
+{% extends "admin/change_form.html" %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  /* An inline row's caption is str(row): ids only (a report prints "<reporter id> reported <post id>"). */
+  .inline-group td.original p { display: none; }
+  .object-tools form.moderation-action { display: inline; margin: 0; }
+  .object-tools form.moderation-action button {
+    display: block; float: left; padding: 3px 12px; background: var(--object-tools-bg);
+    color: var(--object-tools-fg); font-weight: 400; font-size: 0.8125rem;
+    text-transform: uppercase; letter-spacing: 0.5px; border: 0; border-radius: 15px; cursor: pointer;
+  }
+  .object-tools form.moderation-action button:hover,
+  .object-tools form.moderation-action button:focus { background: var(--object-tools-hover-bg); }
+</style>
+{% endblock %}
+
+{% comment %}
+  These buttons sit in the object tools, which Django renders *before* the page's own <form>: a
+  form inside <form id="post_form"> would be dropped by the browser. Each posts to the full list
+  (`?queue=all`), because an action's queryset is the filtered list, and a post that isn't under
+  review (Remove on a VERIFIED post) is not in the queue. `_from_post` brings the moderator back
+  here after the confirmation.
+{% endcomment %}
+{% block object-tools-items %}
+{% for button in moderation_buttons %}
+<li>
+  <form method="post" action="{% url 'admin:posts_post_changelist' %}?queue=all" class="moderation-action">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="{{ button.action }}">
+    <input type="hidden" name="_selected_action" value="{{ original.pk }}">
+    <input type="hidden" name="_from_post" value="1">
+    <button type="submit">{{ button.label }}</button>
+  </form>
+</li>
+{% endfor %}
+{{ block.super }}
+{% endblock %}

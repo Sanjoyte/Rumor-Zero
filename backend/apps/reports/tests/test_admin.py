@@ -1,4 +1,5 @@
-"""Django Admin for reports: a read-only list (Part 8). Moderators get permissions in Part 10."""
+"""Django Admin for reports: a read-only list (Part 8). The Moderators group holds `view_report`
+(Part 10)."""
 
 import pytest
 from django.contrib import admin
@@ -62,14 +63,24 @@ def test_it_is_read_only(client, superuser):
     assert Report.objects.filter(pk=report.pk).exists()
 
 
-def test_a_moderator_without_the_permission_cannot_open_it_yet(client):
-    moderator = UserFactory(role=Role.MODERATOR)  # no model permissions until Part 10
-    client.force_login(moderator)
+def test_staff_without_the_permission_cannot_open_it(client):
+    staff = UserFactory(role=Role.MODERATOR)
+    staff.groups.clear()  # the Moderators group (Part 10) holds `view_report`
+    client.force_login(staff)
     assert client.get(reverse("admin:reports_report_changelist")).status_code == 403
 
 
-def test_a_moderator_granted_view_permission_can_read_but_not_change(client):
+def test_a_moderator_can_read_reports_through_the_group_but_not_change_them(client):
+    client.force_login(UserFactory(role=Role.MODERATOR))
+    report = ReportFactory()
+    assert client.get(reverse("admin:reports_report_changelist")).status_code == 200
+    assert client.get(reverse("admin:reports_report_change", args=[report.pk])).status_code == 200
+    assert client.post(reverse("admin:reports_report_change", args=[report.pk])).status_code == 403
+
+
+def test_staff_granted_view_permission_can_read_but_not_change(client):
     moderator = UserFactory(role=Role.MODERATOR)
+    moderator.groups.clear()
     moderator.user_permissions.set(Permission.objects.filter(codename="view_report"))
     client.force_login(moderator)
     report = ReportFactory()

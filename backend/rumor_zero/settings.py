@@ -85,6 +85,7 @@ INSTALLED_APPS = [
     "apps.social",
     "apps.reports",
     "apps.pipeline",
+    "apps.moderation",
 ]
 
 AUTH_USER_MODEL = "accounts.User"

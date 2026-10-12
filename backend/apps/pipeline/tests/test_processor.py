@@ -11,6 +11,8 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from apps.moderation import services as moderation_services
+from apps.moderation.tests.factories import moderator_user
 from apps.pipeline import processor
 from apps.pipeline.clients import StubPipelineClient
 from apps.pipeline.contract import ContractError
@@ -278,9 +280,8 @@ def test_a_dismissal_mid_check_routes_the_answer_like_a_pending_post():
     post = reported_fact()
 
     def dismiss(request):
-        Post.objects.filter(pk=post.pk).update(
-            status=PostStatus.PENDING, flagged_reason=None, pre_review_status=None
-        )
+        # The real service (Part 10), so the post is left exactly as a moderator leaves it.
+        moderation_services.dismiss_reports(post.pk, moderator=moderator_user())
 
     processor.process_pending(client=answering("true", 95, during=dismiss))
     after = fresh(post)

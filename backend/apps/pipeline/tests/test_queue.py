@@ -44,6 +44,8 @@ def test_the_query_and_the_python_guard_agree_on_every_state_the_database_allows
                 pre_review_status=pre,
                 verdict_source=source,
                 deleted_at=now if deleted else None,
+                # The database holds this to "set exactly while under review".
+                review_started_at=now if status == PostStatus.UNDER_REVIEW else None,
                 created_at=now,
             )
         )

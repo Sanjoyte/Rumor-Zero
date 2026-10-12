@@ -116,7 +116,8 @@ Conventions:
 | verdict_source | `pipeline` \| `moderator`, null | c-6. Moderator verdicts show no % |
 | verdict_note | varchar(500) | public note set by a moderator |
 | report_count | int, default 0 | **lifetime** counter of every report (counting or not), updated by `posts.services.record_report` in the report-insert transaction (guide §3.2 note); never decremented |
-| escalated_at | timestamptz null | c-9 |
+| review_started_at | timestamptz null | when the post entered review (`routing.enter_review`; a merge into an existing review leaves it); cleared when a moderator ends the review. The queue's "waiting" column and sort. Check `posts_post_review_started_consistent`: set exactly while `status='under_review'` (Part 10) |
+| escalated_at | timestamptz null | c-9. Set only on a post under review; cleared when the review ends (Part 10) |
 | moderated_by | FK users SET_NULL null | last moderator to act |
 | moderated_at | timestamptz null | |
 | deleted_at | timestamptz null | author soft delete (D6): hidden everywhere, kept for audit |
@@ -128,7 +129,7 @@ Indexes (Django limits an index name to 30 characters; the `author` FK has no in
 - `(author_id, created_at DESC)` (`posts_author_created_idx`; it also serves the fact-quota count)
 - GIN `(search_vector)`
 - partial `(is_emergency DESC, created_at) WHERE post_type='fact' AND status='pending' AND deleted_at IS NULL` (queue; emergencies first)
-- partial `(created_at) WHERE status='under_review'` (review queue)
+- partial `(review_started_at) WHERE status='under_review'` (review queue, longest wait first; `posts_review_queue_idx`, re-pointed from `created_at` in Part 10)
 - partial `(emergency_expires_at) WHERE is_emergency AND emergency_demoted_at IS NULL AND deleted_at IS NULL` (pinned emergencies)
 - partial `(created_at DESC, id DESC) WHERE deleted_at IS NULL AND NOT status='removed'` (`posts_recent_idx`, added in Part 4): the Recent feed lists every status except removed, which `(status, created_at)` cannot serve
 
@@ -164,20 +165,27 @@ Written only by `apps/reports/services.py`. A report never shows its details or 
 
 ### moderation_actions (audit trail, append-only)
 
+`moderation.ModerationAction` (Part 10; table `moderation_moderationaction`).
+
 | Field | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
-| post | FK SET_NULL null | null for account-level actions |
+| post | FK SET_NULL null, `related_name="moderation_actions"` | null for account-level actions, and after the post is deleted (the snapshot stays). No FK index of its own: `modaction_post_created_idx` leads with it |
 | subject_user | FK users SET_NULL null | the account acted on (emergency block, photo removal/block) |
 | post_snapshot | text | copy of content at action time (so the log survives deletion) |
 | moderator | FK users SET_NULL null | |
-| action | `verified` \| `marked_false` \| `dismissed_report` \| `removed` \| `escalated` \| `restored` \| `emergency_demoted` \| `emergency_blocked` \| `avatar_removed` \| `avatar_blocked` | guide §3.4 plus the D5 features. The whole list is created in Part 10, so later parts never alter the constraint. |
-| from_status, to_status | status enum, null | "what it was before" (null for account-level actions) |
-| appeal | FK appeals null | set when the action resolves an appeal |
-| notes | text | internal rationale |
-| created_at | timestamptz | |
+| action | `verified` \| `marked_false` \| `dismissed_report` \| `removed` \| `escalated` \| `restored` \| `emergency_demoted` \| `emergency_blocked` \| `avatar_removed` \| `avatar_blocked` | guide §3.4 plus the D5 features. The whole list is created in Part 10, so later parts never alter the constraint (`moderation_action_valid`). Part 10 writes the first five |
+| from_status, to_status | status enum, null | "what it was before" (null for account-level actions); database checks `moderation_action_from_status_valid` / `…_to_status_valid` |
+| public_note | varchar(500), blank | **what the author may be shown** (user decision 2026-10-11): the verdict note of Mark verified / Mark FALSE (also copied to `Post.verdict_note`) and the "reason shown to the author" of Remove (never copied to `Post.verdict_note`, so Part 11's Restore needs no undo). Part 11 shows the author the `public_note` of the post's latest `removed` row |
+| appeal | FK appeals null | **added by Part 11** together with the `Appeal` model (the table doesn't exist yet); set when the action resolves an appeal |
+| notes | text | internal rationale (moderators only) |
+| created_at | timestamptz, `default=timezone.now` | taken once the post's row lock is held, so the log's order is the order things happened |
 
-Admin: read-only for everyone, visible only to seniors in full (guide §8.2).
+- Indexes: `modaction_post_created_idx` `(post, created_at DESC)` for the history on a post's page, and `modaction_created_idx` `(created_at DESC)` for the log.
+- **Append-only in code:** `save()` of an existing row and `delete()` raise. Deleting a post or an account only nulls the link (the collector's `SET_NULL` is an `UPDATE` that calls neither).
+- Written only by `apps/moderation/services.py`.
+
+Admin: read-only for everyone. The full list (`ModerationActionAdmin`) is for senior moderators and superusers (`moderation.view_moderationaction`); a moderator sees only a post's own history, as an inline on its page (guide §8.2, user decision 2026-10-11). Account and settings changes have no `moderation_actions` kind and are written to Django's own admin log with their values (§8).
 
 ### appeals (c-7)
 
@@ -244,8 +252,8 @@ A separate table keeps image bytes out of every `users` query.
 - Fields: `report_threshold`, `report_window_hours`, `report_min_account_age_hours`, `confidence_threshold`, `fact_posts_per_day`, the six emergency limits (`emergency_duration_hours`, `emergency_posts_per_day`, `emergency_min_account_age_days`, `emergency_min_reputation`, `emergency_report_threshold`, `emergency_false_cooldown_days`; §3), `updated_by`, `updated_at`. All are created in Part 0A.
 - Seeded from env defaults by a data migration (a missing or empty variable falls back to its default; an invalid or out-of-range one stops startup, naming the variable).
 - Every field is a `PositiveSmallIntegerField` with a DB `CheckConstraint`: ≥ 1 for `report_threshold`, `report_window_hours`, `emergency_duration_hours` and `emergency_report_threshold`; 0–100 for `confidence_threshold` and `emergency_min_reputation`; ≥ 0 for the rest (a per-day value of 0 works as a kill switch). `id` is fixed at 1 by a check.
-- Editable **only by senior moderators** in Django Admin (Part 10; until then any staff user with the model permission).
-- Read through a 60 s cache (`apps.core.services.get_platform_settings()`; a save clears it now and again on commit); every change is logged (Part 10).
+- Editable **only by senior moderators** in Django Admin (`core.change_platformsettings`; a moderator holds `view_platformsettings` and gets the page read-only). Added only when the row is missing.
+- Read through a 60 s cache (`apps.core.services.get_platform_settings()`; a save clears it now and again on commit); every change is logged with old → new values ("Report threshold: 5 → 3; Confidence threshold: 85 → 90.") in Django's admin log, on the object's History page (Part 10).
 
 ## 3. Configuration values
 
@@ -333,11 +341,11 @@ Auth endpoints use allauth's `ACCOUNT_RATE_LIMITS`, keyed on `REMOTE_ADDR` (the 
 | `pending` (**active emergency**) | pipeline result FALSE, confidence ≥ threshold | `under_review` | treated as not decisive: `flagged_reason=pipeline`, `pre_review_status=pending`; top of the admin queue; the post keeps its priority (§4b) |
 | `under_review` (reports, **active emergency**, late result) | pipeline result FALSE, confidence ≥ threshold | unchanged | treated as not decisive: `flagged_reason=both` (no `pre_review_status=verified_false`, so dismissing reports can't make it FALSE without a human). Since Part 9 this is the rule for every post, so 11C adds nothing here |
 | `pending` / `published` / `verified_*` (**active emergency**) | **emergency** report threshold (2) crossed | `under_review` | as for the normal threshold; priority kept |
-| `under_review` | moderator **Mark verified** (fact only) | `verified_true` | `verdict_source=moderator`, `flagged_reason=null`, open reports→`actioned`; log action; notify. An emergency keeps its priority. |
+| `under_review` | moderator **Mark verified** (fact only) | `verified_true` | `verdict_source=moderator`, `verdict_note` = the public note (blank clears it), `flagged_reason`, `pre_review_status`, `review_started_at` and `escalated_at` cleared, open reports→`actioned`; log action (Part 10); notify. An emergency keeps its priority. |
 | `under_review` | moderator **Mark FALSE** (fact only) | `verified_false` | same as above. On an emergency, also `emergency_demoted_at=now` (if active), author `emergency_blocked_until = now + emergency_false_cooldown_days`, notify `emergency_demoted` |
-| `under_review` | moderator **Dismiss reports** | `pre_review_status` if flag was `reports`; stays `under_review` with `flagged_reason=pipeline` if flag was `both` | open reports→`dismissed`; log |
-| any except `removed` | moderator **Remove** | `removed` | `pre_removal_status` = the old status (its `pre_review_status` if it was `under_review`); reports→`actioned`; log; notify (`removed`) |
-| any | moderator **Escalate** | unchanged | `escalated_at=now`; log |
+| `under_review` | moderator **Dismiss reports** | `pre_review_status` if flag was `reports` (the review fields are cleared as above); stays `under_review` with `flagged_reason=pipeline` if flag was `both` (the status it came from, the wait and any escalation are kept) | open reports→`dismissed`; log. Refused with no `reports` in the flag, or when `pre_review_status` isn't a status the post could return to (`no_prior_status`) |
+| any except `removed` | moderator **Remove** | `removed` | `pre_removal_status` = the old status (its `pre_review_status` if it was `under_review`); the review fields are cleared; reports→`actioned`; log with the optional "reason shown to the author" (`public_note`); `Post.verdict_note` is not touched; notify (`removed`) |
+| `under_review` | moderator **Escalate** | unchanged | `escalated_at=now`; log. Only on a post under review (Part 10; Part 11 adds removed posts with an open removal appeal), and not twice. It never locks the post: any moderator can still act |
 | any (**active emergency**) | moderator **Demote emergency** | unchanged | `emergency_demoted_at=now`; log `emergency_demoted`; notify `emergency_demoted` |
 | `verified_false` (author, no prior appeal) | author **appeals** (label) | `under_review` | `flagged_reason=appeal`, `pre_review_status=verified_false`; appeal `open`, kind `label` |
 | `under_review` (appeal) | Mark verified | `verified_true` | appeal `overturned`; notify `appeal_resolved` |
@@ -351,7 +359,9 @@ Auth endpoints use allauth's `ACCOUNT_RATE_LIMITS`, keyed on `REMOTE_ADDR` (the 
 Also:
 - A pipeline result is **ignored** when `verdict_source=moderator` (humans win). More precisely (Part 9), a result or a failure is applied only while the post is **awaiting a check** (`routing.is_awaiting_check`, the same rule as the queue's `awaiting_check_q`): a fact, not deleted, with no `verdict_source`, that is `pending` or under review **for reports only** with `pre_review_status=pending`. Anything else (removed, decided by a moderator, already checked) is ignored and nothing is written, `updated_at` included. A result for a post the author deleted meanwhile, or for a try whose lease a newer claim took over, is dropped (§6).
 - An appeal must be resolved by a moderator other than `original_moderator` unless the resolver is a senior (`APPEAL_REQUIRE_DIFFERENT_MODERATOR`).
-- Opinions: moderators can only Dismiss or Remove.
+- Opinions: moderators can only Dismiss, Remove or Escalate (no verdict).
+- **Who may act on what (Part 10, `apps/moderation/rules.py`):** nobody acts on **their own post, except a superuser**, and every action refuses a post its author **deleted**. Each refusal has a code (`deleted`, `own_post`, `opinion`, `not_under_review`, `no_reports`, `no_prior_status`, `already_removed`, `already_escalated`) and a short text; a mixed selection changes what it can and lists the rest as skipped. The services re-check under the row lock.
+- **Leaving review** (Mark verified/FALSE, Dismiss back to the old status, Remove) clears `flagged_reason`, `pre_review_status`, `review_started_at` and `escalated_at`, so a later review doesn't look old or escalated (the `escalated` row stays in the log). **No moderator action touches `pipeline_*`** (`pipeline_attempts` is Part 9's claim token) or `confidence_score`.
 - "Active emergency" is always computed at read time from the stored columns (`is_active_emergency`, below). No job ever flips a flag.
 - Every verdict, removal, restore and appeal outcome also calls the reputation service in the same transaction (§4a).
 
@@ -361,11 +371,12 @@ Also:
 def merge_flag(existing, new):                      # None+x=x; x+x=x; pipeline+reports=both;
     ...                                             # appeal stays appeal; both stays both
 
-def enter_review(post, reason):
+def enter_review(post, reason, now):
     if post.status == UNDER_REVIEW:
-        post.flagged_reason = merge_flag(post.flagged_reason, reason)
+        post.flagged_reason = merge_flag(post.flagged_reason, reason)      # the wait is not restarted
     else:
         post.pre_review_status, post.status, post.flagged_reason = post.status, UNDER_REVIEW, reason
+        post.review_started_at = now                                       # Part 10: the queue's clock
 
 def is_active_emergency(post, now):                 # read-time only; no scheduler (§4b). Defined in apps/posts/emergency.py
                                                     # (Part 4, where the serializer reads it) and imported here (Part 11C)
@@ -771,29 +782,45 @@ Other settings:
 
 ## 8. Moderation panel: Django Admin (guide §8; d2 is a reference only)
 
-- **Roles:**
-  - *Moderator*: review queue, the actions below, can't change roles or delete users.
-  - *Senior moderator*: + manage moderator accounts (edit `role`), edit `PlatformSettings`, full audit log.
-  - Implemented with Groups and model permissions synced from `role`.
-- **Review queue:** `PostAdmin`, default filter `status=under_review`, plus removed posts with an open removal appeal.
-  - Columns: content (truncated), type, flagged_reason, confidence, report_count, age in queue, escalated, emergency (active / expired / —).
-  - Filters: flagged_reason (pipeline / reports / both / appeal), appeal kind (label / removal), type, escalated, emergency (active).
-  - Default order: **active emergencies first**, then report_count, then created_at. Sortable by report_count and created_at.
-  - Search: content, author username.
-  - Inlines: reports (reason, details, reporter age), appeal, moderation history, credibility events for this post.
-- **Bulk actions**, each calling `moderation.services` and writing `moderation_actions`:
-  - *Mark verified*, *Mark FALSE* (fact posts only; optional public `verdict_note`)
-  - *Dismiss reports*
-  - *Remove post*
-  - *Escalate to senior*
-  - *Demote emergency* (11C)
-  - *Restore post* / *Keep removed* (removal appeals, 11)
+Part 10 built the panel in `apps/moderation/` (`rules.py` the pure rules, `services.py` the five actions, `roles.py` the groups, `admin.py` the screens) and, for accounts and settings, in `apps/accounts/admin.py` and `apps/core/admin.py`.
+
+- **Roles** (Groups and model permissions, synced from `User.role` by `User.save`; the groups and their permissions are created by data migration `moderation.0002_role_groups`, which holds its own frozen copy of the lists in `roles.py`; `test_roles.py` fails until a later change to a list adds a migration):
+  - *Moderator* (group "Moderators"): `posts.view_post`, `posts.change_post` (gates the actions; the page itself stays read-only), `reports.view_report`, `social.view_comment`, `social.change_comment`, `accounts.view_user`, `core.view_platformsettings`.
+  - *Senior moderator* (in both groups; extras only): `accounts.change_user`, `accounts.delete_user`, `core.change_platformsettings`, `moderation.view_moderationaction`, `admin.view_logentry`.
+
+| Capability | Non-staff | Moderator | Senior | Superuser |
+|---|---|---|---|---|
+| Admin login | redirect to login | ✓ | ✓ | ✓ |
+| Queue, post pages, a post's moderation history (inline) | none | ✓ | ✓ | ✓ |
+| The five actions | none | ✓ (not own posts) | ✓ (not own posts) | ✓ (own posts too) |
+| Reports list; comments with Hide/Unhide | none | ✓ | ✓ | ✓ |
+| Users: view | none | ✓ | ✓ | ✓ |
+| Users: `role`, `is_active` (suspend), Mark email verified | none | none | ✓ others; not superusers or self | ✓ |
+| Users: delete | none | none | ✓ one at a time; not superusers or self | ✓ |
+| Users: email, password, profile, `is_superuser` | none | none | none | ✓ |
+| Platform settings (all eleven fields) | none | view | edit | ✓ |
+| Full moderation log; Django's admin log; History pages | none | none | ✓ | ✓ |
+| Bookmarks, likes, follows, reposts | none | none | none | ✓ (unchanged) |
+
+- **Review queue:** `PostAdmin`, which is **read-only for everyone** (`has_change_permission` is always False; a POST to a post's change URL is a 403). Every change goes through `moderation.services`.
+  - **"Show" filter:** the default is the *review queue*: `status='under_review'` and not deleted by the author. "All posts" shows everything. Choosing a Status, or "Deleted by author", also leaves the queue (otherwise "Status: removed" on top of the queue would always be empty). Part 11 adds removed posts with an open removal appeal.
+  - Columns: the claim (excerpt, links to the page), type, status, reason (`flagged_reason`), **pipeline** ("FALSE 92%", "TRUE 95%", "Inconclusive 40%", "—": Part 9 asked to show the late verdict), reports (`report_count`, sortable), **waiting** (`timesince(review_started_at)`, sortable), posted (`created_at`, sortable), escalated, emergency (Active / Ended / —: *ended* means expired or demoted), author.
+  - Filters: Show, flagged reason, type, status, Escalated, "Deleted by author". The appeal-kind and emergency filters belong to 11 and 11C.
+  - Default order: `-report_count`, then `review_started_at` ascending (longest wait first, nulls last), then `-created_at`. 11C puts **active emergencies first**.
+  - Search: content, author username. 100 posts a page; the page uses a constant number of queries.
+  - The post page: fields grouped as Post / Review / Pipeline / Emergency (all read-only), with two inlines, **reports** (time, reporter, the reporter's account age when reporting, reason, details, whether it counts, status) and **moderation history** (time, action, moderator, from → to, public note, notes; visible with `posts.view_post`, so moderators see it without the full log). 11 adds the appeal inline and 11B the credibility events.
+- **The five actions**, bulk actions on the list and buttons on the post page, each calling `moderation.services` once per post (own transaction, row locked, rules re-checked) and writing one `moderation_actions` row:
+  - *Mark verified*, *Mark FALSE* (fact posts only; optional public note), *Dismiss reports*, *Remove posts* (optional "reason shown to the author"), *Escalate to senior*. *Demote emergency* is 11C; *Restore post* / *Keep removed* are 11.
+  - **Confirmation:** the first POST renders a page listing the posts that will change (claim, type, status → new status, reason, reports, pipeline) and the skipped ones with their reason, with the note fields (public note ≤ 500 code points, internal notes ≤ 2,000). It carries the evaluated, capped ids (at most **100** posts; more is an error) and **never** `select_across`: the apply step acts on exactly the posts shown. The form posts back to the same full URL, so the filters survive. The result is a success message ("Marked 3 posts verified.") and a warning for refusals found under the lock ("Skipped 2: 1 opinion: no verdict, 1 not under review.").
+  - **Buttons on a post's page** sit in the object tools (outside the page's own form) and post to the full list (`?queue=all`, because an action's queryset is the filtered list); only the actions that apply to this post are offered (an opinion never gets the verdicts), and the moderator returns to the post page afterwards. A list filtered to opinions drops Mark verified/FALSE from its dropdown.
+- **Logs (seniors only):** `ModerationActionAdmin`, the full moderation log (time, action, moderator, post snapshot linked while the post exists, from → to; filters action and time; search snapshot and moderator), and `LogEntryAdmin`, Django's admin log, which holds what has no `moderation_actions` kind: role and suspension changes, Mark email verified, platform settings and Hide/Unhide of comments, with old → new values. Both are read-only. An object's **History page** (accounts, platform settings, comments, posts) also needs `admin.view_logentry` (`HistoryNeedsLog`); the History link is hidden from those who can't open it.
+- **Accounts** (`UserAdmin`): a superuser has the whole form. A senior sees the page read-only except `role` and `is_active`, never sees the password field, can't edit, suspend or delete a superuser or themselves, has no password page and no bulk delete, and may run **Mark email verified** (`accounts.services.verify_email_by_staff`: verifies the account's own address, creating the allauth `EmailAddress` row if missing; skips verified accounts; logged "Marked email verified"). **Suspension** is `is_active=False`: allauth refuses login, `JWTAuthentication` refuses the access token and a refresh fails; the account's content stays up. **Deleting** an account shows a summary (a count per kind of what goes with it, never the rows' text: bookmarks are private) and asks for no permission on the cascaded models; an account that **wrote admin log entries can't be deleted, only suspended**, so the log keeps its records. The change message carries values ("Role: moderator → senior moderator.", "Active: yes → no.").
+- Comments (Part 7): *Hide comments* and *Unhide comments* bulk actions on a read-only `CommentAdmin` (list: text, author, post, hidden, deleted; filters: hidden, "By deleted at", created; search: text, username; no add, change or delete). Both need `social.change_comment`, which the Moderators group holds. Each change writes Django's own admin log entry ("Hidden" / "Unhidden"), because `moderation_actions` has no comment kind. Unhide doesn't undelete a comment its author deleted. `LikeAdmin` is read-only.
 - Users: *Block emergency posting* (11C); *Remove photo*, *Block photo uploads* (14B). These are logged with `subject_user`.
-- Comments (Part 7): *Hide comments* and *Unhide comments* bulk actions on a read-only `CommentAdmin` (list: text, author, post, hidden, deleted; filters: hidden, "By deleted at", created; search: text, username; no add, change or delete). Both need `social.change_comment` (today a superuser; Part 10 gives it to the Moderators group). Each change writes Django's own admin log entry ("Hidden" / "Unhidden"), because `moderation_actions` (Part 10) has no comment kind. Unhide doesn't undelete a comment its author deleted. `LikeAdmin` is read-only.
 - Reposts and bookmarks (Part 7B): `RepostAdmin` is a read-only list (user, post, status at repost, created; filter by status at repost; search by username). `BookmarkAdmin` is read-only and **superuser-only** (`has_view_permission` is `is_superuser`, so Django also leaves it off the admin index): a moderator holding every bookmark permission still gets 403, because bookmarks are private (§4d).
-- Reports (Part 8): `ReportAdmin` is a read-only list (post, reporter, reason, status, whether it counts, created; filters status, reason, counts, created; search by reporter username; no add, change or delete). The list and `__str__` never show the details text; the page of one report does, for whoever may view it. Viewing needs `reports.view_report`: a superuser today, the moderators from Part 10, which also adds the `PostAdmin` inline and Dismiss (setting `resolved_at` and `resolved_by` together with `status`).
-- Credibility ledger: read-only list (filters by kind; search by username). UserAdmin shows the score with a link to the user's rows.
-- The admin header shows the logo (`core/brand/logo-admin.png`, §14) and "Rumor Zero moderation" (`templates/admin/base_site.html`). It is served at `<BACKEND>/<ADMIN_URL_PATH>`. `/api/v1/me/` returns `admin_url` only to staff, so the sidebar "Moderation" link never exposes the path to others.
+- Reports (Part 8): `ReportAdmin` is a read-only list (post, reporter, reason, status, whether it counts, created; filters status, reason, counts, created; search by reporter username; no add, change or delete). The list and `__str__` never show the details text; the page of one report does, for whoever may view it (moderators, `reports.view_report`). Reports are resolved only by the moderation services (`reports.services.resolve_open_reports` sets `status`, `resolved_by` and `resolved_at` together).
+- Credibility ledger: read-only list (filters by kind; search by username). UserAdmin shows the score with a link to the user's rows (11B).
+- **Header:** the admin shows the logo (`core/brand/logo-admin.png`, §14: the full wordmark on its `#283044` plate, with the header taking the plate's colour) and "Rumor Zero moderation" (`templates/admin/base_site.html`; `site_header`, `site_title` and `index_title` are set in `apps/core/admin.py`; the login page shows it too). The image has an empty `alt`: the name is written beside it. It is served at `<BACKEND>/<ADMIN_URL_PATH>`. `/api/v1/me/` returns `admin_url` only to staff, so the sidebar "Moderation" link never exposes the path to others.
 
 ## 9. API conventions
 

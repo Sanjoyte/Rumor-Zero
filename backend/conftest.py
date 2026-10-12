@@ -99,3 +99,14 @@ def user(db):
     from apps.accounts.tests.factories import UserFactory
 
     return UserFactory()
+
+
+@pytest.fixture
+def role_groups(db):
+    """Both moderator groups with exactly their permissions (`apps/moderation/roles.py`). The test
+    database gets them from migration 0002, but a `transaction=True` test flushes the database:
+    `post_migrate` brings the permission rows back and not the groups' assignments, so a test that
+    depends on them calls this. It also works in an ordinary `db` test."""
+    from apps.moderation.roles import sync_role_groups
+
+    sync_role_groups()

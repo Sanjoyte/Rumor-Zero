@@ -1,8 +1,8 @@
 # Plan: Part 10, Human review panel (Django Admin)
 
-- **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-11, together with the six decisions and the defaults
-  below. Saved here and linked from `HANDOFF.md`. Not implemented yet. Step 0's plan save, HANDOFF link and HANDOFF
-  text fix were done at approval; its workspace check is still to do. Drafted 2026-10-11 by Claude (Opus 5.5).
+- **Status:** IMPLEMENTED 2026-10-13 (uncommitted at the time of writing). APPROVED by the user (Sanjoy Rozario) on
+  2026-10-11, together with the six decisions and the defaults below; drafted 2026-10-11 by Claude (Opus 5.5) and built
+  by Claude (Sonnet 5.5). Deviations from the plan are listed in `task.md` Part 10 ("Built differently from the plan").
 - **Implement with:** Sonnet 5.5 · high (task.md).
 - **Evidence (read-only):**
   - Docs: HANDOFF, MEMORY, `task.md` Part 10 and the Part 8/9 records (their Part 10 notes), the Part 11/11B/11C

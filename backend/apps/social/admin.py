@@ -1,6 +1,7 @@
 from django.contrib import admin, messages
 from django.utils.text import Truncator
 
+from apps.core.admin_mixins import HistoryNeedsLog
 from apps.social.models import Bookmark, Comment, Follow, Like, Repost
 
 
@@ -45,14 +46,14 @@ class LikeAdmin(admin.ModelAdmin):
 
 
 @admin.register(Comment)
-class CommentAdmin(admin.ModelAdmin):
+class CommentAdmin(HistoryNeedsLog, admin.ModelAdmin):
     """Read-only, with two actions: **Hide comments** and **Unhide comments** (ARCHITECTURE §8).
 
     A moderator hides rather than edits or deletes; a hidden comment is in no list and no count
     until it is unhidden. Unhide doesn't undelete what its author deleted. There is no
-    `moderation_actions` row for this (that table arrives in Part 10 and has no comment kind), so
-    each change is written to Django's own admin log. The actions need `social.change_comment`
-    (Part 10 gives it to the Moderators group; today a superuser has it).
+    `moderation_actions` row for this (it has no comment kind), so each change is written to
+    Django's own admin log. The actions need `social.change_comment`, which the Moderators group
+    holds (Part 10). The object's History page is seniors-only, like the log it reads.
     """
 
     list_display = ("excerpt", "author", "post", "is_hidden", "deleted_at", "created_at")

@@ -98,6 +98,7 @@ def test_the_report_that_reaches_the_threshold_sends_the_post_to_review():
     assert after.flagged_reason == FlaggedReason.REPORTS
     assert after.pre_review_status == PostStatus.PUBLISHED
     assert after.report_count == 5
+    assert after.review_started_at == NOW  # the queue's clock starts with the report
 
 
 def test_a_threshold_of_one_means_the_first_report_is_enough(report_settings):
@@ -157,6 +158,7 @@ def test_a_post_already_under_review_keeps_its_status_and_merges_the_reason(flag
     assert after.status == PostStatus.UNDER_REVIEW
     assert after.flagged_reason == expected
     assert after.pre_review_status == PostStatus.PENDING
+    assert after.review_started_at == post.review_started_at  # reports don't restart the wait
 
 
 def test_more_reports_after_the_threshold_change_nothing_more():

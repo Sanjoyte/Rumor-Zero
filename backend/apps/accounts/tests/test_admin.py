@@ -65,7 +65,7 @@ def test_changing_the_role_in_the_admin_keeps_groups_and_is_staff_in_sync(client
 def test_admin_form_cannot_override_derived_access_fields(client):
     client.force_login(UserFactory(is_superuser=True))
     target = UserFactory()
-    other_group = Group.objects.create(name="Moderators")
+    other_group, _ = Group.objects.get_or_create(name="Moderators")
     url = reverse("admin:accounts_user_change", args=[target.pk])
 
     # A crafted POST that tries to grant staff access and a group without changing the role.

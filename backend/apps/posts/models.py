@@ -121,6 +121,9 @@ class Post(models.Model):
     verdict_note = models.CharField(max_length=500, blank=True)
 
     report_count = models.PositiveIntegerField(default=0)
+    # When the post entered review (`routing.enter_review`); cleared when a moderator ends the
+    # review. It is the queue's "age in queue", and set exactly while `status='under_review'`.
+    review_started_at = models.DateTimeField(null=True, blank=True)
     escalated_at = models.DateTimeField(null=True, blank=True)
     moderated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -219,6 +222,14 @@ class Post(models.Model):
                 | Q(confidence_score__gte=0, confidence_score__lte=100),
                 name="posts_post_confidence_range",
             ),
+            # Under review exactly while the clock of the queue is running.
+            models.CheckConstraint(
+                condition=(
+                    Q(status=PostStatus.UNDER_REVIEW, review_started_at__isnull=False)
+                    | (~Q(status=PostStatus.UNDER_REVIEW) & Q(review_started_at__isnull=True))
+                ),
+                name="posts_post_review_started_consistent",
+            ),
         ]
         indexes = [
             models.Index(fields=["status", "-created_at"], name="posts_status_created_idx"),
@@ -230,8 +241,9 @@ class Post(models.Model):
                 & Q(deleted_at__isnull=True),
                 name="posts_pending_queue_idx",
             ),
+            # The review queue, longest waiting first (Part 10).
             models.Index(
-                fields=["created_at"],
+                fields=["review_started_at"],
                 condition=Q(status=PostStatus.UNDER_REVIEW),
                 name="posts_review_queue_idx",
             ),

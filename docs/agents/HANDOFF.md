@@ -6,22 +6,24 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 10 (Human review panel, Django Admin) is planned and approved** (2026-10-11); implementation
-  has not started. Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8 and 9 are done (Part 9 committed by the user as
-  `4da6514`). Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8 and 9 CI have not been
-  reported yet.**
+- **Part:** **Part 10 (Human review panel, Django Admin) is implemented** (2026-10-13, uncommitted). Parts 0A, 0B, 0D, 0C, 1,
+  2, 3, 4, 5, 6, 7, 7B, 8, 9 and 10 are done (Part 9 committed by the user as `4da6514`; the Part 10 plan as `a1062e7`).
+  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9 and 10 CI have not been reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
   - **Part 17 has a launch blocker from Part 9** (your decision 2026-10-11): decide how production gets verdicts
     before deploying; the stub lets an author self-label with `#true` (ARCHITECTURE §6, `task.md` Part 17).
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after saving the approved Part 10 plan).
-- **Phase:** planned; implementation not started. The only change this session is the new plan file and this file
-  (uncommitted).
-- **Next action:** Implement Part 10 from the approved plan.
+- **Owner:** none (Claude stopped after finishing Part 10, as asked).
+- **Phase:** Part 10 built and validated; the working tree holds the whole change, uncommitted. Docker is up (Postgres
+  and Redis); ports 3000 and 8000 are free (every server I started is stopped).
+- **Next action:** you review and commit Part 10, then **plan Part 11** (appeals and removed-post tombstones; it depends on
+  Part 10, now done). Part 10's notes for 11, 11B and 11C are in `task.md` (each part's scope) and in Part 10's
+  "Not done (later parts)".
 - **Approved plan:**
-  [`docs/agents/plans/part-10-human-review-panel.md`](plans/part-10-human-review-panel.md) (approved 2026-10-11)
+  [`docs/agents/plans/part-10-human-review-panel.md`](plans/part-10-human-review-panel.md) (approved 2026-10-11,
+  implemented 2026-10-13)
 - **Previous plans:**
   - [`part-9-pipeline-stub-routing.md`](plans/part-9-pipeline-stub-routing.md), implemented 2026-10-11 (committed as
     `4da6514`);
@@ -41,9 +43,96 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-11 by Claude (Opus 5.5), Part 10 planning.
+- **Last updated:** 2026-10-13 by Claude (Sonnet 5.5), Part 10 implementation.
 
 ## Completed checkpoints
+
+- 2026-10-13 (Claude, Sonnet 5.5): **Part 10 implemented** (uncommitted). Started from HEAD `a573db4` ("added readme", after
+  `a1062e7` "Plan part 10", both committed by you), a clean tree that matched this file (it still said the plan was
+  uncommitted). `docker compose ps` showed **no containers running**: I started them (`docker compose up -d`).
+  - **Backend** (`backend/`):
+    - New app `apps/moderation/`: `models.py` (`ModerationAction`, append-only, all ten kinds, `public_note`),
+      `rules.py` (pure: `refusal`, `transition`, `Act`, `Effect`), `services.py` (`mark_verified`, `mark_false`,
+      `dismiss_reports`, `remove_post`, `escalate`), `roles.py` (the two groups' lists, `sync_role_groups`), `forms.py`,
+      `admin.py` (`PostAdmin` = the review queue, `QueueFilter`, two inlines, the five actions with a confirmation page,
+      `ModerationActionAdmin`, `LogEntryAdmin`), `templates/moderation/admin/{confirm_action,post_change_form,post_change_list}.html`,
+      migrations `0001_initial` and `0002_role_groups` (its own frozen permission lists), `tests/` (conftest + 13 files).
+    - New: `posts/migrations/0002_review_started_at.py`, `core/admin_mixins.py` (`HistoryNeedsLog`),
+      `templates/admin/{base_site,change_form_object_tools}.html`, tests `accounts/tests/test_admin_roles.py`,
+      `core/tests/test_admin_{settings,header}.py`.
+    - Changed: `posts/models.py` (`review_started_at`, its check, the queue index), `posts/services.py` (field lists),
+      `posts/admin.py` (now one comment), `pipeline/routing.py` (`enter_review(post, reason, now)`), `reports/services.py`
+      (`resolve_open_reports`), `accounts/admin.py` (the senior rules, the delete summary, change messages with values, Mark
+      email verified), `accounts/services.py` (`verify_email_by_staff`; the Google helper shares its body), `core/admin.py`
+      (seniors-only settings with old → new values, the site header), `social/admin.py` (History mixin),
+      `rumor_zero/settings.py`, root `conftest.py` (`role_groups`).
+    - Existing tests changed on purpose: the three admin tests that assumed no moderator permissions, the factory (fills
+      `review_started_at`), `test_routing`, `test_queue`, `test_processor` (the real `dismiss_reports`), the repost test,
+      `test_models`, `test_api_delete`; `posts/tests/test_admin.py` was **removed** (moved into the moderation tests).
+  - **Frontend** (`frontend/`): no production change. One test in `AppShell.test.tsx` (the phone account sheet has no
+    Moderation entry for non-staff).
+  - **Docs:** ARCHITECTURE §2/§4/§8, ANALYSIS c-42, STRUCTURE, MEMORY (a Part 10 entry; one Part 8 bullet marked done),
+    `task.md` (criteria, decisions, deviations, both status spots, notes in Parts 2, 11, 11B and 11C), the plan's status
+    line, and `docs/test-command.md`: a "Part 10" section in **both** guides (15 steps each) and one number in its intro
+    line; nothing else touched (the original file is unchanged apart from my two insertions and that line).
+  - Three migrations (`posts.0002`, `moderation.0001`, `moderation.0002`), no new dependency, service or env variable;
+    `design/` untouched. **I did not read `backend/.env` or `frontend/.env.local`**: Django read `ADMIN_URL_PATH` itself
+    (`python manage.py shell -c …` into a shell variable that was never printed or written; my scripts masked it in every
+    output). The dev database was migrated (including a rollback with `migrate posts 0001` and a re-apply, with posts
+    under review in it), and all `part10-` accounts, posts, reports, log rows and audit rows I made were deleted.
+  - **User decisions and defaults** are in `task.md` Part 10 and the plan.
+  - **Validation (all green):**
+    - Backend: `ruff check .` (All checks passed!), `ruff format --check .` (228 files already formatted),
+      `makemigrations --check --dry-run` (No changes detected), `manage.py check` (no issues), `pytest` **2709 passed**
+      (2359 after Part 9; baseline measured first). The Part 10 set: `pytest apps/moderation
+      apps/accounts/tests/test_admin_roles.py apps/core/tests/test_admin_settings.py apps/core/tests/test_admin_header.py`
+      348 passed. The threaded tests (`test_races.py`, `test_pipeline_interplay.py`) ran 10 times in a row without a failure.
+    - **47 backend mutation checks**, every one caught (the first run had two survivors: one was equivalent dead code, the
+      lock query's `.not_deleted()`, removed; the other was a bad mutation that hit a comment): no row lock, no re-check
+      under the lock, the clock before the lock, a report resolved without `resolved_at`, every report (not only open) or
+      none, a service saving `pipeline_attempts`, Dismiss `both` restoring the status, Remove storing `under_review`, the
+      own-post rule and the superuser exemption gone, the deleted-post refusal gone, `no_prior_status` gone (both ways), a
+      kept escalation or clock after review, the clock not started or restarted by a merge, Escalate outside review, the
+      queue showing everything, a status filter that stays in the queue, the cap doubled, buttons without `?queue=all`,
+      `select_across` trusted, verdicts offered in an opinions list, the history inline needing the log permission, the page
+      editable, the History mixin empty, malformed ids not dropped, buttons not following the rules, no logo, each group
+      permission and the migration's list, seniors touching superusers or themselves, the password page open, the bulk delete
+      kept, no `get_deleted_objects` override, unprotected log authors, change messages without values, the password hash
+      shown, Mark email verified unlogged or ignoring "can't change", the settings message and `has_add_permission`.
+      Frontend: one mutation check (the phone sheet gaining Moderation) caught.
+    - Frontend: `npm run lint`, `lint:tokens`, `typecheck`, `format:check` clean; `npm test` **1588 passed** (117 files);
+      `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` OK; `npm run test:e2e` **38 passed** (twice: before and after the last
+      backend change; `CI=1` not run, since no page changed).
+    - Browser (headless Chromium, 1280 px, a scripted walkthrough of steps 11 to 14, screenshots looked at): the header and
+      logo, the index per role, the queue (columns, filters, search), a fact's and an opinion's page (buttons, grouped
+      fields, the reports inline with the reporter's account age, the history inline), a bulk Mark FALSE with its
+      confirmation page and messages, a button that returns to its page, the 403s on the logs, the senior's pages (only
+      `role` and `is_active` editable, no password, History link), a settings edit with its History row (restored to 5), and
+      the app's sidebar link (staff yes, an ordinary account no).
+  - **Found and fixed on the way** (details in MEMORY and `task.md`):
+    - `created_at` of an audit row must be taken after the lock (a race test showed rows out of order);
+    - a column method named `reports` collided with the reverse relation (the column silently didn't sort);
+    - Django's `response_action` turns one malformed id into a 500 (ids are filtered first);
+    - the admin's History link and pages showed the admin log to moderators (hidden and refused);
+    - `startapp` writes `name = "moderation"` and two files to delete; a `heredoc` with an unquoted delimiter in my own
+      scripts expanded `$` in a Python string twice (a scratchpad-only problem);
+    - the first mutation list's "buttons post to the queue only" matched a comment, not the template's form.
+  - **Test-command notes:**
+    - The section is `### Part 10` inside each guide (the brief said `## Part <ID>`; the file's parts are `###` sections
+      inside its two `##` guides, as Parts 3 to 9 did).
+    - The file has **no comment marker** at its bottom (as in Parts 3 to 9): it ends with the last bullet of the Windows
+      Part 10 section. (The brief asked to keep one; there is none to keep.)
+    - Part 10's terminal steps talk to the admin through a short helper program (`/tmp/part10_admin.py`, saved by step 3
+      with a heredoc; on Windows `$env:TEMP\part10_admin.py` through a function `Padm`), shared by both guides, instead of
+      many curl calls. A note of `-` means "empty" because PowerShell 5.1 drops empty arguments.
+    - The 17 runnable Linux bash blocks were **extracted from the finished doc by script and run verbatim** against live
+      Django (window 1 started as the steps say, `next dev` running for step 14); their output was diffed with the doc's
+      expected-output blocks (uuids normalised): **all matched**, three times (the last from the doc inside
+      `docs/test-command.md`). The cleanup block printed `(6, {'moderation.ModerationAction': 6})` and `(55, {'reports.Report':
+      25, 'admin.LogEntry': 3, 'accounts.User_groups': 4, 'account.EmailAddress': 4, 'posts.Post': 8, 'accounts.User': 11})`
+      after a bare run of steps 3 to 10. The browser steps 11 to 14 were checked with the headless script above, not by a
+      person. The **PowerShell blocks were not run** (no PowerShell here): they are the bash twins translated, with
+      `PYTHONUTF8` and the console encoding set for the helper's arrows.
 
 - 2026-10-11 (Claude, Opus 5.5): **Part 10 planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `4da6514` ("Implemented Part 9…", committed by the user), a clean tree. (The older text of

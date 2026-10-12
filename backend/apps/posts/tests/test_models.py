@@ -134,6 +134,25 @@ def test_an_emergency_fact_with_an_expiry_is_fine():
     )
 
 
+def test_a_post_under_review_needs_the_start_of_its_wait():
+    violated("posts_post_review_started_consistent", under_review=True, review_started_at=None)
+
+
+@pytest.mark.parametrize("status", ["published", "removed"])
+def test_a_post_not_under_review_can_not_have_a_review_clock(status):
+    violated(
+        "posts_post_review_started_consistent",
+        status=status,
+        review_started_at=timezone.now(),
+    )
+
+
+def test_the_factory_starts_the_clock_of_a_post_made_under_review():
+    review = PostFactory(under_review=True)
+    assert review.review_started_at == review.created_at
+    assert PostFactory().review_started_at is None
+
+
 def test_the_nullable_columns_default_to_null():
     post = Post.objects.get(pk=PostFactory(fact=True).pk)
     assert post.sources == []
@@ -144,6 +163,7 @@ def test_the_nullable_columns_default_to_null():
     assert post.pipeline_verdict is None
     assert post.verdict_source is None
     assert post.deleted_at is None
+    assert post.review_started_at is None
     assert (post.report_count, post.pipeline_attempts, post.is_emergency) == (0, 0, False)
 
 
@@ -172,6 +192,7 @@ def constraint_and_index_names():
         "posts_post_emergency_fact_only",
         "posts_post_emergency_expiry",
         "posts_post_confidence_range",
+        "posts_post_review_started_consistent",
         "posts_status_created_idx",
         "posts_author_created_idx",
         "posts_pending_queue_idx",

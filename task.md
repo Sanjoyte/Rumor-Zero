@@ -95,7 +95,7 @@ not let the review expand the part's scope without user approval.
 | 7B | Bookmarks & reposts | 6, 7 | [x] Done (2026-10-10) |
 | 8 | Reporting & threshold | 5 | [x] Done (2026-10-10) |
 | 9 | Fact-check pipeline stub + routing | 8 | [x] Done (2026-10-11) |
-| 10 | Human review panel (Django Admin) | 9 | [ ] |
+| 10 | Human review panel (Django Admin) | 9 | [x] Done (2026-10-13) |
 | 11 | Appeals & removed-post tombstones | 10 | [ ] |
 | 11B | Credibility score | 7B, 10, 11 | [ ] |
 | 11C | Emergency posts | 9, 10, 11B | [ ] |
@@ -532,7 +532,7 @@ All three jobs run on test values only; no secrets.
 - **Emails:** templates in `backend/templates/account/email/` (the `allauth` app precedes ours, so app templates would be shadowed); text + HTML, logo from `FRONTEND_ORIGIN/brand/email-logo.png`, no backend host, hex values copied from the Stitch tokens. `AccountAdapter.add_message()` is a no-op (it would set a `messages` cookie).
 - **Found while testing:** allauth defers `jwt` and `cryptography`; two simultaneous first sign-ins on a cold server raced inside the import and answered 500. `AccountsConfig.ready()` now imports them (`test_startup.py`). The bug is older than this part (Part 1's E2E got lucky with fewer parallel sign-ups).
 - **Frontend:** `signInWithToken` and a `user-changed` broadcast (the other tabs reload `/me` once, with no echo); `next-path` blocks `/reset-password` and `/verify-email/…`; key pages set `noindex` and `no-referrer`. The a4/a5/a6 emblem tiles, state switcher, "Simulate instant link click", "Secured Node", "Protocol standard", audit IDs and fabricated emails are dropped (ANALYSIS b-5); a6's "12 characters" is 8. "Forgot password?" sits in a3's options row under the password field (Stitch's place for it), not in the label row. The waiting Resend button is a4's tinted state.
-- **Admin:** no "mark email verified" action (Part 10 follow-up). Out of scope: marking the email verified on a reset, a password-changed email (Part 14), `clearsessions` (Part 9/17). A provider failure on resend still answers 204 (the adapter swallows send errors, as at sign-up).
+- **Admin:** no "mark email verified" action (built in Part 10: `accounts.services.verify_email_by_staff`, seniors only). Out of scope: marking the email verified on a reset, a password-changed email (Part 14), `clearsessions` (Part 9/17). A provider failure on resend still answers 204 (the adapter swallows send errors, as at sign-up).
 - **Verified:** see HANDOFF (backend 577 tests, frontend 708, E2E 15 in dev and CI mode, curl and browser checks recorded in `docs/test-command.md` Part 2). CI itself runs when you push.
 
 **Required tests:** verify flow; expiry with time control; resend throttle; reset flow, token revocation and enumeration-safe responses; email subject, from and link host; frontend state components; E2E: sign up → read the email file → open the link → verified → post button enabled.
@@ -1054,7 +1054,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 ---
 
 ## Part 10: Human review panel (Django Admin)
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-13)
 **Goal:** the moderation panel from guide §8 with two roles, the review queue, bulk actions, a complete audit trail, and runtime-editable thresholds (c-13).
 **Depends on:** 9.
 **Stitch files to convert:** none. `d2_moderator_peer_review_queue` is **reference only** for filters, sorting and actions.
@@ -1072,13 +1072,44 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 **API endpoints:** none new (the admin is server-rendered).
 
 **Acceptance criteria**
-- [ ] Moderators can review and act, but can't edit roles or PlatformSettings, delete users, or see the full audit log. Seniors can do all of that.
-- [ ] Every bulk action produces the ARCHITECTURE §4 result and exactly one `moderation_actions` row per post, with correct from/to status
-- [ ] Verified/false actions aren't offered for opinion posts
-- [ ] Dismiss reports restores `pre_review_status` (or leaves `pipeline` when the flag was `both`), and those reports stop counting
-- [ ] Remove stores `pre_removal_status` (the status before review, if the post was under review)
-- [ ] The admin header shows the logo and "Rumor Zero moderation"
-- [ ] The queue page with 100 flagged posts uses a bounded number of queries
+- [x] Moderators can review and act, but can't edit roles or PlatformSettings, delete users, or see the full audit log. Seniors can do all of that (`test_permissions.py`: every page, button and form for a visitor, a moderator, a senior and a superuser, 49 tests; a moderator's POST to a user, the settings or a post is 403; seniors can edit `role` and `is_active` and the settings, delete one account at a time, and read both logs and every History page; superusers keep everything. A senior can't touch a superuser or themselves, has no password page and no bulk delete. Checked in a scripted browser too)
+- [x] Every bulk action produces the ARCHITECTURE §4 result and exactly one `moderation_actions` row per post, with correct from/to status (`test_services.py` 83 tests: each of the five services against each starting state, the saved fields, only the post's own open reports resolved, one row, a refusal writes nothing; `test_rules.py` 46 tests walk every action against every starting state the database accepts, compared with the §4 table written a second way; `test_admin_actions.py` does each action through the admin client; step 7 of `docs/test-command.md` shows the rows)
+- [x] Verified/false actions aren't offered for opinion posts (the page of an opinion has no verdict buttons, a list filtered to opinions drops both from its Action drop-down, and a mixed selection skips the opinion with "opinion: no verdict")
+- [x] Dismiss reports restores `pre_review_status` (or leaves `pipeline` when the flag was `both`), and those reports stop counting (a flag `reports` goes back to the status it had, the review fields are cleared; `both` becomes `pipeline` and keeps the status, the wait and any escalation; the open reports become `dismissed` with `resolved_by` and `resolved_at`, so a later report can't re-cross the threshold on the old ones; a post with no valid status to return to is refused as `no_prior_status` instead of failing a database check)
+- [x] Remove stores `pre_removal_status` (the status before review, if the post was under review) (and the optional "reason shown to the author" on the audit row's `public_note`, never in `Post.verdict_note`)
+- [x] The admin header shows the logo and "Rumor Zero moderation" (`templates/admin/base_site.html`; the login page, the index and the tab title; the logo has an empty `alt` because the name is beside it)
+- [x] The queue page with 100 flagged posts uses a bounded number of queries (the same count as with 5; a post page with 50 reports and 10 history rows costs the same as one with one of each)
+
+**Decisions and deviations (plan approved 2026-10-11; built 2026-10-12 to 2026-10-13; recorded in ARCHITECTURE §2/§4/§8, ANALYSIS c-42, STRUCTURE, MEMORY):**
+- **User decisions (2026-10-11):**
+  - **Moderators see moderation history only per post** (an inline on the post's page); the full `moderation_actions` list, Django's admin log and every History page are seniors-only.
+  - **Seniors may change `role`, suspend (`is_active`) and delete accounts, and nothing else**; never a superuser, never themselves. Email, password, profile and `is_superuser` stay superuser-only.
+  - **The removal reason for the author is `moderation_actions.public_note`** (verdict notes are copied there too); Remove never touches `Post.verdict_note`.
+  - **Nobody acts on their own post, except a superuser**; every action refuses a post its author deleted.
+  - **`posts.review_started_at`** gives the queue's "waiting" (set by `routing.enter_review(post, reason, now)`, cleared when a moderator ends the review, a database check keeps it set exactly while under review).
+  - **"Mark email verified" is built now, for seniors**, as `accounts.services.verify_email_by_staff` (Part 2's name `mark_email_verified` was taken).
+- **Defaults approved with the plan:** act on what is eligible and skip the rest (one transaction per post, at most 100 posts an action); **Escalate only works on a post under review** (§4 said "any") and not twice; leaving review clears `flagged_reason`, `pre_review_status`, `review_started_at` and `escalated_at`; an account that wrote admin log entries can't be deleted, only suspended; account, settings and comment changes go to Django's `LogEntry` with old → new values; the queue's emergency column says Active / Ended / —; no E2E test.
+- **Built differently from the plan, or beyond it:**
+  - The `reports` column method is `report_total` (a name equal to the reverse relation `Post.reports` is found first as a field, so the column showed and sorted the wrong thing); column headings are Post, Type, Status, Reason, Pipeline, Reports, Waiting, Posted, Escalated, Emergency, Author.
+  - `created_at` of an audit row is taken **after** the row lock is held (a race test showed rows whose times ran backwards when `now` was taken before a lock wait).
+  - The lock query has no `.not_deleted()`: `rules.refusal` already answers `deleted`, and the mutation run showed the filter changed nothing.
+  - `PostAdmin.response_action` drops a posted id that isn't a UUID (Django's own `pk__in` filter would raise `ValidationError`, a 500).
+  - `templates/admin/change_form_object_tools.html` (a copy of Django's) hides the History link from those who can't open it; `apps/core/admin_mixins.py` holds `HistoryNeedsLog`.
+  - The header takes the logo plate's colour (`--header-bg`), so the plate blends in; the title keeps Django's yellow.
+  - `posts/tests/test_admin.py` was removed (its checks moved into `apps/moderation/tests/`); `role_groups` is a root-conftest fixture.
+- **Found while building (all handled):**
+  - Django admin can't delete a user who has posts (`perms_needed`), the bulk delete checks no object, a read-only `password` field prints the hash, `user_change_password` checks only change permission, History pages need only view permission, `select_across` makes the confirmation ignore the posted ids, and `LogEntry.user` cascades (MEMORY has all of it).
+  - The migration that grants permissions must create the permission rows itself on a fresh database and carries its own frozen lists; a `transaction=True` test flushes the groups' permissions.
+  - Two test-helper traps (a helper that fixes a field can't be overridden) and the `0`-based, checkbox-first `o` parameter of the changelist.
+- **Validated by:** 47 backend mutation checks, every one caught (one was equivalent dead code, removed), one frontend mutation check; the threaded tests 10 runs in a row; the Linux blocks of `docs/test-command.md` Part 10 extracted from the doc and run verbatim, their output diffed with the doc's; a scripted headless-Chromium walkthrough of steps 11 to 14 (the header, the queue, a post's page, a bulk action with its confirmation, a button, the senior's pages, the settings and the sidebar link); migrations applied, rolled back (`migrate posts 0001`) and applied again on a database that held posts under review.
+- **Not done (later parts):**
+  - **Part 11:** the `appeal` FK on `moderation_actions` (added with the `Appeal` model), the queue's removed-with-an-open-removal-appeal entries (and Escalate for them), Restore and Keep removed; the author's view of `public_note` (the latest `removed` row); Restore never touches `review_started_at` (the post isn't under review). A post removed while under review for the pipeline or both stores `pre_removal_status=pending`, so a Restore would put an already-checked post back in the pipeline queue: decide how Restore handles it (see also Part 9's note about the attempt count).
+  - **Part 11B:** the reputation calls in the five services (`report_upheld` on Remove and Mark FALSE: `resolve_open_reports` will need to return the reporters) and the credibility inline.
+  - **Part 11C:** the emergency filter and "active emergencies first" ordering, Mark FALSE's emergency effects, Demote emergency, Block emergency posting.
+  - **Part 13:** notify the author on verdict, removal and review changes, in the same transaction as the services' writes.
+  - **Part 14 or 16:** a suspended account's posts stay visible while its profile is a 404 (Part 6): decide whether suspension hides content. **Part 16:** whether moderators should see emails in the user list.
+  - **Admin polish** left for when it bites: the changelist table is wide beside its filter column (it scrolls sideways).
+- **Verified:** see HANDOFF (backend 2709 tests, frontend 1588, E2E 38). The PowerShell blocks of the `docs/test-command.md` section were not run on Windows. CI itself runs when you push.
 
 **Required tests:** each service × each starting state; the permission matrix per role through the admin test client; audit rows; query counts; sidebar link visibility.
 
@@ -1103,6 +1134,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 - The different-moderator rule (seniors exempt), for both kinds.
 - `can_appeal` / `appeal_status` for the author only.
 - Reversing score events on an overturned appeal is added in 11B.
+- **From Part 10:** add the `appeal` FK to `moderation_actions` with the `Appeal` model (the table has no such column yet); show the author the `public_note` of the post's latest `removed` row as the removal reason; Restore doesn't touch `review_started_at` (the post isn't under review) and must not touch `pipeline_attempts`; decide how Restore handles a post removed while under review for the pipeline (`pre_removal_status=pending` puts it back in the pipeline queue); the queue gains removed posts with an open removal appeal and an appeal-kind filter; Escalate must accept them.
 
 **Frontend scope:** `AppealModal` (optional reason ≤500 chars, states) for FALSE-labelled and removed posts; an APPEAL PENDING chip for the author; the outcome shown on the detail page; `RemovedPostCard` (public and author variants, the author variant with "Request another look") on the profile and detail pages.
 
@@ -1153,6 +1185,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
   - `GET /api/v1/users/{u}/reputation/`: score or null, sample, verified / FALSE / removed counts, the last 10 public events with post links.
   - `GET /api/v1/me/reputation/events/`: your full ledger, cursor.
   - The `reputation` block also appears in `GET /api/v1/users/{u}/` and in user rows.
+- **From Part 10:** the five `moderation.services` functions are where the hooks go (same transaction, after the post's row lock): `resolve_open_reports` returns a count today and will need to return the reporters for `report_upheld` (only Remove and Mark FALSE count; Mark verified, Dismiss and Escalate don't). The credibility events inline on `PostAdmin` joins the reports and moderation-history inlines.
 - Admin: a read-only ReputationEvent list (filter by kind, search by username); UserAdmin shows the score with a link.
 
 **Frontend scope**
@@ -1213,6 +1246,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
   - **Block emergency posting** on UserAdmin
   - the "Emergency (active)" filter
 - The `emergency_demoted` notification is wired in Part 13.
+- **From Part 10:** the admin queue, its `QueueFilter` and the five actions exist (`apps/moderation/`): add the emergency filter and put active emergencies first in `PostAdmin.ordering` (above `-report_count`); Mark FALSE's emergency effects go in `rules.transition` and `services.mark_false` (the `ModerationAction` kinds `emergency_demoted` and `emergency_blocked` already exist); the queue's emergency column already says Active / Ended / —; Demote emergency is a sixth action in `ACTIONS` and `rules.py`; Block emergency posting is a logged `UserAdmin` action for seniors or moderators (decide) with `subject_user` on the audit row. A permission or group change needs a new migration with its own frozen lists (`test_roles.py` fails until it exists).
 
 **Frontend scope**
 - Composer:

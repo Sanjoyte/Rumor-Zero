@@ -1,0 +1,25 @@
+{% extends "admin/base.html" %}
+{% load static %}
+{# Django 5.2's own base_site.html with the Rumor Zero logo in front of the name (ARCHITECTURE §8, §14). The logo is the admin plate (core/brand/logo-admin.png: the full wordmark on #283044), so the header takes the plate's colour and the two read as one. `alt` is empty because the name is written beside it. #}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  :root { --header-bg: #283044; }
+  #site-name { display: flex; align-items: center; gap: 12px; }
+  #site-name img { display: block; height: 32px; width: auto; }
+</style>
+{% endblock %}
+
+{% block branding %}
+<div id="site-name">
+  <img src="{% static 'core/brand/logo-admin.png' %}" alt="" height="32">
+  <a href="{% url 'admin:index' %}">{{ site_header|default:_('Django administration') }}</a>
+</div>
+{% if user.is_anonymous %}
+  {% include "admin/color_theme_toggle.html" %}
+{% endif %}
+{% endblock %}
+
+{% block nav-global %}{% endblock %}

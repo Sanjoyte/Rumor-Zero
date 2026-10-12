@@ -1,7 +1,7 @@
 """Creating, deleting and reporting posts, the fact quota, and writing pipeline results
 (ARCHITECTURE §3, §4, §4b, §5, §6).
 
-Only this module and `apps/moderation/services.py` (Part 10) change `Post.status`. There is no HTTP
+Only this module and `apps/moderation/services.py` change `Post.status`. There is no HTTP
 here: the views turn these domain errors into responses.
 """
 
@@ -192,6 +192,7 @@ def record_report(post, *, counting_reports, cfg, now):
             "status",
             "flagged_reason",
             "pre_review_status",
+            "review_started_at",
             "updated_at",
         ]
     )
@@ -204,6 +205,7 @@ _RESULT_FIELDS = [
     "status",
     "flagged_reason",
     "pre_review_status",
+    "review_started_at",
     "verdict_source",
     "pipeline_verdict",
     "confidence_score",
@@ -216,6 +218,7 @@ _FAILURE_FIELDS = [
     "status",
     "flagged_reason",
     "pre_review_status",
+    "review_started_at",
     "pipeline_result",
     "pipeline_next_attempt_at",
     "updated_at",

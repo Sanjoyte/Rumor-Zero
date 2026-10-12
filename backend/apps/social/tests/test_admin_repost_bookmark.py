@@ -25,8 +25,9 @@ def superuser(client):
 
 def moderator_with(client, *codenames):
     """A moderator (so `is_staff`; `User.save` derives it from the role) holding exactly these
-    permissions."""
+    permissions: the Moderators group (Part 10) is left, so nothing it holds is inherited."""
     user = UserFactory(role=Role.MODERATOR)
+    user.groups.clear()
     user.user_permissions.set(Permission.objects.filter(codename__in=codenames))
     client.force_login(user)
     return user
