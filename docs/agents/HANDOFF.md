@@ -6,8 +6,8 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 10 (Human review panel, Django Admin) is implemented** (2026-10-13, uncommitted). Parts 0A, 0B, 0D, 0C, 1,
-  2, 3, 4, 5, 6, 7, 7B, 8, 9 and 10 are done (Part 9 committed by the user as `4da6514`; the Part 10 plan as `a1062e7`).
+- **Part:** **Part 11 (Appeals & removed-post tombstones) is planned and approved** (2026-10-13), not implemented.
+  Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9 and 10 are done (Part 10 committed by the user as `582905b`).
   Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9 and 10 CI have not been reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
@@ -15,16 +15,15 @@ read-only git output.
     before deploying; the stub lets an author self-label with `#true` (ARCHITECTURE §6, `task.md` Part 17).
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after finishing Part 10, as asked).
-- **Phase:** Part 10 built and validated; the working tree holds the whole change, uncommitted. Docker is up (Postgres
-  and Redis); ports 3000 and 8000 are free (every server I started is stopped).
-- **Next action:** you review and commit Part 10, then **plan Part 11** (appeals and removed-post tombstones; it depends on
-  Part 10, now done). Part 10's notes for 11, 11B and 11C are in `task.md` (each part's scope) and in Part 10's
-  "Not done (later parts)".
+- **Owner:** none (Claude stopped after saving the Part 11 plan, as asked).
+- **Phase:** Part 11 planned; no code written. The working tree holds only the new plan file and this file's edits.
+- **Next action:** Implement Part 11 from the approved plan.
 - **Approved plan:**
-  [`docs/agents/plans/part-10-human-review-panel.md`](plans/part-10-human-review-panel.md) (approved 2026-10-11,
-  implemented 2026-10-13)
+  [`docs/agents/plans/part-11-appeals-removed-tombstones.md`](plans/part-11-appeals-removed-tombstones.md) (approved
+  2026-10-13)
 - **Previous plans:**
+  - [`part-10-human-review-panel.md`](plans/part-10-human-review-panel.md), implemented 2026-10-13 (committed as
+    `582905b`);
   - [`part-9-pipeline-stub-routing.md`](plans/part-9-pipeline-stub-routing.md), implemented 2026-10-11 (committed as
     `4da6514`);
   - [`part-8-reporting-threshold.md`](plans/part-8-reporting-threshold.md), implemented 2026-10-10 (committed as
@@ -43,9 +42,24 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-13 by Claude (Sonnet 5.5), Part 10 implementation.
+- **Last updated:** 2026-10-13 by Claude (Opus 5.5), Part 11 planning.
 
 ## Completed checkpoints
+
+- 2026-10-13 (Claude, Opus 5.5): **Part 11 planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `582905b` ("Implemented Part 10…", committed by the user), a clean tree. (The older text of
+    this file said Part 10 was uncommitted; the user committed it in between.)
+  - **Dependency check:** Part 11 depends only on Part 10 (Done 2026-10-13); its chain (9, 8, 5, 4, 1, 0C, 0A/0B/0D,
+    plus 2, 3, 6, 7, 7B) is Done. Open but not blocking: Part 3 criterion 4, and CI for Parts 2 to 10.
+  - **Research:** read-only only: direct reads of the docs and the moderation, posts, pipeline, reports and social
+    code; one Explore agent (the frontend, Stitch b3/c1, E2E helpers); a Plan-agent design review that finished
+    **before** approval (its findings are in the plan, marked "(review)").
+  - **Changed this session:** only the new plan file and this file. No code, no setup command, no `task.md` edit, no
+    env file read, `design/` untouched.
+  - **User decisions (2026-10-13):** Restore of an already-checked fact goes to the review queue; Keep removed writes a
+    new audit kind `kept_removed`; the removal reason is a new author-only key `removal_reason` (24 keys); your own
+    profile lists your removed posts; Remove during an open label appeal closes it as `upheld`; Restore and Keep
+    removed take internal notes only. Details and the approved defaults are in the plan.
 
 - 2026-10-13 (Claude, Sonnet 5.5): **Part 10 implemented** (uncommitted). Started from HEAD `a573db4` ("added readme", after
   `a1062e7` "Plan part 10", both committed by you), a clean tree that matched this file (it still said the plan was
