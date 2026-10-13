@@ -41,7 +41,7 @@ ALL = [
 
 
 @pytest.mark.parametrize("status", ALL)
-def test_anyone_can_read_a_post_in_every_status_with_the_23_keys(status, api_client, auth_client):
+def test_anyone_can_read_a_post_in_every_status_with_the_24_keys(status, api_client, auth_client):
     post = make(status)
     other = auth_client(VerifiedUserFactory())
     author = auth_client(post.author)
@@ -57,7 +57,9 @@ def test_anyone_can_read_a_post_in_every_status_with_the_23_keys(status, api_cli
 
 
 @pytest.mark.parametrize("status", [s for s in ALL if s != PostStatus.REMOVED])
-def test_a_live_post_is_the_same_for_everyone_except_is_mine(status, api_client, auth_client):
+def test_a_live_post_is_the_same_for_everyone_except_is_mine_and_the_appeal_button(
+    status, api_client, auth_client
+):
     post = make(status)
     anonymous = api_client.get(url(post)).json()
     other = auth_client(VerifiedUserFactory()).get(url(post)).json()
@@ -65,7 +67,10 @@ def test_a_live_post_is_the_same_for_everyone_except_is_mine(status, api_client,
     assert anonymous == other
     assert anonymous["content"] == post.content
     assert anonymous["is_mine"] is False and author["is_mine"] is True
-    assert {**author, "is_mine": False} == anonymous
+    # Only the author of a FALSE-labelled post may ask for another look (Part 11).
+    assert anonymous["can_appeal"] is False and other["can_appeal"] is False
+    assert author["can_appeal"] is (status == PostStatus.VERIFIED_FALSE)
+    assert {**author, "is_mine": False, "can_appeal": False} == anonymous
 
 
 def test_sources_come_with_their_kind_in_the_order_entered(api_client):
@@ -125,7 +130,9 @@ def test_the_author_sees_their_removed_post_in_full(auth_client):
     assert len(body["sources"]) == 2
     assert body["verdict_note"] == "Please cite."
     assert body["is_mine"] is True
-    assert body["can_appeal"] is False  # Part 11
+    assert body["can_appeal"] is True  # Part 11: a removed post can be appealed, once
+    assert body["appeal_status"] is None
+    assert body["removal_reason"] == ""  # no removal row: the factory removed it directly
 
 
 def test_a_staff_member_who_is_not_the_author_gets_the_tombstone(auth_client):

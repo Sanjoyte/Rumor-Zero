@@ -96,7 +96,7 @@ not let the review expand the part's scope without user approval.
 | 8 | Reporting & threshold | 5 | [x] Done (2026-10-10) |
 | 9 | Fact-check pipeline stub + routing | 8 | [x] Done (2026-10-11) |
 | 10 | Human review panel (Django Admin) | 9 | [x] Done (2026-10-13) |
-| 11 | Appeals & removed-post tombstones | 10 | [ ] |
+| 11 | Appeals & removed-post tombstones | 10 | [x] Done (2026-10-13) |
 | 11B | Credibility score | 7B, 10, 11 | [ ] |
 | 11C | Emergency posts | 9, 10, 11B | [ ] |
 | 11D | Charts & stats | 7B, 11B | [ ] |
@@ -1103,7 +1103,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
   - Two test-helper traps (a helper that fixes a field can't be overridden) and the `0`-based, checkbox-first `o` parameter of the changelist.
 - **Validated by:** 47 backend mutation checks, every one caught (one was equivalent dead code, removed), one frontend mutation check; the threaded tests 10 runs in a row; the Linux blocks of `docs/test-command.md` Part 10 extracted from the doc and run verbatim, their output diffed with the doc's; a scripted headless-Chromium walkthrough of steps 11 to 14 (the header, the queue, a post's page, a bulk action with its confirmation, a button, the senior's pages, the settings and the sidebar link); migrations applied, rolled back (`migrate posts 0001`) and applied again on a database that held posts under review.
 - **Not done (later parts):**
-  - **Part 11:** the `appeal` FK on `moderation_actions` (added with the `Appeal` model), the queue's removed-with-an-open-removal-appeal entries (and Escalate for them), Restore and Keep removed; the author's view of `public_note` (the latest `removed` row); Restore never touches `review_started_at` (the post isn't under review). A post removed while under review for the pipeline or both stores `pre_removal_status=pending`, so a Restore would put an already-checked post back in the pipeline queue: decide how Restore handles it (see also Part 9's note about the attempt count).
+  - **Part 11 (done 2026-10-13):** the `appeal` FK on `moderation_actions` (added with the `Appeal` model), the queue's removed-with-an-open-removal-appeal entries (and Escalate for them), Restore and Keep removed; the author's view of `public_note` (the latest `removed` row); Restore never touches `review_started_at` (the post isn't under review). A post removed while under review for the pipeline or both stores `pre_removal_status=pending`, so a Restore would put an already-checked post back in the pipeline queue: decide how Restore handles it (see also Part 9's note about the attempt count).
   - **Part 11B:** the reputation calls in the five services (`report_upheld` on Remove and Mark FALSE: `resolve_open_reports` will need to return the reporters) and the credibility inline.
   - **Part 11C:** the emergency filter and "active emergencies first" ordering, Mark FALSE's emergency effects, Demote emergency, Block emergency posting.
   - **Part 13:** notify the author on verdict, removal and review changes, in the same transaction as the services' writes.
@@ -1120,7 +1120,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 ---
 
 ## Part 11: Appeals & removed-post tombstones
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-13)
 **Goal:** the "Request another look" path for authors of FALSE-labelled **and removed** posts (guide §8.4, §16; c-7; ANALYSIS f-2: removals now lower a public score) and proper tombstones for removed posts.
 **Depends on:** 10.
 **Stitch files to convert:** the "Request another look / appeal" button in `b3_post_detail_forensic_proof`; the removed tombstone card in `c1_user_profile`, whose "Request Appeal" button is now used for removal appeals.
@@ -1141,11 +1141,41 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 **API endpoints:** `POST /api/v1/posts/{id}/appeal/`.
 
 **Acceptance criteria**
-- [ ] Only the author of a FALSE-labelled or removed post can appeal, once (others 403, a second appeal 409)
-- [ ] The appealed post appears in the admin queue under `appeal` (with its kind); the moderator who made the original call can't resolve it unless senior
-- [ ] Label appeals: overturning gives VERIFIED, upholding keeps FALSE
-- [ ] Removal appeals: Restore returns the post to its previous status and it reappears in feeds; Keep removed leaves it hidden
-- [ ] The author sees the outcome
+- [x] Only the author of a FALSE-labelled or removed post can appeal, once (others 403, a second appeal 409) (`test_api_appeal.py` 22 tests: 401, 403 `email_unverified`, 404 malformed/unknown/deleted, 403 `not_author` even for a moderator, 409 `already_appealed` for an open, upheld or overturned appeal and before `not_appealable`, 409 for pending, published, TRUE, under review and a FALSE post under review for reports, 400 over 500 code points while 500 emoji pass, the throttle: POST only, the sixth is 429, a 401 or 403 never counts; `test_services_appeals.py` and two real-thread race tests: two appeals at once give one)
+- [x] The appealed post appears in the admin queue under `appeal` (with its kind); the moderator who made the original call can't resolve it unless senior (`test_admin_appeals.py` 40 tests: a removed post with an open appeal is in the default queue, the "By appeal" filter, the Reason column "Appeal (FALSE label)" / "Appeal (removal)", waiting and order by the appeal's time, constant queries at 5 and 100 rows; `test_rules.py` walks every act against every state the database accepts, 5 kinds of appeal and 5 kinds of moderator, and `test_services_appeals.py` checks the refusal writes nothing; seniors and superusers may decide, Escalate is exempt)
+- [x] Label appeals: overturning gives VERIFIED, upholding keeps FALSE (Mark verified overturns, Mark FALSE upholds, Remove upholds (user decision), each linked to the audit row; E2E: a moderator reverses a FALSE label and the author reads "A moderator reversed the decision.")
+- [x] Removal appeals: Restore returns the post to its previous status and it reappears in feeds; Keep removed leaves it hidden (a fact the pipeline already checked goes to the review queue instead, user decision; `test_services_appeals.py`, `test_pipeline_interplay.py`, and the guide's steps 8 to 11 in a real browser)
+- [x] The author sees the outcome (`AppealOutcome` on the post page and on the profile card, the `APPEAL PENDING` chip, `removal_reason`; the E2E test has a moderator keep a removal and the author read "the post stays removed" on the card and the page)
+
+**Decisions and deviations (plan approved 2026-10-13; built 2026-10-13; recorded in ARCHITECTURE §2/§3/§4/§8/§9/§10, ANALYSIS c-43, STRUCTURE, MEMORY):**
+- **User decisions (2026-10-13):**
+  - **Restoring a fact the pipeline had already checked sends it to the review queue** (`under_review`, flag `pipeline`, the clock starts now); one it never finished goes back to `pending` (and is kicked after the commit); every other status is restored as it was.
+  - **"Keep removed" writes its own audit kind, `kept_removed`** (one migration widens `moderation_action_valid`).
+  - **The removal reason reaches the author in a new key, `removal_reason`** (the post object has 24 keys now).
+  - **Your own profile lists your removed posts**; visitors, feeds, bookmarks and the counters are unchanged.
+  - **Remove during an open label appeal closes it as `upheld`**; the different-moderator rule applies.
+  - **Restore and Keep removed take internal notes only.**
+- **Defaults approved with the plan:** superusers and Escalate are exempt from the different-moderator rule; a deleted post can't be appealed and its open appeal stays open; Restore clears `pre_removal_status` and `escalated_at`; an appeal is linked on the resolving audit row only; a FALSE post under review for reports isn't appealable until that review ends; the 201 is the post object; the `appeal` throttle applies to POST only; moderators can read appeals (`view_appeal`).
+- **Built differently from the plan, or beyond it:**
+  - **No row lock on the appeal in `_perform`:** the mutation run showed it was dead code (every appeal writer takes the post's lock first), so it was removed; the same run showed that the explicit `act != ESCALATE` in the first-decision check was redundant (`resolves_appeal` is already false for it), so that went too.
+  - `AppealModal` is single-flight with a ref (two clicks in one tick both saw the old state); the plan said "the fieldset lock" only.
+  - The detail page's removed branch is its own: for its author `RemovedPostCard layout="page"` replaces the old warning `Alert`, **and the action bar and "Copy link" that a removed post used to show its author are gone** (the plan said no action bar; they would have liked a dead post).
+  - `Tombstone.tsx` holds the public tombstone, so `PostCard`'s removed guard and `RemovedPostCard` share it (the guard stays: no caller can ever draw a removed post's text); the `/dev/ui` gallery shows the author variant with `can_appeal: false` (it has no session, and `AppealButton` needs one).
+  - The E2E helpers are `seedAuthor()`, `logIn()` and one `moderate(postId, action, reason)` (a fresh moderator per call, so the different-moderator rule never trips) instead of the plan's `removeWithService` and `resolveAppeal`.
+  - **Recorded deviation from Part 10's note:** Restore does touch `review_started_at` in one case: a Restore into the review queue starts the clock (through `routing.enter_review`), as the database check requires; any other Restore leaves it null.
+  - The reverse of `moderation.0004` restores Part 10's permission lists (not nothing); `moderation.0003` can't be reversed once a `kept_removed` row exists (the old check refuses it): both recorded in ARCHITECTURE §2.
+- **Found while building (all handled):**
+  - A DRF view throttles **every method** (`initial` runs before the handler is looked up), so a POST-only endpoint needs `get_throttles()` by method or a `GET` would use up the allowance and then answer 405.
+  - The 201 of a removal appeal must be re-read with `not_deleted()`, not `visible()` (which drops the removed post); a dev server that was started while a mutation was applied kept the mutated module and answered 500 for removal appeals until restarted (a mutation harness and a live server must never overlap).
+  - A removed post with an open appeal has no `review_started_at`, so the queue's "since" is an expression that falls back to the appeal's time (an `F` in `ordering` would trip admin check E033).
+  - The profile's key page must be built from what the viewer may see, or a removed post leaves a visitor an empty first page with a next cursor (a test now pins it).
+  - MEMORY has the details (the appeal accessor is an `AttributeError`, the strict reads, the restore-into-review rule, the E2E seeding).
+- **Validated by:** 35 backend mutation checks, every one caught after the fixes (two equivalent ones were removed as dead code, three test gaps were closed: the removal reason's query and serializer guards each tested alone, and a visitor's profile pages); 24 frontend mutation checks, every one caught (one test added for an empty row under the verdict, one ref and test for the same-tick double click); the threaded tests (`test_races.py`, `test_pipeline_interplay.py`) 10 runs in a row; the Linux blocks of `docs/test-command.md` Part 11 extracted from the doc and run verbatim (steps 3 to 6, 9 and 12, output diffed with the doc's) plus a scripted headless-Chromium run of steps 7, 8, 10 and 11 (screenshots of the queue, the dialogs, the post page, the profile and a 390 px phone); migrations applied, rolled back to `moderation 0002` and applied again on a database holding appeals (the groups kept Part 10's lists after the rollback).
+- **Not done (later parts):**
+  - **Part 11B:** the reputation calls in `file_appeal`'s outcomes and in `_perform` (Restore reverses `post_removed` for the author and the reposters; an overturned label appeal reverses `fact_false`; Remove on a label appeal records `post_removed`), and the negative ledger rows' link to the appeal.
+  - **Part 13:** `appeal_resolved` notifications from `_perform` when `effect.appeal_status` is set (same transaction).
+  - **Part 14:** appeals in the data export (account deletion already cascades them). **Part 16:** whether a deleted post's open appeal should be closed; the `appeal` throttle with real usage.
+- **Verified:** see HANDOFF (backend 2965 tests, frontend 1692, E2E 40 in dev and CI mode). The PowerShell blocks of the `docs/test-command.md` section were not run on Windows. CI itself runs when you push.
 
 **Required tests:** API rules for both kinds, service transitions (including restore targets), the moderator rule, serializer fields per viewer, AppealModal and chip; E2E: the author files an appeal (resolved through a service fixture).
 
@@ -1185,6 +1215,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
   - `GET /api/v1/users/{u}/reputation/`: score or null, sample, verified / FALSE / removed counts, the last 10 public events with post links.
   - `GET /api/v1/me/reputation/events/`: your full ledger, cursor.
   - The `reputation` block also appears in `GET /api/v1/users/{u}/` and in user rows.
+- **From Part 11:** the seven `moderation.services` actions and `file_appeal` are where the hooks go: Restore reverses `post_removed` for the author and every reposter (and the `report_upheld` events of that removal); Mark verified on a label appeal reverses `fact_false`; Remove on a label appeal records `post_removed`; Keep removed and Mark FALSE on an appeal change nothing. Each `Effect` carries `appeal_status` (and the `ModerationAction` row the `appeal` link), which is what the negative ledger rows' appeal link needs.
 - **From Part 10:** the five `moderation.services` functions are where the hooks go (same transaction, after the post's row lock): `resolve_open_reports` returns a count today and will need to return the reporters for `report_upheld` (only Remove and Mark FALSE count; Mark verified, Dismiss and Escalate don't). The credibility events inline on `PostAdmin` joins the reports and moderation-history inlines.
 - Admin: a read-only ReputationEvent list (filter by kind, search by username); UserAdmin shows the score with a link.
 
@@ -1366,6 +1397,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 - `notifications.Notification` with every type in ARCHITECTURE §2.
 - `notifications.services.notify()`, called explicitly (no signals) from: follow, like, comment, repost, pipeline verdict and under-review, moderator remove and verdict, emergency priority removed (11C), appeal resolved (label and removal appeals).
 - Dedupe follow, like and repost; no self-notifications.
+- **From Part 11:** `appeal_resolved` goes from `moderation.services._perform` when `effect.appeal_status` is set (an appeal's Mark verified, Mark FALSE, Remove, Restore or Keep removed), in the same transaction; the recipient is `appeal.author`, the outcome is `upheld` or `overturned`. `file_appeal` itself notifies nobody. `ModerationAction.appeal` links the row.
 - `GET /api/v1/notifications/` (cursor), `GET …/unread-count/` (indexed, ≤2 queries, uncached), `POST …/mark-read/` (`ids` or `all`).
 
 **Frontend scope:** `/notifications`: items with a glyph, actor avatar, post excerpt, relative time and unread dot; mark all as read; mark read on click. A sidebar unread badge via `useUnreadCount` (30 s, visible-only). Empty state.

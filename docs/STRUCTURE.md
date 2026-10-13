@@ -114,7 +114,7 @@ rumor-zero/
 │   │   │                            a lease and SKIP LOCKED, call, apply; process_pending, process_pending's deadline, process_post,
 │   │   │                            start_kick), management/commands/process_pending.py, tests (conftest + 11 files);
 │   │   │                        11C routing imports is_active_emergency from apps/posts/emergency.py
-│   │   ├── moderation/          ✅ 10 ModerationAction (append-only; migration 0001; the whole §2 list of ten kinds, `public_note`),
+│   │   ├── moderation/          ✅ 10 ModerationAction (append-only; migration 0001; ten kinds, `public_note`),
 │   │   │                            rules.py (pure: `refusal`, `transition`, `Act`, `Effect`), services.py (mark_verified, mark_false,
 │   │   │                            dismiss_reports, remove_post, escalate: row lock, rules re-checked, reports resolved, one audit row),
 │   │   │                            roles.py (the two groups' permission lists, `sync_role_groups`), migrations/0002_role_groups.py (its
@@ -122,7 +122,12 @@ rumor-zero/
 │   │   │                            queue, QueueFilter, inlines, the five actions and the post-page buttons; ModerationActionAdmin and
 │   │   │                            LogEntryAdmin, seniors-only), templates/moderation/admin/{confirm_action,post_change_form}.html,
 │   │   │                            tests (conftest + 13 files)
-│   │   │                        11 Appeal (label/removal) + the `appeal` FK, Restore and Keep removed; 11C emergency actions
+│   │   │                        ✅ 11 Appeal (OneToOne with Post; migrations 0003_appeal and 0004_appeal_permission; the `appeal` FK and the
+│   │   │                            `kept_removed` kind), rules.py (+ Restore, Keep removed, the original-moderator rule), services.py (+ restore_post,
+│   │   │                            keep_removed, file_appeal), views.py/urls.py/serializers.py/exceptions.py (POST /api/v1/posts/{id}/appeal/),
+│   │   │                            queries.py (appeal_status and removal_reason as annotations of `for_list`), admin.py (the queue holds removal
+│   │   │                            appeals; AppealFilter, AppealInline, AppealAdmin, the two new actions), tests (+ 6 files);
+│   │   │                        11C emergency actions
 │   │   ├── reputation/          11B ReputationEvent ledger, scoring.py (pure), services.py (the only writer of scores),
 │   │   │                            management/commands/recompute_reputation.py
 │   │   └── notifications/       13  Notification model + services + API
@@ -227,7 +232,8 @@ rumor-zero/
 │       │   │                            can't be reposted); PostActions now takes the post (posts/feed-items.ts: isUnavailable, visibleItems)
 │       │   ├── bookmarks/       ✅ 7B BookmarkList
 │       │   ├── reports/         ✅ 8 ReportButton (the flag in the action bars), ReportModal, reasons.ts, reports-api.ts, messages.ts
-│       │   ├── appeals/         11   AppealModal, RemovedPostCard
+│       │   ├── appeals/         ✅ 11 AppealButton, AppealModal, AppealOutcome, appeals-api.ts, messages.ts (`RemovedPostCard` and `Tombstone`
+│       │   │                        live in features/posts/)
 │       │   ├── reputation/      11B  CredibilityBadge; 11D CredibilityWidget, CredibilityPanel
 │       │   ├── search/          12   SearchBar, SearchResults
 │       │   ├── notifications/   13   NotificationList, useUnreadCount

@@ -34,6 +34,7 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     is_mine: true,
     can_appeal: false,
     appeal_status: null,
+    removal_reason: "",
     created_at: "2026-10-08T12:00:00Z",
     ...overrides,
   };

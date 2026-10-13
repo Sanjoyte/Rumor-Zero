@@ -131,6 +131,13 @@ def is_awaiting_check(post):
     )
 
 
+def pipeline_had_its_say(post):
+    """Whether the pipeline has finished with `post`: it answered (`pipeline_checked_at`) or it
+    used up its tries (`MAX_ATTEMPTS`) and handed the post to a moderator. A restored post that
+    had its say isn't checked again (Part 11)."""
+    return post.pipeline_checked_at is not None or post.pipeline_attempts >= MAX_ATTEMPTS
+
+
 def backoff(attempts):
     """How long to wait after the `attempts`-th failed try: 2^attempts minutes, at most 60 (§3)."""
     return min(timedelta(minutes=2 ** min(attempts, 6)), _BACKOFF_CAP)

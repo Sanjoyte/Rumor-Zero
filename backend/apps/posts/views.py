@@ -11,6 +11,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsEmailVerified
+from apps.moderation.queries import appeal_defaults
 from apps.posts import services
 from apps.posts.exceptions import (
     EmergencyUnavailableError,
@@ -94,7 +95,8 @@ class PostListView(APIView):
                 limit=exc.limit, next_slot_at=exc.next_slot_at, now=now
             ) from None
         context = {"request": request, "now": now}
-        return Response(PostSerializer(engagement_defaults(post), context=context).data, status=201)
+        post = appeal_defaults(engagement_defaults(post))
+        return Response(PostSerializer(post, context=context).data, status=201)
 
 
 @method_decorator(never_cache, name="dispatch")

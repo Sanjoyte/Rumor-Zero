@@ -1,7 +1,9 @@
 # Plan: Part 11, Appeals & removed-post tombstones
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-13, together with the six decisions and the defaults
-  below; drafted 2026-10-13 by Claude (Opus 5.5). Not implemented yet.
+  below; drafted 2026-10-13 by Claude (Opus 5.5). **IMPLEMENTED 2026-10-13** by Claude (Sonnet 5.5); what changed on the way
+  (the appeal row lock and the explicit Escalate exemption were dead code and are gone; the modal's single flight is a ref;
+  the E2E helpers are `seedAuthor`, `logIn` and `moderate`) is in `task.md` Part 11 and HANDOFF.
 - **Implement with:** Sonnet 5.5 · high (task.md).
 - **Evidence (read-only):** HANDOFF, MEMORY, `task.md` Parts 10/11/11B/11C/13, ARCHITECTURE §2/§3/§4/§4a/§8/§9/§10,
   ANALYSIS (c-7, f-2, b-2 rows, the appeal row), STRUCTURE; code: `apps/moderation/{models,rules,services,admin,

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Card } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { cn } from "@/lib/cn";
@@ -63,9 +64,9 @@ export function explain(
 /**
  * The verdict under the claim (Stitch b3's verification card, cut to what exists): the status in
  * words and, for a moderator's verdict, their public note. A published opinion has no verdict, only
- * one neutral line.
+ * one neutral line. `footer` is b3's last row: the author's "Request another look" (Part 11).
  */
-export function VerdictBlock({ post }: { post: Post }) {
+export function VerdictBlock({ post, footer }: { post: Post; footer?: ReactNode }) {
   if (post.post_type === "opinion" && post.status === "published") {
     return (
       <p className="font-body-sm text-body-sm text-on-surface-variant">
@@ -120,6 +121,7 @@ export function VerdictBlock({ post }: { post: Post }) {
             {note}
           </blockquote>
         )}
+        {footer && <div className="flex flex-wrap items-center pt-space-xs">{footer}</div>}
       </Card>
     </section>
   );

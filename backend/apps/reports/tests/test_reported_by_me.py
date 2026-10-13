@@ -6,6 +6,7 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
+from apps.moderation.queries import appeal_defaults
 from apps.posts.serializers import PostSerializer
 from apps.reports.tests.factories import ReportFactory
 from apps.social.engagement import engagement_defaults
@@ -99,5 +100,5 @@ def test_a_report_leaves_the_query_count_unchanged(
 
 
 def test_a_new_post_is_not_reported_yet():
-    data = PostSerializer(engagement_defaults(PostFactory())).data
+    data = PostSerializer(appeal_defaults(engagement_defaults(PostFactory()))).data
     assert data["reported_by_me"] is False

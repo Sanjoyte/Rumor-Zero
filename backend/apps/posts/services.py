@@ -127,10 +127,17 @@ def create_post(*, author, content, post_type, sources=(), is_emergency=False, n
         )
         # Your own Following feed must show the new post at once, despite its cache (Part 6).
         bust_following_feed(author.pk)
-        if post_type == PostType.FACT and settings.PIPELINE_INLINE_KICK:
-            post_id = post.pk
-            transaction.on_commit(lambda: _kick_pipeline(post_id))
+        if post_type == PostType.FACT:
+            kick_pipeline_after_commit(post.pk)
         return post
+
+
+def kick_pipeline_after_commit(post_id):
+    """With `PIPELINE_INLINE_KICK` on, check the fact in a background thread once the current
+    transaction commits (§6). A new fact uses it, and so does a restored one that is `pending`
+    again (`apps/moderation/services.py`); the sweeper is the fallback either way."""
+    if settings.PIPELINE_INLINE_KICK:
+        transaction.on_commit(lambda: _kick_pipeline(post_id))
 
 
 def _kick_pipeline(post_id):

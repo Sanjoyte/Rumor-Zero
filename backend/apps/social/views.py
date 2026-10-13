@@ -62,13 +62,18 @@ class UserPostsView(APIView):
 
     You can't repost your own post, so a profile never repeats a post and its pages are full.
     `?post_type=` filters a repost by its original's type, deleted or removed originals included.
+    **On your own profile the list also holds your removed posts** (user decision 2026-10-13), as
+    the author's tombstone with its reason and its appeal; to everyone else, a removed post isn't
+    listed.
     """
 
     permission_classes = [AllowAny]
 
     def get(self, request, username):
         target = _target_or_404(username)
-        posts = Post.objects.visible().filter(author=target)
+        own = request.user.is_authenticated and request.user.pk == target.pk
+        visible = Post.objects.not_deleted() if own else Post.objects.visible()
+        posts = visible.filter(author=target)
         reposts = Repost.objects.filter(user=target)
         post_type = request.query_params.get("post_type")
         if post_type:
@@ -80,7 +85,7 @@ class UserPostsView(APIView):
             reposts = reposts.filter(post__post_type=post_type)
         size, cursor = timeline.page_request(request)
         keys, next_key = timeline.page(posts, reposts, size=size, cursor=cursor, dedupe=False)
-        entries = feed.load_entries(keys, request.user, reposter=target)
+        entries = feed.load_entries(keys, request.user, reposter=target, own_removed=own)
         return FeedPagination.envelope(
             timeline_items(entries, request), next_key.token() if next_key else None
         )

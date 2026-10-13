@@ -59,12 +59,17 @@ def test_only_that_authors_posts_newest_first(api_client, ada):
     assert contents(api_client.get(url())) == ["ada 0", "ada 1", "ada 2"]
 
 
-def test_removed_and_deleted_posts_are_left_out_even_for_their_author(api_client, auth_client, ada):
+def test_removed_posts_are_left_out_for_everyone_but_their_author_and_deleted_ones_for_all(
+    api_client, auth_client, ada
+):
     kept = posts_of(ada, 2)
     PostFactory(author=ada, removed=True, content="removed one")
     PostFactory(author=ada, deleted=True, content="deleted one")
-    for client in (api_client, auth_client(ada), auth_client(VerifiedUserFactory())):
+    for client in (api_client, auth_client(VerifiedUserFactory())):
         assert contents(client.get(url())) == [p.content for p in kept]
+    # Your own profile also lists your removed posts (Part 11, user decision 2026-10-13), newest
+    # first like the rest: a deleted one is still gone.
+    assert contents(auth_client(ada).get(url())) == ["removed one", *[p.content for p in kept]]
 
 
 def test_every_other_status_is_listed(api_client, ada):
@@ -167,3 +172,92 @@ def test_the_query_count_is_constant(api_client, auth_client, ada):
     large = (queries(api_client), queries(viewer))
     # the lookup, the page's keys (a union), the posts; and the viewer's own row when signed in
     assert small == large == (3, 4)
+
+
+# ---------- your own removed posts (Part 11, user decision 2026-10-13) ----------
+
+
+def test_your_own_profile_lists_your_removed_posts_in_full_and_nobody_elses_does(
+    api_client, auth_client, ada
+):
+    PostFactory(
+        author=ada,
+        removed=True,
+        content="my removed one",
+        created_at=timezone.now() - timedelta(minutes=1),
+    )
+    mine = api_client.get(url())
+    assert contents(mine) == []  # a visitor sees nothing of it
+    own = auth_client(ada).get(url()).json()["results"]
+    assert [item["post"]["content"] for item in own] == ["my removed one"]
+    assert own[0]["post"]["status"] == "removed" and own[0]["post"]["is_mine"] is True
+    assert own[0]["post"]["can_appeal"] is True
+    other = auth_client(VerifiedUserFactory()).get(url())
+    assert contents(other) == []
+
+
+def test_a_removed_post_stays_off_everyone_elses_view_of_your_profile_and_the_other_way_round(
+    auth_client, ada
+):
+    grace = VerifiedUserFactory(username="grace")
+    PostFactory(author=grace, removed=True, content="grace removed")
+    # Visiting someone else's profile never shows their removed posts, even as a moderator.
+    for viewer in (ada, VerifiedUserFactory(role="moderator")):
+        assert contents(auth_client(viewer).get(url("grace"))) == []
+    assert contents(auth_client(grace).get(url("grace"))) == ["grace removed"]
+
+
+def test_the_post_type_filter_applies_to_your_removed_posts_too(auth_client, ada):
+    base = timezone.now() - timedelta(minutes=5)
+    PostFactory(author=ada, removed=True, fact=True, content="removed fact", created_at=base)
+    PostFactory(
+        author=ada,
+        removed=True,
+        content="removed opinion",
+        created_at=base - timedelta(seconds=1),
+    )
+    client = auth_client(ada)
+    assert contents(client.get(url(), {"post_type": "fact"})) == ["removed fact"]
+    assert contents(client.get(url(), {"post_type": "opinion"})) == ["removed opinion"]
+
+
+def test_a_deleted_removed_post_is_gone_even_from_your_own_profile(auth_client, ada):
+    PostFactory(author=ada, removed=True, deleted=True, content="gone")
+    assert contents(auth_client(ada).get(url())) == []
+
+
+def test_a_repost_of_someone_elses_removed_post_is_still_the_stub_on_your_profile(auth_client, ada):
+    from apps.social.tests.factories import RepostFactory
+
+    theirs = PostFactory(removed=True, content="their removed one")
+    RepostFactory(user=ada, post=theirs)
+    item = auth_client(ada).get(url()).json()["results"][0]
+    assert item["kind"] == "repost"
+    assert item["post"] == {"id": str(theirs.pk), "unavailable": True}
+
+
+def test_your_own_profile_costs_no_more_queries_with_removed_posts(auth_client, ada):
+    client = auth_client(ada)
+    posts_of(ada, 3, verified_pipeline=True)
+    before = queries(client)
+    for index in range(10):
+        PostFactory(
+            author=ada,
+            removed=True,
+            created_at=timezone.now() - timedelta(hours=1, seconds=index),
+        )
+    assert queries(client) == before
+
+
+def test_a_removed_post_never_takes_a_place_in_anyone_elses_pages(api_client, auth_client, ada):
+    """The page is made of the keys of what that viewer may see: three removed posts on top must
+    not leave a visitor an empty first page with a next cursor."""
+    base = timezone.now() - timedelta(minutes=5)
+    for index in range(3):
+        PostFactory(author=ada, removed=True, created_at=base + timedelta(seconds=index + 1))
+    PostFactory(author=ada, content="the only visible one", created_at=base)
+    page = api_client.get(url(), {"page_size": 2}).json()
+    assert [item["post"]["content"] for item in page["results"]] == ["the only visible one"]
+    assert page["next_cursor"] is None
+    own = auth_client(ada).get(url(), {"page_size": 2}).json()
+    assert len(own["results"]) == 2 and own["next_cursor"] is not None

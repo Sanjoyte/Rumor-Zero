@@ -8,12 +8,14 @@ from django.utils import timezone
 from apps.posts.models import PostStatus
 
 MAX_PUBLIC_NOTE_LENGTH = 500
+MAX_APPEAL_REASON_LENGTH = 500
 
 
 class ActionKind(models.TextChoices):
     """Every kind the audit trail will ever hold (ARCHITECTURE §2), created now so later parts
-    never alter the database check. Part 10 writes the first five; `restored` is Part 11,
-    `emergency_*` Part 11C and `avatar_*` Part 14B."""
+    never alter the database check. Part 10 writes the first five; Part 11 writes `restored` and
+    `kept_removed` (the latter was added then: "Keep removed" had no kind), `emergency_*` is Part
+    11C and `avatar_*` Part 14B."""
 
     VERIFIED = "verified", "Marked verified"
     MARKED_FALSE = "marked_false", "Marked FALSE"
@@ -21,6 +23,7 @@ class ActionKind(models.TextChoices):
     REMOVED = "removed", "Removed"
     ESCALATED = "escalated", "Escalated"
     RESTORED = "restored", "Restored"
+    KEPT_REMOVED = "kept_removed", "Kept removed"
     EMERGENCY_DEMOTED = "emergency_demoted", "Emergency demoted"
     EMERGENCY_BLOCKED = "emergency_blocked", "Emergency posting blocked"
     AVATAR_REMOVED = "avatar_removed", "Photo removed"
@@ -29,6 +32,80 @@ class ActionKind(models.TextChoices):
 
 def _in_or_null(field, choices):
     return Q(**{f"{field}__in": choices.values}) | Q(**{f"{field}__isnull": True})
+
+
+class AppealKind(models.TextChoices):
+    LABEL = "label", "FALSE label"
+    REMOVAL = "removal", "Removal"
+
+
+class AppealStatus(models.TextChoices):
+    OPEN = "open", "Open"
+    UPHELD = "upheld", "Upheld"  # the original decision stands
+    OVERTURNED = "overturned", "Overturned"
+
+
+class Appeal(models.Model):
+    """An author's request for another look at a FALSE label or a removal (ARCHITECTURE §2, §4).
+
+    One per post for life (`post` is one-to-one: a unique foreign key in Django's idiom), so a
+    resolved appeal can't be followed by another. Written only by `apps/moderation/services.py`
+    (`file_appeal` and the five actions that resolve one); a row changes once, from `open` to
+    `upheld` or `overturned`, and goes only with the post or the account (CASCADE).
+    `original_moderator` is who made the call being appealed, so someone else looks again: null for
+    a pipeline FALSE, or when the moderator's account is gone.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    post = models.OneToOneField("posts.Post", on_delete=models.CASCADE, related_name="appeal")
+    # The post's author (the service checks it). Its index serves account deletion and export.
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="appeals"
+    )
+    kind = models.CharField(max_length=10, choices=AppealKind.choices)
+    reason = models.CharField(max_length=MAX_APPEAL_REASON_LENGTH, blank=True)
+    status = models.CharField(
+        max_length=10, choices=AppealStatus.choices, default=AppealStatus.OPEN
+    )
+    original_moderator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    # Not auto_now_add: the service passes `now`, and tests place appeals in time.
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(kind__in=AppealKind.values), name="appeals_kind_valid"
+            ),
+            models.CheckConstraint(
+                condition=Q(status__in=AppealStatus.values), name="appeals_status_valid"
+            ),
+            # Open exactly while it has no resolution time, as for reports.
+            models.CheckConstraint(
+                condition=(
+                    Q(status=AppealStatus.OPEN, resolved_at__isnull=True)
+                    | (~Q(status=AppealStatus.OPEN) & Q(resolved_at__isnull=False))
+                ),
+                name="appeals_resolution_consistent",
+            ),
+        ]
+
+    def __str__(self):
+        # The reason is the author's own words: it stays out of logs and the admin's breadcrumbs.
+        return f"{self.get_kind_display()} appeal ({self.post_id})"
 
 
 class ModerationAction(models.Model):
@@ -75,6 +152,14 @@ class ModerationAction(models.Model):
         max_length=20, choices=PostStatus.choices, null=True, blank=True
     )
     public_note = models.CharField(max_length=MAX_PUBLIC_NOTE_LENGTH, blank=True)
+    # Set on the row of the action that resolves an appeal (not on Escalate).
+    appeal = models.ForeignKey(
+        Appeal,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="moderation_actions",
+    )
     notes = models.TextField(blank=True)
     # Not auto_now_add: the services pass `now`, and tests place rows in time.
     created_at = models.DateTimeField(default=timezone.now)

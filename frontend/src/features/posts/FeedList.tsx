@@ -15,6 +15,7 @@ import { unrepostPost } from "@/features/social/social-api";
 import { UnavailablePostCard } from "@/features/social/UnavailablePostCard";
 import { PostCard } from "./PostCard";
 import { PostCardSkeleton } from "./PostCardSkeleton";
+import { RemovedPostCard } from "./RemovedPostCard";
 import { isUnavailable, visibleItems } from "./feed-items";
 import { feedErrorMessage, POST_MESSAGES } from "./messages";
 import { toPostCardProps } from "./post-card-props";
@@ -33,6 +34,9 @@ function FeedCard({
   overlay: StatusOverlay;
 }) {
   const shown = applyStatus(post, overlay);
+  // Removed (loaded so, or found so by the poll): a tombstone for everyone, and for the author on
+  // their own profile their words, the reason and the appeal. Never the card or its action bar.
+  if (shown.status === "removed") return <RemovedPostCard post={shown} />;
   return (
     <PostCard
       {...toPostCardProps(shown)}

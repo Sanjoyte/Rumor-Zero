@@ -17,7 +17,8 @@ def violated(constraint_name, **fields):
     assert exc.value.__cause__.diag.constraint_name == constraint_name
 
 
-def test_the_whole_list_of_ten_kinds_exists_from_the_start():
+def test_the_whole_list_of_eleven_kinds_exists():
+    """Part 10 made ten; Part 11 added `kept_removed` ("Keep removed" had no kind)."""
     assert [kind.value for kind in ActionKind] == [
         "verified",
         "marked_false",
@@ -25,6 +26,7 @@ def test_the_whole_list_of_ten_kinds_exists_from_the_start():
         "removed",
         "escalated",
         "restored",
+        "kept_removed",
         "emergency_demoted",
         "emergency_blocked",
         "avatar_removed",

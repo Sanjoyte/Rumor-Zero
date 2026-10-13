@@ -14,6 +14,7 @@ urlpatterns = [
     path("api/", include("apps.posts.urls")),
     path("api/", include("apps.social.urls")),
     path("api/", include("apps.reports.urls")),
+    path("api/", include("apps.moderation.urls")),
     path("api/", include("apps.core.urls")),
     path(settings.ADMIN_URL_PATH, admin.site.urls),
 ]

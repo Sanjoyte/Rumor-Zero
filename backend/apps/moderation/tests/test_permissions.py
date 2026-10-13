@@ -7,7 +7,7 @@ from django.urls import reverse
 from apps.accounts.models import Role, User
 from apps.accounts.tests.factories import UserFactory
 from apps.core.models import PlatformSettings
-from apps.moderation.tests.factories import ModerationActionFactory
+from apps.moderation.tests.factories import AppealFactory, ModerationActionFactory
 from apps.posts.models import FlaggedReason, PostStatus
 from apps.posts.tests.factories import PostFactory
 from apps.reports.tests.factories import ReportFactory
@@ -43,6 +43,7 @@ def world():
         "report": ReportFactory(post=post),
         "comment": CommentFactory(),
         "action": ModerationActionFactory(post=post),
+        "appeal": AppealFactory(),
         "bookmark": BookmarkFactory(),
         "target": UserFactory(role=Role.MODERATOR),
     }
@@ -58,6 +59,8 @@ PAGE_NAMES = [
     "users",
     "a user's page",
     "platform settings",
+    "appeals",
+    "one appeal",
     "moderation log",
     "one log row",
     "admin log",
@@ -66,6 +69,7 @@ PAGE_NAMES = [
     "follows",
     "reposts",
     "post history",
+    "appeal history",
     "user history",
     "settings history",
     "comment history",
@@ -94,6 +98,11 @@ def pages(world):
             reverse("admin:core_platformsettings_change", args=[1]),
             [302, 200, 200, 200],
         ),
+        "appeals": (reverse("admin:moderation_appeal_changelist"), [302, 200, 200, 200]),
+        "one appeal": (
+            reverse("admin:moderation_appeal_change", args=[world["appeal"].pk]),
+            [302, 200, 200, 200],
+        ),
         "moderation log": (
             reverse("admin:moderation_moderationaction_changelist"),
             [302, 403, 200, 200],
@@ -109,6 +118,10 @@ def pages(world):
         "reposts": (reverse("admin:social_repost_changelist"), [302, 403, 403, 200]),
         # History pages read the admin log, which is seniors-only (review finding 16).
         "post history": (reverse("admin:posts_post_history", args=[post.pk]), [302, 403, 200, 200]),
+        "appeal history": (
+            reverse("admin:moderation_appeal_history", args=[world["appeal"].pk]),
+            [302, 403, 200, 200],
+        ),
         "user history": (
             reverse("admin:accounts_user_history", args=[target.pk]),
             [302, 403, 200, 200],
@@ -138,7 +151,7 @@ def test_who_can_open_each_page(client, world, page):
 def test_the_admin_index_lists_only_what_a_person_may_open(client, world):
     client.force_login(person("moderator"))
     body = client.get(reverse("admin:index")).content.decode()
-    assert "Posts" in body and "Reports" in body and "Comments" in body
+    assert "Posts" in body and "Reports" in body and "Comments" in body and "Appeals" in body
     assert "Moderation actions" not in body and "Log entries" not in body
     assert "Bookmarks" not in body
     client.force_login(person("senior"))

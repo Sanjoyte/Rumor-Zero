@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Card } from "@/components/ui/Card";
 import { CategoryChip } from "@/components/ui/CategoryChip";
-import { Icon } from "@/components/ui/Icon";
 import { AppealPendingBadge, EmergencyBadge, StatusBadge } from "@/components/ui/StatusBadge";
 import { VerdictStripe } from "@/components/ui/VerdictStripe";
 import { cn } from "@/lib/cn";
@@ -11,6 +10,7 @@ import { formatRelativeTime } from "@/lib/format";
 import type { PostSource } from "@/lib/api/types";
 import { type PostStatus, type PostType, type VerdictSource, stripeTone } from "@/lib/post-display";
 import { SourceLink } from "./SourceLink";
+import { Tombstone } from "./Tombstone";
 
 export interface PostCardProps {
   author: {
@@ -100,21 +100,10 @@ export function PostCard({
   const time = formatRelativeTime(createdAt, now);
   const iso = createdAt instanceof Date ? createdAt.toISOString() : createdAt;
 
-  if (status === "removed") {
-    return (
-      <Card as="article" className={cn("p-space-md font-body-sm text-body-sm", className)}>
-        <div className="flex flex-wrap items-center justify-between gap-space-xs text-on-surface-variant">
-          <p className="flex items-center gap-space-xs font-semibold">
-            <Icon name="block" size="lg" className="text-outline" />
-            Removed by a moderator
-          </p>
-          <time dateTime={iso} className="font-label-code text-label-code text-outline">
-            {time}
-          </time>
-        </div>
-      </Card>
-    );
-  }
+  // A removed post is never drawn from its text: the guard stays here so no caller can show it.
+  // (The author's own removed post is `RemovedPostCard`, which is given the whole post.)
+  if (status === "removed")
+    return <Tombstone createdAt={createdAt} now={now} className={className} />;
 
   const tone = stripeTone({ status, emergencyActive });
   const hasName = author.displayName.trim() !== "";

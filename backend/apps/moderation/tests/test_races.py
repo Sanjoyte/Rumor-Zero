@@ -10,8 +10,8 @@ from django.utils import timezone
 
 from apps.accounts.tests.conftest import run_together
 from apps.moderation import services
-from apps.moderation.models import ModerationAction
-from apps.moderation.tests.factories import moderator_user
+from apps.moderation.models import Appeal, AppealKind, AppealStatus, ModerationAction
+from apps.moderation.tests.factories import AppealFactory, moderator_user
 from apps.posts.models import FlaggedReason, Post, PostStatus
 from apps.posts.tests.factories import PostFactory
 from apps.reports import services as report_services
@@ -227,3 +227,130 @@ def test_a_moderator_who_waited_stamps_the_time_after_the_wait():
     row = ModerationAction.objects.get()
     assert row.created_at >= released
     assert Post.objects.get(pk=post.pk).moderated_at == row.created_at
+
+
+# ---------- Part 11: appeals ----------
+
+
+def false_post(**fields):
+    fields.setdefault("verdict_source", "pipeline")
+    return PostFactory(post_type="fact", status=PostStatus.VERIFIED_FALSE, **fields)
+
+
+def appeal_task(post):
+    """The author's appeal, answering a marker instead of raising."""
+
+    def go():
+        try:
+            services.file_appeal(author=post.author, post_id=post.pk)
+            return "filed"
+        except services.AlreadyAppealed:
+            return "already"
+        except services.NotAppealable:
+            return "not_appealable"
+        finally:
+            connection.close()
+
+    return go
+
+
+def test_two_appeals_at_once_make_one_appeal_and_one_refusal():
+    post = false_post()
+    results = run_together(appeal_task(post), appeal_task(post), appeal_task(post))
+    assert sorted(results) == ["already", "already", "filed"]
+    assert Appeal.objects.filter(post=post).count() == 1
+    assert Post.objects.get(pk=post.pk).status == PostStatus.UNDER_REVIEW
+
+
+def test_an_appeal_and_a_mark_false_at_once_take_turns_on_the_post_lock():
+    """The moderator's Mark FALSE (a post that is FALSE already) and the author's appeal: whichever
+    gets the lock first, the other sees its result. Never an appeal on a post a moderator has just
+    re-labelled under it, and never a moderator action on a stale state."""
+    post = false_post(verdict_source="moderator")
+    # Under review for reports, so that Mark FALSE is allowed (and so the appeal is not).
+    Post.objects.filter(pk=post.pk).update(
+        status=PostStatus.UNDER_REVIEW,
+        flagged_reason=FlaggedReason.REPORTS,
+        pre_review_status=PostStatus.VERIFIED_FALSE,
+        review_started_at=timezone.now(),
+    )
+    results = run_together(
+        appeal_task(post),
+        moderator_task("mark_false", post, moderator_user()),
+    )
+    # The appeal needs a FALSE post: a post under review isn't one, and once Mark FALSE has run the
+    # post is FALSE again, so the order decides which one is served.
+    assert results[1] == "done"
+    assert results[0] in ("filed", "not_appealable")
+    after = Post.objects.get(pk=post.pk)
+    if results[0] == "filed":
+        # Mark FALSE came first: the appeal then reviewed the FALSE label.
+        assert after.status == PostStatus.UNDER_REVIEW and after.flagged_reason == "appeal"
+        assert Appeal.objects.filter(post=post).count() == 1
+    else:
+        assert after.status == PostStatus.VERIFIED_FALSE
+        assert not Appeal.objects.filter(post=post).exists()
+
+
+def test_two_restores_at_once_restore_the_post_once():
+    post = PostFactory(
+        post_type="fact",
+        status=PostStatus.REMOVED,
+        pre_removal_status=PostStatus.VERIFIED_TRUE,
+        flagged_reason=FlaggedReason.APPEAL,
+    )
+    AppealFactory(post=post, kind=AppealKind.REMOVAL)
+    results = run_together(
+        moderator_task("restore_post", post, moderator_user()),
+        moderator_task("restore_post", post, moderator_user()),
+    )
+    assert sorted(results) == ["done", "no_removal_appeal"]
+    assert ModerationAction.objects.filter(post=post, action="restored").count() == 1
+    assert Post.objects.get(pk=post.pk).status == PostStatus.VERIFIED_TRUE
+    assert Appeal.objects.get(post=post).status == AppealStatus.OVERTURNED
+
+
+def test_a_restore_and_a_keep_removed_at_once_decide_the_appeal_once():
+    post = PostFactory(
+        post_type="fact",
+        status=PostStatus.REMOVED,
+        pre_removal_status=PostStatus.VERIFIED_TRUE,
+        flagged_reason=FlaggedReason.APPEAL,
+    )
+    AppealFactory(post=post, kind=AppealKind.REMOVAL)
+    results = run_together(
+        moderator_task("restore_post", post, moderator_user()),
+        moderator_task("keep_removed", post, moderator_user()),
+    )
+    assert sorted(results) == ["done", "no_removal_appeal"]
+    rows = ModerationAction.objects.filter(post=post, appeal__isnull=False)
+    assert rows.count() == 1
+    appeal = Appeal.objects.get(post=post)
+    assert appeal.status != AppealStatus.OPEN and rows.get().appeal == appeal
+    # The post and the appeal agree: restored <=> overturned.
+    restored = Post.objects.get(pk=post.pk).status == PostStatus.VERIFIED_TRUE
+    assert restored == (appeal.status == AppealStatus.OVERTURNED)
+
+
+def test_an_appeal_that_waited_for_the_authors_delete_finds_no_post():
+    def delete(locked):
+        locked.deleted_at = timezone.now()
+        locked.save(update_fields=["deleted_at", "updated_at"])
+
+    post = false_post()
+    with hold_the_row(post, on_release=delete):
+        thread, done, outcome = start(lambda: _appeal_or_marker(post))
+        assert not done.wait(0.5)  # blocked on our row lock
+    thread.join(timeout=30)
+    assert outcome["result"] == "not_found"
+    assert not Appeal.objects.exists()
+
+
+def _appeal_or_marker(post):
+    try:
+        services.file_appeal(author=post.author, post_id=post.pk)
+        return "filed"
+    except services.PostNotFound:
+        return "not_found"
+    finally:
+        connection.close()

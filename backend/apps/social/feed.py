@@ -15,7 +15,7 @@ from django.db import transaction
 from django.db.models import Q
 
 from apps.accounts.models import User
-from apps.posts.models import Post
+from apps.posts.models import Post, PostStatus
 from apps.social import timeline
 from apps.social.models import Follow, Repost
 
@@ -66,19 +66,26 @@ class Entry(NamedTuple):
     reposter: User | None
 
 
-def load_entries(keys, viewer, *, reposter=None):
+def load_entries(keys, viewer, *, reposter=None, own_removed=False):
     """The items for `keys`, in order. One path for a cache hit and a miss.
 
     A post item whose post is no longer visible is dropped; a repost item whose original is no
-    longer visible stays, with `post=None` ("This post is no longer available"). Reposts are read
+    longer visible stays, with `post=None` ("This post is no longer available"). `own_removed`
+    (the viewer's own profile) also loads the viewer's own removed posts, and only theirs: a repost
+    of someone else's removed post is still the stub. Reposts are read
     again, matched on the pair **and** its time, so one that was undone (or undone and made again,
     which moves it to the top) leaves a cached page instead of showing out of order. A list that
     belongs to one person passes `reposter` and skips that read. An empty list of ids makes no
     query, so the number of queries depends on what the page holds.
     """
     post_ids = {key.ref for key in keys}
+    loadable = Post.objects.visible()
+    if own_removed:
+        loadable = Post.objects.not_deleted().exclude(
+            Q(status=PostStatus.REMOVED) & ~Q(author=viewer)
+        )
     posts = (
-        {post.pk: post for post in Post.objects.visible().for_list(viewer).filter(pk__in=post_ids)}
+        {post.pk: post for post in loadable.for_list(viewer).filter(pk__in=post_ids)}
         if post_ids
         else {}
     )

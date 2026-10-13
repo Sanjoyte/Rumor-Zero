@@ -5,7 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from apps.pipeline.routing import apply_report_threshold, enter_review, merge_flag
+from apps.pipeline.routing import (
+    MAX_ATTEMPTS,
+    apply_report_threshold,
+    enter_review,
+    merge_flag,
+    pipeline_had_its_say,
+)
 from apps.posts.models import FlaggedReason as Flag
 from apps.posts.models import PostStatus as Status
 
@@ -178,3 +184,23 @@ def test_the_normal_threshold_applies_whatever_the_emergency_one_is():
     """Part 11C adds the emergency branch; until then only `report_threshold` is read."""
     cfg = SimpleNamespace(report_threshold=5, emergency_report_threshold=1)
     assert apply_report_threshold(post(Status.PENDING), 4, cfg, NOW) is False
+
+
+# ---------- pipeline_had_its_say (Part 11: a restored post isn't checked twice) ----------
+
+
+@pytest.mark.parametrize(
+    ("checked_at", "attempts", "said"),
+    [
+        (None, 0, False),
+        (None, 1, False),
+        (None, MAX_ATTEMPTS - 1, False),
+        (None, MAX_ATTEMPTS, True),  # gave up: a moderator was handed the post
+        (None, MAX_ATTEMPTS + 2, True),
+        (NOW, 0, True),  # it answered
+        (NOW, 1, True),
+    ],
+)
+def test_the_pipeline_had_its_say_when_it_answered_or_used_up_its_tries(checked_at, attempts, said):
+    checked = SimpleNamespace(pipeline_checked_at=checked_at, pipeline_attempts=attempts)
+    assert pipeline_had_its_say(checked) is said

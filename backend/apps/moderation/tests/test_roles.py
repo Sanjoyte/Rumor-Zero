@@ -13,7 +13,8 @@ from apps.moderation import roles
 
 pytestmark = pytest.mark.django_db
 
-migration = importlib.import_module("apps.moderation.migrations.0002_role_groups")
+migration = importlib.import_module("apps.moderation.migrations.0004_appeal_permission")
+first_migration = importlib.import_module("apps.moderation.migrations.0002_role_groups")
 
 
 def held(group_name):
@@ -34,11 +35,30 @@ def test_the_lists_in_roles_py_equal_the_frozen_lists_of_the_migration():
     )
 
 
-def test_the_migration_gives_both_groups_exactly_the_declared_permissions():
+def test_part_10s_migration_keeps_its_own_lists_and_gives_the_groups_exactly_those():
+    """`0002` is frozen: it gives moderators no appeal permission, whatever `roles.py` says now."""
+    assert first_migration.MODERATOR_PERMISSIONS == migration.PREVIOUS_MODERATOR_PERMISSIONS
+    assert first_migration.SENIOR_PERMISSIONS == migration.SENIOR_PERMISSIONS
+    assert "moderation.view_appeal" not in first_migration.MODERATOR_PERMISSIONS
+    Group.objects.all().delete()
+    first_migration.grant(live_apps, None)
+    assert held(MODERATORS_GROUP) == set(first_migration.MODERATOR_PERMISSIONS)
+    assert held(SENIORS_GROUP) == set(first_migration.SENIOR_PERMISSIONS)
+
+
+def test_part_11s_migration_gives_both_groups_exactly_the_declared_permissions():
     Group.objects.all().delete()
     migration.grant(live_apps, None)
     assert held(MODERATORS_GROUP) == set(roles.MODERATOR_PERMISSIONS)
     assert held(SENIORS_GROUP) == set(roles.SENIOR_PERMISSIONS)
+    assert "moderation.view_appeal" in held(MODERATORS_GROUP)
+
+
+def test_the_two_migrations_run_in_order_and_end_with_the_live_lists():
+    Group.objects.all().delete()
+    first_migration.grant(live_apps, None)
+    migration.grant(live_apps, None)
+    assert held(MODERATORS_GROUP) == set(roles.MODERATOR_PERMISSIONS)
 
 
 def test_the_migration_is_safe_to_run_again():
@@ -48,11 +68,20 @@ def test_the_migration_is_safe_to_run_again():
     assert held(MODERATORS_GROUP) == set(roles.MODERATOR_PERMISSIONS)
 
 
-def test_going_back_clears_the_permissions_but_keeps_the_groups():
-    migration.grant(live_apps, None)
-    migration.revoke(live_apps, None)
+def test_going_back_over_part_10s_migration_clears_the_permissions_but_keeps_the_groups():
+    first_migration.grant(live_apps, None)
+    first_migration.revoke(live_apps, None)
     assert Group.objects.filter(name__in=[MODERATORS_GROUP, SENIORS_GROUP]).count() == 2
     assert held(MODERATORS_GROUP) == set() and held(SENIORS_GROUP) == set()
+
+
+def test_going_back_over_part_11s_migration_returns_to_part_10s_lists_not_to_nothing():
+    """`migrate moderation 0003` must leave moderators able to work (0002's own reverse would have
+    cleared both groups)."""
+    migration.grant(live_apps, None)
+    migration.revoke(live_apps, None)
+    assert held(MODERATORS_GROUP) == set(first_migration.MODERATOR_PERMISSIONS)
+    assert held(SENIORS_GROUP) == set(first_migration.SENIOR_PERMISSIONS)
 
 
 def test_the_test_database_got_its_groups_from_the_migration_itself():
@@ -116,6 +145,9 @@ def test_an_ordinary_user_has_nothing(role_groups):
         "social.view_follow",
         "social.view_repost",
         "reports.change_report",
+        "moderation.change_appeal",
+        "moderation.delete_appeal",
+        "moderation.add_appeal",
     ],
 )
 def test_a_moderator_lacks_what_the_task_reserves_for_seniors_and_superusers(role_groups, name):
@@ -135,6 +167,9 @@ def test_a_moderator_lacks_what_the_task_reserves_for_seniors_and_superusers(rol
         "moderation.add_moderationaction",
         "moderation.change_moderationaction",
         "moderation.delete_moderationaction",
+        "moderation.add_appeal",
+        "moderation.change_appeal",
+        "moderation.delete_appeal",
         "admin.change_logentry",
         "admin.delete_logentry",
     ],
@@ -154,3 +189,9 @@ def test_changing_the_role_moves_the_permissions_with_the_groups(role_groups):
     person = type(person).objects.get(pk=person.pk)
     assert "admin.view_logentry" not in perms_of(person)
     assert "posts.change_post" in perms_of(person)
+
+
+def test_a_moderator_and_a_senior_can_view_appeals_and_an_ordinary_user_cannot(role_groups):
+    assert "moderation.view_appeal" in perms_of(UserFactory(role=Role.MODERATOR))
+    assert "moderation.view_appeal" in perms_of(UserFactory(role=Role.SENIOR_MODERATOR))
+    assert "moderation.view_appeal" not in perms_of(UserFactory())

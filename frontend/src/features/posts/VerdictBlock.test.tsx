@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { explain, VerdictBlock } from "./VerdictBlock";
 import { makePost } from "./test-helpers";
@@ -132,5 +132,28 @@ describe("VerdictBlock with the pipeline's real answers", () => {
   it("shows no percentage while a post is under review", () => {
     render(<VerdictBlock post={fact({ status: "under_review" })} />);
     expect(screen.queryByText(/%/)).toBeNull();
+  });
+});
+
+describe("VerdictBlock footer (Part 11)", () => {
+  it("shows the footer at the bottom of the card, and nothing without one", () => {
+    const post = makePost({ status: "verified_false", post_type: "fact" });
+    const { rerender } = render(
+      <VerdictBlock post={post} footer={<button type="button">Ask</button>} />,
+    );
+    const card = screen.getByRole("heading", { name: "Verdict" }).closest("section")!;
+    expect(within(card).getByRole("button", { name: "Ask" })).toBeInTheDocument();
+    rerender(<VerdictBlock post={post} />);
+    expect(screen.queryByRole("button", { name: "Ask" })).toBeNull();
+  });
+
+  it("never shows it for a removed post or a published opinion", () => {
+    const footer = <button type="button">Ask</button>;
+    const { rerender } = render(
+      <VerdictBlock post={makePost({ status: "removed" })} footer={footer} />,
+    );
+    expect(screen.queryByRole("button", { name: "Ask" })).toBeNull();
+    rerender(<VerdictBlock post={makePost()} footer={footer} />);
+    expect(screen.queryByRole("button", { name: "Ask" })).toBeNull();
   });
 });

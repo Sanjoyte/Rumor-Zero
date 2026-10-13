@@ -6,19 +6,21 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 11 (Appeals & removed-post tombstones) is planned and approved** (2026-10-13), not implemented.
-  Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9 and 10 are done (Part 10 committed by the user as `582905b`).
-  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9 and 10 CI have not been reported yet.**
+- **Part:** **Part 11 (Appeals & removed-post tombstones) is implemented** (2026-10-13), **uncommitted**.
+  Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10 and 11 are done (Part 10 committed as `582905b`, the Part 11 plan as `fec011f`).
+  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10 and 11 CI have not been reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
   - **Part 17 has a launch blocker from Part 9** (your decision 2026-10-11): decide how production gets verdicts
     before deploying; the stub lets an author self-label with `#true` (ARCHITECTURE §6, `task.md` Part 17).
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after saving the Part 11 plan, as asked).
-- **Phase:** Part 11 planned; no code written. The working tree holds only the new plan file and this file's edits.
-- **Next action:** Implement Part 11 from the approved plan.
-- **Approved plan:**
+- **Owner:** none (Claude stopped after Part 11, as asked).
+- **Phase:** Part 11 done and verified. The working tree holds the whole implementation (`git status --short`: 48 modified
+  files and 17 new paths, see the checkpoint below). Both dev servers are stopped; ports 3000/8000 are free; Docker is up.
+- **Next action:** **You:** review the diff and the Part 11 section of `docs/test-command.md` (both guides), then commit
+  and push so CI runs. **Next part:** 11B (credibility score), from `task.md`; it has a "From Part 11" note.
+- **Approved plan (implemented):**
   [`docs/agents/plans/part-11-appeals-removed-tombstones.md`](plans/part-11-appeals-removed-tombstones.md) (approved
   2026-10-13)
 - **Previous plans:**
@@ -42,9 +44,70 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-13 by Claude (Opus 5.5), Part 11 planning.
+- **Last updated:** 2026-10-13 by Claude (Sonnet 5.5), Part 11 implementation.
 
 ## Completed checkpoints
+
+- 2026-10-13 (Claude, Sonnet 5.5): **Part 11 implemented** (uncommitted). Started from HEAD `fec011f` ("Plan Part 11", committed by
+  you), a clean tree that matched this file. `docker compose ps` showed **no containers running**: I started them
+  (`docker compose up -d`).
+  - **Backend** (`backend/`):
+    - New in `apps/moderation/`: `Appeal` (OneToOne with `Post`, `AppealKind`, `AppealStatus`, the `ModerationAction.appeal` link,
+      the `kept_removed` kind), migrations `0003_appeal` and `0004_appeal_permission` (its own frozen lists; the reverse returns to
+      Part 10's), `exceptions.py`, `serializers.py`, `views.py` (`AppealView`: POST only, the `appeal` throttle for POST only),
+      `urls.py`, `queries.py` (`with_appeal_fields`, `appeal_defaults`), and five new test files (`test_appeal_models`,
+      `test_services_appeals`, `test_api_appeal`, `test_appeal_fields`, `test_admin_appeals`; `AppealFactory` in `factories.py`).
+    - Changed: `rules.py` (`Restore`, `Keep removed`, the open appeal as a required keyword, `resolves_appeal`, the first-decision
+      rule), `services.py` (`file_appeal`, `restore_post`, `keep_removed`, the appeal resolved in `_perform`, the after-commit kick for a
+      restore to `pending`), `admin.py` (the queue holds removal appeals, `AppealFilter`, `AppealInline`, `AppealAdmin`, the two actions, the
+      "in the queue since" expression), `models.py`, `roles.py`; `pipeline/routing.py` (`pipeline_had_its_say`), `posts/{models,
+      serializers,views,services}.py` (`for_list` chains `with_appeal_fields`, 24 keys, `kick_pipeline_after_commit`),
+      `social/{views,feed}.py` (the owner's profile lists their removed posts), `rumor_zero/urls.py`.
+    - Existing tests changed on purpose: `test_rules` (rewritten), `test_models`, `test_roles`, `test_permissions`, `test_races`,
+      `test_pipeline_interplay`, `test_admin_queue` (a resolved appeal on the busy post), `pipeline/test_routing`, the post-key
+      tests (`test_api_create`, `test_api_detail`), `reports/test_reported_by_me`, `social/test_engagement_counts`,
+      `social/test_api_user_posts`.
+  - **Frontend** (`frontend/`): new `src/features/appeals/` (`AppealButton`, `AppealModal`, `AppealOutcome`, `appeals-api.ts`,
+    `messages.ts` + tests), `posts/RemovedPostCard.tsx` + `Tombstone.tsx` (+ test); changed `PostDetail` (a removed post is its own
+    branch; the button in the verdict card; the outcome beside it), `VerdictBlock` (a `footer` slot), `FeedList`, `PostCard` (the guard
+    renders `Tombstone`), `types.ts` (`removal_reason`), `test-helpers`, `features/dev/StitchSections.tsx` (the author variants);
+    `e2e/appeals.spec.ts` and `e2e/helpers.ts` (`seedAuthor`, `logIn`, `moderate`).
+  - **Docs:** ARCHITECTURE §2/§4/§8/§9/§10, ANALYSIS c-43 (and the b-2 rows), STRUCTURE, MEMORY (three Part 11 entries), `task.md` (criteria,
+    decisions, deviations, both status spots, notes in 11B and 13), the plan's status line, and `docs/test-command.md`: a "Part 11"
+    section in **both** guides (12 steps each) and one number in its intro line; nothing else touched. The file has no comment marker
+    at the bottom (none was ever there), so none was kept or added.
+  - Two migrations, no new dependency, service or env variable; `design/` untouched. **I did not read `backend/.env` or
+    `frontend/.env.local`** (Django and the apps read them themselves; the guide never prints a secret). The dev database was migrated,
+    rolled back to `moderation 0002` and applied again, and every `part11-` account and test post I made was deleted (the audit rows
+    stay with a blank moderator and post, as the log keeps its history).
+  - **User decisions and defaults** are in `task.md` Part 11 and the plan.
+  - **Validation (all green):**
+    - Backend: `ruff check .` (All checks passed!), `ruff format --check .` (240 files already formatted), `makemigrations --check
+      --dry-run` (No changes detected), `manage.py check` (no issues), `pytest` **2965 passed** (2709 baseline measured first); `pytest
+      apps/moderation` 559 passed; the threaded tests (`test_races.py`, `test_pipeline_interplay.py`, 30 tests) 10 runs in a row.
+    - **35 backend mutation checks**, every one caught after the fixes: no post lock, no duplicate check, any status appealable, a
+      label appeal that doesn't enter review, a removal appeal that changes the status, `original_moderator` from `moderated_by`
+      or for a pipeline FALSE, the audit row without the appeal link or `resolved_by`, the kick on every `pending`, the first-decision
+      rule gone / applied to seniors / superusers / Escalate, Restore always to `pending` / never to review / keeping
+      `pre_removal_status` or `escalated_at`, Keep removed leaving the flag, Remove not closing a label appeal, Mark verified
+      upholding, Escalate on any removed post, Restore without the prior-status check, the queue without removal appeals, the removal
+      reason from the oldest row / shown to others (query and serializer each alone), `appeal_status` and `can_appeal` leaking, the
+      profile showing removed posts to everyone, the throttle on GET, the 201 re-read with `visible()`. Survivors that were real: the
+      reason's two independent guards and the visitor's profile pages (tests added); equivalent: the appeal row lock and the explicit
+      Escalate exemption (removed as dead code).
+    - Frontend: `npm run lint`, `lint:tokens`, `typecheck`, `format:check` clean; `npm test` **1692 passed** (123 files; 1588 before);
+      `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` OK; `npm run test:e2e` **40 passed** in dev mode and with `CI=1` (38 before).
+      **24 frontend mutation checks**, every one caught (after adding a test for an empty row under the verdict and making the modal
+      single-flight with a ref).
+    - `docs/test-command.md` Part 11, Linux: the blocks of steps 3, 4, 5, 6, 9 and 12 were **extracted from the doc by script and run
+      verbatim** against live Django (outputs diffed with the doc: steps 4 to 6 identical; ids and times differ); steps 7, 8, 10 and 11
+      ran in headless Chromium with scripted logins (the queue, the filter, the buttons per moderator, a Restore with its
+      confirmation, a Mark verified, the dialogs, the post page, the profile card, a visitor, a 390 px phone with no horizontal
+      overflow; screenshots looked at). The PowerShell blocks were written but **not run** (no PowerShell here).
+  - **Found and fixed on the way** (details in MEMORY and `task.md`): a DRF view throttles every method (so a GET would have used up the
+    allowance); the profile's key page needed to be built from what the viewer may see; two redundant checks; and an operational trap:
+    a mutation harness left running while I started a dev server and edited files produced a false 500, a deadlocked `pytest` and a
+    clobbered edit (MEMORY has the rule).
 
 - 2026-10-13 (Claude, Opus 5.5): **Part 11 planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `582905b` ("Implemented Part 10…", committed by the user), a clean tree. (The older text of
@@ -902,18 +965,15 @@ read-only git output.
 
 ## Current workspace state
 
-- HEAD is `466c095` ("Plan Part 8", committed by the user). **Uncommitted:** the whole Part 8 implementation: 23 modified files
-  (this file included) and 3 new folders: `backend/apps/reports/`, `backend/apps/pipeline/` and `frontend/src/features/reports/`
-  (`git status --short`).
-- Docker (Postgres 18 + Redis) is up and healthy; no dev server is running (the ones started for the checks were stopped); ports
-  3000/8000 are free.
-- The local database has `reports.0001_initial` applied. The guide's `part8-*` accounts (and the scripted checks' `p8shot_*`
-  ones, with their posts, reports, reposts and likes) were deleted at the end; accounts from the E2E runs (`fan_*`, `star_*`,
-  `post_*`, `seed_*` and the new `rep_*` reporters made by `seedReports()`) and their data remain (Django Admin → Users deletes them).
-- Ignored artifacts from the checks: `backend/tmp/mail/*.log`, `frontend/test-results/`,
-  `frontend/playwright-report/`, and a production build in `frontend/.next/` made with an empty Google client ID
-  (the last `npm run build` before the CI-mode E2E runs). Scratch scripts and screenshots are in the session's
-  scratchpad, not the repo.
+- HEAD is `fec011f` ("Plan Part 11", committed by the user). **Uncommitted:** the whole Part 11 implementation: 48 modified files
+  (this file included) and 17 new paths (`git status --short`; `frontend/src/features/appeals/` is one of them).
+- Docker (Postgres 18 + Redis) is up and healthy (I started it); both dev servers are stopped; ports 3000/8000 are free.
+- The local database has `moderation.0003_appeal` and `0004_appeal_permission` applied. Every `part11-` account of the guide runs
+  and the rollback checks (and their posts, appeals and reposts) were deleted; accounts from the E2E runs (`apl_*`, `apr_*` and the
+  `mod_*` moderators `moderate()` makes, `fan_*`, `star_*`, `post_*`, `seed_*`, `rep_*`) and their data remain (Django Admin → Users deletes them).
+- Ignored artifacts: `backend/tmp/mail/*.log`, `frontend/test-results/`, `frontend/playwright-report/`, and a production build in
+  `frontend/.next/` (the last `npm run build` used an empty Google client ID). Scratch scripts, mutation harnesses and screenshots are
+  in the session's scratchpad, not the repo.
 
 ## Validation of Part 8 (2026-10-10)
 
@@ -1363,19 +1423,21 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
 
 ## Next exact action
 
-1. **User:** review the diff and the Part 8 section of `docs/test-command.md` (its Linux steps 3 to 9 take about two minutes; the
-   browser steps 10 to 12 need a Next dev server, and step 13 needs your own superuser from Part 0A). Then commit, and push so CI
-   runs; report the CI result (Part 2's to Part 8's jobs). Still open from Part 3: the real-Google check (`docs/test-command.md`
-   Part 3, steps 7 and 8).
-2. **Next part:** Part 9 (the fact-check pipeline stub and routing), from `task.md` (it depends on Part 8, done). Fresh session
-   (`/clear`), first `git status` and `docker compose ps` (start the containers with `docker compose up -d` if they are down).
-   Part 9 adds to `apps/pipeline/` (made in Part 8; `startapp` would refuse it) and must settle three things recorded in `task.md`
-   Part 8: the processor must also take under-review facts with `pre_review_status='pending'`, the late-FALSE-on-a-reported-post leak
-   through the repost refusal, and no post row lock across the 20 s call.
+1. **User:** review the diff and the Part 11 section of `docs/test-command.md` (its Linux steps 3 to 6, 9 and 12 take about two
+   minutes; steps 7, 8, 10 and 11 are in the browser and need both servers). Then commit, and push so CI runs; report the CI result
+   (Part 2's to Part 11's jobs). Still open from Part 3: the real-Google check (`docs/test-command.md` Part 3, steps 7 and 8).
+2. **Next part:** Part 11B (the credibility score), from `task.md` (it depends on 7B, 10 and 11, all done). Fresh session (`/clear`), first
+   `git status` and `docker compose ps` (start the containers with `docker compose up -d` if they are down). Read the "From Part 10"
+   and "From Part 11" notes in `task.md` Part 11B: the hooks go in `moderation.services` (`_perform` and `file_appeal`, same transaction,
+   after the post's row lock) and in `reports.services.resolve_open_reports` (it must return the reporters for `report_upheld`).
 
 ## Blockers or user decisions
 
-- None open. (The Part 8 plan appendix's A1 and A2 were not adopted: A1 is not needed, A2 is a Part 9 follow-up.)
+- None open.
+- User decisions for Part 11 (2026-10-13), now in ARCHITECTURE §2/§4/§8/§9/§10 and ANALYSIS c-43: Restore of an already-checked fact goes to
+  the review queue; Keep removed writes `kept_removed`; the removal reason reaches the author as `removal_reason` (24 keys); your own profile
+  lists your removed posts; Remove during an open label appeal closes it `upheld`; Restore and Keep removed take internal notes only.
+- (The Part 8 plan appendix's A1 and A2 were not adopted: A1 is not needed, A2 is a Part 9 follow-up.)
 - User decisions for Part 8 (2026-10-10), now in ARCHITECTURE §4d/§5/§9/§10 and ANALYSIS c-40: the report action
   is a flag button (not an overflow menu); a young account's report counts with a non-removed post or a non-hidden comment
   (deleted ones count); FALSE posts go to review at the threshold as the docs say, and a post under review after being FALSE
@@ -1403,6 +1465,16 @@ in the guide), then run the guides' Linux commands. Docker Desktop's Linux engin
   (createsuperuser + backfill migration); Turnstile fails closed; the `rz_session=1` hint cookie.
 - User decisions for 0C (2026-10-01), in ARCHITECTURE §10: the reduced logged-out shell; phones get a
   top bar plus five bottom tabs with an account sheet; marketing links only to existing pages.
+
+## Follow-ups noted during Part 11 (still open)
+
+- **11B:** reputation hooks in `file_appeal`'s outcomes and in `_perform` (see `task.md` 11B "From Part 11"); the negative ledger rows'
+  appeal link. **13:** `appeal_resolved` from `_perform` (`task.md` 13). **14:** appeals in the export (already in its scope).
+- **16:** whether a deleted post's open appeal should be closed (today it stays open and moderators refuse a deleted post); the `appeal` throttle
+  (5 a day) with real usage; whether `Escalate` on a removal appeal should also show in a senior-only filter.
+- **Admin polish:** the confirmation page doesn't say a Restore of a never-checked fact will be re-checked ("Removed → Pending"): fine today.
+- **Tests that could be added if they bite:** `ProfilePosts` has no component test of its own (the owner's removed card is covered through
+  `FeedList`, `RemovedPostCard` and the E2E test).
 
 ## Follow-ups noted during Part 8 (still open)
 

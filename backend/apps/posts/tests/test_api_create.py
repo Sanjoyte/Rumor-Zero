@@ -7,7 +7,7 @@ from apps.posts.tests.factories import PostFactory, UserFactory, VerifiedUserFac
 pytestmark = pytest.mark.django_db
 
 URL = "/api/v1/posts/"
-# The §9 post object, in full (23 keys).
+# The §9 post object, in full (24 keys).
 POST_KEYS = {
     "id",
     "author",
@@ -31,6 +31,7 @@ POST_KEYS = {
     "is_mine",
     "can_appeal",
     "appeal_status",
+    "removal_reason",
     "created_at",
 }
 
@@ -125,6 +126,7 @@ def test_the_defaults_of_the_fields_later_parts_fill(client):
     )
     assert body["can_appeal"] is False
     assert body["appeal_status"] is None
+    assert body["removal_reason"] == ""
 
 
 def test_created_at_is_iso_utc(client):

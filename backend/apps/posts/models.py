@@ -64,14 +64,18 @@ class PostQuerySet(models.QuerySet):
 
     def for_list(self, viewer=None):
         """One query for a list of cards: the author joined in, the raw pipeline blob left out,
-        and the likes and comments counted (`liked_by_me` for a signed-in `viewer`).
+        the likes and comments counted (`liked_by_me` for a signed-in `viewer`), and the author's
+        own appeal state and removal reason.
 
-        Every list goes through here, so none can forget the counts. The import is local because
-        `social` depends on `posts` (its models point at `Post`); this is the one way back.
+        Every list goes through here, so none can forget the counts. The imports are local because
+        `social` and `moderation` depend on `posts` (their models point at `Post`); this is the
+        one way back.
         """
+        from apps.moderation.queries import with_appeal_fields
         from apps.social.engagement import with_engagement
 
-        return with_engagement(self.select_related("author").defer("pipeline_result"), viewer)
+        queryset = self.select_related("author").defer("pipeline_result")
+        return with_appeal_fields(with_engagement(queryset, viewer), viewer)
 
 
 def _in_or_null(field, choices):

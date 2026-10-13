@@ -105,13 +105,15 @@ class PostSerializer(serializers.BaseSerializer):
     """The post object of ARCHITECTURE §9, for lists, the detail page and the 201 answer.
 
     The counts and the viewer's flags (`like_count`, `comment_count`, `repost_count`, `liked_by_me`,
-    `reposted_by_me`, `bookmarked_by_me`, `reported_by_me`) come from
-    `PostQuerySet.for_list(viewer)` (a new post gets `engagement_defaults`); the fields later parts
-    fill (appeals) are `false` or `null` for now. Nothing internal leaks: no `flagged_reason`,
+    `reposted_by_me`, `bookmarked_by_me`, `reported_by_me`) and the author's own `appeal_status`
+    and `removal_reason` come from `PostQuerySet.for_list(viewer)` (a new post gets
+    `engagement_defaults` and `appeal_defaults`). Nothing internal leaks: no `flagged_reason`,
     pipeline fields, `report_count` or moderation fields.
     **A removed post is a tombstone for everyone but its author** (user decision 2026-10-09): the
     same keys, with `content`, `sources`, `verdict_note`, `confidence_score` and `verdict_source`
-    blanked. The rule lives here so no list can ever leak a removed post's text.
+    blanked. The rule lives here so no list can ever leak a removed post's text. Its author also
+    gets `removal_reason` (what the moderator said, if anything); everyone else gets `""`.
+    `can_appeal` is the author's FALSE-labelled or removed post that has no appeal yet.
     Context: `request` (for `is_mine`) and `now` (one clock for `emergency_active`).
     """
 
@@ -121,6 +123,9 @@ class PostSerializer(serializers.BaseSerializer):
         now = self.context.get("now") or timezone.now()
         is_mine = bool(user and user.is_authenticated and post.author_id == user.pk)
         tombstone = post.status == PostStatus.REMOVED and not is_mine
+        # Read for everyone (strictly, like the counts: a list that forgot `for_list` raises), shown
+        # to the author only. The annotations already say nothing to anyone else.
+        appeal_status, removal_reason = post.appeal_status, post.removal_reason
         return {
             "id": str(post.pk),
             "author": user_summary(post.author),
@@ -144,8 +149,15 @@ class PostSerializer(serializers.BaseSerializer):
             "bookmarked_by_me": post.bookmarked_by_me,
             "reported_by_me": post.reported_by_me,
             "is_mine": is_mine,
-            "can_appeal": False,
-            "appeal_status": None,
+            "can_appeal": (
+                is_mine
+                and appeal_status is None
+                and post.status in (PostStatus.VERIFIED_FALSE, PostStatus.REMOVED)
+            ),
+            "appeal_status": appeal_status if is_mine else None,
+            "removal_reason": (
+                removal_reason if is_mine and post.status == PostStatus.REMOVED else ""
+            ),
             "created_at": iso(post.created_at),
         }
 

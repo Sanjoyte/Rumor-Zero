@@ -1,6 +1,7 @@
 import pytest
 
 from apps.pipeline.tests.conftest import pipeline_cfg  # noqa: F401  (fixture)
+from apps.posts.tests.conftest import auth_client, verified_user  # noqa: F401  (fixtures)
 
 
 @pytest.fixture(autouse=True)

@@ -495,3 +495,213 @@ describe("PostDetail report (Part 8)", () => {
     expect(screen.queryByRole("button", { name: /report/i })).not.toBeInTheDocument();
   });
 });
+
+// ---------- Part 11: appeals ----------
+
+const appeals = vi.hoisted(() => ({ appealPost: vi.fn() }));
+vi.mock("@/features/appeals/appeals-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/appeals/appeals-api")>()),
+  ...appeals,
+}));
+
+const FALSE_MINE = () =>
+  fact({
+    status: "verified_false",
+    verdict_source: "pipeline",
+    confidence_score: "93.00",
+    is_mine: true,
+    can_appeal: true,
+  });
+const UNDER_APPEAL = () =>
+  fact({
+    status: "under_review",
+    is_mine: true,
+    can_appeal: false,
+    appeal_status: "open",
+  });
+
+describe("PostDetail (appeals)", () => {
+  beforeEach(() => {
+    appeals.appealPost.mockReset();
+  });
+
+  it("offers the author of a FALSE post 'Request another look' at the bottom of the verdict", async () => {
+    api.fetchPost.mockResolvedValue(FALSE_MINE());
+    renderDetail(fact({ status: "verified_false", verdict_source: "pipeline" }), "verified");
+    const button = await screen.findByRole("button", { name: "Request another look" });
+    expect(
+      within(screen.getByRole("heading", { name: "Verdict" }).closest("section")!).getByRole(
+        "button",
+        { name: "Request another look" },
+      ),
+    ).toBe(button);
+    expect(button).toHaveClass("ml-auto");
+  });
+
+  it("leaves no empty row under the verdict when there is nothing to ask", async () => {
+    api.fetchPost.mockResolvedValue(
+      fact({ status: "under_review", is_mine: true, can_appeal: false, appeal_status: "open" }),
+    );
+    renderDetail(fact({ status: "under_review" }), "verified");
+    await screen.findByText("APPEAL PENDING");
+    const verdict = screen.getByRole("heading", { name: "Verdict" }).closest("section")!;
+    expect(verdict.querySelector(".pt-space-xs")).toBeNull();
+  });
+
+  it("offers it to nobody else: not to a reader, not to a visitor", async () => {
+    api.fetchPost.mockResolvedValue(
+      fact({ status: "verified_false", is_mine: false, can_appeal: false }),
+    );
+    renderDetail(fact({ status: "verified_false" }), "verified");
+    await waitFor(() => expect(api.fetchPost).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Request another look" })).toBeNull();
+    renderDetail(fact({ status: "verified_false" }), "anonymous");
+    expect(screen.queryByRole("button", { name: "Request another look" })).toBeNull();
+  });
+
+  it("offers it on no other status, even to the author", async () => {
+    api.fetchPost.mockResolvedValue(
+      fact({ status: "verified_true", is_mine: true, can_appeal: false }),
+    );
+    renderDetail(fact({ status: "verified_true" }), "verified");
+    await screen.findByRole("button", { name: "Delete" });
+    expect(screen.queryByRole("button", { name: "Request another look" })).toBeNull();
+  });
+
+  it("sends the request, patches the page and shows UNDER REVIEW with the chip and the line", async () => {
+    const user = userEvent.setup();
+    api.fetchPost.mockResolvedValue(FALSE_MINE());
+    appeals.appealPost.mockResolvedValue(UNDER_APPEAL());
+    renderDetail(fact({ status: "verified_false", verdict_source: "pipeline" }), "verified");
+    await user.click(await screen.findByRole("button", { name: "Request another look" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Why should we look again?" }),
+      "The source was updated.",
+    );
+    await user.click(screen.getByRole("button", { name: "Send request" }));
+    expect(await screen.findByText("APPEAL PENDING")).toBeInTheDocument();
+    expect(appeals.appealPost).toHaveBeenCalledWith(ID, { reason: "The source was updated." });
+    expect(screen.getAllByText("UNDER REVIEW").length).toBeGreaterThan(0);
+    expect(screen.getByText(/will review it/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request another look" })).toBeNull();
+  });
+
+  it("refetches the post when the server says an appeal exists already", async () => {
+    const user = userEvent.setup();
+    api.fetchPost.mockResolvedValue(FALSE_MINE());
+    appeals.appealPost.mockRejectedValue(
+      new ApiError({ status: 409, code: "already_appealed", detail: "" }),
+    );
+    renderDetail(fact({ status: "verified_false" }), "verified");
+    await user.click(await screen.findByRole("button", { name: "Request another look" }));
+    api.fetchPost.mockResolvedValue(
+      fact({ status: "under_review", is_mine: true, can_appeal: false, appeal_status: "open" }),
+    );
+    const before = api.fetchPost.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "Send request" }));
+    expect(await screen.findByText("APPEAL PENDING")).toBeInTheDocument();
+    expect(api.fetchPost.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it.each([
+    ["verified_true", "overturned", "A moderator reversed the decision."],
+    ["verified_false", "upheld", "A moderator reviewed it, and the FALSE label stays."],
+  ] as const)(
+    "tells the author what became of the appeal: %s / %s",
+    async (status, appeal_status, words) => {
+      api.fetchPost.mockResolvedValue(
+        fact({ status, is_mine: true, can_appeal: false, appeal_status }),
+      );
+      renderDetail(fact({ status }), "verified");
+      expect(await screen.findByText(new RegExp(words.replace(".", "\\.")))).toBeInTheDocument();
+      expect(screen.queryByText("APPEAL PENDING")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Request another look" })).toBeNull();
+    },
+  );
+
+  it("tells the author of a restored opinion too (an opinion has no verdict block to hold the line)", async () => {
+    api.fetchPost.mockResolvedValue(
+      makePost({
+        id: ID,
+        status: "published",
+        post_type: "opinion",
+        is_mine: true,
+        can_appeal: false,
+        appeal_status: "overturned",
+      }),
+    );
+    renderDetail(makePost({ id: ID, is_mine: false }), "verified");
+    expect(await screen.findByText(/A moderator reversed the decision/)).toBeInTheDocument();
+    expect(screen.getByText("Opinions aren't fact-checked.")).toBeInTheDocument();
+  });
+
+  it("says nothing about appeals to a reader", () => {
+    renderDetail(fact({ status: "verified_false", appeal_status: null }), "anonymous");
+    expect(screen.queryByText(/You asked for another look/)).toBeNull();
+  });
+});
+
+describe("PostDetail (the author's removed post)", () => {
+  const mineRemoved = (overrides = {}) =>
+    fact({
+      status: "removed",
+      is_mine: true,
+      can_appeal: true,
+      content: "My removed claim",
+      removal_reason: "Personal attack",
+      ...overrides,
+    });
+
+  it("keeps the claim as the h1 and adds the note, the reason, the sources, Delete and the button", async () => {
+    api.fetchPost.mockResolvedValue(mineRemoved());
+    renderDetail(fact({ status: "removed", content: "" }), "verified");
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent(
+      "“My removed claim”",
+    );
+    expect(screen.getByText(/Only you can see this text/)).toBeInTheDocument();
+    expect(screen.getByText("Reason given: Personal attack")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Sources (2)" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request another look" })).toBeInTheDocument();
+  });
+
+  it("has no action bar, verdict or discussion", async () => {
+    api.fetchPost.mockResolvedValue(mineRemoved());
+    renderDetail(fact({ status: "removed", content: "" }), "verified");
+    await screen.findByRole("heading", { level: 1 });
+    expect(screen.queryByRole("heading", { name: "Verdict" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Like|Repost|Bookmark|Report/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy link" })).toBeNull();
+    expect(social.fetchComments).not.toHaveBeenCalled();
+  });
+
+  it("sends the appeal from the page and shows the chip", async () => {
+    const user = userEvent.setup();
+    api.fetchPost.mockResolvedValue(mineRemoved());
+    appeals.appealPost.mockResolvedValue(mineRemoved({ can_appeal: false, appeal_status: "open" }));
+    renderDetail(fact({ status: "removed", content: "" }), "verified");
+    await user.click(await screen.findByRole("button", { name: "Request another look" }));
+    expect(screen.getByText(/A moderator removed your post\./)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send request" }));
+    expect(await screen.findByText("APPEAL PENDING")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request another look" })).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("My removed claim");
+  });
+
+  it("shows a visitor the notice with the author row and no appeal", () => {
+    renderDetail(
+      fact({ status: "removed", content: "", removal_reason: "leaked", can_appeal: true }),
+    );
+    expect(screen.getByText(DETAIL_MESSAGES.removed)).toBeInTheDocument();
+    expect(screen.queryByText(/leaked/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Request another look" })).toBeNull();
+  });
+
+  it("deletes from the card's footer as before", async () => {
+    const user = userEvent.setup();
+    api.fetchPost.mockResolvedValue(mineRemoved());
+    renderDetail(fact({ status: "removed", content: "" }), "verified");
+    await user.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+});

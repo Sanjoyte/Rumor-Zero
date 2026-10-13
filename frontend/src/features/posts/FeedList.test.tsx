@@ -424,3 +424,104 @@ describe("FeedList action bars (Part 7)", () => {
     expect(screen.queryByRole("link", { name: /Comments/ })).toBeNull();
   });
 });
+
+describe("FeedList removed posts (Part 11)", () => {
+  const removed = (id: string, overrides: Partial<Post> = {}) =>
+    post(id, {
+      status: "removed",
+      post_type: "fact",
+      content: "",
+      sources: [],
+      is_mine: false,
+      ...overrides,
+    });
+  const mineRemoved = (id: string, overrides: Partial<Post> = {}) =>
+    removed(id, {
+      is_mine: true,
+      can_appeal: true,
+      content: "My removed claim",
+      removal_reason: "Personal attack",
+      ...overrides,
+    });
+
+  it("shows a removed post the way everyone else sees it: a tombstone, no action bar", () => {
+    render(<FeedList feed={feedWith({ items: [entry(removed("p1"))] })} />);
+    expect(screen.getByText("Removed by a moderator")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+
+  it("shows the author their own removed post with the reason and the appeal button", async () => {
+    render(<FeedList feed={feedWith({ items: [entry(mineRemoved("p1"))] })} />);
+    expect(screen.getByText(/My removed claim/)).toBeInTheDocument();
+    expect(screen.getByText(/Only you can see this text/)).toBeInTheDocument();
+    expect(screen.getByText("Reason given: Personal attack")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Request another look" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Like|Repost|Report|Bookmark/ })).toBeNull();
+  });
+
+  it("shows the chip, not the button, for an author whose appeal is open", () => {
+    const item = mineRemoved("p1", { can_appeal: false, appeal_status: "open" });
+    render(<FeedList feed={feedWith({ items: [entry(item)] })} />);
+    expect(screen.getByText("APPEAL PENDING")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request another look" })).toBeNull();
+  });
+
+  it("turns a polled removal of somebody else's post into the tombstone", () => {
+    const live = post("p1", { status: "pending", post_type: "fact" });
+    render(
+      <FeedList
+        feed={feedWith({ items: [entry(live)] })}
+        statusUpdates={{
+          p1: { id: "p1", status: "removed", confidence_score: null, verdict_source: null },
+        }}
+      />,
+    );
+    expect(screen.getByText("Removed by a moderator")).toBeInTheDocument();
+    expect(screen.queryByText(/Content of p1/)).toBeNull();
+  });
+
+  it("turns a polled removal of your own post into your own removed card, without a button", () => {
+    const live = post("p1", { status: "pending", post_type: "fact", is_mine: true });
+    render(
+      <FeedList
+        feed={feedWith({ items: [entry(live)] })}
+        statusUpdates={{
+          p1: { id: "p1", status: "removed", confidence_score: null, verdict_source: null },
+        }}
+      />,
+    );
+    expect(screen.getByText(/Content of p1/)).toBeInTheDocument();
+    expect(screen.getByText(/Only you can see this text/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request another look" })).toBeNull();
+  });
+
+  it("keeps the chip after a poll builds a new object for the card", async () => {
+    const user = userEvent.setup();
+    const appeals = await import("@/features/appeals/appeals-api");
+    const spy = vi
+      .spyOn(appeals, "appealPost")
+      .mockResolvedValue(mineRemoved("p1", { can_appeal: false, appeal_status: "open" }));
+    const item = mineRemoved("p1");
+    const view = render(<FeedList feed={feedWith({ items: [entry(item)] })} />);
+    await user.click(await screen.findByRole("button", { name: "Request another look" }));
+    await user.click(screen.getByRole("button", { name: "Send request" }));
+    expect(await screen.findByText("APPEAL PENDING")).toBeInTheDocument();
+    // A status overlay that says nothing new still makes the card build its post again.
+    view.rerender(
+      <FeedList
+        feed={feedWith({ items: [entry({ ...item })] })}
+        statusUpdates={{
+          p1: { id: "p1", status: "removed", confidence_score: null, verdict_source: null },
+        }}
+      />,
+    );
+    expect(screen.getByText("APPEAL PENDING")).toBeInTheDocument();
+    spy.mockRestore();
+  });
+
+  it("still shows a repost of somebody else's removed post as 'no longer available'", () => {
+    render(<FeedList feed={feedWith({ items: [unavailableEntry("gone")] })} />);
+    expect(screen.getByText("This post is no longer available")).toBeInTheDocument();
+  });
+});

@@ -194,3 +194,72 @@ export function processPost(postId: string): { status: string; threshold: number
   if (!match) throw new Error(`no result in: ${out}`);
   return { status: match[1], threshold: Number(match[2]) };
 }
+
+/** An account made straight in the database, with a password: log in through the real form. */
+export interface SeededAuthor {
+  email: string;
+  username: string;
+}
+
+/**
+ * Makes a verified author with a password (and the verified `EmailAddress` row that
+ * `create_superuser` also makes), so a test can log in without a sign-up: the suite is bounded by
+ * allauth's 20 sign-ups a minute. Turnstile guards sign-up only, not log-in.
+ */
+export function seedAuthor(prefix = "author"): SeededAuthor {
+  if (!/^[a-z]{1,10}$/.test(prefix)) throw new Error("a short lower-case prefix");
+  const out = runShell(
+    [
+      "import uuid",
+      "from allauth.account.models import EmailAddress",
+      "from apps.accounts.models import User",
+      "tag = uuid.uuid4().hex[:10]",
+      `user = User.objects.create_user(email=f'${prefix}-{tag}@example.test', username=f'${prefix}_{tag}', password='${PASSWORD}', is_email_verified=True)`,
+      "EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)",
+      "print('SEEDED=' + user.email + ',' + user.username)",
+    ].join("\n"),
+  );
+  const match = /SEEDED=([^,\s]+),(\S+)/.exec(out);
+  if (!match) throw new Error(`no account in: ${out}`);
+  return { email: match[1], username: match[2] };
+}
+
+/** Log in through the form (Part 1) and wait until the rail shows the account. */
+export async function logIn(page: Page, account: SeededAuthor) {
+  await page.goto("/login");
+  await page.getByLabel("Email address").fill(account.email);
+  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+  await page.getByRole("button", { name: /Log in/ }).click();
+  await expect(page).toHaveURL(/\/home$/, { timeout: 30_000 });
+  await expectLoggedIn(page, account.username);
+}
+
+/** A moderator's decision on a post (Part 10, 11), through the backend's own services. */
+export type ModeratorAction =
+  "mark_verified" | "mark_false" | "remove_post" | "restore_post" | "keep_removed";
+
+/**
+ * Has a brand-new moderator (not the one who made any earlier decision) take `action` on a post,
+ * through `apps/moderation/services.py`, exactly as the admin does. `reason` is the "reason shown
+ * to the author" of a removal (and the public note of a verdict). Plain letters, digits and spaces.
+ */
+export function moderate(postId: string, action: ModeratorAction, reason = ""): void {
+  if (!/^[0-9a-f-]{36}$/.test(postId)) throw new Error("not a post id");
+  if (!/^[A-Za-z0-9 ]{0,200}$/.test(reason)) throw new Error("plain text only");
+  const takesNote =
+    action === "remove_post" || action === "mark_verified" || action === "mark_false";
+  const call = takesNote
+    ? `services.${action}('${postId}', moderator=moderator, public_note='${reason}')`
+    : `services.${action}('${postId}', moderator=moderator)`;
+  runShell(
+    [
+      "import uuid",
+      "from apps.accounts.models import User",
+      "from apps.moderation import services",
+      "tag = uuid.uuid4().hex[:10]",
+      "moderator = User.objects.create_user(email=f'mod-{tag}@example.test', username=f'mod_{tag}', is_email_verified=True, role='moderator')",
+      call,
+      "print('MODERATED=1')",
+    ].join("\n"),
+  );
+}

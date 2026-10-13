@@ -15,6 +15,8 @@ import { Textarea } from "@/components/ui/Textarea";
 import { Toggle } from "@/components/ui/Toggle";
 import { VerdictStripe } from "@/components/ui/VerdictStripe";
 import { PostCard, type PostCardProps } from "@/features/posts/PostCard";
+import { RemovedPostCard } from "@/features/posts/RemovedPostCard";
+import type { Post } from "@/lib/api/types";
 import { scorePassword } from "@/lib/password-strength";
 import { Section } from "./GalleryLayout";
 
@@ -119,6 +121,71 @@ const CARDS: { label: string; props: PostCardProps }[] = [
       status: "removed",
       createdAt: "2026-09-28T10:00:00Z",
       now: NOW,
+    },
+  },
+];
+
+/**
+ * A removed post as its author sees it (Part 11), after the request: the button needs a session,
+ * so the gallery shows the two states that don't (the chip, and what became of it).
+ */
+const REMOVED_AS_AUTHOR: { label: string; post: Post }[] = [
+  {
+    label: "removed, author's view: appeal open",
+    post: {
+      id: "00000000-0000-4000-8000-000000000001",
+      author: { id: "u-ada", username: "ada", display_name: "Ada", avatar_url: null },
+      content: "Hidden text that only its author can read.",
+      post_type: "fact",
+      status: "removed",
+      sources: [],
+      is_emergency: false,
+      emergency_active: false,
+      emergency_expires_at: null,
+      confidence_score: null,
+      verdict_source: null,
+      verdict_note: "",
+      like_count: 0,
+      comment_count: 0,
+      repost_count: 0,
+      liked_by_me: false,
+      reposted_by_me: false,
+      bookmarked_by_me: false,
+      reported_by_me: false,
+      is_mine: true,
+      can_appeal: false,
+      appeal_status: "open",
+      removal_reason: "Harassment of a private person.",
+      created_at: "2026-09-28T10:00:00Z",
+    },
+  },
+  {
+    label: "removed, author's view: appeal upheld",
+    post: {
+      id: "00000000-0000-4000-8000-000000000002",
+      author: { id: "u-ada", username: "ada", display_name: "Ada", avatar_url: null },
+      content: "Another hidden claim.",
+      post_type: "opinion",
+      status: "removed",
+      sources: [],
+      is_emergency: false,
+      emergency_active: false,
+      emergency_expires_at: null,
+      confidence_score: null,
+      verdict_source: null,
+      verdict_note: "",
+      like_count: 0,
+      comment_count: 0,
+      repost_count: 0,
+      liked_by_me: false,
+      reposted_by_me: false,
+      bookmarked_by_me: false,
+      reported_by_me: false,
+      is_mine: true,
+      can_appeal: false,
+      appeal_status: "upheld",
+      removal_reason: "",
+      created_at: "2026-09-28T10:00:00Z",
     },
   },
 ];
@@ -311,6 +378,12 @@ export function StitchSections() {
             <div key={label} className="space-y-space-xs">
               <p className="font-label-code text-label-code text-outline uppercase">{label}</p>
               <PostCard {...props} />
+            </div>
+          ))}
+          {REMOVED_AS_AUTHOR.map(({ label, post }) => (
+            <div key={label} className="space-y-space-xs">
+              <p className="font-label-code text-label-code text-outline uppercase">{label}</p>
+              <RemovedPostCard post={post} now={NOW} />
             </div>
           ))}
         </div>

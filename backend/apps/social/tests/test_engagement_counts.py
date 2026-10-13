@@ -8,6 +8,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from apps.moderation.queries import appeal_defaults
 from apps.posts.serializers import PostSerializer
 from apps.social.engagement import engagement_defaults
 from apps.social.models import Follow
@@ -123,10 +124,12 @@ def test_a_viewers_like_on_a_removed_post_is_still_reported_to_that_viewer(auth_
         "reposted_by_me",
         "bookmarked_by_me",
         "reported_by_me",
+        "appeal_status",
+        "removal_reason",
     ],
 )
 def test_the_serializer_refuses_a_post_that_was_not_annotated(missing):
-    post = engagement_defaults(PostFactory())
+    post = appeal_defaults(engagement_defaults(PostFactory()))
     delattr(post, missing)
     with pytest.raises(AttributeError):
         PostSerializer(post, context={}).data  # noqa: B018  (a list that forgot for_list(viewer))

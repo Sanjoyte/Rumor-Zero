@@ -18,18 +18,22 @@ import type { Post } from "@/lib/api/types";
 import { cn } from "@/lib/cn";
 import { formatFullDateTime } from "@/lib/format";
 import { stripeTone } from "@/lib/post-display";
+import { AppealButton } from "@/features/appeals/AppealButton";
+import { AppealOutcome } from "@/features/appeals/AppealOutcome";
 import { CommentSection } from "@/features/social/CommentSection";
 import { PostActions } from "@/features/social/PostActions";
 import { CopyLinkButton } from "./CopyLinkButton";
 import { DeletePostModal } from "./DeletePostModal";
+import { RemovedPostCard } from "./RemovedPostCard";
 import { SourceList } from "./SourceList";
+import { REMOVED_MESSAGES } from "./Tombstone";
 import { VerdictBlock } from "./VerdictBlock";
 import { usePostDetail } from "./usePostDetail";
 import { useStatusPolling } from "./useStatusPolling";
 
 export const DETAIL_MESSAGES = {
   deleted: "Post deleted.",
-  removed: "This post was removed by a moderator.",
+  removed: REMOVED_MESSAGES.page,
   notFound: "The post may have been deleted, or the link may be wrong.",
   loadFailed: "Couldn't load this post. Check your connection and try again.",
 } as const;
@@ -82,7 +86,9 @@ function AuthorRow({ post }: { post: Post }) {
 /**
  * `/p/[id]` (Stitch b3: claim header, author row, verdict, sources, actions). The claim and its
  * status arrive server-rendered; the rest is client-side, including the like button and the
- * discussion (Part 7), repost and bookmark (7B), report (8). 11 adds appeal, 11D stats.
+ * discussion (Part 7), repost and bookmark (7B), report (8), appeal (11). 11D adds stats. A removed
+ * post is `RemovedPostCard`: a tombstone for everyone but its author, who sees their words and can
+ * appeal; it has no action bar, verdict or discussion.
  */
 export function PostDetail({ id, initial }: { id: string; initial: Post | null }) {
   const router = useRouter();
@@ -156,31 +162,46 @@ export function PostDetail({ id, initial }: { id: string; initial: Post | null }
     );
   }
 
-  if (isTombstone(post)) {
+  const isFact = post.post_type === "fact";
+  if (post.status === "removed") {
     return (
       <div className={CONTAINER}>
         <BackLink />
-        <Card as="article" className="flex flex-col gap-space-lg p-space-xl">
-          <AuthorRow post={post} />
-          <p className="flex items-center gap-space-xs font-body-md text-body-md font-semibold text-on-surface-variant">
-            <Icon name="block" size="xl" className="text-outline" />
-            {DETAIL_MESSAGES.removed}
-          </p>
-        </Card>
+        <RemovedPostCard
+          post={post}
+          layout="page"
+          authorRow={<AuthorRow post={post} />}
+          footer={
+            post.is_mine && (
+              <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
+                <Icon name="delete" size="lg" />
+                Delete
+              </Button>
+            )
+          }
+          onFiled={patch}
+          onStale={reload}
+        />
+        {post.is_mine && isFact && <SourceList sources={post.sources} />}
+        {post.is_mine && (
+          <DeletePostModal
+            open={confirmDelete}
+            postId={post.id}
+            isFact={isFact}
+            onClose={() => setConfirmDelete(false)}
+            onDeleted={onDeleted}
+          />
+        )}
       </div>
     );
   }
 
   const tone = stripeTone({ status: post.status, emergencyActive: post.emergency_active });
-  const isFact = post.post_type === "fact";
   return (
     <div className={CONTAINER}>
       <BackLink />
       <Card as="article" className="flex flex-col gap-space-lg p-space-xl">
         {tone && <VerdictStripe tone={tone} />}
-        {post.status === "removed" && (
-          <Alert tone="warning">{DETAIL_MESSAGES.removed} Only you can see this text.</Alert>
-        )}
         <div className="flex flex-wrap items-center gap-space-sm">
           <CategoryChip type={post.post_type} />
           <StatusBadge
@@ -213,17 +234,22 @@ export function PostDetail({ id, initial }: { id: string; initial: Post | null }
           )}
         </div>
       </Card>
-      <VerdictBlock post={post} />
+      <VerdictBlock
+        post={post}
+        footer={
+          post.is_mine && post.can_appeal ? (
+            <AppealButton post={post} onFiled={patch} onStale={reload} />
+          ) : undefined
+        }
+      />
+      {post.is_mine && <AppealOutcome post={post} />}
       {isFact && <SourceList sources={post.sources} />}
-      {post.status !== "removed" && (
-        // A removed post has no discussion (its API answers 404), even for its author.
-        <CommentSection
-          key={post.id}
-          postId={post.id}
-          count={post.comment_count}
-          onCountChange={(count) => patch({ comment_count: count })}
-        />
-      )}
+      <CommentSection
+        key={post.id}
+        postId={post.id}
+        count={post.comment_count}
+        onCountChange={(count) => patch({ comment_count: count })}
+      />
       {post.is_mine && (
         <DeletePostModal
           open={confirmDelete}

@@ -12,8 +12,13 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.tests.factories import UserFactory
-from apps.moderation.models import ActionKind
-from apps.moderation.tests.factories import ModerationActionFactory, moderator_user, senior_user
+from apps.moderation.models import ActionKind, AppealStatus
+from apps.moderation.tests.factories import (
+    AppealFactory,
+    ModerationActionFactory,
+    moderator_user,
+    senior_user,
+)
 from apps.posts.models import FlaggedReason, Post, PostStatus
 from apps.posts.tests.factories import PostFactory
 from apps.reports.models import ReportReason
@@ -320,6 +325,15 @@ def test_the_post_page_uses_the_same_number_of_queries_with_50_reports_and_10_hi
         ReportFactory(post=busy)
     for _ in range(10):
         ModerationActionFactory(post=busy)
+    # An appeal with both moderators named must cost nothing extra (Part 11's inline).
+    AppealFactory(
+        post=busy,
+        author=busy.author,
+        status=AppealStatus.UPHELD,
+        resolved_at=timezone.now(),
+        resolved_by=moderator_user(),
+        original_moderator=senior_user(),
+    )
     client.get(reverse("admin:posts_post_change", args=[quiet.pk]))  # warm caches
     with CaptureQueriesContext(connection) as small:
         client.get(reverse("admin:posts_post_change", args=[quiet.pk]))

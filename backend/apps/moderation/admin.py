@@ -3,10 +3,13 @@
 `PostAdmin` is the review queue. It stays **read-only for everyone** (`has_change_permission` is
 always False, so the page has no Save and a POST to its change URL is a 403): every change goes
 through `apps/moderation/services.py`, which locks the row, re-checks the rules and writes the
-audit trail. The five actions are bulk actions with a confirmation page; the same actions are
-offered as buttons on a post's own page.
+audit trail. The seven actions (Part 11 added Restore post and Keep removed, the two ways to
+resolve a removal appeal) are bulk actions with a confirmation page; the same actions are offered
+as buttons on a post's own page. The queue holds posts under review **and removed posts with an open
+removal appeal**.
 
-`ModerationActionAdmin` (the full moderation log) and `LogEntryAdmin` (Django's own admin log,
+`AppealAdmin` lists the appeals read-only. `ModerationActionAdmin` (the full moderation log) and
+`LogEntryAdmin` (Django's own admin log,
 where account and settings changes are recorded with their values) are read-only and seniors-only.
 """
 
@@ -17,7 +20,7 @@ from collections import Counter
 from django.contrib import admin, messages
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.contrib.admin.models import LogEntry
-from django.db.models import F
+from django.db.models import Case, DateTimeField, F, Q, When
 from django.http import HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.urls import reverse
@@ -29,10 +32,10 @@ from django.utils.timesince import timesince
 from apps.core.admin_mixins import HistoryNeedsLog
 from apps.moderation import rules, services
 from apps.moderation.forms import ConfirmActionForm
-from apps.moderation.models import ModerationAction
+from apps.moderation.models import Appeal, AppealKind, AppealStatus, ModerationAction
 from apps.moderation.rules import Act
 from apps.posts.emergency import is_active_emergency
-from apps.posts.models import Post, PostStatus, PostType
+from apps.posts.models import FlaggedReason, Post, PostStatus, PostType
 from apps.reports.models import Report
 
 BATCH_CAP = 100  # posts per action: the admin's page size, and what a person can read and weigh
@@ -69,6 +72,18 @@ ACTIONS = {
         services.escalate,
         lambda n: f"Escalated {n} {'post' if n == 1 else 'posts'} to a senior moderator.",
     ),
+    "restore_posts": (
+        Act.RESTORE,
+        "Restore posts",
+        services.restore_post,
+        lambda n: f"Restored {n} {'post' if n == 1 else 'posts'}.",
+    ),
+    "keep_removed": (
+        Act.KEEP_REMOVED,
+        "Keep removed",
+        services.keep_removed,
+        lambda n: f"Kept {n} {'post' if n == 1 else 'posts'} removed.",
+    ),
 }
 BUTTON_LABELS = {
     "mark_verified": "Mark verified",
@@ -76,7 +91,30 @@ BUTTON_LABELS = {
     "dismiss_reports": "Dismiss reports",
     "remove_posts": "Remove post",
     "escalate": "Escalate to senior",
+    "restore_posts": "Restore post",
+    "keep_removed": "Keep removed",
 }
+
+
+def open_appeal_of(post):
+    """The open appeal of a post, from `select_related("appeal")` or one query; None if none."""
+    appeal = getattr(post, "appeal", None)  # RelatedObjectDoesNotExist is an AttributeError
+    return appeal if appeal is not None and appeal.status == AppealStatus.OPEN else None
+
+
+def queue_since():
+    """When a post entered the queue: `review_started_at` for a post under review, the open
+    appeal's `created_at` for a removed post with one (its own clock never runs). An expression
+    (not an `F`) so it can be a column's ordering without tripping the admin check E033."""
+    return Case(
+        When(
+            status=PostStatus.REMOVED,
+            appeal__status=AppealStatus.OPEN,
+            then=F("appeal__created_at"),
+        ),
+        default=F("review_started_at"),
+        output_field=DateTimeField(),
+    )
 
 
 def pipeline_text(post):
@@ -93,9 +131,10 @@ def pipeline_text(post):
 
 
 class QueueFilter(admin.SimpleListFilter):
-    """The "Show" filter: the review queue (the default) or every post. Choosing a status or
-    "deleted by author" is a look at other posts, so it leaves the queue too (otherwise
-    "removed" on top of the queue would always be empty)."""
+    """The "Show" filter: the review queue (the default) or every post. The queue is the posts
+    under review and the removed posts with an open removal appeal (`flagged_reason=appeal`).
+    Choosing a status or "deleted by author" is a look at other posts, so it leaves the queue too
+    (otherwise "removed" on top of the queue would always be empty)."""
 
     title = "show"
     parameter_name = "queue"
@@ -107,7 +146,10 @@ class QueueFilter(admin.SimpleListFilter):
     def queryset(self, request, queryset):
         if self.value() == "all" or any(key in request.GET for key in self.LEAVES_THE_QUEUE):
             return queryset
-        return queryset.filter(status=PostStatus.UNDER_REVIEW, deleted_at__isnull=True)
+        in_queue = Q(status=PostStatus.UNDER_REVIEW) | Q(
+            status=PostStatus.REMOVED, flagged_reason=FlaggedReason.APPEAL
+        )
+        return queryset.filter(in_queue, deleted_at__isnull=True)
 
     def choices(self, changelist):
         yield {
@@ -120,6 +162,21 @@ class QueueFilter(admin.SimpleListFilter):
             "query_string": changelist.get_query_string({self.parameter_name: "all"}),
             "display": "All posts",
         }
+
+
+class AppealFilter(admin.SimpleListFilter):
+    """Posts with an open appeal of one kind."""
+
+    title = "appeal"
+    parameter_name = "appeal"
+
+    def lookups(self, request, model_admin):
+        return [(AppealKind.LABEL, "FALSE label"), (AppealKind.REMOVAL, "Removal")]
+
+    def queryset(self, request, queryset):
+        if self.value() in AppealKind.values:
+            return queryset.filter(appeal__kind=self.value(), appeal__status=AppealStatus.OPEN)
+        return queryset
 
 
 class EscalatedFilter(admin.SimpleListFilter):
@@ -136,6 +193,37 @@ class EscalatedFilter(admin.SimpleListFilter):
 
 
 # ---------- the inlines on a post's page ----------
+
+
+class AppealInline(admin.TabularInline):
+    """The author's appeal, if any (viewable with `moderation.view_appeal`)."""
+
+    model = Appeal
+    extra = 0
+    max_num = 1
+    can_delete = False
+    fields = (
+        "kind",
+        "status",
+        "reason",
+        "created_at",
+        "original_moderator",
+        "resolved_by",
+        "resolved_at",
+    )
+    readonly_fields = fields
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("original_moderator", "resolved_by")
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 class ReportInline(admin.TabularInline):
@@ -226,6 +314,7 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
     )
     list_filter = (
         QueueFilter,
+        AppealFilter,
         "flagged_reason",
         "post_type",
         "status",
@@ -234,14 +323,14 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
         ("deleted_at", admin.EmptyFieldListFilter),
     )
     search_fields = ("content", "author__username")
-    list_select_related = ("author",)
+    list_select_related = ("author", "appeal")
     list_per_page = BATCH_CAP
     show_full_result_count = False
-    # Most reported first, then the longest wait, then the newest: the same shape as the Part 11C
-    # ordering, which puts active emergencies above all of it.
-    ordering = ("-report_count", F("review_started_at").asc(nulls_last=True), "-created_at")
+    # Most reported first, then the longest in the queue, then the newest: the same shape as the
+    # Part 11C ordering, which puts active emergencies above all of it.
+    ordering = ("-report_count", queue_since().asc(nulls_last=True), "-created_at")
     actions = list(ACTIONS)
-    inlines = (ReportInline, ModerationHistoryInline)
+    inlines = (AppealInline, ReportInline, ModerationHistoryInline)
     change_form_template = "moderation/admin/post_change_form.html"
     change_list_template = "moderation/admin/post_change_list.html"
 
@@ -312,15 +401,23 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
 
     @admin.display(description="Reason", ordering="flagged_reason")
     def reason(self, post):
+        if post.flagged_reason == FlaggedReason.APPEAL:
+            # The flag is the same for both kinds: the status tells them apart (a label appeal
+            # puts the post under review, a removal appeal leaves it removed).
+            return (
+                "Appeal (removal)" if post.status == PostStatus.REMOVED else "Appeal (FALSE label)"
+            )
         return post.get_flagged_reason_display() if post.flagged_reason else "—"
 
     @admin.display(description="Pipeline", ordering="confidence_score")
     def pipeline(self, post):
         return pipeline_text(post)
 
-    @admin.display(description="Waiting", ordering="review_started_at")
+    @admin.display(description="Waiting", ordering=queue_since().asc(nulls_last=True))
     def waiting(self, post):
-        return timesince(post.review_started_at, timezone.now()) if post.review_started_at else "—"
+        appeal = open_appeal_of(post) if post.status == PostStatus.REMOVED else None
+        since = appeal.created_at if appeal is not None else post.review_started_at
+        return timesince(since, timezone.now()) if since else "—"
 
     @admin.display(boolean=True, description="Escalated", ordering="escalated_at")
     def escalated(self, post):
@@ -359,10 +456,11 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
 
     def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
         if obj is not None and self.has_moderate_permission(request):
+            appeal = open_appeal_of(obj)
             context["moderation_buttons"] = [
                 {"action": name, "label": BUTTON_LABELS[name]}
                 for name, (act, *_rest) in ACTIONS.items()
-                if rules.refusal(act, obj, request.user) is None
+                if rules.refusal(act, obj, request.user, appeal=appeal) is None
             ]
         return super().render_change_form(request, context, add, change, form_url, obj)
 
@@ -380,7 +478,7 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
         request.POST = posted
         return super().response_action(request, queryset)
 
-    # --- the five actions ---
+    # --- the seven actions ---
 
     @admin.action(description="Mark verified (facts only)", permissions=["moderate"])
     def mark_verified(self, request, queryset):
@@ -402,6 +500,14 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
     def escalate(self, request, queryset):
         return self._moderate(request, queryset, "escalate")
 
+    @admin.action(description="Restore posts (removal appeals)", permissions=["moderate"])
+    def restore_posts(self, request, queryset):
+        return self._moderate(request, queryset, "restore_posts")
+
+    @admin.action(description="Keep removed (removal appeals)", permissions=["moderate"])
+    def keep_removed(self, request, queryset):
+        return self._moderate(request, queryset, "keep_removed")
+
     def _moderate(self, request, queryset, name):
         """First POST: show what would change and what would be skipped, with the note fields.
         The confirmation POST (it carries `apply`): do it, post by post, through the service.
@@ -416,7 +522,7 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
             # `response_action` has already dropped malformed ids (below).
             ids = request.POST.getlist(ACTION_CHECKBOX_NAME)
             queryset = self.get_queryset(request).filter(pk__in=ids)
-        posts = list(queryset.select_related("author").order_by("pk")[: BATCH_CAP + 1])
+        posts = list(queryset.select_related("author", "appeal").order_by("pk")[: BATCH_CAP + 1])
         if len(posts) > BATCH_CAP:
             self.message_user(
                 request,
@@ -438,11 +544,14 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
         now = timezone.now()
         changing, skipped = [], []
         for post in posts:
-            refusal = rules.refusal(act, post, request.user)
+            appeal = open_appeal_of(post)
+            refusal = rules.refusal(act, post, request.user, appeal=appeal)
             if refusal is not None:
                 skipped.append({"row": self._row(post), "why": refusal.text})
                 continue
-            after = rules.transition(act, copy.copy(post), moderator=request.user, now=now)
+            after = rules.transition(
+                act, copy.copy(post), moderator=request.user, now=now, appeal=appeal
+            )
             row = self._row(post)
             row["after"] = PostStatus(after.to_status).label
             changing.append(row)
@@ -528,6 +637,7 @@ class ModerationActionAdmin(admin.ModelAdmin):
         "from_status",
         "to_status",
         "public_note",
+        "appeal",
         "notes",
     )
     readonly_fields = fields
@@ -545,6 +655,58 @@ class ModerationActionAdmin(admin.ModelAdmin):
         if row.from_status is None and row.to_status is None:
             return "—"
         return f"{row.from_status or '—'} → {row.to_status or '—'}"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(Appeal)
+class AppealAdmin(HistoryNeedsLog, admin.ModelAdmin):
+    """Every appeal, read-only, for those holding `moderation.view_appeal` (moderators and up). An
+    appeal is filed by its author and resolved by the post's actions: nothing is edited here.
+    The author's words are on an appeal's own page, not in the list."""
+
+    list_display = (
+        "created_at",
+        "post_link",
+        "author",
+        "kind",
+        "status",
+        "original_moderator",
+        "resolved_by",
+        "resolved_at",
+    )
+    list_filter = ("kind", "status", "created_at")
+    search_fields = ("author__username",)
+    list_select_related = ("post", "author", "original_moderator", "resolved_by")
+    show_full_result_count = False
+    ordering = ("-created_at",)
+    fields = (
+        "post",
+        "author",
+        "kind",
+        "status",
+        "reason",
+        "original_moderator",
+        "resolved_by",
+        "resolved_at",
+        "created_at",
+    )
+    readonly_fields = fields
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).defer("post__pipeline_result")
+
+    @admin.display(description="Post")
+    def post_link(self, appeal):
+        url = reverse("admin:posts_post_change", args=[appeal.post_id])
+        return format_html('<a href="{}">{}</a>', url, Truncator(appeal.post.content).chars(80))
 
     def has_add_permission(self, request):
         return False

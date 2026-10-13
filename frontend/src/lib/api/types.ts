@@ -60,6 +60,8 @@ export interface Post {
   can_appeal: boolean;
   /** Only returned to the author. */
   appeal_status: AppealStatus | null;
+  /** What the moderator said when removing the post: the author of a removed post only, else "". */
+  removal_reason: string;
   created_at: string;
 }
 

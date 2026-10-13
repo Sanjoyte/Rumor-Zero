@@ -317,3 +317,29 @@ describe("PostCard action bar (Part 7)", () => {
     expect(screen.queryByText("Reposted by Bo")).toBeNull();
   });
 });
+
+describe("PostCard removed guard (Part 11)", () => {
+  const HREF = "/p/11111111-1111-4111-8111-111111111111";
+  const SOURCES = [{ value: "https://example.org/a", kind: "url" as const }];
+
+  it("is the tombstone whatever else it is given, so no caller can show a removed post's text", () => {
+    const { container } = render(
+      <PostCard
+        {...BASE}
+        status="removed"
+        href={HREF}
+        sources={SOURCES}
+        appealPending
+        actions={<div data-testid="bar">bar</div>}
+        header={<p>Reposted by Bo</p>}
+      />,
+    );
+    expect(screen.getByText("Removed by a moderator")).toBeInTheDocument();
+    expect(screen.queryByText(/Solar capacity grew/)).toBeNull();
+    expect(screen.queryByText("APPEAL PENDING")).toBeNull();
+    expect(screen.queryByTestId("bar")).toBeNull();
+    expect(screen.queryByText("Reposted by Bo")).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
+    expect(container.querySelector("time")).toHaveAttribute("datetime", BASE.createdAt);
+  });
+});

@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -7745,6 +7745,532 @@ escalates the opinion with a button.
   wipes the whole local database, which is destructive.
 - No real secret was used: the password of the test accounts is a throwaway, and `ADMIN_URL_PATH` was read into a
   variable and never printed (`unset ADM P10` forgets them).
+
+### Part 11: Appeals & removed-post tombstones
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and
+`frontend/.env.local`. Part 11 adds **two migrations** (`moderation.0003_appeal`, `moderation.0004_appeal_permission`),
+**no dependency**, **no new variable** and **one endpoint**, `POST /api/v1/posts/{id}/appeal/`. It lets the author of a
+post labelled FALSE, or removed by a moderator, ask once for **another look**. A FALSE post goes back under review
+(`UNDER REVIEW` with an `APPEAL PENDING` chip for its author); a removed post stays hidden and joins the review queue
+next to the posts under review. A moderator who did not make the first decision (a senior moderator or a superuser may
+decide either way) then decides it in Django Admin: **Mark verified**, **Mark FALSE** or **Remove** for a label
+appeal, and two new actions, **Restore post** and **Keep removed**, for a removal appeal. The author sees the outcome,
+and a removed post now shows its author their own words, the reason a moderator gave and the appeal.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 12 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 9 and 12**: the variables and functions you set in step 3 (`id`, `ada`, `bo`, `cy`, `api`, `fa` to `fd`, `ft`, `fz`, `mk`, `get`, `send`) only live in that one terminal. If you close it, redo step 3. | 1 to 9, 12 |
+| Window 3 (frontend) | `npm run dev` in `frontend`. Leave it running. | 10 and 11 |
+| Browser | Steps 7, 8, 10 and 11 | 7, 8, 10, 11 |
+
+Things to know first:
+
+- **Who may do what** (ARCHITECTURE §4, §9). Only the **author** of a post that is `verified_false` or `removed` can
+  appeal it, **once per post for life**, and only with a verified email. A FALSE post that reports sent to review is
+  `under review`, so it can't be appealed until that review ends. Everyone else gets `can_appeal: false`, and only the
+  author ever sees `appeal_status` or the removal reason.
+- **Who decides.** The moderator who made the first decision (the one who removed the post, or who marked it FALSE; a
+  FALSE label the pipeline gave has nobody) can't resolve its appeal, but may **Escalate** it. A senior moderator or a
+  superuser may always decide.
+- **The accounts.** Step 3 makes six: `ada` (the author of four posts), `bo` (somebody else), `cy` (the refusals and the
+  daily allowance), `mod1` and `mod2` (two moderators) and `boss` (a senior moderator). The password of all of them is
+  the throwaway `correct-horse-battery-42`. The people who post are verified with a shell command, which stands in for
+  clicking the link in the email (Part 2 shows the real flow). `mod1` removes two posts in step 3; that is why `mod1`
+  can't decide those appeals and `mod2` can.
+- **The pipeline is the stub** (Part 9): `#false` in a fact makes it FALSE 92%, `#true` makes it VERIFIED 95%. Step 3
+  runs `process_pending` after a few seconds, which checks whatever the background check has not reached yet.
+- **Your admin address** is `http://localhost:8000/admin/` unless `ADMIN_URL_PATH` in `backend/.env` says otherwise (then use
+  that address in steps 7, 8 and 11).
+- The outputs below were recorded on Linux on 2026-10-13. The browser steps were checked the same day with headless
+  Chromium (screenshots at 1280 and 390 px) and Django Admin with a scripted browser, not by a person at a keyboard.
+  Ids, numbers in names and times differ on every run. The leftover posts from earlier parts' tests don't show: every
+  command filters on this run's `id`.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies Part 11's two migrations,
+confirms there is nothing more to make, then runs the whole backend test suite, Part 11's tests, the linter and the
+formatter check.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                            # 2 migrations the first time, then: No migrations to apply.
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 2965 passed
+python -m pytest apps/moderation -q                 # 559 passed
+ruff check . ; ruff format --check .                # All checks passed! / 240 files already formatted
+```
+
+**You should see:** the first `migrate` prints two `Applying …` lines:
+
+```text
+  Applying moderation.0003_appeal... OK
+  Applying moderation.0004_appeal_permission... OK
+```
+
+(a second run prints `No migrations to apply.`), then `No changes detected` and `System check identified no issues (0
+silenced).`; the full run ends with `2965 passed`, the moderation set with `559 passed`, and the last pair is
+`All checks passed!` and `240 files already formatted`. (Counts may grow later; what matters is that nothing fails.)
+
+- `0003_appeal` makes the `moderation_appeal` table (one appeal per post for life), links a moderator action to the
+  appeal it resolved, and adds the audit kind `kept_removed` ("Keep removed" had none). `0004_appeal_permission` lets
+  moderators read appeals in Django Admin (`moderation.view_appeal`). Both can be undone with `python manage.py migrate
+  moderation 0002`; the second one puts the groups back to Part 10's permissions, not to nothing. The first can't be
+  undone once a `kept_removed` row exists (the old database check would refuse it), which is why this guide doesn't.
+- Part 11's new test files are in `apps/moderation/tests/`: `test_appeal_models.py`, `test_services_appeals.py` (every
+  state `file_appeal` and the five actions meet, the rows they write, the restore targets), `test_api_appeal.py`,
+  `test_appeal_fields.py` (the post object per viewer on every list, and what it costs) and `test_admin_appeals.py`;
+  `test_rules.py` was rewritten around the appeal and the first-decision rule, and `test_races.py` has five new
+  thread tests (two appeals at once, an appeal against a Mark FALSE, two Restores).
+- Existing tests changed on purpose: the post object has 24 keys now (`removal_reason`), a FALSE post's author sees
+  `can_appeal: true`, and the profile list shows its owner their removed posts.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last command) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 123 files, 1692 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 40 passed
+cd ../backend                                       # back to backend/ for steps 3 to 9
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  123 passed (123)` and `Tests
+1692 passed (1692)`. `npm run build` lists the same routes as in Part 10 (Part 11 adds no page). The end-to-end
+run ends with `40 passed`.
+
+- The two new end-to-end tests (`e2e/appeals.spec.ts`) sign nobody up (the suite is bounded by allauth's 20 sign-ups a
+  minute): `seedAuthor()` makes a verified author with a password straight in the database, the author logs in through
+  the real form, and `moderate()` has a brand-new moderator take each decision through the backend's own services. One
+  test appeals a FALSE label (it goes under review, the chip appears, a moderator reverses it, the author is told); the
+  other removes a post with a reason, checks the page, the profile and a visitor's view, appeals from the profile card
+  and has the removal kept.
+
+#### Step 3: Start the servers, make six accounts and six posts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 9.**
+
+**What this does:** Window 1 runs Django with your own settings and window 3 the website. In window 2 you sign three
+people up through the API, make three moderators with a shell command and save the helpers `mk` (make a post, print its
+id), `get` (a GET, printing the status code and then the answer) and `send` (any request, the same way). `ada` posts
+four facts and `cy` two; the stub labels each, and `mod1` removes two of ada's.
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```bash
+cd frontend                                         # from the repo root
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend` with the venv active: steps 1 and 2 leave you there; needs `jq`, `sudo apt install jq`). If you
+opened a new terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the addresses are new each run
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+signup() { jq -nc --arg e "$1" --arg u "$2" '{email: $e, username: $u, password: "correct-horse-battery-42", turnstile_token: "XXXX.DUMMY.TOKEN.XXXX"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/signup | jq -r .meta.access_token; }
+ada=$(signup "part11-ada-$id@example.test" "part11_ada_$id")      # $ada = ada's login token (the author of every post)
+bo=$(signup "part11-bo-$id@example.test" "part11_bo_$id")         # $bo = bo's (somebody else)
+cy=$(signup "part11-cy-$id@example.test" "part11_cy_$id")         # $cy = cy's (the refusals and the allowance of step 6)
+python manage.py shell -c "
+from apps.accounts.models import User, Role
+User.objects.filter(email__in=[f'part11-{name}-$id@example.test' for name in ('ada', 'bo', 'cy')]).update(is_email_verified=True)
+for name, role in (('mod1', Role.MODERATOR), ('mod2', Role.MODERATOR), ('boss', Role.SENIOR_MODERATOR)):
+    User.objects.create_user(email=f'part11-{name}-$id@example.test', username=f'part11_{name}_$id', password='correct-horse-battery-42', is_email_verified=True, role=role)
+print(User.objects.filter(email__startswith='part11-', email__endswith='$id@example.test').count(), 'accounts made')
+" | tail -1
+echo ${ada:0:10} ${bo:0:10} ${cy:0:10}               # three token prefixes, not an empty line
+api=http://localhost:8000/api/v1
+mk() { curl -s -H "Authorization: Bearer $1" -H "Content-Type: application/json" --data-binary "$2" $api/posts/ | jq -r .id; }   # mk <token> <json>: makes a post, prints its id
+get() { local out; out=$(curl -s -w '\n%{http_code}' ${2:+-H "Authorization: Bearer $2"} "$api$1"); printf '%s  ' "${out##*$'\n'}"; printf '%s' "${out%$'\n'*}" | jq -c "${3:-.}"; }   # get <path> [token] [jq filter]: prints the status code, then the answer
+send() { local out; out=$(curl -s -w '\n%{http_code}' -X "$1" ${3:+-H "Authorization: Bearer $3"} ${4:+-H "Content-Type: application/json" --data-binary "$4"} "$api$2"); printf '%s  %s\n' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | jq -c "${5:-.}" 2>/dev/null)"; }   # send <METHOD> <path> [token] [json body] [jq filter]: prints the status code, then the answer
+fa=$(mk "$ada" '{"content":"The Rhine closed to shipping for a week last winter #false","post_type":"fact"}')   # a: a fact the stub will call FALSE (appealed in step 4)
+fb=$(mk "$ada" '{"content":"Offshore wind supplied a fifth of the grid last year #true","post_type":"fact"}')   # b: a TRUE fact a moderator removes (appealed in step 5)
+fc=$(mk "$ada" '{"content":"The ferry timetable changed in March #false","post_type":"fact"}')                 # c: FALSE again (appealed in the browser, step 10)
+fd=$(mk "$ada" '{"content":"The bridge toll doubled in June #true","post_type":"fact"}')                       # d: TRUE, removed, appealed in the browser
+ft=$(mk "$cy" '{"content":"The library opens at nine on weekdays #true","post_type":"fact"}')                   # cy's TRUE fact (it can't be appealed)
+fz=$(mk "$cy" '{"content":"The canal froze solid in January #false","post_type":"fact"}')                      # cy's FALSE fact
+sleep 3; python manage.py process_pending | tail -1                 # checks what the background check has not reached yet
+python manage.py shell -c "
+from apps.accounts.models import User
+from apps.moderation import services
+mod1 = User.objects.get(username='part11_mod1_$id')
+services.remove_post('$fb', moderator=mod1, public_note='Personal attack on a named person')
+services.remove_post('$fd', moderator=mod1, public_note='Link to a scam site')
+print('mod1 removed 2 posts')
+" | tail -1
+for p in $fa $fb $fc $fd $ft $fz; do get /posts/$p/ "$ada" '{status, is_mine}'; done
+echo "id=$id"                                       # write this down: the browser steps log in with it
+```
+
+**You should see** (the number in the names is your `id`; the number of posts `process_pending` reports is anything from
+0 to 6, depending on how many the background check had already done):
+
+```text
+6 accounts made
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+Processed 2 fact posts.
+mod1 removed 2 posts
+200  {"status":"verified_false","is_mine":true}
+200  {"status":"removed","is_mine":true}
+200  {"status":"verified_false","is_mine":true}
+200  {"status":"removed","is_mine":true}
+200  {"status":"verified_true","is_mine":false}
+200  {"status":"verified_false","is_mine":false}
+id=105229
+```
+
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- Post `a` and post `c` are FALSE (by the pipeline, so nobody made the first decision); posts `b` and `d` were TRUE and
+  `mod1` removed them (so `mod1` made the first decision about both). `ft` and `fz` are `cy`'s: one TRUE, one FALSE.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it needs
+  internet.
+
+**If it differs:** an empty token means the sign-up failed (`runserver` isn't running, `jq` is missing, or you signed up
+more than 20 times in a minute), and a `null` id means a post failed. Fix that and run this block again from
+`id=$(date +%H%M%S)`. A status other than `verified_*` or `removed` means the background check was slow: run
+`python manage.py process_pending` once more and repeat the last `for` line.
+
+#### Step 4: Appeal a FALSE label
+
+**Where:** Terminal window 2 (the same terminal as step 3).
+
+**What this does:** Reads post `a` as three people, has the wrong person and then the author ask for another look, tries
+a second time, and reads it again.
+
+```bash
+echo "--- ada's view of post a (FALSE, by the stub)"; get /posts/$fa/ "$ada" '{status, verdict_source, can_appeal, appeal_status}'
+echo "--- bo's view of it"; get /posts/$fa/ "$bo" '{status, can_appeal, appeal_status}'
+echo "--- bo asks for another look at ada's post"; send POST /posts/$fa/appeal/ "$bo" '{}' '{code}'
+echo "--- ada asks"; send POST /posts/$fa/appeal/ "$ada" '{"reason":"The source has been updated since the check."}' '{status, can_appeal, appeal_status}'
+echo "--- ada asks a second time"; send POST /posts/$fa/appeal/ "$ada" '{}' '{code, detail}'
+echo "--- ada's view now"; get /posts/$fa/ "$ada" '{status, can_appeal, appeal_status}'
+echo "--- bo's view now"; get /posts/$fa/ "$bo" '{status, can_appeal, appeal_status}'
+```
+
+**You should see:**
+
+```text
+--- ada's view of post a (FALSE, by the stub)
+200  {"status":"verified_false","verdict_source":"pipeline","can_appeal":true,"appeal_status":null}
+--- bo's view of it
+200  {"status":"verified_false","can_appeal":false,"appeal_status":null}
+--- bo asks for another look at ada's post
+403  {"code":"not_author"}
+--- ada asks
+201  {"status":"under_review","can_appeal":false,"appeal_status":"open"}
+--- ada asks a second time
+409  {"code":"already_appealed","detail":"You already asked for another look at this post."}
+--- ada's view now
+200  {"status":"under_review","can_appeal":false,"appeal_status":"open"}
+--- bo's view now
+200  {"status":"under_review","can_appeal":false,"appeal_status":null}
+```
+
+- The 201 answer is the post as its author now sees it: **under review**, with `appeal_status: "open"`. Everybody
+  else sees `under_review` too, but never an appeal (`appeal_status` stays `null`): that is private to the author.
+- The FALSE label was set aside, not erased: the post remembers it was `verified_false` and, when a moderator decides, it
+  becomes TRUE or FALSE again (step 8).
+
+#### Step 5: Appeal a removal
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads removed post `b` as a visitor, as `bo` and as its author (who gets her own words and the
+reason the moderator gave), checks which lists show it, then asks for another look.
+
+```bash
+echo "--- a visitor's view of post b (removed)"; get /posts/$fb/ "" '{status, content, removal_reason, can_appeal}'
+echo "--- bo's view"; get /posts/$fb/ "$bo" '{status, content, removal_reason, can_appeal}'
+echo "--- ada's view"; get /posts/$fb/ "$ada" '{status, content, removal_reason, can_appeal, appeal_status}'
+echo "--- ada's profile, as ada: her removed posts are there"; get /users/part11_ada_$id/posts/ "$ada" '[.results[].post | {status, removal_reason}]'
+echo "--- ada's profile, as a visitor: they are not"; get /users/part11_ada_$id/posts/ "" '[.results[].post.status]'
+echo "--- Recent: no removed post"; get /posts/ "$ada" '[.results[] | select(.post.status == "removed")] | length'
+echo "--- ada asks for another look at the removal"; send POST /posts/$fb/appeal/ "$ada" '{"reason":"It was a quote from the court ruling."}' '{status, content, removal_reason, can_appeal, appeal_status}'
+```
+
+**You should see:**
+
+```text
+--- a visitor's view of post b (removed)
+200  {"status":"removed","content":"","removal_reason":"","can_appeal":false}
+--- bo's view
+200  {"status":"removed","content":"","removal_reason":"","can_appeal":false}
+--- ada's view
+200  {"status":"removed","content":"Offshore wind supplied a fifth of the grid last year #true","removal_reason":"Personal attack on a named person","can_appeal":true,"appeal_status":null}
+--- ada's profile, as ada: her removed posts are there
+200  [{"status":"removed","removal_reason":"Link to a scam site"},{"status":"verified_false","removal_reason":""},{"status":"removed","removal_reason":"Personal attack on a named person"},{"status":"under_review","removal_reason":""}]
+--- ada's profile, as a visitor: they are not
+200  ["verified_false","under_review"]
+--- Recent: no removed post
+200  0
+--- ada asks for another look at the removal
+201  {"status":"removed","content":"Offshore wind supplied a fifth of the grid last year #true","removal_reason":"Personal attack on a named person","can_appeal":false,"appeal_status":"open"}
+```
+
+- A removed post is a **tombstone for everyone but its author**: no text, no reason. The author gets the whole post, and
+  `removal_reason` is what the moderator wrote in "Reason shown to the author" (it is `""` when they wrote nothing).
+- Your own profile lists your removed posts (the profile list shows its owner what the public can't see); nobody else's
+  view of it changes, and Recent never shows a removed post.
+- After a removal appeal the post **stays removed and hidden**; the appeal only puts it in front of the moderators.
+
+#### Step 6: Everything that is refused, and the daily allowance
+
+**Where:** Terminal window 2.
+
+**What this does:** Tries what the endpoint must refuse: a TRUE post, a reason of 501 characters, a post that isn't
+there, no login, the wrong HTTP method, and then uses up the allowance of five requests a day.
+
+```bash
+echo "--- cy asks about a TRUE post"; send POST /posts/$ft/appeal/ "$cy" '{}' '{code, detail}'
+echo "--- a reason of 501 characters"; send POST /posts/$fz/appeal/ "$cy" "{\"reason\":\"$(printf 'x%.0s' {1..501})\"}" '.'
+echo "--- a post that doesn't exist"; send POST /posts/00000000-0000-4000-8000-000000000000/appeal/ "$cy" '{}' '{code}'
+echo "--- not logged in"; send POST /posts/$fz/appeal/ "" '{}' '{code}'
+echo "--- GET is not allowed (and doesn't use the allowance)"; send GET /posts/$fz/appeal/ "$cy" '' '{code}'
+echo "--- cy has used 3 of 5 for the day; two more, then the sixth is refused"
+for i in 1 2 3; do send POST /posts/00000000-0000-4000-8000-00000000000$i/appeal/ "$cy" '{}' '{code}'; done
+```
+
+**You should see:**
+
+```text
+--- cy asks about a TRUE post
+409  {"code":"not_appealable","detail":"Only posts labelled FALSE or removed can be appealed."}
+--- a reason of 501 characters
+400  {"reason":["Keep it to 500 characters."]}
+--- a post that doesn't exist
+404  {"code":"not_found"}
+--- not logged in
+401  {"code":"not_authenticated"}
+--- GET is not allowed (and doesn't use the allowance)
+405  {"code":"method_not_allowed"}
+--- cy has used 3 of 5 for the day; two more, then the sixth is refused
+404  {"code":"not_found"}
+404  {"code":"not_found"}
+429  {"code":"throttled"}
+```
+
+- From the rate limit on, **every answer counts** against the five (a 400, a 404 and a 409 too), as for reports. A 401
+  never counts, and a `GET` is not throttled at all (a test makes eight and then an appeal still works).
+- An account whose email is not verified gets `403 email_unverified` (not shown here: it would need a seventh
+  account); the tests cover it.
+- `cy`'s own FALSE post `fz` was left unappealed on purpose: the 400 for a long reason comes before the post is looked
+  at, so nothing was filed.
+
+#### Step 7: See the appeals in the review queue, and who may decide them
+
+**Where:** Browser (Django Admin).
+
+**What this does:** Logs in as `mod1`, the moderator who removed posts `b` and `d`, and shows that the two appeals are in the
+queue, how to tell them apart, and that `mod1` isn't offered the decision on the removal appeal.
+
+1. Open `http://localhost:8000/admin/` and log in with the **email** `part11-mod1-<id>@example.test` (your `id` from step 3)
+   and the password `correct-horse-battery-42`. The header shows the logo and "Rumor Zero moderation".
+2. In the left sidebar click **Posts**, type `part11_ada_<id>` in the search box and press **Search**.
+3. In the filter column on the right click **By appeal → Removal**, then **FALSE label**, then **All**.
+4. Open the post "Offshore wind supplied a fifth of the grid last year #true" and look at the buttons at the top right
+   and the **Appeals** section lower down. Then go back and open "The Rhine closed to shipping for a week last winter
+   #false".
+5. In the left sidebar, under **Moderation**, click **Appeals**, and click the row of the Offshore post.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 2: the list | Two rows. **The Rhine…**: type Fact, status *Under review*, reason **Appeal (FALSE label)**, pipeline *FALSE 92%*. **Offshore wind…**: status *Removed*, reason **Appeal (removal)**, pipeline *TRUE 95%*. The column "Waiting" counts from the appeal for the removed post. Both are in the default queue ("By show → Review queue"), although one of them is removed. |
+| Step 3: the filter | **Removal** keeps only the Offshore post, **FALSE label** only the Rhine post, **All** both. |
+| Step 4: the Offshore post (you removed it) | The only button is **ESCALATE TO SENIOR**: *Restore post* and *Keep removed* are not offered, because you made the first decision. The **Appeals** section has one row: kind *Removal*, status *Open*, the author's words "It was a quote from the court ruling.", original moderator `part11_mod1_<id>` (you). |
+| Step 4: the Rhine post | **MARK VERIFIED**, **MARK FALSE**, **REMOVE POST** and **ESCALATE TO SENIOR**. Its original moderator is empty: the stub made the label. |
+| Step 5: Appeals | Two rows with created, post, author, kind, status, original moderator and resolved by/at. The list doesn't show the author's words (they are private); the row's own page does, read-only. |
+
+- Escalating is what the first moderator *should* do: it only stamps the post for a senior, and the rule that keeps
+  `mod1` from deciding doesn't apply to it. Try it if you like (it can't be undone, and it only happens once per post).
+
+#### Step 8: Decide two appeals as other moderators
+
+**Where:** Browser (Django Admin).
+
+**What this does:** `mod2` restores the removed post; `mod1` (who didn't make the first decision about the FALSE post)
+marks it verified.
+
+1. Log out (top right) and log in as `part11-mod2-<id>@example.test`.
+2. Open the Offshore post. Click **RESTORE POST**.
+3. On the confirmation page type a note in **Internal notes** ("Quoted from the ruling: fine on rereading.") and click
+   **Yes, restore posts**.
+4. Log out, log in as `part11-mod1-<id>@example.test`, open "The Rhine closed…", click **MARK VERIFIED**, type
+   "Rechecked against the filing." in **Public note** and click **Yes, mark verified**.
+5. Go to **Posts**, search `part11_ada_<id>` again.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 2: the Offshore post as `mod2` | **ESCALATE TO SENIOR**, **RESTORE POST** and **KEEP REMOVED**. |
+| Step 3: the confirmation page | "1 post will change" with the row *Removed → Verified true* (a fact the pipeline had already checked goes back to its label; one the pipeline had *checked and left to a moderator* would show *Removed → Under review*), the reason "Appeal (removal)", and **Internal notes** only: Restore and Keep removed have no public note. After the click: "Restored 1 post." The post's buttons are now only **REMOVE POST**, and its history shows "Restored · removed → verified_true · by `part11_mod2_<id>`" under "Removed". |
+| Step 4: the Rhine post as `mod1` | "Under review → Verified true" on the confirmation page, then "Marked 1 post verified." |
+| Step 5: the queue | Nothing: both appeals are decided and left the queue. **By show → All posts** still lists both. In **Appeals** their status is *Overturned*, with *resolved by* filled. |
+
+- A post restored from `pending` that the pipeline had **never** finished goes back to `pending` and is checked again
+  (the background check starts at once, like a new post). One it had already checked goes to **review** instead, so a
+  moderator gives the label and the pipeline never judges it twice.
+- The two rows in the log (**Moderation actions**, seniors only) link to the appeal each one resolved.
+
+#### Step 9: See the outcomes through the API
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads posts `a` and `b` as their author, and the author's profile as a visitor.
+
+```bash
+echo "--- post a: the label was overturned"; get /posts/$fa/ "$ada" '{status, verdict_source, verdict_note, can_appeal, appeal_status}'
+echo "--- post b: restored, with its first label"; get /posts/$fb/ "$ada" '{status, verdict_source, removal_reason, can_appeal, appeal_status}'
+echo "--- ada's profile, as a visitor: b is back"; get /users/part11_ada_$id/posts/ "" '[.results[].post | {status, content: .content[0:30]}]'
+```
+
+**You should see:**
+
+```text
+--- post a: the label was overturned
+200  {"status":"verified_true","verdict_source":"moderator","verdict_note":"Rechecked against the filing.","can_appeal":false,"appeal_status":"overturned"}
+--- post b: restored, with its first label
+200  {"status":"verified_true","verdict_source":"pipeline","removal_reason":"","can_appeal":false,"appeal_status":"overturned"}
+--- ada's profile, as a visitor: b is back
+200  [{"status":"verified_false","content":"The ferry timetable changed in"},{"status":"verified_true","content":"Offshore wind supplied a fifth"},{"status":"verified_true","content":"The Rhine closed to shipping f"}]
+```
+
+- Post `a` is VERIFIED now **by a moderator** (`verdict_source: "moderator"`, with the public note); post `b` is back
+  exactly as it was, with the pipeline's label. Both still say `appeal_status: "overturned"` to their author, and
+  `can_appeal` stays false (one appeal per post for life). The removal reason is `""` again: the post isn't removed.
+- Post `d` is still removed, so it is not in the visitor's list; post `c` (FALSE, not yet appealed) is.
+
+#### Step 10: Ask for another look on the website
+
+**Where:** Browser, `http://localhost:3000` (window 3 runs it).
+
+**What this does:** Logs in as `ada` and asks for another look at posts `c` (FALSE) and `d` (removed), the second one from
+her own profile.
+
+1. Open `http://localhost:3000/login` and log in with `part11-ada-<id>@example.test` and `correct-horse-battery-42`.
+2. Open post `c`: from Home find "The ferry timetable changed in March #false", or from step 3 use
+   `http://localhost:3000/p/<fc>` (`echo $fc`).
+3. Click **REQUEST ANOTHER LOOK** (in the Verdict card, bottom right). Type "The ferry company confirmed the change in
+   writing." and click **Send request**.
+4. Open post `d` (`echo $fd`).
+5. Open your profile (**Profile** in the sidebar, or `http://localhost:3000/u/part11_ada_<id>`). Find the card
+   "The bridge toll doubled in June #true" and click **REQUEST ANOTHER LOOK** on it, then **Send request**.
+6. In a private window open `http://localhost:3000/p/<fd>` and `http://localhost:3000/u/part11_ada_<id>`.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 3: the dialog | **Appeal · Request another look**, the post quoted in a red-striped card, "Your post is labelled FALSE.", a box "Why should we look again?" with "0 / 500 characters" and "Optional.", a blue note **What happens next** ("A moderator who didn't make the first decision looks again. The post shows UNDER REVIEW meanwhile. You can ask once for each post."), **Cancel** and **Send request**. The box has the focus. While it sends, the button is busy and the dialog can't be closed. |
+| Step 3: afterwards | A toast "Request sent. A moderator will take another look.", the badges **UNDER REVIEW** and **APPEAL PENDING** (amber) beside **FACT**, the Verdict card saying "Under review", the line "You asked for another look. A moderator who didn't make the first decision will review it." and **no button** any more. |
+| Step 4: the removed post's page | **FACT · REMOVED**, your words as the page's heading, "Only you can see this text.", "Reason given: Link to a scam site", **REQUEST ANOTHER LOOK**, your **Delete** button and "Sources (0)". No like, repost, comment or Verdict. |
+| Step 5: your profile | The card is the author's tombstone: "Removed by a moderator", the age, "Only you can see this text.", the reason, your claim and the button. The dialog says "A moderator removed your post." and "Reason given: Link to a scam site", and its note says "The post stays hidden meanwhile." After **Send request** the card shows the chip **APPEAL PENDING** and the "You asked for another look…" line instead of the button, and the posts counter doesn't change. |
+| Step 6: the private window | `/p/<fd>` shows the author row and **"This post was removed by a moderator."** and nothing of your words; the profile doesn't list the post at all. |
+
+- On a phone-width window (390 px) nothing scrolls sideways and the button and the dialog fit.
+- Ask twice and the second try changes nothing: the server answers 409, the page says so ("You already asked for another
+  look at this post.") and refetches the post.
+
+#### Step 11: Decide those two in the admin, and read the outcomes
+
+**Where:** Browser (Django Admin as `mod2`), then the website as `ada`.
+
+**What this does:** `mod2` marks `c` FALSE again and keeps `d` removed; `ada` reads what became of her requests.
+
+1. In the admin log in as `part11-mod2-<id>@example.test`. Open "The ferry timetable changed in March #false", click **MARK FALSE**,
+   type "Still FALSE after a second look." in **Public note**, click **Yes, mark false**.
+2. Open "The bridge toll doubled in June #true", click **KEEP REMOVED**, click **Yes, keep removed**.
+3. On the website, as `ada`, reload `/p/<fc>`, `/p/<fd>` and your profile.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 1 | "Marked 1 post FALSE." |
+| Step 2 | "Kept 1 post removed." |
+| Step 3: post `c` | The badge says **FALSE · REVIEWED**, the Verdict card "Reviewed by a moderator" with the note, and the line "You asked for another look. A moderator reviewed it, and the FALSE label stays." No chip, no button. |
+| Step 3: post `d` and the profile card | "You asked for another look. A moderator reviewed it, and the post stays removed." No chip, no button; the reason stays. |
+
+- A reversed decision reads "You asked for another look. A moderator reversed the decision." Open `/p/<fa>` as `ada`
+  to see it for post `a`; post `b` (now back in your list and in Recent) says the same.
+
+#### Step 12: Look at the rows, and clean up
+
+**Where:** Terminal window 2.
+
+**What this does:** Lists the four appeals and the six moderator actions of this run, then deletes the accounts.
+
+```bash
+python manage.py shell -c "
+from apps.moderation.models import Appeal
+rows = Appeal.objects.filter(author__email__startswith='part11-', author__email__endswith='$id@example.test').select_related('post', 'original_moderator', 'resolved_by').order_by('created_at')
+for a in rows:
+    print(a.get_kind_display(), a.get_status_display(), '| first decision by:', a.original_moderator.username[7:11] if a.original_moderator else '-', '| resolved by:', a.resolved_by.username[7:11] if a.resolved_by else '-', '| the post is now', a.post.status)
+" | tail -4
+python manage.py shell -c "
+from apps.moderation.models import ModerationAction
+for r in ModerationAction.objects.filter(post_id__in=['$fa', '$fb', '$fc', '$fd']).select_related('appeal', 'moderator').order_by('created_at'):
+    print(r.created_at.strftime('%H:%M:%S'), r.get_action_display(), 'by', r.moderator.username[7:11], '| resolved:', r.appeal.get_kind_display() if r.appeal else '-')
+" | tail -6
+python manage.py shell -c "
+from apps.accounts.models import User
+total = User.objects.filter(email__startswith='part11-', email__endswith='$id@example.test').delete()[0]
+print(total, 'rows deleted: the 6 accounts, their posts and appeals, and what hung on them')
+" | tail -1
+```
+
+**You should see** (the times and the number of deleted rows differ):
+
+```text
+FALSE label Overturned | first decision by: - | resolved by: mod1 | the post is now verified_true
+Removal Overturned | first decision by: mod1 | resolved by: mod2 | the post is now verified_true
+FALSE label Upheld | first decision by: - | resolved by: mod2 | the post is now verified_false
+Removal Upheld | first decision by: mod1 | resolved by: mod2 | the post is now removed
+04:52:33 Removed by mod1 | resolved: -
+04:52:33 Removed by mod1 | resolved: -
+04:53:12 Restored by mod2 | resolved: Removal
+04:53:14 Marked verified by mod1 | resolved: FALSE label
+04:54:02 Marked FALSE by mod2 | resolved: FALSE label
+04:54:03 Kept removed by mod2 | resolved: Removal
+23 rows deleted: the 6 accounts, their posts and appeals, and what hung on them
+```
+
+- Every appeal names who made the first decision (blank for a pipeline FALSE) and who resolved it, never the same
+  person unless they are a senior moderator or a superuser. **Only the action that decides an appeal links to it**
+  (an Escalate does not).
+- The audit rows stay when the accounts go (they keep their text and show a blank moderator and post): the log keeps its
+  history. `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes
+  the whole local database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway, and your admin address is the default
+  one unless you set `ADMIN_URL_PATH` in `backend/.env` (it is never printed here).
 
 ---
 
@@ -15747,3 +16273,557 @@ escalates the opinion with a button.
   wipes the whole local database, which is destructive.
 - No real secret was used: the password of the test accounts is a throwaway, and `ADMIN_URL_PATH` was read into a
   variable and never printed (`Remove-Item Env:ADM, Env:P10` forgets them).
+
+### Part 11: Appeals & removed-post tombstones
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and
+`frontend\.env.local`. Part 11 adds **two migrations** (`moderation.0003_appeal`, `moderation.0004_appeal_permission`),
+**no dependency**, **no new variable** and **one endpoint**, `POST /api/v1/posts/{id}/appeal/`. It lets the author of a
+post labelled FALSE, or removed by a moderator, ask once for **another look**. A FALSE post goes back under review
+(`UNDER REVIEW` with an `APPEAL PENDING` chip for its author); a removed post stays hidden and joins the review queue
+next to the posts under review. A moderator who did not make the first decision (a senior moderator or a superuser may
+decide either way) then decides it in Django Admin: **Mark verified**, **Mark FALSE** or **Remove** for a label
+appeal, and two new actions, **Restore post** and **Keep removed**, for a removal appeal. The author sees the outcome,
+and a removed post now shows its author their own words, the reason a moderator gave and the appeal.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 12 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for steps 3 to 9 and 12**: the variables and functions you set in step 3 (`$id`, `$ada`, `$bo`, `$cy`, `$api`, `$fa` to `$fd`, `$ft`, `$fz`, `Mk`, `Send`, `Fetch`) only live in that one terminal. If you close it, redo step 3. | 1 to 9, 12 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 10 and 11 |
+| Browser | Steps 7, 8, 10 and 11 | 7, 8, 10, 11 |
+
+Things to know first:
+
+- **Who may do what** (ARCHITECTURE §4, §9). Only the **author** of a post that is `verified_false` or `removed` can
+  appeal it, **once per post for life**, and only with a verified email. A FALSE post that reports sent to review is
+  `under review`, so it can't be appealed until that review ends. Everyone else gets `can_appeal: false`, and only the
+  author ever sees `appeal_status` or the removal reason.
+- **Who decides.** The moderator who made the first decision (the one who removed the post, or who marked it FALSE; a
+  FALSE label the pipeline gave has nobody) can't resolve its appeal, but may **Escalate** it. A senior moderator or a
+  superuser may always decide.
+- **The accounts.** Step 3 makes six: `ada` (the author of four posts), `bo` (somebody else), `cy` (the refusals and the
+  daily allowance), `mod1` and `mod2` (two moderators) and `boss` (a senior moderator). The password of all of them is
+  the throwaway `correct-horse-battery-42`. The people who post are verified with a shell command, which stands in for
+  clicking the link in the email (Part 2 shows the real flow). `mod1` removes two posts in step 3; that is why `mod1`
+  can't decide those appeals and `mod2` can.
+- **The pipeline is the stub** (Part 9): `#false` in a fact makes it FALSE 92%, `#true` makes it VERIFIED 95%. Step 3
+  runs `process_pending` after a few seconds, which checks whatever the background check has not reached yet.
+- **Your admin address** is `http://localhost:8000/admin/` unless `ADMIN_URL_PATH` in `backend\.env` says otherwise (then use
+  that address in steps 7, 8 and 11).
+- **The PowerShell blocks below were not run on Windows.** The agent works on the Linux PC; it ran the bash twin of every command in the Linux guide on 2026-10-13, and the outputs below are those. The PowerShell commands follow the patterns Parts 1 to 10 proved on Windows (JSON written to a file and sent with `--data-binary`, here-strings piped to `python manage.py shell`, the `Mk`, `Send` and `Fetch` helpers of Part 8).
+- The outputs below were recorded on Linux on 2026-10-13. The browser steps were checked the same day with headless
+  Chromium (screenshots at 1280 and 390 px) and Django Admin with a scripted browser, not by a person at a keyboard.
+  Ids, numbers in names and times differ on every run. The leftover posts from earlier parts' tests don't show: every
+  command filters on this run's `id`.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies Part 11's two migrations,
+confirms there is nothing more to make, then runs the whole backend test suite, Part 11's tests, the linter and the
+formatter check.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                            # 2 migrations the first time, then: No migrations to apply.
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 2965 passed
+python -m pytest apps/moderation -q                 # 559 passed
+ruff check . ; ruff format --check .                # All checks passed! / 240 files already formatted
+```
+
+**You should see:** the first `migrate` prints two `Applying …` lines:
+
+```text
+  Applying moderation.0003_appeal... OK
+  Applying moderation.0004_appeal_permission... OK
+```
+
+(a second run prints `No migrations to apply.`), then `No changes detected` and `System check identified no issues (0
+silenced).`; the full run ends with `2965 passed`, the moderation set with `559 passed`, and the last pair is
+`All checks passed!` and `240 files already formatted`. (Counts may grow later; what matters is that nothing fails.)
+
+- `0003_appeal` makes the `moderation_appeal` table (one appeal per post for life), links a moderator action to the
+  appeal it resolved, and adds the audit kind `kept_removed` ("Keep removed" had none). `0004_appeal_permission` lets
+  moderators read appeals in Django Admin (`moderation.view_appeal`). Both can be undone with `python manage.py migrate
+  moderation 0002`; the second one puts the groups back to Part 10's permissions, not to nothing. The first can't be
+  undone once a `kept_removed` row exists (the old database check would refuse it), which is why this guide doesn't.
+- Part 11's new test files are in `apps\moderation\tests\`: `test_appeal_models.py`, `test_services_appeals.py` (every
+  state `file_appeal` and the five actions meet, the rows they write, the restore targets), `test_api_appeal.py`,
+  `test_appeal_fields.py` (the post object per viewer on every list, and what it costs) and `test_admin_appeals.py`;
+  `test_rules.py` was rewritten around the appeal and the first-decision rule, and `test_races.py` has five new
+  thread tests (two appeals at once, an appeal against a Mark FALSE, two Restores).
+- Existing tests changed on purpose: the post object has 24 keys now (`removal_reason`), a FALSE post's author sees
+  `can_appeal: true`, and the profile list shows its owner their removed posts.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last command) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 123 files, 1692 tests passed
+npm run build
+npm run test:e2e                                    # 40 passed
+cd ..\backend                                       # back to backend\ for steps 3 to 9
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  123 passed (123)` and `Tests
+1692 passed (1692)`. `npm run build` lists the same routes as in Part 10 (Part 11 adds no page). The end-to-end
+run ends with `40 passed`.
+
+- On Windows `npm run build` can't blank `NEXT_PUBLIC_GOOGLE_CLIENT_ID` (PowerShell's `$env:NAME = ""` *deletes* the variable), so a `frontend\.env.local` with your real client ID is baked into that build. The end-to-end run pins an empty client ID for both servers, so it is unaffected.
+- The two new end-to-end tests (`e2e\appeals.spec.ts`) sign nobody up (the suite is bounded by allauth's 20 sign-ups a
+  minute): `seedAuthor()` makes a verified author with a password straight in the database, the author logs in through
+  the real form, and `moderate()` has a brand-new moderator take each decision through the backend's own services. One
+  test appeals a FALSE label (it goes under review, the chip appears, a moderator reverses it, the author is told); the
+  other removes a post with a reason, checks the page, the profile and a visitor's view, appeals from the profile card
+  and has the removal kept.
+
+#### Step 3: Start the servers, make six accounts and six posts
+
+**Where:** First window 1 (the Django server) and window 3 (the frontend), then window 2 (the commands).
+**Keep using window 2 for steps 4 to 9.**
+
+**What this does:** Window 1 runs Django with your own settings and window 3 the website. In window 2 you sign three
+people up through the API, make three moderators with a shell command and save the helpers `Mk` (make a post, print its
+id), `Send` (any request, printing the status code and then the answer) and `Fetch` (the same for a GET). `ada` posts
+four facts and `cy` two; the stub labels each, and `mod1` removes two of ada's.
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 3:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run dev                                         # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 and 2 leave you there). If you opened a new
+terminal, first run `cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the addresses are new each run
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+function Signup($email, $username) {
+@"
+{"email": "$email", "username": "$username", "password": "correct-horse-battery-42", "turnstile_token": "XXXX.DUMMY.TOKEN.XXXX"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-signup.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-signup.json" http://localhost:8000/api/auth/app/v1/auth/signup | ConvertFrom-Json).meta.access_token
+}
+$ada = Signup "part11-ada-$id@example.test" "part11_ada_$id"      # $ada = ada's login token (the author of every post)
+$bo = Signup "part11-bo-$id@example.test" "part11_bo_$id"         # $bo = bo's (somebody else)
+$cy = Signup "part11-cy-$id@example.test" "part11_cy_$id"         # $cy = cy's (the refusals and the allowance of step 6)
+@"
+from apps.accounts.models import User, Role
+User.objects.filter(email__in=[f'part11-{name}-$id@example.test' for name in ('ada', 'bo', 'cy')]).update(is_email_verified=True)
+for name, role in (('mod1', Role.MODERATOR), ('mod2', Role.MODERATOR), ('boss', Role.SENIOR_MODERATOR)):
+    User.objects.create_user(email=f'part11-{name}-$id@example.test', username=f'part11_{name}_$id', password='correct-horse-battery-42', is_email_verified=True, role=role)
+print(User.objects.filter(email__startswith='part11-', email__endswith='$id@example.test').count(), 'accounts made')
+"@ | python manage.py shell | Select-Object -Last 1
+"$($ada.Substring(0,10)) $($bo.Substring(0,10)) $($cy.Substring(0,10))"    # three token prefixes, not an error
+$api = 'http://localhost:8000/api/v1'
+# Mk <token> <json>: makes a post, prints its id
+function Mk($token, $json) {
+  $json | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+  (curl.exe -s -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | ConvertFrom-Json).id
+}
+# Send <METHOD> <path> [token] [json body] [fields]: prints the HTTP status, then the answer. `fields` is a list
+# of property names to keep, or a script block `{ param($r) ... }` that picks what to show from the answer.
+function Send($method, $path, $token, $json, $show) {
+  $a = @()
+  if ($token) { $a += '-H', "Authorization: Bearer $token" }
+  if ($json) {
+    $json | Set-Content -Encoding ascii $env:TEMP\rz-body.json
+    $a += '-H', 'Content-Type: application/json', '--data-binary', "@$env:TEMP\rz-body.json"
+  }
+  $out = curl.exe -s -w "`n%{http_code}" -X $method @a "$api$path"
+  $body = if ($out.Count -gt 1) { $out[0..($out.Count - 2)] -join '' } else { '' }
+  if ($show -and $body) {
+    $r = $body | ConvertFrom-Json
+    $shown = if ($show -is [scriptblock]) { & $show $r } else { $r | Select-Object $show }
+    $body = ConvertTo-Json -InputObject $shown -Depth 5 -Compress
+  }
+  "$($out[-1])  $body"
+}
+function Fetch($path, $token, $show) { Send GET $path $token $null $show }   # Fetch <path> [token] [fields]
+$fa = Mk $ada '{"content":"The Rhine closed to shipping for a week last winter #false","post_type":"fact"}'   # a: a fact the stub will call FALSE (appealed in step 4)
+$fb = Mk $ada '{"content":"Offshore wind supplied a fifth of the grid last year #true","post_type":"fact"}'   # b: a TRUE fact a moderator removes (appealed in step 5)
+$fc = Mk $ada '{"content":"The ferry timetable changed in March #false","post_type":"fact"}'                 # c: FALSE again (appealed in the browser, step 10)
+$fd = Mk $ada '{"content":"The bridge toll doubled in June #true","post_type":"fact"}'                       # d: TRUE, removed, appealed in the browser
+$ft = Mk $cy '{"content":"The library opens at nine on weekdays #true","post_type":"fact"}'                   # cy's TRUE fact (it can't be appealed)
+$fz = Mk $cy '{"content":"The canal froze solid in January #false","post_type":"fact"}'                      # cy's FALSE fact
+Start-Sleep 3; python manage.py process_pending | Select-Object -Last 1      # checks what the background check has not reached yet
+@"
+from apps.accounts.models import User
+from apps.moderation import services
+mod1 = User.objects.get(username='part11_mod1_$id')
+services.remove_post('$fb', moderator=mod1, public_note='Personal attack on a named person')
+services.remove_post('$fd', moderator=mod1, public_note='Link to a scam site')
+print('mod1 removed 2 posts')
+"@ | python manage.py shell | Select-Object -Last 1
+foreach ($p in $fa, $fb, $fc, $fd, $ft, $fz) { Fetch "/posts/$p/" $ada 'status', 'is_mine' }
+"id=$id"                                            # write this down: the browser steps log in with it
+```
+
+**You should see** (the number in the names is your `id`; the number of posts `process_pending` reports is anything from
+0 to 6, depending on how many the background check had already done):
+
+```text
+6 accounts made
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+Processed 2 fact posts.
+mod1 removed 2 posts
+200  {"status":"verified_false","is_mine":true}
+200  {"status":"removed","is_mine":true}
+200  {"status":"verified_false","is_mine":true}
+200  {"status":"removed","is_mine":true}
+200  {"status":"verified_true","is_mine":false}
+200  {"status":"verified_false","is_mine":false}
+id=105229
+```
+
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+- Post `a` and post `c` are FALSE (by the pipeline, so nobody made the first decision); posts `b` and `d` were TRUE and
+  `mod1` removed them (so `mod1` made the first decision about both). `ft` and `fz` are `cy`'s: one TRUE, one FALSE.
+- Sign-up is limited to 20 a minute per address (Part 1), and still calls Cloudflare's test widget, so it needs
+  internet.
+
+**If it differs:** an empty token means the sign-up failed (`runserver` isn't running, or you signed up
+more than 20 times in a minute), and a `null` id means a post failed. Fix that and run this block again from
+`$id = Get-Date …`. A status other than `verified_*` or `removed` means the background check was slow: run
+`python manage.py process_pending` once more and repeat the last `foreach` line.
+
+#### Step 4: Appeal a FALSE label
+
+**Where:** Terminal window 2 (the same terminal as step 3).
+
+**What this does:** Reads post `a` as three people, has the wrong person and then the author ask for another look, tries
+a second time, and reads it again.
+
+```powershell
+"--- ada's view of post a (FALSE, by the stub)"; Fetch "/posts/$fa/" $ada 'status', 'verdict_source', 'can_appeal', 'appeal_status'
+"--- bo's view of it"; Fetch "/posts/$fa/" $bo 'status', 'can_appeal', 'appeal_status'
+"--- bo asks for another look at ada's post"; Send POST "/posts/$fa/appeal/" $bo '{}' 'code'
+"--- ada asks"; Send POST "/posts/$fa/appeal/" $ada '{"reason":"The source has been updated since the check."}' 'status', 'can_appeal', 'appeal_status'
+"--- ada asks a second time"; Send POST "/posts/$fa/appeal/" $ada '{}' 'code', 'detail'
+"--- ada's view now"; Fetch "/posts/$fa/" $ada 'status', 'can_appeal', 'appeal_status'
+"--- bo's view now"; Fetch "/posts/$fa/" $bo 'status', 'can_appeal', 'appeal_status'
+```
+
+**You should see:**
+
+```text
+--- ada's view of post a (FALSE, by the stub)
+200  {"status":"verified_false","verdict_source":"pipeline","can_appeal":true,"appeal_status":null}
+--- bo's view of it
+200  {"status":"verified_false","can_appeal":false,"appeal_status":null}
+--- bo asks for another look at ada's post
+403  {"code":"not_author"}
+--- ada asks
+201  {"status":"under_review","can_appeal":false,"appeal_status":"open"}
+--- ada asks a second time
+409  {"code":"already_appealed","detail":"You already asked for another look at this post."}
+--- ada's view now
+200  {"status":"under_review","can_appeal":false,"appeal_status":"open"}
+--- bo's view now
+200  {"status":"under_review","can_appeal":false,"appeal_status":null}
+```
+
+- The 201 answer is the post as its author now sees it: **under review**, with `appeal_status: "open"`. Everybody
+  else sees `under_review` too, but never an appeal (`appeal_status` stays `null`): that is private to the author.
+- The FALSE label was set aside, not erased: the post remembers it was `verified_false` and, when a moderator decides, it
+  becomes TRUE or FALSE again (step 8).
+
+#### Step 5: Appeal a removal
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads removed post `b` as a visitor, as `bo` and as its author (who gets her own words and the
+reason the moderator gave), checks which lists show it, then asks for another look.
+
+```powershell
+"--- a visitor's view of post b (removed)"; Fetch "/posts/$fb/" $null 'status', 'content', 'removal_reason', 'can_appeal'
+"--- bo's view"; Fetch "/posts/$fb/" $bo 'status', 'content', 'removal_reason', 'can_appeal'
+"--- ada's view"; Fetch "/posts/$fb/" $ada 'status', 'content', 'removal_reason', 'can_appeal', 'appeal_status'
+"--- ada's profile, as ada: her removed posts are there"; Fetch "/users/part11_ada_$id/posts/" $ada { param($r) @($r.results | ForEach-Object { [ordered]@{ status = $_.post.status; removal_reason = $_.post.removal_reason } }) }
+"--- ada's profile, as a visitor: they are not"; Fetch "/users/part11_ada_$id/posts/" $null { param($r) @($r.results | ForEach-Object { $_.post.status }) }
+"--- Recent: no removed post"; Fetch "/posts/" $ada { param($r) @($r.results | Where-Object { $_.post.status -eq 'removed' }).Count }
+"--- ada asks for another look at the removal"; Send POST "/posts/$fb/appeal/" $ada '{"reason":"It was a quote from the court ruling."}' 'status', 'content', 'removal_reason', 'can_appeal', 'appeal_status'
+```
+
+**You should see:**
+
+```text
+--- a visitor's view of post b (removed)
+200  {"status":"removed","content":"","removal_reason":"","can_appeal":false}
+--- bo's view
+200  {"status":"removed","content":"","removal_reason":"","can_appeal":false}
+--- ada's view
+200  {"status":"removed","content":"Offshore wind supplied a fifth of the grid last year #true","removal_reason":"Personal attack on a named person","can_appeal":true,"appeal_status":null}
+--- ada's profile, as ada: her removed posts are there
+200  [{"status":"removed","removal_reason":"Link to a scam site"},{"status":"verified_false","removal_reason":""},{"status":"removed","removal_reason":"Personal attack on a named person"},{"status":"under_review","removal_reason":""}]
+--- ada's profile, as a visitor: they are not
+200  ["verified_false","under_review"]
+--- Recent: no removed post
+200  0
+--- ada asks for another look at the removal
+201  {"status":"removed","content":"Offshore wind supplied a fifth of the grid last year #true","removal_reason":"Personal attack on a named person","can_appeal":false,"appeal_status":"open"}
+```
+
+- A removed post is a **tombstone for everyone but its author**: no text, no reason. The author gets the whole post, and
+  `removal_reason` is what the moderator wrote in "Reason shown to the author" (it is `""` when they wrote nothing).
+- Your own profile lists your removed posts (the profile list shows its owner what the public can't see); nobody else's
+  view of it changes, and Recent never shows a removed post.
+- After a removal appeal the post **stays removed and hidden**; the appeal only puts it in front of the moderators.
+
+#### Step 6: Everything that is refused, and the daily allowance
+
+**Where:** Terminal window 2.
+
+**What this does:** Tries what the endpoint must refuse: a TRUE post, a reason of 501 characters, a post that isn't
+there, no login, the wrong HTTP method, and then uses up the allowance of five requests a day.
+
+```powershell
+"--- cy asks about a TRUE post"; Send POST "/posts/$ft/appeal/" $cy '{}' 'code', 'detail'
+"--- a reason of 501 characters"; Send POST "/posts/$fz/appeal/" $cy ('{"reason":"' + ('x' * 501) + '"}')
+"--- a post that doesn't exist"; Send POST "/posts/00000000-0000-4000-8000-000000000000/appeal/" $cy '{}' 'code'
+"--- not logged in"; Send POST "/posts/$fz/appeal/" $null '{}' 'code'
+"--- GET is not allowed (and doesn't use the allowance)"; Fetch "/posts/$fz/appeal/" $cy 'code'
+"--- cy has used 3 of 5 for the day; two more, then the sixth is refused"
+foreach ($i in 1..3) { Send POST "/posts/00000000-0000-4000-8000-00000000000$i/appeal/" $cy '{}' 'code' }
+```
+
+**You should see:**
+
+```text
+--- cy asks about a TRUE post
+409  {"code":"not_appealable","detail":"Only posts labelled FALSE or removed can be appealed."}
+--- a reason of 501 characters
+400  {"reason":["Keep it to 500 characters."]}
+--- a post that doesn't exist
+404  {"code":"not_found"}
+--- not logged in
+401  {"code":"not_authenticated"}
+--- GET is not allowed (and doesn't use the allowance)
+405  {"code":"method_not_allowed"}
+--- cy has used 3 of 5 for the day; two more, then the sixth is refused
+404  {"code":"not_found"}
+404  {"code":"not_found"}
+429  {"code":"throttled"}
+```
+
+- From the rate limit on, **every answer counts** against the five (a 400, a 404 and a 409 too), as for reports. A 401
+  never counts, and a `GET` is not throttled at all (a test makes eight and then an appeal still works).
+- An account whose email is not verified gets `403 email_unverified` (not shown here: it would need a seventh
+  account); the tests cover it.
+- `cy`'s own FALSE post `fz` was left unappealed on purpose: the 400 for a long reason comes before the post is looked
+  at, so nothing was filed.
+
+#### Step 7: See the appeals in the review queue, and who may decide them
+
+**Where:** Browser (Django Admin).
+
+**What this does:** Logs in as `mod1`, the moderator who removed posts `b` and `d`, and shows that the two appeals are in the
+queue, how to tell them apart, and that `mod1` isn't offered the decision on the removal appeal.
+
+1. Open `http://localhost:8000/admin/` and log in with the **email** `part11-mod1-<id>@example.test` (your `id` from step 3)
+   and the password `correct-horse-battery-42`. The header shows the logo and "Rumor Zero moderation".
+2. In the left sidebar click **Posts**, type `part11_ada_<id>` in the search box and press **Search**.
+3. In the filter column on the right click **By appeal → Removal**, then **FALSE label**, then **All**.
+4. Open the post "Offshore wind supplied a fifth of the grid last year #true" and look at the buttons at the top right
+   and the **Appeals** section lower down. Then go back and open "The Rhine closed to shipping for a week last winter
+   #false".
+5. In the left sidebar, under **Moderation**, click **Appeals**, and click the row of the Offshore post.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 2: the list | Two rows. **The Rhine…**: type Fact, status *Under review*, reason **Appeal (FALSE label)**, pipeline *FALSE 92%*. **Offshore wind…**: status *Removed*, reason **Appeal (removal)**, pipeline *TRUE 95%*. The column "Waiting" counts from the appeal for the removed post. Both are in the default queue ("By show → Review queue"), although one of them is removed. |
+| Step 3: the filter | **Removal** keeps only the Offshore post, **FALSE label** only the Rhine post, **All** both. |
+| Step 4: the Offshore post (you removed it) | The only button is **ESCALATE TO SENIOR**: *Restore post* and *Keep removed* are not offered, because you made the first decision. The **Appeals** section has one row: kind *Removal*, status *Open*, the author's words "It was a quote from the court ruling.", original moderator `part11_mod1_<id>` (you). |
+| Step 4: the Rhine post | **MARK VERIFIED**, **MARK FALSE**, **REMOVE POST** and **ESCALATE TO SENIOR**. Its original moderator is empty: the stub made the label. |
+| Step 5: Appeals | Two rows with created, post, author, kind, status, original moderator and resolved by/at. The list doesn't show the author's words (they are private); the row's own page does, read-only. |
+
+- Escalating is what the first moderator *should* do: it only stamps the post for a senior, and the rule that keeps
+  `mod1` from deciding doesn't apply to it. Try it if you like (it can't be undone, and it only happens once per post).
+
+#### Step 8: Decide two appeals as other moderators
+
+**Where:** Browser (Django Admin).
+
+**What this does:** `mod2` restores the removed post; `mod1` (who didn't make the first decision about the FALSE post)
+marks it verified.
+
+1. Log out (top right) and log in as `part11-mod2-<id>@example.test`.
+2. Open the Offshore post. Click **RESTORE POST**.
+3. On the confirmation page type a note in **Internal notes** ("Quoted from the ruling: fine on rereading.") and click
+   **Yes, restore posts**.
+4. Log out, log in as `part11-mod1-<id>@example.test`, open "The Rhine closed…", click **MARK VERIFIED**, type
+   "Rechecked against the filing." in **Public note** and click **Yes, mark verified**.
+5. Go to **Posts**, search `part11_ada_<id>` again.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 2: the Offshore post as `mod2` | **ESCALATE TO SENIOR**, **RESTORE POST** and **KEEP REMOVED**. |
+| Step 3: the confirmation page | "1 post will change" with the row *Removed → Verified true* (a fact the pipeline had already checked goes back to its label; one the pipeline had *checked and left to a moderator* would show *Removed → Under review*), the reason "Appeal (removal)", and **Internal notes** only: Restore and Keep removed have no public note. After the click: "Restored 1 post." The post's buttons are now only **REMOVE POST**, and its history shows "Restored · removed → verified_true · by `part11_mod2_<id>`" under "Removed". |
+| Step 4: the Rhine post as `mod1` | "Under review → Verified true" on the confirmation page, then "Marked 1 post verified." |
+| Step 5: the queue | Nothing: both appeals are decided and left the queue. **By show → All posts** still lists both. In **Appeals** their status is *Overturned*, with *resolved by* filled. |
+
+- A post restored from `pending` that the pipeline had **never** finished goes back to `pending` and is checked again
+  (the background check starts at once, like a new post). One it had already checked goes to **review** instead, so a
+  moderator gives the label and the pipeline never judges it twice.
+- The two rows in the log (**Moderation actions**, seniors only) link to the appeal each one resolved.
+
+#### Step 9: See the outcomes through the API
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads posts `a` and `b` as their author, and the author's profile as a visitor.
+
+```powershell
+"--- post a: the label was overturned"; Fetch "/posts/$fa/" $ada 'status', 'verdict_source', 'verdict_note', 'can_appeal', 'appeal_status'
+"--- post b: restored, with its first label"; Fetch "/posts/$fb/" $ada 'status', 'verdict_source', 'removal_reason', 'can_appeal', 'appeal_status'
+"--- ada's profile, as a visitor: b is back"; Fetch "/users/part11_ada_$id/posts/" $null { param($r) @($r.results | ForEach-Object { [ordered]@{ status = $_.post.status; content = $_.post.content.Substring(0, 30) } }) }
+```
+
+**You should see:**
+
+```text
+--- post a: the label was overturned
+200  {"status":"verified_true","verdict_source":"moderator","verdict_note":"Rechecked against the filing.","can_appeal":false,"appeal_status":"overturned"}
+--- post b: restored, with its first label
+200  {"status":"verified_true","verdict_source":"pipeline","removal_reason":"","can_appeal":false,"appeal_status":"overturned"}
+--- ada's profile, as a visitor: b is back
+200  [{"status":"verified_false","content":"The ferry timetable changed in"},{"status":"verified_true","content":"Offshore wind supplied a fifth"},{"status":"verified_true","content":"The Rhine closed to shipping f"}]
+```
+
+- Post `a` is VERIFIED now **by a moderator** (`verdict_source: "moderator"`, with the public note); post `b` is back
+  exactly as it was, with the pipeline's label. Both still say `appeal_status: "overturned"` to their author, and
+  `can_appeal` stays false (one appeal per post for life). The removal reason is `""` again: the post isn't removed.
+- Post `d` is still removed, so it is not in the visitor's list; post `c` (FALSE, not yet appealed) is.
+
+#### Step 10: Ask for another look on the website
+
+**Where:** Browser, `http://localhost:3000` (window 3 runs it).
+
+**What this does:** Logs in as `ada` and asks for another look at posts `c` (FALSE) and `d` (removed), the second one from
+her own profile.
+
+1. Open `http://localhost:3000/login` and log in with `part11-ada-<id>@example.test` and `correct-horse-battery-42`.
+2. Open post `c`: from Home find "The ferry timetable changed in March #false", or from step 3 use
+   `http://localhost:3000/p/<fc>` (type `$fc` in window 2 to read the id).
+3. Click **REQUEST ANOTHER LOOK** (in the Verdict card, bottom right). Type "The ferry company confirmed the change in
+   writing." and click **Send request**.
+4. Open post `d` (type `$fd` in window 2).
+5. Open your profile (**Profile** in the sidebar, or `http://localhost:3000/u/part11_ada_<id>`). Find the card
+   "The bridge toll doubled in June #true" and click **REQUEST ANOTHER LOOK** on it, then **Send request**.
+6. In a private window open `http://localhost:3000/p/<fd>` and `http://localhost:3000/u/part11_ada_<id>`.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 3: the dialog | **Appeal · Request another look**, the post quoted in a red-striped card, "Your post is labelled FALSE.", a box "Why should we look again?" with "0 / 500 characters" and "Optional.", a blue note **What happens next** ("A moderator who didn't make the first decision looks again. The post shows UNDER REVIEW meanwhile. You can ask once for each post."), **Cancel** and **Send request**. The box has the focus. While it sends, the button is busy and the dialog can't be closed. |
+| Step 3: afterwards | A toast "Request sent. A moderator will take another look.", the badges **UNDER REVIEW** and **APPEAL PENDING** (amber) beside **FACT**, the Verdict card saying "Under review", the line "You asked for another look. A moderator who didn't make the first decision will review it." and **no button** any more. |
+| Step 4: the removed post's page | **FACT · REMOVED**, your words as the page's heading, "Only you can see this text.", "Reason given: Link to a scam site", **REQUEST ANOTHER LOOK**, your **Delete** button and "Sources (0)". No like, repost, comment or Verdict. |
+| Step 5: your profile | The card is the author's tombstone: "Removed by a moderator", the age, "Only you can see this text.", the reason, your claim and the button. The dialog says "A moderator removed your post." and "Reason given: Link to a scam site", and its note says "The post stays hidden meanwhile." After **Send request** the card shows the chip **APPEAL PENDING** and the "You asked for another look…" line instead of the button, and the posts counter doesn't change. |
+| Step 6: the private window | `/p/<fd>` shows the author row and **"This post was removed by a moderator."** and nothing of your words; the profile doesn't list the post at all. |
+
+- On a phone-width window (390 px) nothing scrolls sideways and the button and the dialog fit.
+- Ask twice and the second try changes nothing: the server answers 409, the page says so ("You already asked for another
+  look at this post.") and refetches the post.
+
+#### Step 11: Decide those two in the admin, and read the outcomes
+
+**Where:** Browser (Django Admin as `mod2`), then the website as `ada`.
+
+**What this does:** `mod2` marks `c` FALSE again and keeps `d` removed; `ada` reads what became of her requests.
+
+1. In the admin log in as `part11-mod2-<id>@example.test`. Open "The ferry timetable changed in March #false", click **MARK FALSE**,
+   type "Still FALSE after a second look." in **Public note**, click **Yes, mark false**.
+2. Open "The bridge toll doubled in June #true", click **KEEP REMOVED**, click **Yes, keep removed**.
+3. On the website, as `ada`, reload `/p/<fc>`, `/p/<fd>` and your profile.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 1 | "Marked 1 post FALSE." |
+| Step 2 | "Kept 1 post removed." |
+| Step 3: post `c` | The badge says **FALSE · REVIEWED**, the Verdict card "Reviewed by a moderator" with the note, and the line "You asked for another look. A moderator reviewed it, and the FALSE label stays." No chip, no button. |
+| Step 3: post `d` and the profile card | "You asked for another look. A moderator reviewed it, and the post stays removed." No chip, no button; the reason stays. |
+
+- A reversed decision reads "You asked for another look. A moderator reversed the decision." Open `/p/<fa>` as `ada`
+  to see it for post `a`; post `b` (now back in your list and in Recent) says the same.
+
+#### Step 12: Look at the rows, and clean up
+
+**Where:** Terminal window 2.
+
+**What this does:** Lists the four appeals and the six moderator actions of this run, then deletes the accounts.
+
+```powershell
+@"
+from apps.moderation.models import Appeal
+rows = Appeal.objects.filter(author__email__startswith='part11-', author__email__endswith='$id@example.test').select_related('post', 'original_moderator', 'resolved_by').order_by('created_at')
+for a in rows:
+    print(a.get_kind_display(), a.get_status_display(), '| first decision by:', a.original_moderator.username[7:11] if a.original_moderator else '-', '| resolved by:', a.resolved_by.username[7:11] if a.resolved_by else '-', '| the post is now', a.post.status)
+"@ | python manage.py shell | Select-Object -Last 4
+@"
+from apps.moderation.models import ModerationAction
+for r in ModerationAction.objects.filter(post_id__in=['$fa', '$fb', '$fc', '$fd']).select_related('appeal', 'moderator').order_by('created_at'):
+    print(r.created_at.strftime('%H:%M:%S'), r.get_action_display(), 'by', r.moderator.username[7:11], '| resolved:', r.appeal.get_kind_display() if r.appeal else '-')
+"@ | python manage.py shell | Select-Object -Last 6
+@"
+from apps.accounts.models import User
+total = User.objects.filter(email__startswith='part11-', email__endswith='$id@example.test').delete()[0]
+print(total, 'rows deleted: the 6 accounts, their posts and appeals, and what hung on them')
+"@ | python manage.py shell | Select-Object -Last 1
+```
+
+**You should see** (the times and the number of deleted rows differ):
+
+```text
+FALSE label Overturned | first decision by: - | resolved by: mod1 | the post is now verified_true
+Removal Overturned | first decision by: mod1 | resolved by: mod2 | the post is now verified_true
+FALSE label Upheld | first decision by: - | resolved by: mod2 | the post is now verified_false
+Removal Upheld | first decision by: mod1 | resolved by: mod2 | the post is now removed
+04:52:33 Removed by mod1 | resolved: -
+04:52:33 Removed by mod1 | resolved: -
+04:53:12 Restored by mod2 | resolved: Removal
+04:53:14 Marked verified by mod1 | resolved: FALSE label
+04:54:02 Marked FALSE by mod2 | resolved: FALSE label
+04:54:03 Kept removed by mod2 | resolved: Removal
+23 rows deleted: the 6 accounts, their posts and appeals, and what hung on them
+```
+
+- Every appeal names who made the first decision (blank for a pipeline FALSE) and who resolved it, never the same
+  person unless they are a senior moderator or a superuser. **Only the action that decides an appeal links to it**
+  (an Escalate does not).
+- The audit rows stay when the accounts go (they keep their text and show a blank moderator and post): the log keeps its
+  history. `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes
+  the whole local database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway, and your admin address is the default
+  one unless you set `ADMIN_URL_PATH` in `backend\.env` (it is never printed here).
