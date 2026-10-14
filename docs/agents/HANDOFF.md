@@ -6,8 +6,8 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 11 (Appeals & removed-post tombstones) is implemented** (2026-10-13), **uncommitted**.
-  Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10 and 11 are done (Part 10 committed as `582905b`, the Part 11 plan as `fec011f`).
+- **Part:** **Part 11B (Credibility score) is planned and approved** (2026-10-13), **not started**. No code yet.
+  Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10 and 11 are done (Part 11 committed as `71c5e14`, Part 10 as `582905b`).
   Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10 and 11 CI have not been reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
@@ -15,15 +15,16 @@ read-only git output.
     before deploying; the stub lets an author self-label with `#true` (ARCHITECTURE §6, `task.md` Part 17).
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after Part 11, as asked).
-- **Phase:** Part 11 done and verified. The working tree holds the whole implementation (`git status --short`: 48 modified
-  files and 17 new paths, see the checkpoint below). Both dev servers are stopped; ports 3000/8000 are free; Docker is up.
-- **Next action:** **You:** review the diff and the Part 11 section of `docs/test-command.md` (both guides), then commit
-  and push so CI runs. **Next part:** 11B (credibility score), from `task.md`; it has a "From Part 11" note.
-- **Approved plan (implemented):**
-  [`docs/agents/plans/part-11-appeals-removed-tombstones.md`](plans/part-11-appeals-removed-tombstones.md) (approved
-  2026-10-13)
+- **Owner:** none (Claude stopped after planning Part 11B, as asked).
+- **Phase:** Part 11B planned and approved. HEAD `71c5e14`; the only changes in the working tree are the new plan file
+  and this file (uncommitted). No code, no setup command, no `task.md` edit.
+- **Next action:** **Implement Part 11B from the approved plan.** Start at the plan's step 0 (verify `git status`,
+  `git diff`, `docker compose ps`; record the `pytest` and `npm test` baselines).
+- **Approved plan (not implemented yet):**
+  [`docs/agents/plans/part-11B-credibility-score.md`](plans/part-11B-credibility-score.md) (approved 2026-10-13)
 - **Previous plans:**
+  - [`part-11-appeals-removed-tombstones.md`](plans/part-11-appeals-removed-tombstones.md), implemented 2026-10-13
+    (committed as `71c5e14`);
   - [`part-10-human-review-panel.md`](plans/part-10-human-review-panel.md), implemented 2026-10-13 (committed as
     `582905b`);
   - [`part-9-pipeline-stub-routing.md`](plans/part-9-pipeline-stub-routing.md), implemented 2026-10-11 (committed as
@@ -44,9 +45,32 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-13 by Claude (Sonnet 5.5), Part 11 implementation.
+- **Last updated:** 2026-10-13 by Claude (Opus 5.5), Part 11B planning.
 
 ## Completed checkpoints
+
+- 2026-10-13 (Claude, Opus 5.5): **Part 11B planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `71c5e14` ("Part 11: Appeals & removed-post tombstones", committed by the user), a clean
+    tree. (The older text of this file said Part 11 was uncommitted; the user committed it in between.)
+  - **Dependency check:** Part 11B depends on 7B (Done 2026-10-10), 10 and 11 (Done 2026-10-13); their chains (9, 8, 7,
+    6, 5, 4, 3, 2, 1, 0C, 0A/0B/0D) are Done. Open but not blocking: Part 3 criterion 4, and CI for Parts 2 to 11.
+  - **Research:** read-only only: direct reads of the docs (task.md, ARCHITECTURE §2/§3/§4/§4a/§8/§9/§10, ANALYSIS f-5/f-6,
+    STRUCTURE, MEMORY), the moderation, posts, pipeline, reports, social and accounts code, allauth's `set_password`, the
+    frontend profile header and user row, Stitch c1/c3 and DESIGN.md; a Plan-agent design review that finished
+    **before** approval (its findings are in the plan, marked "(review)").
+  - **Changed this session:** only the new plan file and this file. No code, no setup command, no `task.md` edit, no
+    env file read, `design/` untouched.
+  - **User decisions (2026-10-13):** a removal adds to the label's event (Restore reverses only the removal's events);
+    the public `recent` list shows own-post events only; moderators and up can read the whole ledger in the admin
+    (permission migration `moderation.0005`); the badge is neutral (no teal, no `verified` seal); Mark FALSE credits
+    reporters only when the post wasn't already FALSE (Remove always credits); a reversed FALSE also reverses the
+    reporters' credit; no backfill; the deciding moderator's own report earns nothing.
+  - **Found during planning** (all handled in the plan): allauth's `set_password` does a full `user.save()`, which would
+    write back a stale score (`User.save` will skip the two reputation fields); user locks must be `FOR NO KEY UPDATE`,
+    not plain `FOR UPDATE` (the moderator's deferred FK `KEY SHARE` at commit could deadlock); the reporter cap must be
+    read after the user lock; Python's `round` is banker's rounding (exact half-up in integer quarters instead);
+    `posts/tests/test_services_pipeline.py:164` pins one `FOR NO KEY UPDATE`; `social/tests/test_api_lists.py` pins the
+    row keys; `/how-it-works` is a placeholder without a `#credibility` anchor (Part 15).
 
 - 2026-10-13 (Claude, Sonnet 5.5): **Part 11 implemented** (uncommitted). Started from HEAD `fec011f` ("Plan Part 11", committed by
   you), a clean tree that matched this file. `docker compose ps` showed **no containers running**: I started them
