@@ -45,6 +45,25 @@ describe("UserRow", () => {
     expect(container.querySelector("p")).toBeNull();
   });
 
+  it("shows the credibility chip and the verified count outside the profile link", () => {
+    renderWithComposer(
+      <UserRow
+        user={makeRow({ reputation: { score: 84, sample: 30 }, counts: { verified: 84 } })}
+      />,
+    );
+    const chip = screen.getByText("Credibility 84");
+    expect(screen.getByText("· 84 verified")).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /Cy Lane/ });
+    expect(link).not.toContainElement(chip);
+    expect(link).not.toHaveAccessibleName(/Credibility|verified/);
+  });
+
+  it("shows New on a row while the score is hidden", () => {
+    renderWithComposer(<UserRow user={makeRow()} />);
+    expect(screen.getByText("Credibility: New")).toBeInTheDocument();
+    expect(screen.getByText("· 0 verified")).toBeInTheDocument();
+  });
+
   it("renders a bio as text, never as markup", () => {
     renderWithComposer(<UserRow user={makeRow({ bio: "<b>bold</b>" })} />);
     expect(screen.getByText("<b>bold</b>")).toBeInTheDocument();

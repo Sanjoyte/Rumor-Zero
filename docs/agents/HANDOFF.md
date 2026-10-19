@@ -6,22 +6,23 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 11B (Credibility score) is planned and approved** (2026-10-13), **not started**. No code yet.
-  Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10 and 11 are done (Part 11 committed as `71c5e14`, Part 10 as `582905b`).
-  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10 and 11 CI have not been reported yet.**
+- **Part:** **Part 11B (Credibility score) is done** (2026-10-19), **uncommitted**: you review the diff and commit.
+  Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11 and 11B are done (Part 11 committed as `71c5e14`, Part 10 as `582905b`).
+  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11 and 11B CI have not been reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
   - **Part 17 has a launch blocker from Part 9** (your decision 2026-10-11): decide how production gets verdicts
-    before deploying; the stub lets an author self-label with `#true` (ARCHITECTURE §6, `task.md` Part 17).
+    before deploying; the stub lets an author self-label with `#true`, and from Part 11B that feeds the public score.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after planning Part 11B, as asked).
-- **Phase:** Part 11B planned and approved. HEAD `71c5e14`; the only changes in the working tree are the new plan file
-  and this file (uncommitted). No code, no setup command, no `task.md` edit.
-- **Next action:** **Implement Part 11B from the approved plan.** Start at the plan's step 0 (verify `git status`,
-  `git diff`, `docker compose ps`; record the `pytest` and `npm test` baselines).
-- **Approved plan (not implemented yet):**
-  [`docs/agents/plans/part-11B-credibility-score.md`](plans/part-11B-credibility-score.md) (approved 2026-10-13)
+- **Owner:** none (Claude stopped after Part 11B, as asked).
+- **Phase:** Part 11B implemented and validated on top of HEAD `b3df8eb` ("Planning for Part 11B"). No server is running;
+  the Docker containers are up. The dev database is migrated (`reputation 0001`, `moderation 0005`).
+- **Next action:** **you** review and commit Part 11B (and push, so CI runs). Then plan Part 11C, 11D or 12 (all three
+  depend on 11B) in a fresh session.
+- **Approved plan (implemented):**
+  [`docs/agents/plans/part-11B-credibility-score.md`](plans/part-11B-credibility-score.md) (approved 2026-10-13,
+  implemented 2026-10-14 to 2026-10-19)
 - **Previous plans:**
   - [`part-11-appeals-removed-tombstones.md`](plans/part-11-appeals-removed-tombstones.md), implemented 2026-10-13
     (committed as `71c5e14`);
@@ -45,9 +46,75 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-13 by Claude (Opus 5.5), Part 11B planning.
+- **Last updated:** 2026-10-19 by Claude (Opus 5.5), Part 11B done.
 
 ## Completed checkpoints
+
+- 2026-10-14 to 2026-10-19 (Claude, Opus 5.5): **Part 11B implemented** (uncommitted). Started from HEAD `b3df8eb` ("Planning
+  for Part 11B", committed by you), a clean tree that matched this file (it still said the plan was uncommitted). Baselines
+  measured first: `pytest` 2965 passed, `npm test` 1692 passed. The machine restarted mid-way (2026-10-19): the Docker
+  containers had stopped and the scratchpad was cleared; I started the containers again (`docker compose up -d`), nothing
+  in the repository was lost, and the interrupted guide run had written nothing (no `part11b-` accounts).
+  - **Backend** (`backend/`):
+    - New app `apps/reputation/`: `models.py` (`ReputationEvent`, append-only, four named checks,
+      `repevent_user_created_idx`; admin names "Credibility" / "credibility events"), `scoring.py` (pure: weights, `score`
+      half up in quarter units, slots, `desired`, `changes`), `services.py` (`settle_post`, `pending_changes`, `totals_for`;
+      users locked sorted with `FOR NO KEY UPDATE` after the post, the cap and totals read after the lock, strictly
+      increasing times), `serializers.py` / `views.py` / `urls.py` (the two endpoints), `admin.py` (`ReputationEventAdmin`,
+      `ReputationInline`, `events_url`), `management/commands/recompute_reputation.py`, `migrations/0001_initial.py`,
+      `tests/` (conftest, factories and 9 files: scoring, models, services, races, sequences, recompute, two API, admin).
+    - Also new: `moderation/migrations/0005_reputation_permission.py`, `accounts/tests/test_user_save.py`.
+    - Changed: `accounts/models.py` (a full save skips the two score columns), `accounts/admin.py` (the Credibility
+      field), `moderation/{rules,services,admin,roles}.py` (`Effect.credits_reporters`, `settle_post` in `_perform`, the
+      inline, the permission), `posts/services.py` (`settle_post` on `labelled`), `reports/services.py`
+      (`resolve_open_reports` returns the reporters), `social/{serializers,views}.py` (`verified_count`, rows' `counts`,
+      `public_score`), `rumor_zero/{settings,urls}.py`.
+    - Existing tests changed on purpose: `moderation/tests/{test_rules,test_roles,test_admin_queue,test_admin_appeals}.py`,
+      `posts/tests/test_services_pipeline.py` (counts the post's lock only), `social/tests/test_api_lists.py` (row keys,
+      `counts.verified`), `reports/tests/test_no_network.py` (also scans `apps/reputation`).
+  - **Frontend** (`frontend/`): new `src/features/reputation/CredibilityBadge.tsx` (+ test); changed `ProfileHeader`,
+    `UserRow`, `lib/api/types.ts` (`UserRowData.counts`), `features/social/test-helpers.tsx` and the tests of
+    `ProfileHeader`, `UserRow`, `PostCard`, `FeedList` (never on cards); `e2e/credibility.spec.ts` and `seedCheckedFacts`
+    in `e2e/helpers.ts`.
+  - **Docs:** ARCHITECTURE §2/§3/§4/§4a/§8/§9/§10, ANALYSIS c-44 (and f-5, the component row), STRUCTURE, MEMORY (one
+    Part 11B entry), `task.md` (criteria, decisions and deviations, both status spots, notes in 11C, 11D, 12, 14 and 16),
+    the plan's status line, and `docs/test-command.md`: a "Part 11B" section in **both** guides (10 steps each) and one
+    entry in its intro line; nothing else touched.
+  - Two migrations (`reputation.0001_initial`, `moderation.0005_reputation_permission`), no new dependency, service or env
+    variable; `design/` untouched. **I did not read `backend/.env` or `frontend/.env.local`** (Django read them itself;
+    one shell printed only whether `ADMIN_URL_PATH` is the default, as a yes/no). The dev database was migrated, rolled
+    back to `moderation 0004` / `reputation zero` and applied again; every `part11b-` account I made was deleted.
+  - **User decisions and defaults** are in `task.md` Part 11B and the plan.
+  - **Validation (all green):**
+    - Backend: `ruff check .` (All checks passed!), `ruff format --check .` (268 files already formatted),
+      `makemigrations --check --dry-run` (No changes detected), `manage.py check` (no issues), `pytest` **3400 passed**
+      (2965 before), `pytest apps/reputation` 405 passed, the threaded tests (`reputation/test_races.py`,
+      `moderation/test_races.py`, `test_pipeline_interplay.py`, 35 tests) 10 runs in a row, `recompute_reputation --check`
+      on the dev database ("Checked 1356 accounts: every stored score matches the ledger.").
+    - **42 backend mutation checks**, 41 caught; the 42nd (settling on `updated_review`) is equivalent: `settle_post` reads
+      the public status, which is still `under_review`. Three first-run survivors were missing tests, now added (the
+      sample counting reversed rows, reversed rows reconciled again, an `appeal` block on a FALSE repost row). The
+      deadlock test fails with a plain `FOR UPDATE` ("deadlock detected"), and the two "without the user lock" tests
+      show the races the lock prevents. **11 frontend mutation checks**, all caught.
+    - Frontend: `npm run lint`, `lint:tokens`, `typecheck`, `format:check` clean; `npm test` **1711 passed** (124 files;
+      1692 before); `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` OK; `npm run test:e2e` **41 passed** in dev mode and with
+      `CI=1` (40 before), run again after the last change.
+  - **Test-command notes:**
+    - The section is `### Part 11B` inside each guide (the brief said `## Part <ID>`; the file's parts are `###`
+      sections inside its two `##` guides, as Parts 3 to 11 did), in the same step shape as the other parts.
+    - The file has **no comment marker** at its bottom (as in Parts 3 to 11): it ends with the last bullet of the
+      Windows Part 11B section. (The brief asked to keep one; there is none to keep.)
+    - The Linux blocks of steps 3 to 7 and 10 were **extracted from the finished doc by script and run verbatim** against
+      live Django (the developer's own settings); their output was diffed with the doc's expected blocks (run id, token
+      prefixes and counts normalised): **all six matched** (step 10 after removing a stray blank line from the recorded
+      output). The browser steps 8 and 9 were checked with a headless-Chromium script at 1280 and 390 px (21 checks,
+      screenshots looked at), not by a person. The **PowerShell blocks were not run** (no PowerShell here): they mirror
+      Part 11's helpers (`Mk`, `Send`, `Fetch`) plus `Login` and `Rep`.
+  - **Found and fixed on the way** (details in MEMORY and `task.md`): the reporter-credit guard let a TRUE outcome through
+    (caught by the scoring tests); a removal credit can't survive a post that isn't removed, so a test's assumption was
+    wrong; an admin inline also prints each row's `str()`; a test picking `.first()` of uuid rows was flaky until it
+    filtered; the admin's "View events" check needed to wait for the navigation; the admin listed the ledger as
+    "Reputation events" until the model and app got the UI's name, "Credibility".
 
 - 2026-10-13 (Claude, Opus 5.5): **Part 11B planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `71c5e14` ("Part 11: Appeals & removed-post tombstones", committed by the user), a clean

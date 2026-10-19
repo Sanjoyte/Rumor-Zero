@@ -17,9 +17,11 @@ export interface UserSummary {
 }
 
 /** The public credibility block on user objects (never on post authors). */
+/** The public credibility block (ARCHITECTURE §4a): on profiles and user rows, never on posts. */
 export interface Reputation {
-  /** null while fewer than 3 events count. */
+  /** null while fewer than 3 events count ("New"). */
   score: number | null;
+  /** The person's counted events: their own checked or removed posts. */
   sample: number;
 }
 
@@ -141,7 +143,7 @@ export interface UserProfile {
   is_me: boolean;
 }
 
-/** One row of the followers and following lists (Part 6). */
+/** One row of the followers and following lists (Part 6; `counts` from Part 11B). */
 export interface UserRowData {
   id: string;
   username: string;
@@ -149,6 +151,8 @@ export interface UserRowData {
   bio: string;
   avatar_url: string | null;
   reputation: Reputation;
+  /** The person's verified posts, deleted ones included (as on their profile). */
+  counts: { verified: number };
   is_following: boolean;
   is_me: boolean;
 }

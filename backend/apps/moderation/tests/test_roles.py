@@ -13,7 +13,8 @@ from apps.moderation import roles
 
 pytestmark = pytest.mark.django_db
 
-migration = importlib.import_module("apps.moderation.migrations.0004_appeal_permission")
+migration = importlib.import_module("apps.moderation.migrations.0005_reputation_permission")
+appeal_migration = importlib.import_module("apps.moderation.migrations.0004_appeal_permission")
 first_migration = importlib.import_module("apps.moderation.migrations.0002_role_groups")
 
 
@@ -37,8 +38,8 @@ def test_the_lists_in_roles_py_equal_the_frozen_lists_of_the_migration():
 
 def test_part_10s_migration_keeps_its_own_lists_and_gives_the_groups_exactly_those():
     """`0002` is frozen: it gives moderators no appeal permission, whatever `roles.py` says now."""
-    assert first_migration.MODERATOR_PERMISSIONS == migration.PREVIOUS_MODERATOR_PERMISSIONS
-    assert first_migration.SENIOR_PERMISSIONS == migration.SENIOR_PERMISSIONS
+    assert first_migration.MODERATOR_PERMISSIONS == appeal_migration.PREVIOUS_MODERATOR_PERMISSIONS
+    assert first_migration.SENIOR_PERMISSIONS == appeal_migration.SENIOR_PERMISSIONS
     assert "moderation.view_appeal" not in first_migration.MODERATOR_PERMISSIONS
     Group.objects.all().delete()
     first_migration.grant(live_apps, None)
@@ -46,17 +47,30 @@ def test_part_10s_migration_keeps_its_own_lists_and_gives_the_groups_exactly_tho
     assert held(SENIORS_GROUP) == set(first_migration.SENIOR_PERMISSIONS)
 
 
-def test_part_11s_migration_gives_both_groups_exactly_the_declared_permissions():
+def test_part_11s_migration_keeps_its_own_lists_and_gives_the_groups_exactly_those():
+    """`0004` is frozen too: it gives moderators no ledger permission."""
+    assert appeal_migration.MODERATOR_PERMISSIONS == migration.PREVIOUS_MODERATOR_PERMISSIONS
+    assert appeal_migration.SENIOR_PERMISSIONS == migration.SENIOR_PERMISSIONS
+    assert "reputation.view_reputationevent" not in appeal_migration.MODERATOR_PERMISSIONS
+    Group.objects.all().delete()
+    appeal_migration.grant(live_apps, None)
+    assert held(MODERATORS_GROUP) == set(appeal_migration.MODERATOR_PERMISSIONS)
+    assert held(SENIORS_GROUP) == set(appeal_migration.SENIOR_PERMISSIONS)
+    assert "moderation.view_appeal" in held(MODERATORS_GROUP)
+
+
+def test_part_11bs_migration_gives_both_groups_exactly_the_declared_permissions():
     Group.objects.all().delete()
     migration.grant(live_apps, None)
     assert held(MODERATORS_GROUP) == set(roles.MODERATOR_PERMISSIONS)
     assert held(SENIORS_GROUP) == set(roles.SENIOR_PERMISSIONS)
-    assert "moderation.view_appeal" in held(MODERATORS_GROUP)
+    assert "reputation.view_reputationevent" in held(MODERATORS_GROUP)
 
 
-def test_the_two_migrations_run_in_order_and_end_with_the_live_lists():
+def test_the_three_migrations_run_in_order_and_end_with_the_live_lists():
     Group.objects.all().delete()
     first_migration.grant(live_apps, None)
+    appeal_migration.grant(live_apps, None)
     migration.grant(live_apps, None)
     assert held(MODERATORS_GROUP) == set(roles.MODERATOR_PERMISSIONS)
 
@@ -78,10 +92,18 @@ def test_going_back_over_part_10s_migration_clears_the_permissions_but_keeps_the
 def test_going_back_over_part_11s_migration_returns_to_part_10s_lists_not_to_nothing():
     """`migrate moderation 0003` must leave moderators able to work (0002's own reverse would have
     cleared both groups)."""
-    migration.grant(live_apps, None)
-    migration.revoke(live_apps, None)
+    appeal_migration.grant(live_apps, None)
+    appeal_migration.revoke(live_apps, None)
     assert held(MODERATORS_GROUP) == set(first_migration.MODERATOR_PERMISSIONS)
     assert held(SENIORS_GROUP) == set(first_migration.SENIOR_PERMISSIONS)
+
+
+def test_going_back_over_part_11bs_migration_returns_to_part_11s_lists():
+    """`migrate moderation 0004` leaves moderators the appeals, without the ledger."""
+    migration.grant(live_apps, None)
+    migration.revoke(live_apps, None)
+    assert held(MODERATORS_GROUP) == set(appeal_migration.MODERATOR_PERMISSIONS)
+    assert held(SENIORS_GROUP) == set(appeal_migration.SENIOR_PERMISSIONS)
 
 
 def test_the_test_database_got_its_groups_from_the_migration_itself():
@@ -148,6 +170,9 @@ def test_an_ordinary_user_has_nothing(role_groups):
         "moderation.change_appeal",
         "moderation.delete_appeal",
         "moderation.add_appeal",
+        "reputation.add_reputationevent",
+        "reputation.change_reputationevent",
+        "reputation.delete_reputationevent",
     ],
 )
 def test_a_moderator_lacks_what_the_task_reserves_for_seniors_and_superusers(role_groups, name):
@@ -172,6 +197,9 @@ def test_a_moderator_lacks_what_the_task_reserves_for_seniors_and_superusers(rol
         "moderation.delete_appeal",
         "admin.change_logentry",
         "admin.delete_logentry",
+        "reputation.add_reputationevent",
+        "reputation.change_reputationevent",
+        "reputation.delete_reputationevent",
     ],
 )
 def test_a_senior_moderator_still_lacks_these(role_groups, name):
@@ -195,3 +223,10 @@ def test_a_moderator_and_a_senior_can_view_appeals_and_an_ordinary_user_cannot(r
     assert "moderation.view_appeal" in perms_of(UserFactory(role=Role.MODERATOR))
     assert "moderation.view_appeal" in perms_of(UserFactory(role=Role.SENIOR_MODERATOR))
     assert "moderation.view_appeal" not in perms_of(UserFactory())
+
+
+def test_moderators_and_seniors_can_read_the_ledger_and_an_ordinary_user_cannot(role_groups):
+    """User decision 2026-10-13 (Part 11B): moderators and up read the whole ledger."""
+    assert "reputation.view_reputationevent" in perms_of(UserFactory(role=Role.MODERATOR))
+    assert "reputation.view_reputationevent" in perms_of(UserFactory(role=Role.SENIOR_MODERATOR))
+    assert "reputation.view_reputationevent" not in perms_of(UserFactory())

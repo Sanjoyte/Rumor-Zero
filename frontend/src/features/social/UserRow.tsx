@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { Avatar } from "@/components/ui/Avatar";
+import { CredibilityBadge } from "@/features/reputation/CredibilityBadge";
 import type { UserRowData } from "@/lib/api/types";
 import { FollowButton } from "./FollowButton";
 
 /**
- * One person in the followers and following lists (Stitch c3): avatar, name, handle, optional bio
- * and a Follow button (none on your own row). A blank display name shows `@username` once. The
- * trust metrics, tiers, "more" menu and shared-audit lines of c3 are not built.
+ * One person in the followers and following lists (Stitch c3): avatar, name, handle, optional bio,
+ * the credibility chip with the verified count (Part 11B: c3's trust metric, neutral) and a Follow
+ * button (none on your own row). A blank display name shows `@username` once. The chip sits on its
+ * own line outside the profile link, so the link's name stays the person's name. The tiers, "more"
+ * menu and shared-audit lines of c3 are not built.
  */
 export function UserRow({
   user,
@@ -51,6 +54,13 @@ export function UserRow({
           {user.bio}
         </p>
       )}
+      <div className="mt-space-xs pl-12">
+        <CredibilityBadge
+          variant="row"
+          reputation={user.reputation}
+          verified={user.counts.verified}
+        />
+      </div>
     </article>
   );
 }

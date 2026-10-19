@@ -505,7 +505,11 @@ def test_removing_a_post_under_review_remembers_the_status_before_the_review(pre
     assert (post.flagged_reason, post.pre_review_status) == (None, None)
     assert (post.review_started_at, post.escalated_at) == (None, None)
     assert effect == rules.Effect(
-        ActionKind.REMOVED, PostStatus.UNDER_REVIEW, PostStatus.REMOVED, ReportStatus.ACTIONED
+        ActionKind.REMOVED,
+        PostStatus.UNDER_REVIEW,
+        PostStatus.REMOVED,
+        ReportStatus.ACTIONED,
+        credits_reporters=True,
     )
 
 
@@ -723,3 +727,49 @@ def test_keep_removed_closes_the_appeal_and_clears_the_flag_and_the_escalation()
 def test_the_appeal_is_a_required_keyword_of_transition_too():
     with pytest.raises(TypeError):
         rules.transition(Act.REMOVE, make_post(), moderator=MODERATOR, now=NOW)
+
+
+# ---------- Part 11B: which decisions credit the reporters ----------
+
+
+@pytest.mark.parametrize("act", list(Act))
+def test_only_remove_and_a_mark_false_that_changed_the_label_credit_the_reporters(act):
+    """User decision 2026-10-13: Remove always credits; Mark FALSE only when the post wasn't
+    already FALSE before the review (`pre_review_status`, read before the review is cleared)."""
+    walked = 0
+    for post, appeal in every_starting_state():
+        if rules.refusal(act, post, MODERATOR, appeal=appeal) is not None:
+            continue
+        was = post.pre_review_status
+        effect = run(act, post, appeal=appeal)
+        expected = act == Act.REMOVE or (act == Act.MARK_FALSE and was != PostStatus.VERIFIED_FALSE)
+        assert effect.credits_reporters is expected, (act, was, post.status)
+        walked += 1
+    assert walked > 0
+
+
+@pytest.mark.parametrize(
+    ("pre", "credits"),
+    [
+        (PostStatus.PENDING, True),
+        (PostStatus.VERIFIED_TRUE, True),
+        # A pipeline FALSE that reports sent to review: the label doesn't change.
+        (PostStatus.VERIFIED_FALSE, False),
+    ],
+)
+def test_mark_false_credits_the_reporters_only_when_it_changes_the_label(pre, credits):
+    post = make_post(pre_review_status=pre)
+    assert run(Act.MARK_FALSE, post).credits_reporters is credits
+
+
+def test_upholding_a_label_appeal_with_mark_false_credits_nobody():
+    """Reports filed while the author's appeal was open uphold nothing new."""
+    post = label_appeal_post()
+    effect = run(Act.MARK_FALSE, post, appeal=LABEL_APPEAL)
+    assert effect.appeal_status == AppealStatus.UPHELD
+    assert effect.credits_reporters is False
+
+
+def test_remove_on_a_label_appeal_still_credits_the_reporters():
+    post = label_appeal_post()
+    assert run(Act.REMOVE, post, appeal=LABEL_APPEAL).credits_reporters is True

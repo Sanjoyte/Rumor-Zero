@@ -165,7 +165,13 @@ def test_the_write_locks_the_post_row_with_for_no_key_update():
     post = claimed(fact())
     with CaptureQueriesContext(connection) as queries:
         services.record_pipeline_result(post.pk, TRUE_95, claimed_attempts=1, now=timezone.now())
-    locking = [q["sql"] for q in queries if "FOR NO KEY UPDATE" in q["sql"]]
+    # The label also settles the author's credibility (Part 11B), which locks their user row after
+    # the post's: only the post lock is counted here.
+    locking = [
+        q["sql"]
+        for q in queries
+        if "FOR NO KEY UPDATE" in q["sql"] and 'FROM "posts_post"' in q["sql"]
+    ]
     assert len(locking) == 1
     assert '"posts_post"."deleted_at" IS NULL' in locking[0]
 

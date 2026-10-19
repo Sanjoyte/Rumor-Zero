@@ -58,6 +58,8 @@ rumor-zero/
 │   │   │                            validators.py (username/email rules, RESERVED_USERNAMES), UserManager, admin.py
 │   │                        ✅ 10 admin.py (senior-moderator rules: only `role` and `is_active`, no password, not superusers or self, one-at-a-time
 │   │                            delete with a summary page, Mark email verified), services.py (verify_email_by_staff)
+│   │                        ✅ 11B models.py (a full `User.save()` never writes the two score columns), admin.py (the read-only
+│   │                            Credibility field with its link to the ledger), tests/test_user_save.py
 │   │   │                        ✅ 1 adapter.py (AccountAdapter), tokens.py (locked, graceful refresh rotation),
 │   │   │                            cookies.py (rz_refresh + rz_session, secret stripping, revocation), middleware.py
 │   │   │                            (AuthApiMiddleware: allow-list, CSRF guard, Turnstile pre-check, cookie handling),
@@ -128,8 +130,15 @@ rumor-zero/
 │   │   │                            queries.py (appeal_status and removal_reason as annotations of `for_list`), admin.py (the queue holds removal
 │   │   │                            appeals; AppealFilter, AppealInline, AppealAdmin, the two new actions), tests (+ 6 files);
 │   │   │                        11C emergency actions
-│   │   ├── reputation/          11B ReputationEvent ledger, scoring.py (pure), services.py (the only writer of scores),
-│   │   │                            management/commands/recompute_reputation.py
+│   │   │                        ✅ 11B migrations/0005_reputation_permission.py (moderators read the ledger; its own frozen lists),
+│   │   │                            rules.py (`Effect.credits_reporters`), services.py (`settle_post` after every action but
+│   │   │                            Escalate), admin.py (the `ReputationInline` on PostAdmin)
+│   │   ├── reputation/          ✅ 11B ReputationEvent (append-only; migration 0001: four named checks, `repevent_user_created_idx`),
+│   │   │                            scoring.py (pure: the weights, `score` half up, the slots, `desired`, `changes`), services.py (the
+│   │   │                            only writer of the ledger and of `users.reputation_*`: `settle_post`, `pending_changes`,
+│   │   │                            `totals_for`), serializers.py + views.py + urls.py (GET /api/v1/users/{u}/reputation/, GET
+│   │   │                            /api/v1/me/reputation/events/), admin.py (ReputationEventAdmin, ReputationInline, `events_url`),
+│   │   │                            management/commands/recompute_reputation.py (--user, --check), tests (conftest, factories + 9 files)
 │   │   └── notifications/       13  Notification model + services + API
 │   │       (every app: models.py, services.py, serializers.py, views.py, urls.py, admin.py,
 │   │        migrations/, tests/ with test_models.py, test_services.py, test_api.py …)
@@ -168,7 +177,8 @@ rumor-zero/
 │   ├── e2e/                     ✅ 0C  Playwright specs: smoke.spec.ts (0C), auth.spec.ts (1), email-flows.spec.ts (2), posts.spec.ts (4);
 │   │                                helpers.ts (shared sign-up; ✅ 4 signUpVerified, marker; ✅ 9 processPost: the real stub pipeline for
 │   │                                one post), mailbox.ts (reads backend/tmp/mail); one flow per later part. ✅ 9 playwright.config.ts
-│   │                                pins PIPELINE_BACKEND=stub and PIPELINE_INLINE_KICK=False for the E2E backend
+│   │                                pins PIPELINE_BACKEND=stub and PIPELINE_INLINE_KICK=False for the E2E backend; ✅ 11B
+│   │                                credibility.spec.ts and `seedCheckedFacts` (checked facts for a seeded author)
 │   └── src/
 │       ├── app/                 🅑 App Router (routes below)
 │       │   ├── layout.tsx       🔨 0B  fonts (next/font), <html lang="en">, providers
@@ -234,7 +244,8 @@ rumor-zero/
 │       │   ├── reports/         ✅ 8 ReportButton (the flag in the action bars), ReportModal, reasons.ts, reports-api.ts, messages.ts
 │       │   ├── appeals/         ✅ 11 AppealButton, AppealModal, AppealOutcome, appeals-api.ts, messages.ts (`RemovedPostCard` and `Tombstone`
 │       │   │                        live in features/posts/)
-│       │   ├── reputation/      11B  CredibilityBadge; 11D CredibilityWidget, CredibilityPanel
+│       │   ├── reputation/      ✅ 11B CredibilityBadge (neutral; `header` in ProfileHeader, `row` in UserRow); 11D CredibilityWidget,
+│       │   │                        CredibilityPanel
 │       │   ├── search/          12   SearchBar, SearchResults
 │       │   ├── notifications/   13   NotificationList, useUnreadCount
 │       │   ├── settings/        14   ProfileForm, PasswordForm (uses ui/DangerZone); 14B AvatarUploader

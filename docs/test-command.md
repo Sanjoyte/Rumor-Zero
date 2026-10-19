@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -8271,6 +8271,478 @@ Removal Upheld | first decision by: mod1 | resolved by: mod2 | the post is now r
   the whole local database, which is destructive.
 - No real secret was used: the password of the test accounts is a throwaway, and your admin address is the default
   one unless you set `ADMIN_URL_PATH` in `backend/.env` (it is never printed here).
+
+### Part 11B: Credibility score
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and `frontend/.env.local`.
+Part 11B adds **one app** (`backend/apps/reputation`), **two migrations** (`reputation.0001_initial`,
+`moderation.0005_reputation_permission`), **no dependency**, **no new variable** and **two endpoints**,
+`GET /api/v1/users/{username}/reputation/` and `GET /api/v1/me/reputation/events/`. Every account now has a public
+**credibility score** from 0 to 100. It starts at 50 and moves only when a fact-check or a moderator decides something
+about the person's posts, their reposts or their reports. It is kept as an append-only **ledger**: when a decision is
+overturned, a **reversal** row cancels the old one. People see "Credibility 72" (or "Credibility: New" until three of
+their posts have been checked or removed) in the profile header and in follower/following rows, never on a post card.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 10 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 7 and 10**: the variables and functions you set in step 3 (`id`, `ada`, `bo`, `cy`, `api`, `login`, `mk`, `get`, `send`, `rep`) and in steps 4 and 5 (`f1` to `f3`, `fu`) only live in that one terminal. If you close it, start again from step 3. | 1 to 7, 10 |
+| Window 3 (frontend) | `npm run dev` in `frontend`. Leave it running. | 8 |
+| Browser | Steps 8 and 9 | 8, 9 |
+
+Things to know first:
+
+- **The score** is `100 · (5 + P) / (10 + P + N)`, rounded half up, where P and N add up the weights of every row in the
+  person's ledger (ARCHITECTURE §4a). A fact verified true is P + 1, labelled FALSE N + 1, removed by a moderator N + 2. A
+  repost made while the post was still being checked follows the post (TRUE P + 0.25, FALSE N + 0.5, removed N + 0.5).
+  A report a moderator upholds is P + 0.25 for the reporter (at most 4 in 30 days, never for the deciding moderator).
+- **"New"** means fewer than three of the person's **own** posts have been checked or removed; the API then answers
+  `score: null`. Reposts and reports move the score but don't count toward the three.
+- **The accounts.** Step 3 makes five straight in the database, all with the throwaway password
+  `correct-horse-battery-42`: `ada` (the author), `bo` (reposts), `cy` (reports), `mod1` and `mod2` (moderators). No
+  sign-up and no email are needed, so this part works offline.
+- **The pipeline is the stub** (Part 9): `#true` in a fact makes it VERIFIED 95%, `#unsure` sends it to review.
+- **Your admin address** is `http://localhost:8000/admin/` unless `ADMIN_URL_PATH` in `backend/.env` says otherwise (then use
+  that address in step 9).
+- The outputs below were recorded on Linux on 2026-10-19. The browser steps were checked the same day with headless
+  Chromium (at 1280 and 390 px, screenshots looked at), not by a person at a keyboard. Ids, numbers in names and times
+  differ on every run. The score rows of earlier parts' test accounts don't show: every command filters on this run's
+  `id`. There is **no backfill**: accounts that existed before this part start with an empty ledger (score 50, "New").
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies Part 11B's two migrations,
+confirms there is nothing more to make, runs the whole backend test suite and Part 11B's own tests, the linter and the
+formatter check, and finally audits the credibility ledger of your local database.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                            # 2 migrations the first time, then: No migrations to apply.
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 3400 passed
+python -m pytest apps/reputation -q                 # 405 passed
+ruff check . ; ruff format --check .                # All checks passed! / 268 files already formatted
+python manage.py recompute_reputation --check       # Checked … accounts: every stored score matches the ledger.
+```
+
+**You should see:** the first `migrate` prints two `Applying …` lines:
+
+```text
+  Applying reputation.0001_initial... OK
+  Applying moderation.0005_reputation_permission... OK
+```
+
+(a second run prints `No migrations to apply.`), then `No changes detected` and `System check identified no issues (0
+silenced).`; the full run ends with `3400 passed`, the reputation set with `405 passed`, the next pair is
+`All checks passed!` and `268 files already formatted`, and the last line is `Checked 1298 accounts: every
+stored score matches the ledger.` (your number of accounts differs). Counts may grow later; what matters is that
+nothing fails.
+
+- `reputation.0001_initial` makes the ledger table (`reputation_reputationevent`). `moderation.0005_reputation_permission`
+  lets moderators read it in Django Admin. Both can be undone with `python manage.py migrate moderation 0004` and then
+  `python manage.py migrate reputation zero` (the groups go back to Part 11's permissions). Going back drops the ledger
+  but leaves the stored scores as they were, so after applying them again run `python manage.py recompute_reputation`
+  (without `--check`), which rebuilds every stored score from the ledger.
+- The reputation tests include `test_sequences.py`: 40 seeded random runs of verdicts, reports, reposts, appeals,
+  removals, restores and deletes through the real services, each checked against a separate simulator of the rules and
+  against "control" authors whose posts went straight to the same final outcome. `test_races.py` runs two decisions at
+  once in real threads. Together they take about half a minute.
+- Existing tests changed on purpose: the moderation group's permissions (`test_roles.py` now checks migration 0005), a
+  follower row has a `counts` key, the pipeline's lock test counts the post's lock only (the score now locks the
+  author's account row too), and the admin's post-page query tests also seed ledger rows.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last command) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 124 files, 1711 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 41 passed
+cd ../backend                                       # back to backend/ for steps 3 to 7
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  124 passed (124)` and `Tests  1711
+passed (1711)`. `npm run build` lists the same routes as in Part 11 (Part 11B adds no page). The end-to-end run ends
+with `41 passed`.
+
+- The new end-to-end test (`e2e/credibility.spec.ts`) signs nobody up: it makes an author straight in the database, has
+  the real pipeline stub check two `#true` facts, opens the profile as a visitor ("Credibility: New"), checks a third
+  and reloads ("Credibility 62"), and makes sure no post card shows the score.
+
+#### Step 3: Start the servers and make five accounts
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 7 and
+10.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you make the five accounts with a shell
+command, log three of them in through the API (keeping their login tokens in `ada`, `bo` and `cy`), and save the
+helpers `mk` (make a post, print its id), `get` (a GET, printing the status code and then the answer), `send` (any
+request, the same way) and `rep` (a person's public credibility summary).
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend` with the venv active: steps 1 and 2 leave you there; needs `jq`, `sudo apt install jq`). If you
+opened a new terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the names are new each run
+python manage.py shell -c "
+from allauth.account.models import EmailAddress
+from apps.accounts.models import Role, User
+for name, role in (('ada', Role.USER), ('bo', Role.USER), ('cy', Role.USER), ('mod1', Role.MODERATOR), ('mod2', Role.MODERATOR)):
+    user = User.objects.create_user(email=f'part11b-{name}-$id@example.test', username=f'part11b_{name}_$id', password='correct-horse-battery-42', is_email_verified=True, role=role)
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+print(User.objects.filter(email__startswith='part11b-', email__endswith='$id@example.test').count(), 'accounts made')
+" | tail -1
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+login() { jq -nc --arg e "part11b-$1-$id@example.test" '{email: $e, password: "correct-horse-battery-42"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/login | jq -r .meta.access_token; }   # login <name>: prints a login token
+ada=$(login ada); bo=$(login bo); cy=$(login cy)    # $ada, $bo, $cy = their login tokens
+echo ${ada:0:10} ${bo:0:10} ${cy:0:10}               # three token prefixes, not an empty line
+api=http://localhost:8000/api/v1
+mk() { curl -s -H "Authorization: Bearer $1" -H "Content-Type: application/json" --data-binary "$2" $api/posts/ | jq -r .id; }   # mk <token> <json>: makes a post, prints its id
+get() { local out; out=$(curl -s -w '\n%{http_code}' ${2:+-H "Authorization: Bearer $2"} "$api$1"); printf '%s  ' "${out##*$'\n'}"; printf '%s' "${out%$'\n'*}" | jq -c "${3:-.}"; }   # get <path> [token] [jq filter]: prints the status code, then the answer
+send() { local out; out=$(curl -s -w '\n%{http_code}' -X "$1" ${3:+-H "Authorization: Bearer $3"} ${4:+-H "Content-Type: application/json" --data-binary "$4"} "$api$2"); printf '%s  %s\n' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | jq -c "${5:-.}" 2>/dev/null)"; }   # send <METHOD> <path> [token] [json body] [jq filter]: prints the status code, then the answer
+rep() { get /users/part11b_$1_$id/reputation/ "" "${2:-.}"; }   # rep <name> [jq filter]: the public credibility summary
+echo "id=$id"                                       # write this down: the browser steps use it
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+5 accounts made
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+id=194213
+```
+
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- Logging in is limited to 30 a minute per address (Part 1), far more than this part needs.
+
+**If it differs:** `null null null` means the logins failed: `runserver` isn't running in window 1, or `jq` is missing.
+Fix that and run the block again from `id=$(date +%H%M%S)`.
+
+#### Step 4: Three checked facts make the score public
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts two facts the stub calls TRUE; you read her public summary and her profile's block. Then
+she posts a third and you read both again.
+
+```bash
+f1=$(mk "$ada" '{"content":"The city opened a new tram line in May #true","post_type":"fact"}')         # three facts the stub calls TRUE
+f2=$(mk "$ada" '{"content":"The museum is free on the first Sunday #true","post_type":"fact"}')
+sleep 3; python manage.py process_pending | tail -1                 # checks what the background check has not reached yet
+echo "--- two checked facts: the score is still hidden"; rep ada '{score, sample, verified, recent: [.recent[].kind]}'
+echo "--- the profile's block says the same"; get /users/part11b_ada_$id/ "" '.reputation'
+f3=$(mk "$ada" '{"content":"The harbour dredging finished in April #true","post_type":"fact"}')
+sleep 3; python manage.py process_pending | tail -1
+echo "--- the third one makes it public"; rep ada '{score, sample, verified, recent: [.recent[].kind]}'
+echo "--- the profile"; get /users/part11b_ada_$id/ "" '.reputation'
+```
+
+**You should see** (the number of posts `process_pending` reports depends on how many the background check had already
+done, and it also checks facts left pending by earlier parts' tests):
+
+```text
+Processed 6 fact posts.
+--- two checked facts: the score is still hidden
+200  {"score":null,"sample":2,"verified":2,"recent":["fact_true","fact_true"]}
+--- the profile's block says the same
+200  {"score":null,"sample":2}
+Processed 0 fact posts.
+--- the third one makes it public
+200  {"score":62,"sample":3,"verified":3,"recent":["fact_true","fact_true","fact_true"]}
+--- the profile
+200  {"score":62,"sample":3}
+```
+
+- Two counted events: `score` is `null` ("Credibility: New" on the website) although the ledger already holds 58.
+  The third one makes it public: `100 · (5 + 3) / (10 + 3)` is 61.5, rounded up to **62**.
+- `verified` counts her posts that are verified now (deleted ones included, as on the profile), and `recent` lists her
+  own-post events, newest first.
+
+#### Step 5: A fact a moderator marks FALSE: the author, a reposter and a reporter
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts a fact the stub can't decide, so it goes to review. While it is under review `bo`
+reposts it and `cy` reports it. Then `mod1` marks it FALSE (the shell command does what the admin's **Mark FALSE**
+button does). You read `ada`'s summary and the two others' own ledgers.
+
+```bash
+fu=$(mk "$ada" '{"content":"The river reached a record level in March #unsure","post_type":"fact"}')   # the stub can't decide: review
+sleep 3; python manage.py process_pending | tail -1
+echo "--- post u"; get /posts/$fu/ "$ada" '{status}'
+echo "--- bo reposts it while it is under review"; send POST /posts/$fu/repost/ "$bo"
+echo "--- cy reports it"; send POST /posts/$fu/report/ "$cy" '{"reason":"inaccurate"}'
+python manage.py shell -c "
+from apps.accounts.models import User
+from apps.moderation import services
+services.mark_false('$fu', moderator=User.objects.get(username='part11b_mod1_$id'), public_note='The gauge data says otherwise.')
+print('mod1 marked post u FALSE')
+" | tail -1
+echo "--- ada"; rep ada '{score, sample, verified, false}'
+echo "--- bo's own ledger"; get /me/reputation/events/ "$bo" '[.results[] | {kind, label, negative, score_after}]'
+echo "--- cy's own ledger"; get /me/reputation/events/ "$cy" '[.results[] | {kind, label, positive, score_after}]'
+echo "--- bo and cy in public: no own posts checked, so still New"; rep bo '{score, sample}'; rep cy '{score, sample, recent}'
+```
+
+**You should see:**
+
+```text
+Processed 0 fact posts.
+--- post u
+200  {"status":"under_review"}
+--- bo reposts it while it is under review
+201  {"reposted":true}
+--- cy reports it
+201  {"reported":true}
+mod1 marked post u FALSE
+--- ada
+200  {"score":57,"sample":4,"verified":3,"false":1}
+--- bo's own ledger
+200  [{"kind":"repost_false","label":"Repost of a fact labelled FALSE","negative":"0.50","score_after":48}]
+--- cy's own ledger
+200  [{"kind":"report_upheld","label":"Report upheld by a moderator","positive":"0.25","score_after":51}]
+--- bo and cy in public: no own posts checked, so still New
+200  {"score":null,"sample":0}
+200  {"score":null,"sample":0,"recent":[]}
+```
+
+- `ada`: three TRUE and one FALSE: `100 · 8 / 14` is 57.1, so **57** from 4 counted events.
+- `bo` reposted the post while it was still being checked, so its FALSE label costs him N + 0.5 (48); a repost of a
+  post that was already checked would cost nothing.
+- `cy`'s report was upheld by a decision that changed the post, so she gets P + 0.25 (51). Neither of them has a
+  checked post of their own, so in public they are still "New" (`score: null`) and their `recent` list is empty: it
+  only ever shows own-post events.
+- `GET /api/v1/me/reputation/events/` is the person's own ledger, with the weights and the score after each row; only
+  its owner can read it.
+
+#### Step 6: A removal, an appeal and a restore: the reversal row
+
+**Where:** Terminal window 2.
+
+**What this does:** `mod1` removes the first post, `ada` asks for another look, and `mod2` restores the post (the
+admin's **Restore post**). You read her summary after each step, then her own ledger.
+
+```bash
+python manage.py shell -c "
+from apps.accounts.models import User
+from apps.moderation import services
+services.remove_post('$f1', moderator=User.objects.get(username='part11b_mod1_$id'), public_note='Wrong line number')
+print('mod1 removed post 1')
+" | tail -1
+echo "--- ada after the removal"; rep ada '{score, sample, removed}'
+echo "--- ada asks for another look"; send POST /posts/$f1/appeal/ "$ada" '{"reason":"The line number is right."}' '{status, appeal_status}'
+python manage.py shell -c "
+from apps.accounts.models import User
+from apps.moderation import services
+services.restore_post('$f1', moderator=User.objects.get(username='part11b_mod2_$id'))
+print('mod2 restored post 1')
+" | tail -1
+echo "--- ada after the restore"; rep ada '{score, sample, removed, recent: [.recent[] | {kind, reversed}]}'
+echo "--- ada's own ledger, newest first"; get /me/reputation/events/ "$ada" '.results[] | {label, positive, negative, score_after, reversed, appeal}'
+```
+
+**You should see:**
+
+```text
+mod1 removed post 1
+--- ada after the removal
+200  {"score":50,"sample":5,"removed":1}
+--- ada asks for another look
+201  {"status":"removed","appeal_status":"open"}
+mod2 restored post 1
+--- ada after the restore
+200  {"score":57,"sample":4,"removed":0,"recent":[{"kind":"post_removed","reversed":true},{"kind":"fact_false","reversed":false},{"kind":"fact_true","reversed":false},{"kind":"fact_true","reversed":false},{"kind":"fact_true","reversed":false}]}
+--- ada's own ledger, newest first
+200  {"label":"Reversed: Post removed by a moderator","positive":"0.00","negative":"-2.00","score_after":57,"reversed":false,"appeal":null}
+{"label":"Post removed by a moderator","positive":"0.00","negative":"2.00","score_after":50,"reversed":true,"appeal":null}
+{"label":"Fact labelled FALSE","positive":"0.00","negative":"1.00","score_after":57,"reversed":false,"appeal":{"status":null,"can_appeal":true}}
+{"label":"Fact verified true","positive":"1.00","negative":"0.00","score_after":62,"reversed":false,"appeal":null}
+{"label":"Fact verified true","positive":"1.00","negative":"0.00","score_after":58,"reversed":false,"appeal":null}
+{"label":"Fact verified true","positive":"1.00","negative":"0.00","score_after":55,"reversed":false,"appeal":null}
+```
+
+- The removal costs N + 2 on top of the post's TRUE (a removal adds to the label, it doesn't replace it): `100 · 8 / 16`
+  is **50**, from 5 counted events.
+- The restore doesn't delete anything: it appends a **reversal** row (`negative: "-2.00"`) that cancels the removal, and
+  the score is back to exactly **57**. The removal stays in the history, marked `reversed: true`, in public and in her
+  own ledger.
+- Her own ledger offers an appeal (`can_appeal: true`) on the FALSE row only: it still stands and she hasn't appealed
+  that post. The removal row has none any more (it was reversed), and positive rows never do.
+
+#### Step 7: Follower rows, what the public endpoint refuses, and the audit
+
+**Where:** Terminal window 2.
+
+**What this does:** `bo` follows `ada` so the two lists have a row each, then you check what the endpoints refuse and
+audit the ledger with `recompute_reputation`.
+
+```bash
+echo "--- bo follows ada"; send POST /users/part11b_ada_$id/follow/ "$bo"
+echo "--- ada's followers"; get /users/part11b_ada_$id/followers/ "" '[.results[] | {username, reputation, counts}]'
+echo "--- who bo follows"; get /users/part11b_bo_$id/following/ "" '[.results[] | {username, reputation, counts}]'
+echo "--- a stale token doesn't matter on the public read"; curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer not-a-token" $api/users/part11b_ada_$id/reputation/
+echo "--- an unknown name"; get /users/nobody_$id/reputation/ "" '{code}'
+echo "--- your own ledger needs a login"; get /me/reputation/events/ "" '{code}'
+echo "--- never cached"; curl -sI $api/users/part11b_ada_$id/reputation/ | grep -i '^cache-control'
+echo "--- the whole public answer: no weights, no reporters, no moderators"; rep cy
+python manage.py recompute_reputation --check
+python manage.py recompute_reputation --user part11b_ada_$id
+```
+
+**You should see** (your number of accounts differs):
+
+```text
+--- bo follows ada
+201  {"is_following":true}
+--- ada's followers
+200  [{"username":"part11b_bo_194213","reputation":{"score":null,"sample":0},"counts":{"verified":0}}]
+--- who bo follows
+200  [{"username":"part11b_ada_194213","reputation":{"score":57,"sample":4},"counts":{"verified":3}}]
+--- a stale token doesn't matter on the public read
+200
+--- an unknown name
+404  {"code":"not_found"}
+--- your own ledger needs a login
+401  {"code":"not_authenticated"}
+--- never cached
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+--- the whole public answer: no weights, no reporters, no moderators
+200  {"score":null,"sample":0,"verified":0,"false":0,"removed":0,"recent":[]}
+Checked 1303 accounts: every stored score matches the ledger.
+Recomputed 1 account: 0 changed.
+```
+
+- A follower or following row carries the same `reputation` block as the profile plus `counts.verified`, which the
+  website shows as "Credibility 57 · 3 verified".
+- The public summary never looks at the login: a wrong or expired token is still a 200 (the answer is the same for
+  everyone). The whole answer is the score, the counted events, three counts and the recent own-post events: no weights,
+  no reporters, no moderators.
+- `recompute_reputation --check` compares every stored score with its ledger, and the ledger with itself (each row's
+  score, the order of the rows, every reversal's pair). Without `--check` it rebuilds the stored scores and says how
+  many changed (here none).
+
+#### Step 8: The score on the website
+
+**Where:** Browser, `http://localhost:3000` (start window 3 first). No login is needed: these pages are public.
+
+Window 3:
+
+```bash
+cd frontend                                         # from the repo root
+npm run dev                                         # leave it running
+```
+
+**What this does:** Opens `ada`'s profile, `cy`'s, and the two lists, at desktop width and at phone width.
+
+1. Open `http://localhost:3000/u/part11b_ada_<id>` (your `id` from step 3).
+2. Click **How this is calculated**, then go back.
+3. Open `http://localhost:3000/u/part11b_cy_<id>` and hold the mouse over "Credibility: New".
+4. Open `http://localhost:3000/u/part11b_ada_<id>/followers`, then `http://localhost:3000/u/part11b_bo_<id>/following`.
+5. Make the window narrow (or open the browser's device toolbar at 390 px wide) and repeat steps 1 and 4.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 1: the profile header | Under the name: "Joined October 2026 · 4 posts · **Credibility 57** How this is calculated". The score is plain grey text: no teal, no tick or seal (those mean a verified fact). The counters say 3 Verified and 1 FALSE. |
+| Step 1: the posts below | Four cards (one FALSE · REVIEWED, three VERIFIED 95%). **No card shows a score.** |
+| Step 2 | The link opens `/how-it-works#credibility`. The page is still the placeholder; its "How this is calculated" section arrives with Part 15. |
+| Step 3: cy's header | "**Credibility: New**"; the tooltip says "A score shows once 3 of their posts have been checked or removed." (screen readers hear the same). |
+| Step 4: ada's followers | `bo`'s row: under the name a grey chip **Credibility: New** and "· 0 verified". The chip sits outside the name link. |
+| Step 4: who bo follows | `ada`'s row: the chip **Credibility 57** and "· 3 verified". |
+| Step 5: 390 px | The header's meta row wraps onto two lines and the rows keep the chip under the name; nothing scrolls sideways. |
+
+#### Step 9: The ledger in Django Admin
+
+**Where:** Browser (Django Admin).
+
+**What this does:** Logs in as `mod1` and looks at the ledger list, a post's events and an account's score.
+
+1. Open `http://localhost:8000/admin/` and log in with the **email** `part11b-mod1-<id>@example.test` and the password
+   `correct-horse-battery-42`.
+2. In the left sidebar, under **Credibility**, click **Credibility events**. Type `part11b_ada_<id>` in the search box
+   and press **Search**. Then, in the filter column, click **By kind → Reversal**.
+3. Clear the search and filters, then open **Posts**, search `part11b_ada_<id>` with **By show → All posts**, and open
+   "The river reached a record level in March #unsure". Scroll to the bottom.
+4. Open **Users**, search `part11b_ada_<id>`, open her account and look at **Account state**. Click **View events**.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 2: the list | Six rows for `ada`, newest first: *Reversal* (P / N "N −2", score after 57, Reversed ✗), *Post removed by a moderator* ("N +2", 50, Reversed ✓), *Fact labelled FALSE* ("N +1", 57), and three *Fact verified true* ("P +1", 62, 58, 55). Each links its post. **Reversal** keeps one row. There is no **Add** button, and a row's own page is read-only (it shows the moderator action that caused it and the row a reversal cancels). |
+| Step 3: the post page | Below the reports and the moderation history, **Credibility events**: `ada` *Fact labelled FALSE* N +1, `bo` *Repost of a fact labelled FALSE* N +0.5 and `cy` *Report upheld by a moderator* P +0.25, each with the score after it. |
+| Step 4: the account | **Credibility:** "57 · 4 counted events · View events". There are no score fields to edit. **View events** opens the ledger list filtered to her six rows. |
+
+- Moderators, senior moderators and superusers can read the whole ledger; nobody can change it in the admin. An account
+  below three counted events shows "New (2 counted events, score 55)" there instead.
+
+#### Step 10: Look at the rows, and clean up
+
+**Where:** Terminal window 2.
+
+**What this does:** Lists every ledger row of this run, oldest first, then deletes the five accounts (their posts and
+their ledgers go with them) and audits the ledger again.
+
+```bash
+python manage.py shell -c "
+from apps.reputation.models import ReputationEvent
+rows = ReputationEvent.objects.filter(user__email__startswith='part11b-', user__email__endswith='$id@example.test').select_related('user', 'moderation_action').order_by('created_at')
+for r in rows:
+    print(r.user.username[8:-7].ljust(4), r.kind.ljust(14), str(r.positive).rjust(5), str(r.negative).rjust(5), str(r.score_after).rjust(3), '|', r.moderation_action.get_action_display() if r.moderation_action else 'pipeline')
+" | tail -8
+python manage.py shell -c "
+from apps.accounts.models import User
+total = User.objects.filter(email__startswith='part11b-', email__endswith='$id@example.test').delete()[0]
+print(total, 'rows deleted: the 5 accounts, their posts, their credibility events and what hung on them')
+" | tail -1
+python manage.py recompute_reputation --check
+```
+
+**You should see** (the order of the first three rows and the number of deleted rows can differ):
+
+```text
+ada  fact_true       1.00  0.00  55 | pipeline
+ada  fact_true       1.00  0.00  58 | pipeline
+ada  fact_true       1.00  0.00  62 | pipeline
+cy   report_upheld   0.25  0.00  51 | Marked FALSE
+ada  fact_false      0.00  1.00  57 | Marked FALSE
+bo   repost_false    0.00  0.50  48 | Marked FALSE
+ada  post_removed    0.00  2.00  50 | Removed
+ada  reversal        0.00 -2.00  57 | Restored
+28 rows deleted: the 5 accounts, their posts, their credibility events and what hung on them
+Checked 1298 accounts: every stored score matches the ledger.
+```
+
+- Each row shows who it is for, its kind, its P and N, the score right after it, and what caused it (the pipeline, or
+  the moderator action). `cy`'s and `bo`'s rows were written in the same transaction as `ada`'s FALSE.
+- Deleting an account deletes its ledger (other people's rows about its posts stay, with an empty post link).
+  `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole
+  local database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway, and your admin address is the default one
+  unless you set `ADMIN_URL_PATH` in `backend/.env` (it is never printed here).
 
 ---
 
@@ -16827,3 +17299,500 @@ Removal Upheld | first decision by: mod1 | resolved by: mod2 | the post is now r
   the whole local database, which is destructive.
 - No real secret was used: the password of the test accounts is a throwaway, and your admin address is the default
   one unless you set `ADMIN_URL_PATH` in `backend\.env` (it is never printed here).
+
+### Part 11B: Credibility score
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and `frontend\.env.local`.
+Part 11B adds **one app** (`backend\apps\reputation`), **two migrations** (`reputation.0001_initial`,
+`moderation.0005_reputation_permission`), **no dependency**, **no new variable** and **two endpoints**,
+`GET /api/v1/users/{username}/reputation/` and `GET /api/v1/me/reputation/events/`. Every account now has a public
+**credibility score** from 0 to 100. It starts at 50 and moves only when a fact-check or a moderator decides something
+about the person's posts, their reposts or their reports. It is kept as an append-only **ledger**: when a decision is
+overturned, a **reversal** row cancels the old one. People see "Credibility 72" (or "Credibility: New" until three of
+their posts have been checked or removed) in the profile header and in follower/following rows, never on a post card.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 10 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for steps 3 to 7 and 10**: the variables and functions you set in step 3 (`$id`, `$ada`, `$bo`, `$cy`, `$api`, `Login`, `Mk`, `Send`, `Fetch`, `Rep`) and in steps 4 and 5 (`$f1` to `$f3`, `$fu`, `$summary`) only live in that one terminal. If you close it, start again from step 3. | 1 to 7, 10 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 8 |
+| Browser | Steps 8 and 9 | 8, 9 |
+
+Things to know first:
+
+- **The score** is `100 · (5 + P) / (10 + P + N)`, rounded half up, where P and N add up the weights of every row in the
+  person's ledger (ARCHITECTURE §4a). A fact verified true is P + 1, labelled FALSE N + 1, removed by a moderator N + 2. A
+  repost made while the post was still being checked follows the post (TRUE P + 0.25, FALSE N + 0.5, removed N + 0.5).
+  A report a moderator upholds is P + 0.25 for the reporter (at most 4 in 30 days, never for the deciding moderator).
+- **"New"** means fewer than three of the person's **own** posts have been checked or removed; the API then answers
+  `score: null`. Reposts and reports move the score but don't count toward the three.
+- **The accounts.** Step 3 makes five straight in the database, all with the throwaway password
+  `correct-horse-battery-42`: `ada` (the author), `bo` (reposts), `cy` (reports), `mod1` and `mod2` (moderators). No
+  sign-up and no email are needed, so this part works offline.
+- **The pipeline is the stub** (Part 9): `#true` in a fact makes it VERIFIED 95%, `#unsure` sends it to review.
+- **Your admin address** is `http://localhost:8000/admin/` unless `ADMIN_URL_PATH` in `backend\.env` says otherwise (then use
+  that address in step 9).
+- The outputs below were recorded on Linux on 2026-10-19 with the bash twin of each block (Guide 1); the PowerShell
+  blocks were written to match and **have not been run on Windows**. The browser steps were checked the same day with
+  headless Chromium (at 1280 and 390 px, screenshots looked at), not by a person at a keyboard. Ids, numbers in names and times
+  differ on every run. The score rows of earlier parts' test accounts don't show: every command filters on this run's
+  `id`. There is **no backfill**: accounts that existed before this part start with an empty ledger (score 50, "New").
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies Part 11B's two migrations,
+confirms there is nothing more to make, runs the whole backend test suite and Part 11B's own tests, the linter and the
+formatter check, and finally audits the credibility ledger of your local database.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                            # 2 migrations the first time, then: No migrations to apply.
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 3400 passed
+python -m pytest apps/reputation -q                 # 405 passed
+ruff check . ; ruff format --check .                # All checks passed! / 268 files already formatted
+python manage.py recompute_reputation --check       # Checked … accounts: every stored score matches the ledger.
+```
+
+**You should see:** the first `migrate` prints two `Applying …` lines:
+
+```text
+  Applying reputation.0001_initial... OK
+  Applying moderation.0005_reputation_permission... OK
+```
+
+(a second run prints `No migrations to apply.`), then `No changes detected` and `System check identified no issues (0
+silenced).`; the full run ends with `3400 passed`, the reputation set with `405 passed`, the next pair is
+`All checks passed!` and `268 files already formatted`, and the last line is `Checked 1298 accounts: every
+stored score matches the ledger.` (your number of accounts differs). Counts may grow later; what matters is that
+nothing fails.
+
+- `reputation.0001_initial` makes the ledger table (`reputation_reputationevent`). `moderation.0005_reputation_permission`
+  lets moderators read it in Django Admin. Both can be undone with `python manage.py migrate moderation 0004` and then
+  `python manage.py migrate reputation zero` (the groups go back to Part 11's permissions). Going back drops the ledger
+  but leaves the stored scores as they were, so after applying them again run `python manage.py recompute_reputation`
+  (without `--check`), which rebuilds every stored score from the ledger.
+- The reputation tests include `test_sequences.py`: 40 seeded random runs of verdicts, reports, reposts, appeals,
+  removals, restores and deletes through the real services, each checked against a separate simulator of the rules and
+  against "control" authors whose posts went straight to the same final outcome. `test_races.py` runs two decisions at
+  once in real threads. Together they take about half a minute.
+- Existing tests changed on purpose: the moderation group's permissions (`test_roles.py` now checks migration 0005), a
+  follower row has a `counts` key, the pipeline's lock test counts the post's lock only (the score now locks the
+  author's account row too), and the admin's post-page query tests also seed ledger rows.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last command) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 124 files, 1711 tests passed
+npm run build
+npm run test:e2e                                    # 41 passed
+cd ..\backend                                       # back to backend\ for steps 3 to 7
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  124 passed (124)` and `Tests  1711
+passed (1711)`. `npm run build` lists the same routes as in Part 11 (Part 11B adds no page). The end-to-end run ends
+with `41 passed`.
+
+- The new end-to-end test (`e2e/credibility.spec.ts`) signs nobody up: it makes an author straight in the database, has
+  the real pipeline stub check two `#true` facts, opens the profile as a visitor ("Credibility: New"), checks a third
+  and reloads ("Credibility 62"), and makes sure no post card shows the score.
+
+#### Step 3: Start the servers and make five accounts
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 7 and
+10.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you make the five accounts with a shell
+command, log three of them in through the API (keeping their login tokens in `$ada`, `$bo` and `$cy`), and save the
+helpers `Mk` (make a post, print its id), `Fetch` (a GET, printing the status code and then the answer), `Send` (any
+request, the same way) and `Rep` (a person's public credibility summary).
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 and 2 leave you there). If you opened a new terminal, first run
+`cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the names are new each run
+@"
+from allauth.account.models import EmailAddress
+from apps.accounts.models import Role, User
+for name, role in (('ada', Role.USER), ('bo', Role.USER), ('cy', Role.USER), ('mod1', Role.MODERATOR), ('mod2', Role.MODERATOR)):
+    user = User.objects.create_user(email=f'part11b-{name}-$id@example.test', username=f'part11b_{name}_$id', password='correct-horse-battery-42', is_email_verified=True, role=role)
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+print(User.objects.filter(email__startswith='part11b-', email__endswith='$id@example.test').count(), 'accounts made')
+"@ | python manage.py shell | Select-Object -Last 1
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+# Login <name>: prints a login token
+function Login($name) {
+@"
+{"email": "part11b-$name-$id@example.test", "password": "correct-horse-battery-42"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-login.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-login.json" http://localhost:8000/api/auth/app/v1/auth/login | ConvertFrom-Json).meta.access_token
+}
+$ada = Login ada; $bo = Login bo; $cy = Login cy    # $ada, $bo, $cy = their login tokens
+"$($ada.Substring(0,10)) $($bo.Substring(0,10)) $($cy.Substring(0,10))"    # three token prefixes, not an error
+$api = 'http://localhost:8000/api/v1'
+# Mk <token> <json>: makes a post, prints its id
+function Mk($token, $json) {
+  $json | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+  (curl.exe -s -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | ConvertFrom-Json).id
+}
+# Send <METHOD> <path> [token] [json body] [fields]: prints the HTTP status, then the answer. `fields` is a list
+# of property names to keep, or a script block `{ param($r) ... }` that picks what to show from the answer.
+function Send($method, $path, $token, $json, $show) {
+  $a = @()
+  if ($token) { $a += '-H', "Authorization: Bearer $token" }
+  if ($json) {
+    $json | Set-Content -Encoding ascii $env:TEMP\rz-body.json
+    $a += '-H', 'Content-Type: application/json', '--data-binary', "@$env:TEMP\rz-body.json"
+  }
+  $out = curl.exe -s -w "`n%{http_code}" -X $method @a "$api$path"
+  $body = if ($out.Count -gt 1) { $out[0..($out.Count - 2)] -join '' } else { '' }
+  if ($show -and $body) {
+    $r = $body | ConvertFrom-Json
+    $shown = if ($show -is [scriptblock]) { & $show $r } else { $r | Select-Object $show }
+    $body = ConvertTo-Json -InputObject $shown -Depth 5 -Compress
+  }
+  "$($out[-1])  $body"
+}
+function Fetch($path, $token, $show) { Send GET $path $token $null $show }   # Fetch <path> [token] [fields]
+function Rep($name, $show) { Fetch "/users/part11b_$($name)_$id/reputation/" $null $show }   # Rep <name> [fields]: the public credibility summary
+"id=$id"                                            # write this down: the browser steps use it
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+5 accounts made
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+id=194213
+```
+
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+- Logging in is limited to 30 a minute per address (Part 1), far more than this part needs.
+
+**If it differs:** an error about `Substring` on a null value means the logins failed (`runserver` isn't running in
+window 1). Start it and run the block again from `$id = Get-Date …`.
+
+#### Step 4: Three checked facts make the score public
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts two facts the stub calls TRUE; you read her public summary and her profile's block. Then
+she posts a third and you read both again.
+
+```powershell
+$f1 = Mk $ada '{"content":"The city opened a new tram line in May #true","post_type":"fact"}'   # three facts the stub calls TRUE
+$f2 = Mk $ada '{"content":"The museum is free on the first Sunday #true","post_type":"fact"}'
+Start-Sleep 3; python manage.py process_pending | Select-Object -Last 1      # checks what the background check has not reached yet
+$summary = { param($r) [ordered]@{ score = $r.score; sample = $r.sample; verified = $r.verified; recent = @($r.recent.kind) } }
+"--- two checked facts: the score is still hidden"; Rep ada $summary
+"--- the profile's block says the same"; Fetch "/users/part11b_ada_$id/" $null { param($r) $r.reputation }
+$f3 = Mk $ada '{"content":"The harbour dredging finished in April #true","post_type":"fact"}'
+Start-Sleep 3; python manage.py process_pending | Select-Object -Last 1
+"--- the third one makes it public"; Rep ada $summary
+"--- the profile"; Fetch "/users/part11b_ada_$id/" $null { param($r) $r.reputation }
+```
+
+**You should see** (the number of posts `process_pending` reports depends on how many the background check had already
+done, and it also checks facts left pending by earlier parts' tests):
+
+```text
+Processed 6 fact posts.
+--- two checked facts: the score is still hidden
+200  {"score":null,"sample":2,"verified":2,"recent":["fact_true","fact_true"]}
+--- the profile's block says the same
+200  {"score":null,"sample":2}
+Processed 0 fact posts.
+--- the third one makes it public
+200  {"score":62,"sample":3,"verified":3,"recent":["fact_true","fact_true","fact_true"]}
+--- the profile
+200  {"score":62,"sample":3}
+```
+
+- Two counted events: `score` is `null` ("Credibility: New" on the website) although the ledger already holds 58.
+  The third one makes it public: `100 · (5 + 3) / (10 + 3)` is 61.5, rounded up to **62**.
+- `verified` counts her posts that are verified now (deleted ones included, as on the profile), and `recent` lists her
+  own-post events, newest first.
+
+#### Step 5: A fact a moderator marks FALSE: the author, a reposter and a reporter
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts a fact the stub can't decide, so it goes to review. While it is under review `bo`
+reposts it and `cy` reports it. Then `mod1` marks it FALSE (the shell command does what the admin's **Mark FALSE**
+button does). You read `ada`'s summary and the two others' own ledgers.
+
+```powershell
+$fu = Mk $ada '{"content":"The river reached a record level in March #unsure","post_type":"fact"}'   # the stub can't decide: review
+Start-Sleep 3; python manage.py process_pending | Select-Object -Last 1
+"--- post u"; Fetch "/posts/$fu/" $ada 'status'
+"--- bo reposts it while it is under review"; Send POST "/posts/$fu/repost/" $bo
+"--- cy reports it"; Send POST "/posts/$fu/report/" $cy '{"reason":"inaccurate"}'
+@"
+from apps.accounts.models import User
+from apps.moderation import services
+services.mark_false('$fu', moderator=User.objects.get(username='part11b_mod1_$id'), public_note='The gauge data says otherwise.')
+print('mod1 marked post u FALSE')
+"@ | python manage.py shell | Select-Object -Last 1
+"--- ada"; Rep ada 'score', 'sample', 'verified', 'false'
+"--- bo's own ledger"; Fetch '/me/reputation/events/' $bo { param($r) @($r.results | Select-Object kind, label, negative, score_after) }
+"--- cy's own ledger"; Fetch '/me/reputation/events/' $cy { param($r) @($r.results | Select-Object kind, label, positive, score_after) }
+"--- bo and cy in public: no own posts checked, so still New"; Rep bo 'score', 'sample'; Rep cy 'score', 'sample', 'recent'
+```
+
+**You should see:**
+
+```text
+Processed 0 fact posts.
+--- post u
+200  {"status":"under_review"}
+--- bo reposts it while it is under review
+201  {"reposted":true}
+--- cy reports it
+201  {"reported":true}
+mod1 marked post u FALSE
+--- ada
+200  {"score":57,"sample":4,"verified":3,"false":1}
+--- bo's own ledger
+200  [{"kind":"repost_false","label":"Repost of a fact labelled FALSE","negative":"0.50","score_after":48}]
+--- cy's own ledger
+200  [{"kind":"report_upheld","label":"Report upheld by a moderator","positive":"0.25","score_after":51}]
+--- bo and cy in public: no own posts checked, so still New
+200  {"score":null,"sample":0}
+200  {"score":null,"sample":0,"recent":[]}
+```
+
+- `ada`: three TRUE and one FALSE: `100 · 8 / 14` is 57.1, so **57** from 4 counted events.
+- `bo` reposted the post while it was still being checked, so its FALSE label costs him N + 0.5 (48); a repost of a
+  post that was already checked would cost nothing.
+- `cy`'s report was upheld by a decision that changed the post, so she gets P + 0.25 (51). Neither of them has a
+  checked post of their own, so in public they are still "New" (`score: null`) and their `recent` list is empty: it
+  only ever shows own-post events.
+- `GET /api/v1/me/reputation/events/` is the person's own ledger, with the weights and the score after each row; only
+  its owner can read it.
+
+#### Step 6: A removal, an appeal and a restore: the reversal row
+
+**Where:** Terminal window 2.
+
+**What this does:** `mod1` removes the first post, `ada` asks for another look, and `mod2` restores the post (the
+admin's **Restore post**). You read her summary after each step, then her own ledger.
+
+```powershell
+@"
+from apps.accounts.models import User
+from apps.moderation import services
+services.remove_post('$f1', moderator=User.objects.get(username='part11b_mod1_$id'), public_note='Wrong line number')
+print('mod1 removed post 1')
+"@ | python manage.py shell | Select-Object -Last 1
+"--- ada after the removal"; Rep ada 'score', 'sample', 'removed'
+"--- ada asks for another look"; Send POST "/posts/$f1/appeal/" $ada '{"reason":"The line number is right."}' 'status', 'appeal_status'
+@"
+from apps.accounts.models import User
+from apps.moderation import services
+services.restore_post('$f1', moderator=User.objects.get(username='part11b_mod2_$id'))
+print('mod2 restored post 1')
+"@ | python manage.py shell | Select-Object -Last 1
+"--- ada after the restore"; Rep ada { param($r) [ordered]@{ score = $r.score; sample = $r.sample; removed = $r.removed; recent = @($r.recent | Select-Object kind, reversed) } }
+"--- ada's own ledger, newest first"; Fetch '/me/reputation/events/' $ada { param($r) @($r.results | Select-Object label, positive, negative, score_after, reversed, appeal) }
+```
+
+**You should see:**
+
+```text
+mod1 removed post 1
+--- ada after the removal
+200  {"score":50,"sample":5,"removed":1}
+--- ada asks for another look
+201  {"status":"removed","appeal_status":"open"}
+mod2 restored post 1
+--- ada after the restore
+200  {"score":57,"sample":4,"removed":0,"recent":[{"kind":"post_removed","reversed":true},{"kind":"fact_false","reversed":false},{"kind":"fact_true","reversed":false},{"kind":"fact_true","reversed":false},{"kind":"fact_true","reversed":false}]}
+--- ada's own ledger, newest first
+200  [{"label":"Reversed: Post removed by a moderator","positive":"0.00","negative":"-2.00","score_after":57,"reversed":false,"appeal":null},{"label":"Post removed by a moderator","positive":"0.00","negative":"2.00","score_after":50,"reversed":true,"appeal":null},{"label":"Fact labelled FALSE","positive":"0.00","negative":"1.00","score_after":57,"reversed":false,"appeal":{"status":null,"can_appeal":true}},{"label":"Fact verified true","positive":"1.00","negative":"0.00","score_after":62,"reversed":false,"appeal":null},{"label":"Fact verified true","positive":"1.00","negative":"0.00","score_after":58,"reversed":false,"appeal":null},{"label":"Fact verified true","positive":"1.00","negative":"0.00","score_after":55,"reversed":false,"appeal":null}]
+```
+
+- The removal costs N + 2 on top of the post's TRUE (a removal adds to the label, it doesn't replace it): `100 · 8 / 16`
+  is **50**, from 5 counted events.
+- The restore doesn't delete anything: it appends a **reversal** row (`negative: "-2.00"`) that cancels the removal, and
+  the score is back to exactly **57**. The removal stays in the history, marked `reversed: true`, in public and in her
+  own ledger.
+- PowerShell prints her ledger as one JSON array; the bash guide prints one row per line.
+- Her own ledger offers an appeal (`can_appeal: true`) on the FALSE row only: it still stands and she hasn't appealed
+  that post. The removal row has none any more (it was reversed), and positive rows never do.
+
+#### Step 7: Follower rows, what the public endpoint refuses, and the audit
+
+**Where:** Terminal window 2.
+
+**What this does:** `bo` follows `ada` so the two lists have a row each, then you check what the endpoints refuse and
+audit the ledger with `recompute_reputation`.
+
+```powershell
+"--- bo follows ada"; Send POST "/users/part11b_ada_$id/follow/" $bo
+"--- ada's followers"; Fetch "/users/part11b_ada_$id/followers/" $null { param($r) @($r.results | Select-Object username, reputation, counts) }
+"--- who bo follows"; Fetch "/users/part11b_bo_$id/following/" $null { param($r) @($r.results | Select-Object username, reputation, counts) }
+"--- a stale token doesn't matter on the public read"; curl.exe -s -o NUL -w "%{http_code}`n" -H "Authorization: Bearer not-a-token" "$api/users/part11b_ada_$id/reputation/"
+"--- an unknown name"; Fetch "/users/nobody_$id/reputation/" $null 'code'
+"--- your own ledger needs a login"; Fetch '/me/reputation/events/' $null 'code'
+"--- never cached"; curl.exe -sI "$api/users/part11b_ada_$id/reputation/" | Select-String -Pattern '^cache-control'
+"--- the whole public answer: no weights, no reporters, no moderators"; Rep cy
+python manage.py recompute_reputation --check
+python manage.py recompute_reputation --user part11b_ada_$id
+```
+
+**You should see** (your number of accounts differs):
+
+```text
+--- bo follows ada
+201  {"is_following":true}
+--- ada's followers
+200  [{"username":"part11b_bo_194213","reputation":{"score":null,"sample":0},"counts":{"verified":0}}]
+--- who bo follows
+200  [{"username":"part11b_ada_194213","reputation":{"score":57,"sample":4},"counts":{"verified":3}}]
+--- a stale token doesn't matter on the public read
+200
+--- an unknown name
+404  {"code":"not_found"}
+--- your own ledger needs a login
+401  {"code":"not_authenticated"}
+--- never cached
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+--- the whole public answer: no weights, no reporters, no moderators
+200  {"score":null,"sample":0,"verified":0,"false":0,"removed":0,"recent":[]}
+Checked 1303 accounts: every stored score matches the ledger.
+Recomputed 1 account: 0 changed.
+```
+
+- A follower or following row carries the same `reputation` block as the profile plus `counts.verified`, which the
+  website shows as "Credibility 57 · 3 verified".
+- The public summary never looks at the login: a wrong or expired token is still a 200 (the answer is the same for
+  everyone). The whole answer is the score, the counted events, three counts and the recent own-post events: no weights,
+  no reporters, no moderators.
+- `recompute_reputation --check` compares every stored score with its ledger, and the ledger with itself (each row's
+  score, the order of the rows, every reversal's pair). Without `--check` it rebuilds the stored scores and says how
+  many changed (here none).
+
+#### Step 8: The score on the website
+
+**Where:** Browser, `http://localhost:3000` (start window 3 first). No login is needed: these pages are public.
+
+Window 3:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run dev                                         # leave it running
+```
+
+**What this does:** Opens `ada`'s profile, `cy`'s, and the two lists, at desktop width and at phone width.
+
+1. Open `http://localhost:3000/u/part11b_ada_<id>` (your `id` from step 3).
+2. Click **How this is calculated**, then go back.
+3. Open `http://localhost:3000/u/part11b_cy_<id>` and hold the mouse over "Credibility: New".
+4. Open `http://localhost:3000/u/part11b_ada_<id>/followers`, then `http://localhost:3000/u/part11b_bo_<id>/following`.
+5. Make the window narrow (or open the browser's device toolbar at 390 px wide) and repeat steps 1 and 4.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 1: the profile header | Under the name: "Joined October 2026 · 4 posts · **Credibility 57** How this is calculated". The score is plain grey text: no teal, no tick or seal (those mean a verified fact). The counters say 3 Verified and 1 FALSE. |
+| Step 1: the posts below | Four cards (one FALSE · REVIEWED, three VERIFIED 95%). **No card shows a score.** |
+| Step 2 | The link opens `/how-it-works#credibility`. The page is still the placeholder; its "How this is calculated" section arrives with Part 15. |
+| Step 3: cy's header | "**Credibility: New**"; the tooltip says "A score shows once 3 of their posts have been checked or removed." (screen readers hear the same). |
+| Step 4: ada's followers | `bo`'s row: under the name a grey chip **Credibility: New** and "· 0 verified". The chip sits outside the name link. |
+| Step 4: who bo follows | `ada`'s row: the chip **Credibility 57** and "· 3 verified". |
+| Step 5: 390 px | The header's meta row wraps onto two lines and the rows keep the chip under the name; nothing scrolls sideways. |
+
+#### Step 9: The ledger in Django Admin
+
+**Where:** Browser (Django Admin).
+
+**What this does:** Logs in as `mod1` and looks at the ledger list, a post's events and an account's score.
+
+1. Open `http://localhost:8000/admin/` and log in with the **email** `part11b-mod1-<id>@example.test` and the password
+   `correct-horse-battery-42`.
+2. In the left sidebar, under **Credibility**, click **Credibility events**. Type `part11b_ada_<id>` in the search box
+   and press **Search**. Then, in the filter column, click **By kind → Reversal**.
+3. Clear the search and filters, then open **Posts**, search `part11b_ada_<id>` with **By show → All posts**, and open
+   "The river reached a record level in March #unsure". Scroll to the bottom.
+4. Open **Users**, search `part11b_ada_<id>`, open her account and look at **Account state**. Click **View events**.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 2: the list | Six rows for `ada`, newest first: *Reversal* (P / N "N −2", score after 57, Reversed ✗), *Post removed by a moderator* ("N +2", 50, Reversed ✓), *Fact labelled FALSE* ("N +1", 57), and three *Fact verified true* ("P +1", 62, 58, 55). Each links its post. **Reversal** keeps one row. There is no **Add** button, and a row's own page is read-only (it shows the moderator action that caused it and the row a reversal cancels). |
+| Step 3: the post page | Below the reports and the moderation history, **Credibility events**: `ada` *Fact labelled FALSE* N +1, `bo` *Repost of a fact labelled FALSE* N +0.5 and `cy` *Report upheld by a moderator* P +0.25, each with the score after it. |
+| Step 4: the account | **Credibility:** "57 · 4 counted events · View events". There are no score fields to edit. **View events** opens the ledger list filtered to her six rows. |
+
+- Moderators, senior moderators and superusers can read the whole ledger; nobody can change it in the admin. An account
+  below three counted events shows "New (2 counted events, score 55)" there instead.
+
+#### Step 10: Look at the rows, and clean up
+
+**Where:** Terminal window 2.
+
+**What this does:** Lists every ledger row of this run, oldest first, then deletes the five accounts (their posts and
+their ledgers go with them) and audits the ledger again.
+
+```powershell
+@"
+from apps.reputation.models import ReputationEvent
+rows = ReputationEvent.objects.filter(user__email__startswith='part11b-', user__email__endswith='$id@example.test').select_related('user', 'moderation_action').order_by('created_at')
+for r in rows:
+    print(r.user.username[8:-7].ljust(4), r.kind.ljust(14), str(r.positive).rjust(5), str(r.negative).rjust(5), str(r.score_after).rjust(3), '|', r.moderation_action.get_action_display() if r.moderation_action else 'pipeline')
+"@ | python manage.py shell | Select-Object -Last 8
+@"
+from apps.accounts.models import User
+total = User.objects.filter(email__startswith='part11b-', email__endswith='$id@example.test').delete()[0]
+print(total, 'rows deleted: the 5 accounts, their posts, their credibility events and what hung on them')
+"@ | python manage.py shell | Select-Object -Last 1
+python manage.py recompute_reputation --check
+```
+
+**You should see** (the order of the first three rows and the number of deleted rows can differ):
+
+```text
+ada  fact_true       1.00  0.00  55 | pipeline
+ada  fact_true       1.00  0.00  58 | pipeline
+ada  fact_true       1.00  0.00  62 | pipeline
+cy   report_upheld   0.25  0.00  51 | Marked FALSE
+ada  fact_false      0.00  1.00  57 | Marked FALSE
+bo   repost_false    0.00  0.50  48 | Marked FALSE
+ada  post_removed    0.00  2.00  50 | Removed
+ada  reversal        0.00 -2.00  57 | Restored
+28 rows deleted: the 5 accounts, their posts, their credibility events and what hung on them
+Checked 1298 accounts: every stored score matches the ledger.
+```
+
+- Each row shows who it is for, its kind, its P and N, the score right after it, and what caused it (the pipeline, or
+  the moderator action). `cy`'s and `bo`'s rows were written in the same transaction as `ada`'s FALSE.
+- Deleting an account deletes its ledger (other people's rows about its posts stay, with an empty post link).
+  `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole
+  local database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway, and your admin address is the default one
+  unless you set `ADMIN_URL_PATH` in `backend\.env` (it is never printed here).

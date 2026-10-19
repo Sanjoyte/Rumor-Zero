@@ -1,5 +1,6 @@
 """Creating, deleting and reporting posts, the fact quota, and writing pipeline results
-(ARCHITECTURE §3, §4, §4b, §5, §6).
+(ARCHITECTURE §3, §4, §4b, §5, §6). A pipeline label also settles the author's and the reposters'
+credibility events (§4a) in the same transaction.
 
 Only this module and `apps/moderation/services.py` change `Post.status`. There is no HTTP
 here: the views turn these domain errors into responses.
@@ -18,6 +19,7 @@ from apps.accounts.models import User
 from apps.core.services import get_platform_settings
 from apps.pipeline import routing
 from apps.posts.models import Post, PostStatus, PostType
+from apps.reputation import services as reputation_services
 from apps.social.feed import bust_following_feed
 
 logger = logging.getLogger(__name__)
@@ -264,6 +266,10 @@ def record_pipeline_result(post_id, result, *, claimed_attempts, now):
         outcome = routing.apply_pipeline_result(post, result, get_platform_settings(), now)
         if outcome != routing.Outcome.IGNORED:
             post.save(update_fields=_RESULT_FIELDS)
+        if outcome == routing.Outcome.LABELLED:
+            # The label is public now, so it counts (§4a). A result held back for a review
+            # (`entered_review`, `updated_review`) records nothing: a late TRUE stays private.
+            reputation_services.settle_post(post, now=now)
         return outcome
 
 

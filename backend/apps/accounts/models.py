@@ -31,6 +31,8 @@ ROLE_GROUPS = {
     Role.SENIOR_MODERATOR: (MODERATORS_GROUP, SENIORS_GROUP),
 }
 MANAGED_GROUP_NAMES = (MODERATORS_GROUP, SENIORS_GROUP)
+# Written only by `apps/reputation/services.py` (and `recompute_reputation`), never by a save.
+REPUTATION_FIELDS = frozenset({"reputation_score", "reputation_sample"})
 
 
 class UserManager(BaseUserManager):
@@ -146,6 +148,18 @@ class User(AbstractBaseUser, PermissionsMixin):
         sync_groups = touches_access and (
             self._state.adding or getattr(self, "_loaded_role", None) != self.role
         )
+        if update_fields is None and not self._state.adding and not kwargs.get("force_insert"):
+            # A full save of a loaded account (allauth's `set_password`, the admin form) would
+            # write back the score it read earlier in the request, undoing a ledger write that
+            # committed meanwhile. It writes every other loaded field instead (Part 11B).
+            deferred = self.get_deferred_fields()
+            kwargs["update_fields"] = [
+                field.attname
+                for field in self._meta.concrete_fields
+                if not field.primary_key
+                and field.attname not in deferred
+                and field.attname not in REPUTATION_FIELDS
+            ]
 
         super().save(*args, **kwargs)
 

@@ -83,8 +83,8 @@ Conventions:
 | is_active, is_staff, is_superuser, last_login | Django | |
 | avatar_version | varchar(16) null | null = no photo (initials). Set by the avatar service (14B); the photo URL is built from it (§9). Replaces the old unused `avatar_url`. |
 | avatar_uploads_blocked | bool, default false | set by a moderator (14B) |
-| reputation_score | smallint, default 50, check 0–100 | denormalised credibility score. Written **only** by `apps/reputation/services.py` (§4a) |
-| reputation_sample | int, default 0 | un-reversed own-post events counted in the score; the score is public only when ≥ 3 |
+| reputation_score | smallint, default 50, check 0–100 | denormalised credibility score. Written **only** by `apps/reputation/services.py` (§4a, a `bulk_update`) and repaired by `recompute_reputation`. **A full `User.save()` never writes it** (Part 11B): a save of a loaded account without `update_fields` (allauth's `set_password`, the admin form) writes every other loaded field, so it can't write back a score read earlier in the request |
+| reputation_sample | int, default 0 | un-reversed own-post events counted in the score; the score is public only when ≥ 3. Same writers and the same `User.save` rule as `reputation_score` |
 | emergency_blocked_until | timestamptz null | no emergency posts before this time: set automatically after a FALSE emergency, or by a moderator (§4b) |
 | created_at | timestamptz, indexed | |
 
@@ -223,19 +223,23 @@ Written only by `apps/moderation/services.py` (`file_appeal`, and the five actio
 
 ### reputation_events: `reputation.ReputationEvent` (append-only ledger, Part 11B)
 
+Table `reputation_reputationevent`.
+
 | Field | Type | Notes |
 |---|---|---|
 | id | uuid PK | |
-| user | FK users CASCADE | whose score changes |
-| kind | `fact_true` \| `fact_false` \| `emergency_false` \| `post_removed` \| `repost_true` \| `repost_false` \| `repost_emergency_false` \| `repost_removed` \| `report_upheld` \| `reversal` | weights in §4a |
-| positive, negative | numeric(6,2) | the event's P and N weights (both ≥ 0); a `reversal` row carries the negated values of the row it cancels |
-| post | FK posts SET_NULL null | the post the event is about |
-| moderation_action | FK moderation_actions SET_NULL null | the moderator action that caused it, if any |
-| reverses | FK self null, **unique** | set only on `reversal` rows (check: `kind='reversal'` iff set); a row can be reversed once |
-| score_after | smallint | the user's score right after this row (drives the trend chart) |
-| created_at | timestamptz | index(user, created_at) |
+| user | FK users CASCADE, `related_name="reputation_events"` | whose score changes. No FK index of its own: `repevent_user_created_idx` leads with it |
+| kind | `fact_true` \| `fact_false` \| `emergency_false` \| `post_removed` \| `repost_true` \| `repost_false` \| `repost_emergency_false` \| `repost_removed` \| `report_upheld` \| `reversal` | `EventKind` with plain-language labels ("Fact labelled FALSE", "Repost of a fact verified true", "Report upheld by a moderator", …); weights in §4a; check `reputation_event_kind_valid` |
+| positive, negative | numeric(6,2) | the event's P and N weights; a `reversal` row carries the negated values of the row it cancels. Check `reputation_event_weights_sign`: a reversal has both ≤ 0, every other row both ≥ 0 |
+| post | FK posts SET_NULL null, `related_name="reputation_events"`, indexed | the post the event is about (`settle_post` reads a post's rows by it) |
+| moderation_action | FK moderation_actions SET_NULL null, no index | the moderator action that caused it (the Mark FALSE or Remove that earned a `report_upheld`, the Restore that reversed a removal); null for the pipeline |
+| reverses | `OneToOneField(self, CASCADE, null, related_name="reversed_by")` | set only on `reversal` rows (check `reputation_event_reverses_iff_reversal`); the unique index means a row is reversed at most once |
+| score_after | smallint, check 0–100 | the user's score right after this row (drives 11D's trend) |
+| created_at | timestamptz, `default=timezone.now` | **strictly increasing per user**: the service writes `max(now, the user's last row + 1 µs)`, so a writer whose `now` is older (it waited for a lock) still comes after the row it waited for, and 11D's "last `score_after` of each day" and the cursor never see ties |
 
-Rows are never updated or deleted, except by account deletion (CASCADE). Admin is read-only.
+- Index `repevent_user_created_idx (user, created_at)` serves the totals, the reporter cap, both endpoints and the trend.
+- **Append-only in code:** `save()` of an existing row and `delete()` raise (as `ModerationAction`). Rows go only with their account (CASCADE, through the collector). A post's hard delete only nulls the link: `SET_NULL` is a queryset `UPDATE`, which calls neither method, so "never updated" has that one exception. A post's soft delete (D6) changes nothing.
+- Written only by `apps/reputation/services.py`. Admin is read-only (§8).
 
 ### avatars: `accounts.Avatar` (Part 14B)
 
@@ -273,8 +277,8 @@ A separate table keeps image bytes out of every `users` query.
 | Report threshold while an emergency is active | 2 | `EMERGENCY_REPORT_THRESHOLD` | ✅ |
 | Emergency ban after a FALSE emergency (days) | 30 | `EMERGENCY_FALSE_COOLDOWN_DAYS` | ✅ |
 | Pinned emergencies shown per feed | 3 (+ "Show all") | code | — |
-| Credibility: start / prior weight / public after | 50 / 10 imaginary events / 3 counted events | code (`apps/reputation/scoring.py`) | — |
-| Credibility: reporter credit cap | 4 upheld reports per 30 days | code | — |
+| Credibility: start / prior weight / public after | 50 / 10 imaginary events / 3 counted events; the score is rounded **half up** (Part 11B) | code (`apps/reputation/scoring.py`: `START_SCORE`, `PUBLIC_AFTER`) | — |
+| Credibility: reporter credit cap | 4 un-reversed `report_upheld` credits per rolling 30 days (one exactly 30 days old no longer counts); at the cap no row is written | code (`REPORT_CREDIT_CAP`, `REPORT_CREDIT_WINDOW`) | — |
 | Sources per fact post | 5 | code (+ DB check) | — |
 | Source max length | 500 chars each | code (+ column type) | — |
 | Profile photo limits | ≤ 5 MB, ≤ 25 MP, ≥ 128×128 px; stored as WebP 256 + 96 px | code (§4e) | — |
@@ -367,7 +371,7 @@ Also:
 - **Who may act on what (Part 10, `apps/moderation/rules.py`):** nobody acts on **their own post, except a superuser**, and every action refuses a post its author **deleted**. Each refusal has a code (`deleted`, `own_post`, `opinion`, `not_under_review`, `no_reports`, `no_prior_status`, `already_removed`, `already_escalated`; Part 11 adds `no_removal_appeal` and `original_moderator`) and a short text; a mixed selection changes what it can and lists the rest as skipped. The services re-check under the row lock.
 - **Leaving review** (Mark verified/FALSE, Dismiss back to the old status, Remove) clears `flagged_reason`, `pre_review_status`, `review_started_at` and `escalated_at`, so a later review doesn't look old or escalated (the `escalated` row stays in the log). **No moderator action touches `pipeline_*`** (`pipeline_attempts` is Part 9's claim token) or `confidence_score`.
 - "Active emergency" is always computed at read time from the stored columns (`is_active_emergency`, below). No job ever flips a flag.
-- Every verdict, removal, restore and appeal outcome also calls the reputation service in the same transaction (§4a).
+- Every verdict, removal, restore and appeal outcome also calls the reputation service in the same transaction (§4a, Part 11B): `moderation.services._perform` calls `reputation.services.settle_post` after its audit row for **every action but Escalate** (Dismiss can make a late TRUE public; Keep removed finds nothing to do), and `posts.services.record_pipeline_result` calls it only when the outcome is `labelled` (a result held for a review records nothing, so a late TRUE stays private). `file_appeal`, `record_report`, `delete_post`, `repost` and `unrepost` never touch the ledger. `reports.services.resolve_open_reports` returns the reporters it resolved, for the credit.
 
 ### Routing: pure functions in `apps/pipeline/routing.py` (no I/O, exhaustively unit-tested)
 
@@ -451,12 +455,15 @@ All status writes go through `apps/posts/services.py` (plus `apps/moderation/ser
 **Formula** (pure functions in `apps/reputation/scoring.py`):
 
 ```python
-def score(p, n):              # p, n = sums of the positive / negative weights of all ledger rows (reversals included)
-    return round(100 * (5 + p) / (10 + p + n))   # starts at 50; the 10 imaginary events damp single-post swings
+def score(p, n):   # p, n = sums of the positive / negative weights of all ledger rows (reversals included)
+    # round(100 * (5 + p) / (10 + p + n)), a half rounded UP, computed exactly in quarter units:
+    P, N = 4 * p, 4 * n; D = 40 + P + N
+    return (200 * (20 + P) + D) // (2 * D)        # starts at 50; the 10 imaginary events damp swings
 ```
 
-- **Public only when `reputation_sample ≥ 3`.** Below that the API returns `score: null` and the UI says "New". Emergency eligibility always uses the stored score.
-- A new account moves 50 → 45 after one FALSE, 50 → 55 after one TRUE, and 50 → 38 after a FALSE emergency.
+- **Half up, exactly** (Part 11B): Python's `round` rounds a half to even ((0, 30) is 12.5 and must give 13), and floats can't be trusted near a half. Every weight is a multiple of 0.25, so the sums are too; `score` refuses a negative sum or one that isn't a quarter.
+- **Public only when `reputation_sample ≥ 3`** (`scoring.public_score`). Below that the API returns `score: null` and the UI says "New". Emergency eligibility always uses the stored score.
+- A new account moves 50 → 45 after one FALSE, 50 → 55 after one TRUE, 50 → 38 after a FALSE emergency, and to 62 after three TRUE (61.5).
 
 **Events** (the only ones that exist):
 
@@ -465,10 +472,10 @@ def score(p, n):              # p, n = sums of the positive / negative weights o
 | `fact_true` | author | a fact post becomes `verified_true` (pipeline or moderator) | P + 1 |
 | `fact_false` | author | a fact post becomes `verified_false` | N + 1 |
 | `emergency_false` | author | an `is_emergency` post becomes `verified_false` (replaces `fact_false`) | N + 3 |
-| `post_removed` | author | a moderator removes the post (any type) | N + 2 |
-| `report_upheld` | reporter | the reported post is removed or marked FALSE by a moderator while the report is open; at most 4 counted per reporter per rolling 30 days | P + 0.25 |
-| `repost_true` / `repost_false` / `repost_emergency_false` / `repost_removed` | reposter | the original reaches that outcome **and** the repost was made while it was `pending` or `under_review` (`status_at_repost`) | P + 0.25 / N + 0.5 / N + 1 / N + 0.5 |
-| `reversal` | same user as the row it cancels | the outcome is overturned (§ below) | the negated weights |
+| `post_removed` | author | a moderator removes the post (any type); it **adds to** the label's event, it doesn't replace it (user decision 2026-10-13): a removed FALSE post costs N+1 and N+2 | N + 2 |
+| `report_upheld` | reporter | a moderator's **Remove**, or a **Mark FALSE that changed the label** (the post wasn't already FALSE before the review: a pipeline FALSE that reports sent to review, or a label appeal, credits nobody; user decision 2026-10-13), resolves the report while it is open. Never the deciding moderator's own report. At most 4 un-reversed credits per reporter per rolling 30 days | P + 0.25 |
+| `repost_true` / `repost_false` / `repost_emergency_false` / `repost_removed` | reposter | the original reaches that outcome **and** the repost was made while it was `pending` or `under_review` (`status_at_repost`, read literally: a repost made during a review counts when the review ends) | P + 0.25 / N + 0.5 / N + 1 / N + 0.5 |
+| `reversal` | same user as the row it cancels | the outcome is overturned (below) | the negated weights |
 
 Nothing else changes the score:
 - An emergency verified TRUE is a plain `fact_true`, with no bonus.
@@ -476,24 +483,33 @@ Nothing else changes the score:
 - Opinions only count when removed.
 - A failed appeal costs nothing.
 - Reposting an already-checked post earns nothing.
+- Reviews freeze the score: entering review changes nothing, and a pipeline's late TRUE held in `pre_review_status` records nothing until it becomes public (at a Dismiss, dated then).
+
+**One reconciling writer** (`reputation.services.settle_post`, Part 11B; it replaces the four functions the task first named). A post's events are kept in step with its *state*, not written event by event:
+- Every row belongs to one of two **slots**. **LABEL**: the author's `fact_*`/`emergency_false`, the reposters' `repost_true`/`repost_false`/`repost_emergency_false`, and the `report_upheld` rows a Mark FALSE earned. **REMOVAL**: `post_removed`, `repost_removed`, and the `report_upheld` rows a Remove earned (a credit's slot comes from its `moderation_action`).
+- `scoring.desired(status, is_emergency)`: `verified_true` sets LABEL to TRUE, `verified_false` to FALSE (EMERGENCY FALSE for an emergency); **any other status keeps LABEL as it is** (a review, `pending`, a removed post keeping its label). `removed` sets REMOVAL; any other status empties it.
+- `scoring.changes()` then **reverses** every un-reversed row of a set slot whose kind no longer matches (a credit matches only a negative outcome, so a FALSE that becomes TRUE also reverses the Mark FALSE's credits; user decision 2026-10-13) and **adds** what is missing: the author's row; a row for every eligible reposter (a current repost made while undecided, **or** an un-reversed reposter row they already hold in the slot: a repost undone after the verdict keeps its row and moves to the new kind on a re-label, one undone before any verdict gets nothing); and the reporters the caller passes, in the action's slot.
+- So a re-label reverses the old outcome for the author **and every reposter** and records the new one; a **Restore** reverses only the REMOVAL slot (author, reposters and that removal's credits) and keeps the label; Keep removed, a re-sent verdict or Mark FALSE upholding a label appeal find nothing to do. Running it twice writes nothing (**idempotent**), and an overturned appeal or a restore returns everyone to exactly what the final outcome alone would have given them.
 
 **Rules**
-- **Idempotent:** at most one un-reversed outcome row per (user, post, role). Re-applying the same verdict is a no-op.
-- **Re-labels:** when a label changes (moderator re-decision, appeal overturned, restore), the service appends `reversal` rows for the old outcome, for the author **and every reposter**, then records the new outcome.
+- **Writes:** only `apps/reputation/services.py` writes the ledger and `users.reputation_score` / `reputation_sample` (a `bulk_update`, so `User.save` and its group sync never run; `recompute_reputation` repairs them). It is called explicitly (no signals) from `posts.services` and `moderation.services`, inside their transaction, **after the caller has locked the post** (`settle_post` raises outside a transaction).
+- **Locks:** the post first (the caller's `FOR NO KEY UPDATE`), then every affected user, **sorted by id, with `FOR NO KEY UPDATE`**, not a plain `FOR UPDATE`: a moderator's audit row and `moderated_by` take `KEY SHARE` on users' rows at commit (the foreign keys are deferred), and a plain `FOR UPDATE` on someone who is deciding another post at the same time deadlocks with it (a race test shows it). Never a user and then a post (Part 14's account deletion must keep this order); one `settle_post` per transaction. Nothing to do means nothing is locked.
+- **The cap is read after the users' lock** (two decisions at once would both see room for one more), and so are the totals: one grouped aggregate per write (Postgres refuses an aggregate with `FOR UPDATE`, so the lock is its own query). Each new row's `score_after` runs through the user's rows in the order they are written (reversals first, then additions).
 - **Deletion:** deleting a post (D6) doesn't undo its events, and undoing a repost after the verdict doesn't either.
-- **Writes:** only `apps/reputation/services.py` writes the ledger and `users.reputation_score` / `reputation_sample`. It is called explicitly (no signals) from `posts.services` and `moderation.services`, inside their transaction, with `select_for_update()` on the user row. `score_after` is stored on every row.
-- **Recompute:** `python manage.py recompute_reputation [--user …] [--check]` rebuilds the denormalised fields from the ledger; `--check` fails on any difference.
+- **No backfill** (user decision 2026-10-13): the ledger started empty in Part 11B. A post labelled before it gets its missing events at its next moderator action, dated that day.
+- **Recompute:** `python manage.py recompute_reputation [--user <username>] [--check]` rebuilds the two stored fields from the ledger in chunks of 500 accounts (each chunk locked as the service locks), and prints "Recomputed N accounts: M changed.". `--check` writes nothing and fails (non-zero exit) on any stored difference, on a `score_after` that doesn't follow from the rows before it, on times that don't strictly increase, and on a reversal that cancels another person's row, another reversal, or not exactly its row.
 
-**Display**
-- The score appears in the profile header, user rows and people search, plus the Credibility widget (ring, counts, 30-day trend; 11D).
-- The owner's full history is in settings, with reversed rows marked and an "Ask for another look" link on each negative row.
-- A "How this is calculated" section lives on `/how-it-works#credibility`.
+**Display** (Part 11B; 11D adds the widget and the trend)
+- **Neutral** (user decision 2026-10-13): grey `on-surface-variant` text, never the teal or the `verified` seal that mean a verified fact. The profile header's meta row reads "Credibility 72" or "Credibility: New" (with "A score shows once 3 of their posts have been checked or removed." as its title and screen-reader text) and a "How this is calculated" link; follower/following rows show c3's neutral chip "Credibility 72" or "Credibility: New" and "· 84 verified" (no link in rows).
+- The score appears in the profile header, user rows and people search (Part 12), plus the Credibility widget (ring, counts, 30-day trend; 11D).
+- The owner's full history (`GET /api/v1/me/reputation/events/`) is shown in settings, with reversed rows marked and an "Ask for another look" link on each negative row (11D/14).
+- A "How this is calculated" section lives on `/how-it-works#credibility` (the text and the anchor arrive with Part 15).
 - The score is **never shown on post cards**, and people are never ranked by it.
 
 **Appeal path and legal caution (guide §16)**
 - Label appeals (FALSE) and removal appeals (§4) both exist.
 - An overturned appeal reverses the events for the author and every reposter, so the score returns exactly to what it would have been.
-- The ledger is the audit trail.
+- The ledger is the audit trail; moderators and up can read all of it in Django Admin (§8).
 - The Terms of Service wording about labels and the score needs legal review before launch.
 
 ## 4b. Emergency posts (D5, ANALYSIS f-1; Part 11C)
@@ -789,7 +805,7 @@ Other settings:
 Part 10 built the panel in `apps/moderation/` (`rules.py` the pure rules, `services.py` the five actions, `roles.py` the groups, `admin.py` the screens) and, for accounts and settings, in `apps/accounts/admin.py` and `apps/core/admin.py`.
 
 - **Roles** (Groups and model permissions, synced from `User.role` by `User.save`; the groups and their permissions are created by data migration `moderation.0002_role_groups`, which holds its own frozen copy of the lists in `roles.py`; `test_roles.py` fails until a later change to a list adds a migration):
-  - *Moderator* (group "Moderators"): `posts.view_post`, `posts.change_post` (gates the actions; the page itself stays read-only), `reports.view_report`, `social.view_comment`, `social.change_comment`, `accounts.view_user`, `core.view_platformsettings`.
+  - *Moderator* (group "Moderators"): `posts.view_post`, `posts.change_post` (gates the actions; the page itself stays read-only), `reports.view_report`, `social.view_comment`, `social.change_comment`, `accounts.view_user`, `core.view_platformsettings`, `moderation.view_appeal` (Part 11, migration `0004`), `reputation.view_reputationevent` (Part 11B, migration `0005_reputation_permission`; user decision 2026-10-13: moderators and up read the whole credibility ledger). Each later list change adds a migration with its own frozen lists; `0005`'s reverse returns to `0004`'s lists.
   - *Senior moderator* (in both groups; extras only): `accounts.change_user`, `accounts.delete_user`, `core.change_platformsettings`, `moderation.view_moderationaction`, `admin.view_logentry`.
 
 | Capability | Non-staff | Moderator | Senior | Superuser |
@@ -804,6 +820,7 @@ Part 10 built the panel in `apps/moderation/` (`rules.py` the pure rules, `servi
 | Users: email, password, profile, `is_superuser` | none | none | none | ✓ |
 | Platform settings (all eleven fields) | none | view | edit | ✓ |
 | Full moderation log; Django's admin log; History pages | none | none | ✓ | ✓ |
+| Credibility ledger (the whole list, a post's events, an account's link; read-only) | none | ✓ | ✓ | ✓ |
 | Bookmarks, likes, follows, reposts | none | none | none | ✓ (unchanged) |
 
 - **Review queue:** `PostAdmin`, which is **read-only for everyone** (`has_change_permission` is always False; a POST to a post's change URL is a 403). Every change goes through `moderation.services`.
@@ -812,7 +829,7 @@ Part 10 built the panel in `apps/moderation/` (`rules.py` the pure rules, `servi
   - Filters: Show, **appeal** (FALSE label / Removal: posts with an *open* appeal of that kind; Part 11), flagged reason, type, status, Escalated, "Deleted by author". The emergency filter belongs to 11C. The Reason column reads "Appeal (FALSE label)" or "Appeal (removal)" (the flag is the same; the status tells them apart).
   - Default order: `-report_count`, then **in the queue since** ascending (longest wait first, nulls last), then `-created_at`. "In the queue since" is `review_started_at` for a post under review and the open appeal's `created_at` for a removed post (the *Waiting* column and its sort use the same expression). 11C puts **active emergencies first**.
   - Search: content, author username. 100 posts a page; the page uses a constant number of queries.
-  - The post page: fields grouped as Post / Review / Pipeline / Emergency (all read-only), with three inlines, the **appeal** (kind, status, the author's reason, created, original moderator, resolved by and at; viewable with `moderation.view_appeal`, read-only, one query with its two moderators), **reports** (time, reporter, the reporter's account age when reporting, reason, details, whether it counts, status) and **moderation history** (time, action, moderator, from → to, public note, notes; visible with `posts.view_post`, so moderators see it without the full log). 11B adds the credibility events.
+  - The post page: fields grouped as Post / Review / Pipeline / Emergency (all read-only), with three inlines, the **appeal** (kind, status, the author's reason, created, original moderator, resolved by and at; viewable with `moderation.view_appeal`, read-only, one query with its two moderators), **reports** (time, reporter, the reporter's account age when reporting, reason, details, whether it counts, status) and **moderation history** (time, action, moderator, from → to, public note, notes; visible with `posts.view_post`, so moderators see it without the full log), and **credibility events** (Part 11B: time, user, kind, "P / N" such as "N +1" or a reversal's "N −1", score after; oldest first; viewable with `reputation.view_reputationevent`, read-only, one query with the users).
 - **The five actions**, bulk actions on the list and buttons on the post page, each calling `moderation.services` once per post (own transaction, row locked, rules re-checked) and writing one `moderation_actions` row:
   - *Mark verified*, *Mark FALSE* (fact posts only; optional public note), *Dismiss reports*, *Remove posts* (optional "reason shown to the author"), *Escalate to senior*. *Restore post* and *Keep removed* (Part 11: the two ways to resolve a removal appeal; internal notes only, and the confirmation's status column reads "Under review" where Restore sends a checked fact to review) make it seven; *Demote emergency* is 11C. A button or a row is offered only when `rules.refusal` allows it: Restore and Keep removed need a removed post with an open removal appeal, Escalate is also offered there, and none of the appeal actions is offered to the moderator who made the first decision (seniors and superusers excepted). **`AppealAdmin`** lists every appeal read-only for moderators and up (created, post, author, kind, status, original moderator, resolved by and at; filters kind, status, created; search by the author's username); the author's words show on an appeal's own page, not in the list.
   - **Confirmation:** the first POST renders a page listing the posts that will change (claim, type, status → new status, reason, reports, pipeline) and the skipped ones with their reason, with the note fields (public note ≤ 500 code points, internal notes ≤ 2,000). It carries the evaluated, capped ids (at most **100** posts; more is an error) and **never** `select_across`: the apply step acts on exactly the posts shown. The form posts back to the same full URL, so the filters survive. The result is a success message ("Marked 3 posts verified.") and a warning for refusals found under the lock ("Skipped 2: 1 opinion: no verdict, 1 not under review.").
@@ -823,7 +840,7 @@ Part 10 built the panel in `apps/moderation/` (`rules.py` the pure rules, `servi
 - Users: *Block emergency posting* (11C); *Remove photo*, *Block photo uploads* (14B). These are logged with `subject_user`.
 - Reposts and bookmarks (Part 7B): `RepostAdmin` is a read-only list (user, post, status at repost, created; filter by status at repost; search by username). `BookmarkAdmin` is read-only and **superuser-only** (`has_view_permission` is `is_superuser`, so Django also leaves it off the admin index): a moderator holding every bookmark permission still gets 403, because bookmarks are private (§4d).
 - Reports (Part 8): `ReportAdmin` is a read-only list (post, reporter, reason, status, whether it counts, created; filters status, reason, counts, created; search by reporter username; no add, change or delete). The list and `__str__` never show the details text; the page of one report does, for whoever may view it (moderators, `reports.view_report`). Reports are resolved only by the moderation services (`reports.services.resolve_open_reports` sets `status`, `resolved_by` and `resolved_at` together).
-- Credibility ledger: read-only list (filters by kind; search by username). UserAdmin shows the score with a link to the user's rows (11B).
+- **Credibility ledger** (Part 11B; `apps/reputation/admin.py`): `ReputationEventAdmin` is a read-only list for moderators and up (time, user, kind, P / N, score after, the post linked by its excerpt, "Reversed" from an `Exists`; filters kind and created; search by username; `?user__id__exact=<id>` lists one account's rows; no add, change or delete; constant queries). A row's own page shows its `moderation_action` and the row it `reverses`. **`UserAdmin`** shows a read-only **Credibility** field instead of the two raw columns in "Account state": "72 · 23 counted events · View events" when public, "New (2 counted events, score 55) · View events" otherwise, the link opening the account's rows. The two columns are never in a form.
 - **Header:** the admin shows the logo (`core/brand/logo-admin.png`, §14: the full wordmark on its `#283044` plate, with the header taking the plate's colour) and "Rumor Zero moderation" (`templates/admin/base_site.html`; `site_header`, `site_title` and `index_title` are set in `apps/core/admin.py`; the login page shows it too). The image has an empty `alt`: the name is written beside it. It is served at `<BACKEND>/<ADMIN_URL_PATH>`. `/api/v1/me/` returns `admin_url` only to staff, so the sidebar "Moderation" link never exposes the path to others.
 
 ## 9. API conventions
@@ -930,9 +947,9 @@ Part 10 built the panel in `apps/moderation/` (`rules.py` the pure rules, `servi
 
 **Social graph (Part 6):**
 - **Lookup:** the username in the URL is NFKC-normalised, trimmed and lower-cased (`lookup_name`, at most 64 characters, must fit `[a-z0-9_]{3,30}`) and matched exactly on the unique index. An unknown, **inactive** or malformed name is a JSON 404 `not_found`, never a 500 (a NUL byte used to be one).
-- `GET /api/v1/users/{username}/` (public, never cached; a stale Bearer token is a 401 as on the post detail): `{id, username, display_name, bio, avatar_url, created_at, counts: {followers, following, posts, verified, false}, reputation: {score, sample}, is_following, is_me}` (10 keys). **One query anonymous, two signed in** (the counts and `is_following` are subquery annotations). `posts` counts the posts the public can see (not deleted, not removed); **`verified` and `false` also count the author's deleted posts**, so deleting can't erase a FALSE label (user decision 2026-10-09; removed posts are in neither, their status is `removed`). `reputation.score` is `null` until `reputation_sample` reaches 3 (always, until 11B). `is_following` and `is_me` are `false` for visitors.
+- `GET /api/v1/users/{username}/` (public, never cached; a stale Bearer token is a 401 as on the post detail): `{id, username, display_name, bio, avatar_url, created_at, counts: {followers, following, posts, verified, false}, reputation: {score, sample}, is_following, is_me}` (10 keys). **One query anonymous, two signed in** (the counts and `is_following` are subquery annotations). `posts` counts the posts the public can see (not deleted, not removed); **`verified` and `false` also count the author's deleted posts**, so deleting can't erase a FALSE label (user decision 2026-10-09; removed posts are in neither, their status is `removed`). `reputation.score` is `null` until `reputation_sample` reaches 3; from Part 11B both come from the credibility ledger (§4a). `is_following` and `is_me` are `false` for visitors.
 - `GET …/{username}/posts/` (public): the §9 feed envelope (`pinned: []`), newest first, `Post.objects.visible()` of that author (the author's own removed posts stay out too), `FeedPagination`, optional `?post_type=fact|opinion` (anything else: 400 on `post_type`). **On your own profile the list also holds your removed posts** (Part 11; user decision 2026-10-13): the author's tombstone with your text, the reason and the appeal; a repost of someone else's removed post is still the "no longer available" stub, and to every other viewer a removed post is not listed.
-- `GET …/{username}/followers/` and `…/following/` (public): `{results: [row], next_cursor}`, newest follow first (`TimestampCursorMixin` guards the cursor: a crafted one is 404), row = `{id, username, display_name, bio, avatar_url, reputation, is_following, is_me}`; inactive users are left out; `is_following` is an `Exists` annotation, so the list is one query plus the lookup (3 signed in).
+- `GET …/{username}/followers/` and `…/following/` (public): `{results: [row], next_cursor}`, newest follow first (`TimestampCursorMixin` guards the cursor: a crafted one is 404), row = `{id, username, display_name, bio, avatar_url, reputation, counts: {verified}, is_following, is_me}` (9 keys; `counts.verified` is Part 11B's, for c3's "· 84 verified": the person's verified posts, deleted ones included, the profile's own rule, as one correlated subquery); inactive users are left out; `is_following` is an `Exists` annotation, so the list is one query plus the lookup (3 signed in).
 - `POST …/{username}/follow/` (`IsAuthenticated` + `IsEmailVerified`, throttle `follow`, `get_or_create`): **201** `{"is_following": true}` when new, **200** the same body when it already existed, **400 `cannot_follow_self`**, 404, 403 `email_unverified`, 401. `DELETE` (`IsAuthenticated` only): **204** always (also when you weren't following), 404 for an unknown user.
 - `GET /api/v1/feed/` (`IsAuthenticated`, not verified-only; `never_cache`): posts by `followed ∪ {me}` that are visible, the §9 envelope (`pinned: []` until 11C), `FeedPagination` ordering `(-created_at, -id)`. Cache: see "Home feed (Following)" above. 3 queries on a miss (the user, the ids, the posts), 2 on a hit.
 
@@ -969,10 +986,16 @@ Part 10 built the panel in `apps/moderation/` (`rules.py` the pure rules, `servi
   - Returns `{confidence_score, confidence_threshold, verdict_source, seconds_to_verdict, verdict_at, daily: [{date, reposts, likes, comments}]}`.
   - The confidence fields are null unless `verdict_source=pipeline`.
   - `daily` covers the first 14 UTC days after posting, from grouped counts on `(post, created_at)` indexes, with a constant number of queries. Uncached.
-- `GET /api/v1/users/{u}/reputation/` returns:
-  - `{score | null, sample, verified, false, removed, recent: [≤ 10 public events: kind, label, post_id, created_at, reversed]}`;
+- `GET /api/v1/users/{username}/reputation/` (Part 11B; public, **never authenticates** (`authentication_classes = []`, so a stale token isn't a 401: the answer doesn't depend on who asks), `never_cache`, no throttle; the username is looked up as on the profile, so an unknown, inactive or malformed one is a JSON 404):
+  - `{"score": 72 | null, "sample": 23, "verified": 20, "false": 3, "removed": 1, "recent": [{"kind", "label", "post_id", "created_at", "reversed"}]}`;
+  - `verified`, `false` and `removed` count the account's posts **by status, deleted ones included** (the profile header's rule, so the two never disagree);
+  - `recent` is the last 10 **own-post** rows (`fact_true`, `fact_false`, `emergency_false`, `post_removed`), newest first, with `reversed` (an `Exists`); repost rows, report credits and reversal rows never appear (user decision 2026-10-13). `post_id` is null when the author deleted the post (or it is gone). No weight, `score_after`, reporter, moderator or reversal link is ever in it;
+  - **2 queries** (the account with its three counts, then the rows), whatever the ledger holds;
   - from 11D, also `trend: [30 × {date, score}]` (null while the score is hidden).
-- `GET /api/v1/me/reputation/events/`: your whole ledger (cursor), including reversal rows and links to appeal.
+- `GET /api/v1/me/reputation/events/` (Part 11B; `IsAuthenticated`, `never_cache`): your whole ledger, newest first, reversal rows included, `{results, next_cursor}` (`TimestampCursorMixin` on `(-created_at, -id)`, 20 per page, `?page_size=` up to 50, a crafted cursor is a 404). Only ever your own. **2 queries** (you, then the page with its posts, their appeals and the reversed rows joined). Row (11 keys): `{id, kind, label, positive, negative, score_after, created_at, post_id, reverses, reversed, appeal}`:
+  - `positive`/`negative` are decimal strings ("0.25", a reversal's "-1.00"); a reversal's `label` is "Reversed: <the row's label>" and `reverses` its id;
+  - `post_id` follows the public rule (null for a deleted post);
+  - `appeal` is set only on your **own negative rows that still stand** (`fact_false`, `emergency_false`, `post_removed`, not reversed): `{"status": "open" | "upheld" | "overturned" | null, "can_appeal": bool}`, where `can_appeal` is the post object's rule (a `verified_false` or `removed` post of yours, not deleted, with no appeal yet); every other row has `null` (a repost or a report has no appeal of its own).
 
 **Search (guide §10):** `SearchQuery(q, search_type="websearch", config="english")` against `search_vector`, ranked with `SearchRank`, newest first on ties. Users are matched by `username`/`display_name` prefix and returned with their `reputation` block (never sorted by it). Removed and deleted posts are excluded.
 
@@ -1026,10 +1049,14 @@ Part 10 built the panel in `apps/moderation/` (`rules.py` the pure rules, `servi
     - **`useStatusPolling`** (10 s, then × 1.5 up to 60 s; 10 minutes of **visible** time; a hidden tab pauses and checks once on return; a new pending id restarts the schedule; silent errors; at most 50 ids; public, `token: false`): the feed and the page pass it the posts loaded as `pending` and it stops asking about each one when it settles or vanishes. Results are an **overlay** (`status-overlay.ts`), not a rewrite of the feed: a polled `removed` turns the card into the tombstone card, a vanished post is hidden, and on the page the badge changes at once and one silent refetch brings the rest. `usePostDetail` marks a viewer as fetched only on success, because StrictMode aborts the first request.
   - **Profiles, follows and the Following tab (Part 6):**
     - **`/u/[username]`** (in the `(app)` shell, dynamic `ƒ`, public) has a **light server render** like `/p/[id]`: one anonymous `no-store` fetch of `BACKEND_ORIGIN` (5 s timeout, `fetchPublicProfile` in `lib/api/server.ts`) shared by `generateMetadata` and the page through `cache()`. A name that can't be a username is `notFound()` with no fetch; the backend's 404 is a real HTTP 404 (with `noindex`); a timeout or 5xx renders the shell and the client fetches. `/u/Ada` **redirects (307) to `/u/ada`**. Metadata (`profile-metadata.ts`): title `Name (@user)` or `@user`, description = the bio's first 160 characters or "Posts by @user on Rumor Zero.", canonical `/u/{username}`, `openGraph` type `profile` with the site name, the title suffix typed by hand and the two static share images (the descriptors are exported from `post-metadata.ts`, the one allow-listed place that names them).
-    - **Page (Stitch c1; `max-w-reading`, one column, because c1's 12-column grid exists for the dropped side widgets):** `ProfileHeader` (avatar size 20, the name as the one `h1`, `@username` once when the display name is blank, bio as plain text, **Follow/Following or Edit profile** (a link to `/settings`), "Joined March 2024 · 42 posts", counters **Followers**, **Following** (links to the lists), **Verified** (primary dot), **FALSE** (error dot), printed in full "1,420"), then `FilterChips` All / Facts / Opinions and the person's posts (`ProfilePosts`: `useCursorFeed` + `FeedList` + `useStatusPolling`; remounted with `key={username:filter}` because `useCursorFeed` doesn't refetch when `fetchPage` changes; on your own profile a post you make is added at the top when it matches the filter). Not built from c1: the seal and "Author" badge, affiliation, trust score, peer reviews, share and more buttons, the Published/Pending/Discourse control, the filter button, the "pending items visible only to author" callout (it contradicts the guide), the four side widgets.
+    - **Page (Stitch c1; `max-w-reading`, one column, because c1's 12-column grid exists for the dropped side widgets):** `ProfileHeader` (avatar size 20, the name as the one `h1`, `@username` once when the display name is blank, bio as plain text, **Follow/Following or Edit profile** (a link to `/settings`), "Joined March 2024 · 42 posts · Credibility 72 How this is calculated" (Part 11B, below), counters **Followers**, **Following** (links to the lists), **Verified** (primary dot), **FALSE** (error dot), printed in full "1,420"), then `FilterChips` All / Facts / Opinions and the person's posts (`ProfilePosts`: `useCursorFeed` + `FeedList` + `useStatusPolling`; remounted with `key={username:filter}` because `useCursorFeed` doesn't refetch when `fetchPage` changes; on your own profile a post you make is added at the top when it matches the filter). Not built from c1: the seal and "Author" badge, affiliation, peer reviews, share and more buttons, the Published/Pending/Discourse control, the filter button, the "pending items visible only to author" callout (it contradicts the guide), the four side widgets.
     - **Viewer-specific data:** the server render is the anonymous view. A signed-in visitor fetches once more for `is_following` and `is_me` (`useProfile`, modelled on `usePostDetail`: a viewer is marked as fetched only on success, because StrictMode aborts the first request); until that lands the button area is a same-size skeleton, so it never flashes the wrong state.
     - **`FollowButton`:** Follow (primary) / Following (secondary; hover shows "Unfollow" in the same grid cell, so the width and the accessible name "Following" don't change). Optimistic: it flips at once, tells the parent (`onChange`, so the profile's follower count moves by one), and on a failure goes back and toasts (403 `email_unverified` "Verify your email to follow people…", 429 with the wait, 404, 401, network). One request at a time (the `loading` state, plus a ref for two clicks in one tick). Visitors get a "Follow" link to `/login?next=/u/<name>`; unverified users an `aria-disabled` button with a hint and the Part 2 toast; nobody gets a button on their own row or profile.
-    - **`/u/[username]/followers` and `/following`** (Stitch c3; client-rendered, `noindex`, no server read): "← Back to Name (@user)", `Tabs` Followers/Following with counts (each tab is its own address, `router.push`), `UserRow`s in a `divide-y` card (avatar, name, handle, bio line, `FollowButton`), Load more, skeletons, empty and error states. Not built from c3: the network header card, category chips, the in-list filter, trust metrics, tiers, the "more" menu, the directory banner. Unfollowing in a list keeps the row.
+    - **`/u/[username]/followers` and `/following`** (Stitch c3; client-rendered, `noindex`, no server read): "← Back to Name (@user)", `Tabs` Followers/Following with counts (each tab is its own address, `router.push`), `UserRow`s in a `divide-y` card (avatar, name, handle, bio line, the credibility line (Part 11B, below), `FollowButton`), Load more, skeletons, empty and error states. Not built from c3: the network header card, category chips, the in-list filter, tiers, the "more" menu, the directory banner. Unfollowing in a list keeps the row.
+  - **Credibility score (Part 11B; `features/reputation/CredibilityBadge.tsx`, a Server-Component-safe presentational component):** neutral on purpose (user decision 2026-10-13): grey `text-on-surface-variant`, no teal, no `verified` seal, no glyph (DESIGN.md reserves those for a verified fact).
+    - `variant="header"`, in `ProfileHeader`'s meta row after the post count: "Credibility 72" (`font-label-code text-label-code`), or "Credibility: New" with the title and screen-reader text "A score shows once 3 of their posts have been checked or removed.", then a **"How this is calculated"** link to `/how-it-works#credibility` (`prefetch={false}`; the page's section and anchor arrive in Part 15).
+    - `variant="row"`, in `UserRow` on its own line (`pl-12`, outside the profile link, so the link's name stays the person's name): c3's neutral chip (`rounded-lg border border-outline-variant/30 bg-surface-container px-space-xs py-0.5 font-label-badge text-label-badge text-on-surface-variant`) "Credibility 72" or "Credibility: New" (the same title), then "· 84 verified" (`formatCount`, from the row's `counts.verified`). No link in rows: twenty identical links would be noise.
+    - **Never on post cards** (`PostCard` and `FeedList` tests pin it); the profile's server render already carries the score, so it shows without a client fetch.
     - **Home (Following tab):** `Tabs` = Recent, Following (the second only when signed in). Following loads **lazily** (`enabled` turns on at the first selection and stays on, so `/home` makes no extra request and switching back keeps the list); a post you make is prepended to both feeds; status polling takes the pending ids of the **active** tab's feed. Empty state "Follow people to see their posts here" with a **See Recent** button. `FeedList` takes an optional `empty` node.
     - **Author links:** `PostCard` gets `author.href` (`/u/{username}`); the avatar and name are one link above the stretched claim link (`relative z-10`), the time stays outside it. The removed-post tombstone card has no author block. `PostDetail`'s author row is a link (also on a tombstone: the author is public).
   - **Likes and comments (Part 7; `features/social/`):**

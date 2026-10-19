@@ -1,0 +1,77 @@
+from django.db.models import OuterRef
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import never_cache
+from rest_framework.exceptions import NotFound
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from apps.accounts.models import User
+from apps.core.pagination import CursorPagination, TimestampCursorMixin
+from apps.posts.models import Post, PostStatus
+from apps.reputation.models import ReputationEvent
+from apps.reputation.serializers import event_data, is_reversed, recent_events, reputation_data
+from apps.social.engagement import count_subquery
+from apps.social.services import lookup_name
+
+
+def _by_status(status):
+    # Deleted posts included: deleting a post doesn't erase its record (as the profile's counts).
+    return count_subquery(Post.objects.filter(author=OuterRef("pk"), status=status), "author")
+
+
+@method_decorator(never_cache, name="dispatch")
+class ReputationView(APIView):
+    """`GET /api/v1/users/{username}/reputation/`: an account's public credibility summary.
+
+    Public, uncached, and it **never authenticates** (`authentication_classes = []`, like the
+    status poller): the answer doesn't depend on who asks, so a stale token isn't a 401. Two
+    queries: the account with its three counts, then its recent own-post events. The score is
+    null until three events count (ARCHITECTURE §4a).
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request, username):
+        name = lookup_name(username)
+        user = None
+        if name is not None:
+            user = (
+                User.objects.filter(username=name, is_active=True)
+                .only("id", "reputation_score", "reputation_sample")
+                .annotate(
+                    verified_n=_by_status(PostStatus.VERIFIED_TRUE),
+                    false_n=_by_status(PostStatus.VERIFIED_FALSE),
+                    removed_n=_by_status(PostStatus.REMOVED),
+                )
+                .first()
+            )
+        if user is None:
+            raise NotFound
+        return Response(reputation_data(user, recent_events(user)))
+
+
+class ReputationEventPagination(TimestampCursorMixin, CursorPagination):
+    """Your ledger, newest first; a crafted cursor is a 404."""
+
+    ordering = ("-created_at", "-id")
+
+
+@method_decorator(never_cache, name="dispatch")
+class MyReputationEventsView(APIView):
+    """`GET /api/v1/me/reputation/events/`: your whole ledger, reversals included, newest first
+    (`{results, next_cursor}`). Only ever your own. Two queries: you, then the page."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        rows = (
+            ReputationEvent.objects.filter(user=request.user)
+            .select_related("post", "post__appeal", "reverses")
+            .defer("post__pipeline_result", "post__content", "post__sources")
+            .annotate(is_reversed=is_reversed())
+        )
+        paginator = ReputationEventPagination()
+        page = paginator.paginate_queryset(rows, request, view=self)
+        return paginator.get_paginated_response([event_data(row) for row in page])

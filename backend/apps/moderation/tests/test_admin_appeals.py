@@ -19,6 +19,7 @@ from apps.moderation.models import ActionKind, Appeal, AppealStatus, ModerationA
 from apps.moderation.tests.factories import AppealFactory, moderator_user, senior_user
 from apps.posts.models import FlaggedReason, Post, PostStatus
 from apps.posts.tests.factories import PostFactory
+from apps.reputation.tests.factories import EventFactory
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("role_groups")]
 
@@ -415,6 +416,10 @@ def test_the_post_page_costs_the_same_number_of_queries_with_a_resolved_appeal(c
     busy = removal_appeal(
         "busy", status=AppealStatus.UPHELD, resolved_at=timezone.now(), resolved_by=senior_user()
     ).post
+    # Its credibility events (Part 11B's inline) cost nothing extra either.
+    EventFactory(post=quiet)
+    for _ in range(5):
+        EventFactory(post=busy)
     client.get(reverse("admin:posts_post_change", args=[quiet.pk]))  # warm caches
     with CaptureQueriesContext(connection) as small:
         client.get(reverse("admin:posts_post_change", args=[quiet.pk]))

@@ -2,7 +2,8 @@
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-13, together with the eight decisions and the defaults
   below; drafted 2026-10-13 by Claude (Opus 5.5). Saved here and linked from HANDOFF at approval, so step 0 only needs to
-  verify the workspace and record the baselines. Not implemented yet.
+  verify the workspace and record the baselines. **Implemented** 2026-10-14 to 2026-10-19 by Claude (Opus 5.5); what was
+  built differently is in `task.md` Part 11B ("Decisions and deviations") and the validation in HANDOFF.
 - **Implement with:** Opus 5.5 · high (task.md).
 - **Evidence (all read-only):**
   - Docs: HANDOFF, MEMORY (Parts 7B to 11), `task.md` Parts 11 / 11B / 11C / 11D, ARCHITECTURE §2/§3/§4/§4a/§8/§9/§10,

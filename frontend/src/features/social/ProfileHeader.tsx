@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import type { UserProfile } from "@/lib/api/types";
 import { cn } from "@/lib/cn";
 import { formatCount, formatMonthYear } from "@/lib/format";
+import { CredibilityBadge } from "@/features/reputation/CredibilityBadge";
 import { FollowButton } from "./FollowButton";
 
 function Counter({
@@ -49,11 +50,12 @@ function Counter({
 }
 
 /**
- * The profile card (Stitch c1): avatar, name, handle, Follow or Edit profile, bio, join date and the
- * counters. A blank display name shows `@username` once. Not built: the seal, the "Author" badge,
- * affiliation, the trust score, share and more buttons, and the side widgets (the credibility score
- * comes in 11B). `viewerReady` is false while a signed-in visitor's own view is still loading, so
- * the button never shows the wrong state.
+ * The profile card (Stitch c1): avatar, name, handle, Follow or Edit profile, bio, join date, post
+ * count, the credibility score (Part 11B, in place of c1's trust score, neutral) and the counters.
+ * A blank display name shows `@username` once. Not built: the seal, the "Author" badge,
+ * affiliation, peer reviews, share and more buttons, and the side widgets (the Credibility widget
+ * is 11D). `viewerReady` is false while a signed-in visitor's own view is still loading, so the
+ * button never shows the wrong state.
  */
 export function ProfileHeader({
   profile,
@@ -121,6 +123,10 @@ export function ProfileHeader({
           ·
         </span>
         <span>{posts}</span>
+        <span aria-hidden="true" className="text-outline-variant">
+          ·
+        </span>
+        <CredibilityBadge variant="header" reputation={profile.reputation} />
       </p>
       <div className="mt-space-md grid grid-cols-2 gap-space-sm rounded-lg border border-outline-variant/30 bg-surface-container-low p-space-md sm:grid-cols-4">
         <Counter value={counts.followers} label="Followers" href={`${base}/followers`} />

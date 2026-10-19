@@ -195,6 +195,34 @@ export function processPost(postId: string): { status: string; threshold: number
   return { status: match[1], threshold: Number(match[2]) };
 }
 
+/**
+ * Gives a seeded author `n` checked facts (Part 11B): each is a new `#true` fact that the real
+ * pipeline (the stub, through `process_post`) labels VERIFIED, so the credibility ledger records it
+ * through the real services, as the inline kick would. Returns the posts' ids.
+ */
+export function seedCheckedFacts(username: string, n: number): string[] {
+  if (!/^[a-z0-9_]{3,30}$/.test(username)) throw new Error("not a username");
+  if (!Number.isInteger(n) || n < 1 || n > 10) throw new Error("1 to 10 facts");
+  const out = runShell(
+    [
+      "from apps.accounts.models import User",
+      "from apps.pipeline.processor import process_post",
+      "from apps.posts.models import Post",
+      `author = User.objects.get(username='${username}')`,
+      "ids = []",
+      `for i in range(${n}):`,
+      "    post = Post.objects.create(author=author, content=f'A checked claim {i} #true', post_type='fact', status='pending')",
+      "    assert process_post(post.pk), 'the post was not due for a check'",
+      "    assert Post.objects.get(pk=post.pk).status == 'verified_true', 'not verified'",
+      "    ids.append(str(post.pk))",
+      "print('CHECKED=' + ','.join(ids))",
+    ].join("\n"),
+  );
+  const match = /CHECKED=([0-9a-f,-]+)/.exec(out);
+  if (!match) throw new Error(`no posts in: ${out}`);
+  return match[1].split(",");
+}
+
 /** An account made straight in the database, with a password: log in through the real form. */
 export interface SeededAuthor {
   email: string;

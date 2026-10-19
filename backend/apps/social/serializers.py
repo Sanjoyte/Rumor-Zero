@@ -8,17 +8,20 @@ from apps.accounts.models import User
 from apps.accounts.serializers import avatar_url, user_summary
 from apps.posts.models import Post, PostStatus
 from apps.posts.serializers import PostSerializer, content_field, feed_item, iso
+from apps.reputation.scoring import public_score
 from apps.social import timeline
 from apps.social.engagement import count_subquery as _count
 from apps.social.models import Follow
 
-# The credibility score is public only after this many counted events (ARCHITECTURE §4a). Nothing
-# writes `reputation_sample` before Part 11B, so `score` is null until then.
-MIN_PUBLIC_SAMPLE = 3
-
 
 def _by_status(author, status):
     return Post.objects.filter(author=author, status=status)
+
+
+def verified_count(author):
+    """The author's verified posts, deleted ones included: the profile's `verified` counter and a
+    user row's `counts.verified` (c3's "· 84 verified")."""
+    return _count(_by_status(author, PostStatus.VERIFIED_TRUE), "author")
 
 
 def profile_queryset(viewer):
@@ -36,15 +39,17 @@ def profile_queryset(viewer):
         posts_n=_count(Post.objects.visible().filter(author=me), "author"),
         # ...but a deleted post keeps its verdict in the record (user decision 2026-10-09). A
         # removed post's status is `removed`, so it is in neither.
-        verified_n=_count(_by_status(me, PostStatus.VERIFIED_TRUE), "author"),
+        verified_n=verified_count(me),
         false_n=_count(_by_status(me, PostStatus.VERIFIED_FALSE), "author"),
         is_following_n=is_following,
     )
 
 
 def reputation_block(user):
+    """The public credibility block (ARCHITECTURE §4a): the score is null until three events
+    count."""
     return {
-        "score": user.reputation_score if user.reputation_sample >= MIN_PUBLIC_SAMPLE else None,
+        "score": public_score(user.reputation_score, user.reputation_sample),
         "sample": user.reputation_sample,
     }
 
@@ -77,11 +82,13 @@ def profile_data(user, viewer):
     }
 
 
-def user_row(user, *, is_following, viewer):
-    """One row of the followers and following lists."""
+def user_row(user, *, is_following, viewer, verified):
+    """One row of the followers and following lists (9 keys). `verified` counts the person's
+    verified posts, as on their profile."""
     return {
         **_person(user),
         "reputation": reputation_block(user),
+        "counts": {"verified": verified},
         "is_following": is_following,
         "is_me": bool(viewer is not None and viewer.is_authenticated and viewer.pk == user.pk),
     }

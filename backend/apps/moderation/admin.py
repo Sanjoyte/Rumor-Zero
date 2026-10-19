@@ -37,6 +37,7 @@ from apps.moderation.rules import Act
 from apps.posts.emergency import is_active_emergency
 from apps.posts.models import FlaggedReason, Post, PostStatus, PostType
 from apps.reports.models import Report
+from apps.reputation.admin import ReputationInline
 
 BATCH_CAP = 100  # posts per action: the admin's page size, and what a person can read and weigh
 
@@ -330,7 +331,7 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
     # Part 11C ordering, which puts active emergencies above all of it.
     ordering = ("-report_count", queue_since().asc(nulls_last=True), "-created_at")
     actions = list(ACTIONS)
-    inlines = (AppealInline, ReportInline, ModerationHistoryInline)
+    inlines = (AppealInline, ReportInline, ModerationHistoryInline, ReputationInline)
     change_form_template = "moderation/admin/post_change_form.html"
     change_list_template = "moderation/admin/post_change_list.html"
 

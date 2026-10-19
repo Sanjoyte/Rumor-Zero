@@ -29,6 +29,7 @@ from apps.social.serializers import (
     profile_queryset,
     timeline_items,
     user_row,
+    verified_count,
 )
 
 
@@ -95,7 +96,8 @@ class UserListView(APIView):
     """Followers or following of a user, newest follow first: `{results: [row], next_cursor}`.
 
     The rows are users; the cursor walks the follow rows. `is_following` is an `Exists`
-    annotation, so the page is one query whoever asks.
+    annotation and each person's verified count a correlated subquery, so the page is one query
+    whoever asks.
     """
 
     permission_classes = [AllowAny]
@@ -108,7 +110,9 @@ class UserListView(APIView):
         viewer = request.user if request.user.is_authenticated else None
         person = self.person_field
         rows = Follow.objects.filter(**{self.owner_field: target, f"{person}__is_active": True})
-        rows = rows.select_related(person)
+        rows = rows.select_related(person).annotate(
+            person_verified=verified_count(OuterRef(f"{person}_id"))
+        )
         if viewer is not None:
             rows = rows.annotate(
                 viewer_follows=Exists(
@@ -122,6 +126,7 @@ class UserListView(APIView):
                 getattr(row, person),
                 is_following=bool(getattr(row, "viewer_follows", False)),
                 viewer=viewer,
+                verified=row.person_verified,
             )
             for row in page
         ]

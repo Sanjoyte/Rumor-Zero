@@ -114,6 +114,14 @@ describe("PostCard", () => {
     expect(document.body.textContent).not.toMatch(/debunk/i);
   });
 
+  it.each(["pending", "verified_true", "verified_false", "under_review"] as const)(
+    "never shows a credibility score, whatever the status (%s; Part 11B)",
+    (status) => {
+      render(<PostCard {...BASE} status={status} />);
+      expect(document.body.textContent).not.toMatch(/credibility/i);
+    },
+  );
+
   describe("sources (Part 4)", () => {
     const SOURCES = [
       { value: "10.1038/s41558-024-02102", kind: "doi" as const },

@@ -90,6 +90,16 @@ describe("FeedList", () => {
     expect(cards[2]).toHaveTextContent("Content of c");
   });
 
+  it("never shows a credibility score on a card (Part 11B: profiles and user rows only)", () => {
+    const items = [
+      entry(post("a")),
+      entry(post("f", { post_type: "fact", status: "verified_true", verdict_source: "pipeline" })),
+    ];
+    render(<FeedList feed={feedWith({ items })} />);
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+    expect(document.body.textContent).not.toMatch(/credibility/i);
+  });
+
   it("renders a fact with its status and first source", () => {
     const fact = post("f", {
       post_type: "fact",

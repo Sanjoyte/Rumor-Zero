@@ -36,6 +36,21 @@ describe("ProfileHeader", () => {
     expect(screen.getByText("42 posts")).toBeInTheDocument();
   });
 
+  it("shows the credibility score in the meta row, with how it is calculated", () => {
+    renderHeader(makeProfile({ reputation: { score: 72, sample: 23 } }));
+    const region = screen.getByRole("region", { name: "Profile" });
+    expect(within(region).getByText("Credibility 72")).toBeInTheDocument();
+    expect(within(region).getByRole("link", { name: "How this is calculated" })).toHaveAttribute(
+      "href",
+      "/how-it-works#credibility",
+    );
+  });
+
+  it("says Credibility: New while fewer than three events count", () => {
+    renderHeader(makeProfile({ reputation: { score: null, sample: 2 } }));
+    expect(screen.getByText(/^Credibility: New/)).toBeInTheDocument();
+  });
+
   it("says '1 post' for one", () => {
     renderHeader(makeProfile({ counts: { ...makeProfile().counts, posts: 1 } }));
     expect(screen.getByText("1 post")).toBeInTheDocument();

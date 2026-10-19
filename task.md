@@ -97,7 +97,7 @@ not let the review expand the part's scope without user approval.
 | 9 | Fact-check pipeline stub + routing | 8 | [x] Done (2026-10-11) |
 | 10 | Human review panel (Django Admin) | 9 | [x] Done (2026-10-13) |
 | 11 | Appeals & removed-post tombstones | 10 | [x] Done (2026-10-13) |
-| 11B | Credibility score | 7B, 10, 11 | [ ] |
+| 11B | Credibility score | 7B, 10, 11 | [x] Done (2026-10-19) |
 | 11C | Emergency posts | 9, 10, 11B | [ ] |
 | 11D | Charts & stats | 7B, 11B | [ ] |
 | 12 | Search | 6, 11B | [ ] |
@@ -1186,7 +1186,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 ---
 
 ## Part 11B: Credibility score
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-19)
 **Goal:** a public per-account credibility score (0–100, starting at 50) driven by fact-check outcomes (D5; ARCHITECTURE §4a; guide §16).
 - Stored as an append-only ledger plus a denormalised score.
 - Fully reversible, with a visible appeal path.
@@ -1226,14 +1226,44 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 **API endpoints:** the two reputation endpoints above.
 
 **Acceptance criteria**
-- [ ] Every row of the ARCHITECTURE §4a weight table has a passing test, including the emergency weight, the repost timing rule and the reporter cap
-- [ ] An overturned appeal or a restore returns the author and every reposter to exactly their previous score
-- [ ] Re-running the same verdict never double-counts; deleting a post keeps its events
-- [ ] Scores are hidden publicly (API `null`, UI "New") until 3 counted events
-- [ ] `recompute_reputation --check` passes after a randomised sequence of verdicts, removals, restores and appeals
-- [ ] Profile and user-row endpoints keep a constant query count
+- [x] Every row of the ARCHITECTURE §4a weight table has a passing test, including the emergency weight, the repost timing rule and the reporter cap (`test_scoring.py`: the table written out again, `score` at 50/45/55/38/62 and the half-way cases, `desired` over every status, `changes()` over every slot × value × row kind and reposter eligibility over every `status_at_repost`; `test_services.py`: each kind through the real pipeline and moderator services, the emergency FALSE for author and reposter, a repost after the verdict earning nothing, the cap's 4th and 5th credit, its 30-day edge and a reversed credit freeing a slot)
+- [x] An overturned appeal or a restore returns the author and every reposter to exactly their previous score (`test_services.py` compares them with control users whose posts went straight to the final outcome: an overturned label appeal, a Restore of a TRUE and of a FALSE post, a label that flips twice; `test_sequences.py` does it after every one of 40 random walks)
+- [x] Re-running the same verdict never double-counts; deleting a post keeps its events (`settle_post` twice writes nothing, a re-sent pipeline result is ignored, Keep removed and Mark FALSE upholding an appeal write nothing; a deleted post's rows stay and the public `recent` drops its link)
+- [x] Scores are hidden publicly (API `null`, UI "New") until 3 counted events (`test_api_reputation.py`, the profile and user rows; `CredibilityBadge` tests; the E2E test sees "Credibility: New" at two checked facts and "Credibility 62" at three)
+- [x] `recompute_reputation --check` passes after a randomised sequence of verdicts, removals, restores and appeals (`test_sequences.py`: 40 seeded walks × 40 steps through the real services, including reports, reposts and their undoing, deletes and refusals; the ledger also matches an independent simulator after every walk, and `pending_changes` is empty after every step; a coverage test shows the walks reach every event kind and the cap's refusal)
+- [x] Profile and user-row endpoints keep a constant query count (the profile is unchanged: 1 anonymous, 2 signed in; the follower/following lists stay 2/3 with each row's verified posts and live scores seeded; the reputation endpoint is 2 queries and the events endpoint 2, over 1 and 30 rows)
 
 **Required tests:** scoring pure-function table; one service test per event kind; reversal paths (appeal overturned, restore, re-label); concurrency (two verdicts for the same author at once); recompute; API and privacy (no private ledger data in the public endpoint); CredibilityBadge.
+
+**Decisions and deviations (plan approved 2026-10-13; built 2026-10-14 to 2026-10-19; recorded in ARCHITECTURE §2/§3/§4/§4a/§8/§9/§10, ANALYSIS c-44 and f-5, STRUCTURE, MEMORY):**
+- **User decisions (2026-10-13):**
+  - **A removal adds to the label; it doesn't replace it** (a removed FALSE post costs N+1 and N+2); **Restore reverses only the removal's events** (the author's, the reposters' and that removal's report credits).
+  - **The public `recent` list shows own-post events only** (`fact_true`, `fact_false`, `emergency_false`, `post_removed`, each with `reversed`).
+  - **Moderators and up read the whole ledger** in Django Admin (`reputation.view_reputationevent`, migration `moderation.0005_reputation_permission`).
+  - **The badge is neutral:** grey text, "Credibility 72" or "Credibility: New"; in rows c3's neutral chip and "· 84 verified". No teal and no `verified` seal.
+  - **Report credit only when the decision changed the post:** Remove always; Mark FALSE only when the post wasn't FALSE before the review.
+  - **A reversed FALSE reverses the reporters' credit too.**
+  - **No backfill** (pre-11B posts are healed by their next moderator action).
+  - **No self-credit** for the deciding moderator's own report.
+- **Built differently from the task text (approved with the plan):**
+  - **One reconciling writer, `reputation.services.settle_post(post, now, action, credited_reporters)`, instead of the task's four functions** (`record_post_outcome`, `record_removal`, `record_report_upheld`, `reverse_post_events`): the post's events are kept in step with its state in two slots (LABEL, REMOVAL), so every caller is one line, a re-label or a restore can't forget a reversal, and re-running is a no-op by construction. The pure rules are `scoring.desired` and `scoring.changes`.
+  - **The users are locked with `select_for_update(no_key=True)`, sorted, after the post**, not the plain `select_for_update()` the task and ARCHITECTURE named: the moderator's deferred foreign keys take `KEY SHARE` at commit, and a plain `FOR UPDATE` deadlocked in a test (two moderators deciding each other's posts at once).
+  - **The hooks:** `moderation.services._perform` settles after every action but Escalate (Dismiss can make a late TRUE public); `posts.services.record_pipeline_result` only on `labelled`. `file_appeal` writes nothing (an appeal's outcome is settled by the action that resolves it). `reports.services.resolve_open_reports` returns the reporters' ids (it returned a count; nothing read it).
+  - **Rounding is half up, computed exactly in quarter units** (Python's `round` is banker's rounding); ARCHITECTURE §4a's `round` was corrected.
+  - **A full `User.save()` no longer writes `reputation_score` / `reputation_sample`** (allauth's `set_password` and the admin form save whole rows and would write back a stale score); `UserAdmin` shows a read-only **Credibility** field instead of the two raw columns.
+  - **Extra beyond the plan:** user rows gained `counts.verified` (planned) and the admin names the app and model "Credibility" / "Credibility events" (the UI name, ANALYSIS f-5); the events endpoint's `post_id` is null for a deleted post, as the public one's.
+- **Defaults approved with the plan:** reviews freeze the score and a late TRUE counts only once public (dated then); the repost timing rule is literal (`under_review` counts; a repost undone after the verdict keeps its row and moves on a re-label); every open report a credited action resolves is credited, up to 4 un-reversed per rolling 30 days, the cap read after the users' lock; strictly increasing `created_at` per person; the public endpoint never authenticates and its counts are status-based (deleted posts included); the events row has 11 keys with an `appeal` block on your own negative rows that still stand; the "How this is calculated" link is in the profile header only (the `#credibility` anchor arrives with Part 15); Escalate never settles; the deciding moderator's own repost events still apply to them.
+- **Found while building (all handled):** an aggregate can't carry `FOR UPDATE` in Postgres (the lock and the totals are two queries); the reverse one-to-one `reversed_by` raises when absent even under `select_related` (an `Exists` annotation instead); `migrate reputation zero` leaves the stored scores (run `recompute_reputation` after re-applying); `setPostState` in the E2E helpers bypasses the ledger (credibility tests use the real pipeline through `seedCheckedFacts`). MEMORY has the details.
+- **Validated by:** 42 backend mutation checks (41 caught; the 42nd, settling on `updated_review`, is equivalent because `settle_post` reads the public status, which is still `under_review`; three first-run survivors became tests: the sample counting reversed rows, reversed rows reconciled again, an appeal block on a FALSE repost row) and 11 frontend mutation checks, all caught; the threaded tests (`reputation/test_races.py`, `moderation/test_races.py`, `test_pipeline_interplay.py`) 10 runs in a row, and the deadlock test fails with a plain `FOR UPDATE`; the Linux blocks of `docs/test-command.md` Part 11B extracted from the doc and run verbatim against live Django (steps 3 to 7 and 10, output diffed with the doc's) plus a scripted headless-Chromium run of steps 8 and 9 at 1280 and 390 px (screenshots looked at); migrations applied, rolled back to `moderation 0004` / `reputation zero` and applied again.
+- **Not done (later parts):**
+  - **Part 11C:** Mark FALSE on an emergency already records `emergency_false` (the weight is built, through `is_emergency`); the `emergency_blocked_until` write must go inside or after `settle_post`'s user locks; eligibility reads the stored score; any new status writer must call `settle_post`.
+  - **Part 11D:** the trend reads the last `score_after` per UTC day (times are strictly increasing per person); `CredibilityPanel` reads `GET /api/v1/me/reputation/events/` and its `appeal` block; the "Ask for another look" link goes on own-post negative rows only.
+  - **Part 12:** people search reuses the user row's `reputation` and `counts.verified`.
+  - **Part 14:** the export includes the ledger; account deletion cascades it and must never lock a user before its posts.
+  - **Part 15:** the `/how-it-works#credibility` text and anchor.
+  - **Part 16:** the per-write aggregate cost, the lock fan-out on a post with thousands of reposters, a moderator deciding a post they reposted (the +0.25 gain), report-credit farming with real data.
+  - **Part 17:** the stub in production would feed this public score (the existing launch blocker).
+- **Verified:** see HANDOFF (backend 3400 tests, `apps/reputation` 405, frontend 1711, E2E 41 in dev and CI mode). The PowerShell blocks of the `docs/test-command.md` section were not run on Windows. CI itself runs when you push.
 
 **Recommended models**
 - **Plan:** Opus 5.5 · xhigh. A public score with legal weight must be exactly reversible and auditable.
@@ -1278,6 +1308,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
   - the "Emergency (active)" filter
 - The `emergency_demoted` notification is wired in Part 13.
 - **From Part 10:** the admin queue, its `QueueFilter` and the five actions exist (`apps/moderation/`): add the emergency filter and put active emergencies first in `PostAdmin.ordering` (above `-report_count`); Mark FALSE's emergency effects go in `rules.transition` and `services.mark_false` (the `ModerationAction` kinds `emergency_demoted` and `emergency_blocked` already exist); the queue's emergency column already says Active / Ended / —; Demote emergency is a sixth action in `ACTIONS` and `rules.py`; Block emergency posting is a logged `UserAdmin` action for seniors or moderators (decide) with `subject_user` on the audit row. A permission or group change needs a new migration with its own frozen lists (`test_roles.py` fails until it exists).
+- **From Part 11B:** an emergency post's Mark FALSE (or pipeline FALSE) already records `emergency_false` (N + 3) and `repost_emergency_false` through `reputation.services.settle_post`, which `_perform` calls after every action but Escalate; a new action that changes `Post.status` must settle too (`pending_changes(post)` must stay empty). Write `emergency_blocked_until` **inside or after** `settle_post`'s user locks (post first, then users sorted, `FOR NO KEY UPDATE`; never a user before a post). Eligibility reads the stored `users.reputation_score` (the last migration is `moderation.0005_reputation_permission`).
 
 **Frontend scope**
 - Composer:
@@ -1329,6 +1360,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
   - `seconds_to_verdict`, `verdict_at`, and `daily` buckets (UTC days, the first 14 days after posting) of reposts, likes and comments
   - a constant number of queries; uncached
 - `GET /api/v1/users/{u}/reputation/` gains `trend`: 30 daily points from the ledger's `score_after` (null while the score is hidden).
+- **From Part 11B:** the endpoint exists (`apps/reputation/views.py`, 2 queries; `recent` is own-post rows only). A person's rows have strictly increasing `created_at`, so the trend is the last `score_after` of each UTC day (carried forward over days without rows, 50 before the first). `CredibilityPanel` reads `GET /api/v1/me/reputation/events/` (cursor, 11-key rows, reversal rows included); its `appeal` block is set only on the owner's own negative rows that still stand, which is where "Ask for another look" goes.
 
 **Frontend scope**
 - `src/components/ui/charts/`:
@@ -1367,6 +1399,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 - `GET /api/v1/search/`:
   - `type=posts`: `websearch` query, `SearchRank`, filters `post_type` and `status`, excludes removed and deleted
   - `type=users`: prefix match on username and display name, returned with the `reputation` block (never sorted by it)
+  - **From Part 11B:** reuse `social.serializers.reputation_block` and the user row's `counts.verified` (`verified_count`), so search rows read like follower rows (`CredibilityBadge variant="row"`).
   - Pagination: bounded offset (max 5 pages), because rank order can't use a cursor. Documented deviation.
   - Throttled per IP.
 
@@ -1429,6 +1462,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 - `DELETE /api/v1/me/`:
   - confirmed by password, or by typing your username for Google-only accounts
   - cascades your content, bookmarks, reposts and ledger rows
+  - **From Part 11B:** never lock the user's row before their posts (the ledger's lock order is post, then users); the ledger goes with the account (CASCADE), and other people's rows about your posts keep only an empty post link (SET_NULL)
   - moderation logs keep their snapshots
   - logs you out
 
@@ -1560,6 +1594,7 @@ Plus toasts and field errors.
   - source-list handling (all sources of a post) and the "never fetched" test
   - the emergency safeguards
   - the credibility score's appeal and audit path
+  - **From Part 11B:** the per-write totals aggregate in `settle_post`, the user-lock fan-out on a post with thousands of reposters, a moderator deciding a post they reposted (their +0.25), and report-credit farming with real data
 - `check --deploy` clean.
 - Security headers and cookie flags verified by tests; admin path confirmed.
 - Throttle review; secret-leak scan of the repo (patterns); logging review (no tokens or PII).

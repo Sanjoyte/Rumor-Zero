@@ -101,16 +101,21 @@ def file_report(*, reporter, post_id, reason, details, now=None):
 
 
 def resolve_open_reports(post, *, status, moderator, now):
-    """Close `post`'s open reports as `dismissed` or `actioned` (ARCHITECTURE §4); returns how many.
+    """Close `post`'s open reports as `dismissed` or `actioned` (ARCHITECTURE §4); returns the
+    reporters' ids (Part 11B credits them when a moderator upholds their reports).
 
     One `UPDATE` sets the status, `resolved_by` and `resolved_at` together, as the database check
     `reports_resolution_consistent` demands. Reports that are already resolved, and other posts',
     are untouched. A resolved report never counts toward the threshold again. Called by the
     moderation services inside their transaction with the post's row lock held, so a report that
-    arrives meanwhile waits and is filed afterwards. Report writes stay in this module.
+    arrives meanwhile waits and is filed afterwards (`file_report` locks the post first), and the
+    reporters read just before the `UPDATE` are exactly the ones it resolves. Report writes stay
+    in this module.
     """
     if status not in (ReportStatus.DISMISSED, ReportStatus.ACTIONED):
         raise ValueError(f"a report is resolved as dismissed or actioned, not {status!r}")
-    return Report.objects.filter(post=post, status=ReportStatus.OPEN).update(
-        status=status, resolved_by=moderator, resolved_at=now
-    )
+    open_reports = Report.objects.filter(post=post, status=ReportStatus.OPEN)
+    reporters = list(open_reports.order_by("reporter_id").values_list("reporter_id", flat=True))
+    if reporters:
+        open_reports.update(status=status, resolved_by=moderator, resolved_at=now)
+    return reporters

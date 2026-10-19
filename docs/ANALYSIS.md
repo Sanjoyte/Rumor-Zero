@@ -109,7 +109,7 @@ Each decision has a default. The rest of the docs (ARCHITECTURE, task.md) alread
 | `EmergencyChip` + violet stripe, `PinnedEmergencies` (banner) | b1, b2, c1 | Part 11C (`tertiary` family, `bolt` glyph) |
 | `SourceLink` | b1, b2, b3 | Part 4: one line with the first source's host or DOI, then "+N more" |
 | `SourceList` | b3 | Part 5: numbered list of every source (01, 02 …), full value, open-in-new link |
-| `CredibilityBadge`, `CredibilityWidget`, `CredibilityPanel` | c1, c2, c3, b4 | Parts 11B/11D |
+| `CredibilityBadge`, `CredibilityWidget`, `CredibilityPanel` | c1, c2, c3, b4 | ✅ `CredibilityBadge` Part 11B (c-44: c1's meta row and c3's row metric, both neutral); the widget and panel 11D |
 | Chart primitives `MeterBar`, `StatTile`, `BarChart`, `RingGauge`, `Sparkline` | b3, c1, b4, c2 | Part 11D; token-built HTML/SVG, no chart library |
 | `AvatarUploader` | c2 | Part 14B |
 | `Tabs` (underline + count), `SegmentedControl`, `FilterChips` | b1, b4, c1, c3, c4, d2, b2 | Fix the b1 underline bug |
@@ -482,6 +482,17 @@ The original default was "drop all". Since 2026-09-29 the seven features you nam
     - **Restore post and Keep removed take internal notes only.** The author is told the outcome in plain words (b-2) and sees the original removal reason.
     - **Defaults approved with the plan:** superusers are exempt from the different-moderator rule (as from the own-post rule) and Escalate is exempt from it; a deleted post can't be appealed (404, its author included) and its open appeal simply stays open; `pre_removal_status` and `escalated_at` are cleared by Restore; an appeal is linked on the resolving action's audit row only (not on Escalate); a FALSE post that reports sent to review is not appealable until that review ends; the 201 answer is the post object; 409 `already_appealed` wins over `not_appealable`; the `appeal` throttle (5 a day) applies to POST only; moderators can read appeals (`moderation.view_appeal`), seniors get nothing extra.
     - **Built the way the docs said, recorded because it is easy to get wrong:** `original_moderator` of a label appeal is the moderator of the latest `marked_false` row **only when a moderator gave the label** (a pipeline FALSE has none), never `post.moderated_by` (a later Dismiss of reports would make the dismisser the labeller); the removal appeal leaves `review_started_at` null (Part 10's check says set exactly while under review) and the queue shows it by the appeal's `created_at`; lock order is always post, then appeal.
+44. **Part 11B decisions (user, 2026-10-13)** on points the guide, f-5, `task.md` and the earlier docs leave open:
+    - **A removal adds to the label; it doesn't replace it.** The label's event (`fact_true` / `fact_false` / `emergency_false`) stays and `post_removed` (N + 2) is added, so a removed FALSE post costs N + 1 and N + 2. **Restore reverses only the removal's events** (the author's, the reposters' and the credits that removal earned).
+    - **The public `recent` list shows own-post events only** (`fact_true`, `fact_false`, `emergency_false`, `post_removed`, each with `reversed`): repost rows, report credits and reversal rows never appear there.
+    - **Moderators and up read the whole ledger** in Django Admin (`reputation.view_reputationevent`, migration `moderation.0005`).
+    - **The badge is neutral:** grey text, "Credibility 72" or "Credibility: New", and in rows c3's neutral chip plus "· 84 verified"; no teal and no `verified` seal, which DESIGN.md keeps for a verified fact.
+    - **A report earns credit only when the decision changed the post:** Remove always; Mark FALSE only when the post wasn't already FALSE before the review (reports on a pipeline-FALSE post, or filed during a label appeal, earn nothing).
+    - **A reversed FALSE also reverses the reporters' credit** (it mirrors the restore rule).
+    - **No backfill:** the ledger starts empty; a post labelled before Part 11B gets its missing events at its next moderator action, dated that day.
+    - **No self-credit:** the deciding moderator's own report earns nothing from their decision.
+    - **Defaults approved with the plan:** one reconciling writer (`settle_post`, two slots, LABEL and REMOVAL) instead of the task's four functions (every caller is one line, a re-label or a restore can't forget a reversal, re-running is a no-op by construction); reviews freeze the score and a late TRUE counts only once public; the repost timing rule is literal (`under_review` counts); every open report a credited action resolves is credited, up to 4 un-reversed credits per rolling 30 days, read after the users' lock; strictly increasing `created_at` per person and exact half-up rounding; the public endpoint never authenticates and its counts are status-based; the events row has 11 keys with an `appeal` block on your own negative rows; user rows gain `counts.verified`; the "How this is calculated" link is in the profile header only; Escalate never settles; the deciding moderator's own repost events still apply to them.
+    - **Built the way the docs said, recorded because it is easy to get wrong:** the users are locked with `FOR NO KEY UPDATE`, not `FOR UPDATE` (a moderator's deferred foreign keys take `KEY SHARE` at commit, and two moderators deciding each other's posts deadlocked in a test with the plain lock); a full `User.save()` no longer writes the two score columns (allauth's `set_password` and the admin form save whole rows); Python's `round` is banker's rounding, so the score is computed in integer quarters.
 
 ---
 
@@ -753,6 +764,7 @@ The full rules are in ARCHITECTURE (sections named below). This section records 
 
   It is never shown on post cards, and people are never ranked by it.
 - **Names:** "Credibility score" in the UI, `reputation` in code.
+- **As built in Part 11B (c-44):** the score is rounded half up; a removal **adds** N + 2 to the label's event; a report is credited only when the moderator's decision changed the post (Remove, or a Mark FALSE of a post that wasn't FALSE already), never for the deciding moderator's own report, and a reversed FALSE takes the credits back; a review freezes the score; the public sees "Credibility 72" or "New" in neutral grey (no teal, no seal) in the profile header and user rows, with the account's recent own-post events at `GET /api/v1/users/{u}/reputation/`; the owner's full ledger is at `GET /api/v1/me/reputation/events/` (11D and 14 show it).
 
 ### f-6 Charts (Part 11D)
 

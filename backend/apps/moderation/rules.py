@@ -71,13 +71,19 @@ ORIGINAL_MODERATOR = Refusal("original_moderator", "you made the first decision"
 class Effect:
     """What `transition` did: the audit row's kind and statuses, what happens to the post's open
     reports (a `ReportStatus`, or None to leave them alone) and to its open appeal (an
-    `AppealStatus` it is resolved as, or None when this action resolves none)."""
+    `AppealStatus` it is resolved as, or None when this action resolves none).
+
+    `credits_reporters` (Part 11B): whether the reporters whose open reports this action upholds
+    earn a `report_upheld` credit. Only when the decision changed the post (user decision
+    2026-10-13): Remove always; Mark FALSE unless the post was already FALSE before the review (a
+    pipeline FALSE that reports sent to review, or a label appeal)."""
 
     kind: str
     from_status: str
     to_status: str
     report_status: str | None
     appeal_status: str | None = None
+    credits_reporters: bool = False
 
 
 def can_return_to(post):
@@ -190,6 +196,7 @@ def transition(act, post, *, moderator, now, appeal, public_note=""):
     from_status = post.status
     report_status = None
     appeal_status = None
+    credits_reporters = False
     if resolves_appeal(act, post, appeal):
         appeal_status = (
             AppealStatus.OVERTURNED
@@ -198,6 +205,8 @@ def transition(act, post, *, moderator, now, appeal, public_note=""):
         )
     if act in VERDICT_ACTS:
         verified = act == Act.MARK_VERIFIED
+        # Read before the review fields are cleared: a post that was FALSE already isn't changed.
+        credits_reporters = not verified and post.pre_review_status != PostStatus.VERIFIED_FALSE
         post.status = PostStatus.VERIFIED_TRUE if verified else PostStatus.VERIFIED_FALSE
         post.verdict_source = VerdictSource.MODERATOR
         post.verdict_note = public_note
@@ -221,6 +230,7 @@ def transition(act, post, *, moderator, now, appeal, public_note=""):
         _leave_review(post)
         kind = ActionKind.REMOVED
         report_status = ReportStatus.ACTIONED
+        credits_reporters = True
     elif act == Act.ESCALATE:
         post.escalated_at = now
         kind = ActionKind.ESCALATED
@@ -235,4 +245,4 @@ def transition(act, post, *, moderator, now, appeal, public_note=""):
         raise ValueError(f"not an action: {act!r}")
     post.moderated_by = moderator
     post.moderated_at = now
-    return Effect(kind, from_status, post.status, report_status, appeal_status)
+    return Effect(kind, from_status, post.status, report_status, appeal_status, credits_reporters)

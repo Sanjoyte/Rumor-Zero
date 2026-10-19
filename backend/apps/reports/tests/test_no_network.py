@@ -13,6 +13,7 @@ from django.utils import timezone
 
 import apps.pipeline
 import apps.reports
+import apps.reputation
 from apps.reports.tests.factories import aged_user
 from apps.social.tests.factories import PostFactory
 
@@ -48,19 +49,19 @@ def test_reporting_makes_no_network_request(blocked, auth_client):
     assert blocked == []
 
 
-def test_the_reports_and_pipeline_code_import_nothing_that_can_fetch():
+def test_the_reports_pipeline_and_reputation_code_import_nothing_that_can_fetch():
     """Only the pipeline's HTTP client may open a connection (Part 9), and only to the configured
-    `PIPELINE_URL`: no module fetches a user-supplied link. The allow-list must match exactly, so
-    it can't silently go stale."""
+    `PIPELINE_URL`: no module fetches a user-supplied link, and the credibility ledger (Part 11B)
+    fetches nothing at all. The allow-list must match exactly, so it can't silently go stale."""
     forbidden = re.compile(
         r"^\s*(?:import|from)\s+(?:urllib\.request|urllib3|requests|httpx|aiohttp|socket|http\.client)\b",
         re.MULTILINE,
     )
     importers = [
         f"{package.name}/{path.name}"
-        for module in (apps.reports, apps.pipeline)
+        for module in (apps.reports, apps.pipeline, apps.reputation)
         for package in [Path(module.__file__).parent]
-        for path in package.glob("*.py")
+        for path in [*package.glob("*.py"), *package.glob("management/commands/*.py")]
         if forbidden.search(path.read_text())
     ]
     assert importers == ["pipeline/clients.py"]

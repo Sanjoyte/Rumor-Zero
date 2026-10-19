@@ -25,6 +25,7 @@ export function makeRow(overrides: Partial<UserRowData> = {}): UserRowData {
     bio: "",
     avatar_url: null,
     reputation: { score: null, sample: 0 },
+    counts: { verified: 0 },
     is_following: false,
     is_me: false,
     ...overrides,

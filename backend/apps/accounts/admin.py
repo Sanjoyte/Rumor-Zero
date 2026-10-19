@@ -7,11 +7,14 @@ from django.contrib.auth.forms import BaseUserCreationForm
 from django.contrib.auth.forms import UserChangeForm as BaseUserChangeForm
 from django.core.exceptions import PermissionDenied
 from django.db import router
+from django.utils.html import format_html
 from django.utils.text import capfirst, get_text_list
 
 from apps.accounts import services
 from apps.accounts.models import Role, User
 from apps.core.admin_mixins import HistoryNeedsLog
+from apps.reputation.admin import events_url
+from apps.reputation.scoring import public_score
 
 # allauth registers all three social models. The Google app lives in settings (a database row would
 # make two apps match: a 500), and tokens are never stored. SocialAccount stays: it shows who linked
@@ -76,8 +79,7 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
             {
                 "fields": (
                     "is_email_verified",
-                    "reputation_score",
-                    "reputation_sample",
+                    "credibility",
                     "avatar_version",
                     "avatar_uploads_blocked",
                     "emergency_blocked_until",
@@ -98,14 +100,27 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
         "is_staff",
         "groups",
         "is_email_verified",
-        "reputation_score",
-        "reputation_sample",
+        "credibility",
         "avatar_version",
         "avatar_uploads_blocked",
         "emergency_blocked_until",
         "last_login",
         "created_at",
     )
+
+    # --- the credibility score (Part 11B): read-only, written only by the reputation service ---
+
+    @admin.display(description="Credibility")
+    def credibility(self, user):
+        """The score with its counted events ("72 · 23 counted events"), or "New (2 counted
+        events, score 55)" while the public sees no score, and a link to the account's rows."""
+        sample = user.reputation_sample
+        events = f"{sample} counted event{'' if sample == 1 else 's'}"
+        if public_score(user.reputation_score, sample) is None:
+            text = f"New ({events}, score {user.reputation_score})"
+        else:
+            text = f"{user.reputation_score} · {events}"
+        return format_html('{} · <a href="{}">View events</a>', text, events_url(user))
 
     # --- what each kind of staff member sees ---
 

@@ -86,6 +86,7 @@ INSTALLED_APPS = [
     "apps.reports",
     "apps.pipeline",
     "apps.moderation",
+    "apps.reputation",
 ]
 
 AUTH_USER_MODEL = "accounts.User"

@@ -23,6 +23,7 @@ from apps.posts.models import FlaggedReason, Post, PostStatus
 from apps.posts.tests.factories import PostFactory
 from apps.reports.models import ReportReason
 from apps.reports.tests.factories import ReportFactory
+from apps.reputation.tests.factories import EventFactory
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("role_groups")]
 
@@ -325,6 +326,10 @@ def test_the_post_page_uses_the_same_number_of_queries_with_50_reports_and_10_hi
         ReportFactory(post=busy)
     for _ in range(10):
         ModerationActionFactory(post=busy)
+    # Credibility events with their people must cost nothing extra (Part 11B's inline).
+    for _ in range(10):
+        EventFactory(post=busy)
+    EventFactory(post=quiet)
     # An appeal with both moderators named must cost nothing extra (Part 11's inline).
     AppealFactory(
         post=busy,

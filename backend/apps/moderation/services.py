@@ -11,11 +11,14 @@ Each action runs in one `transaction.atomic()` and does the same things:
 3. apply `rules.transition` and save exactly those fields;
 4. resolve the post's open reports through `reports.services.resolve_open_reports`, and its open
    appeal when the action decides it;
-5. append the `ModerationAction`, linked to the appeal it resolved.
+5. append the `ModerationAction`, linked to the appeal it resolved;
+6. bring the credibility ledger in line with the post's new state (`reputation.services
+   .settle_post`, Part 11B), crediting the reporters whose reports the action upheld when it changed
+   the post (`Effect.credits_reporters`), never the deciding moderator. Escalate changes nothing
+   and settles nothing.
 
 A refusal raises `ActionRefused` and writes nothing. There is no HTTP here: the admin turns the
-exception into a message. Part 11B adds the reputation calls and Part 13 the notifications, in this
-same transaction.
+exception into a message. Part 13 adds the notifications, in this same transaction.
 """
 
 from django.db import transaction
@@ -34,6 +37,7 @@ from apps.posts import services as post_services
 from apps.posts.models import FlaggedReason, Post, PostStatus, VerdictSource
 from apps.posts.services import NotPostAuthor, PostNotFound
 from apps.reports import services as report_services
+from apps.reputation import services as reputation_services
 
 # Exactly what `rules.transition` can change, plus `updated_at` (auto_now needs to be listed).
 _SAVED_FIELDS = [
@@ -95,10 +99,15 @@ def _perform(act, post_id, *, moderator, notes, public_note, now):
             act, post, moderator=moderator, now=now, appeal=appeal, public_note=public_note
         )
         post.save(update_fields=_SAVED_FIELDS)
+        credited = ()
         if effect.report_status is not None:
-            report_services.resolve_open_reports(
+            reporters = report_services.resolve_open_reports(
                 post, status=effect.report_status, moderator=moderator, now=now
             )
+            if effect.credits_reporters:
+                # No self-credit: the deciding moderator's own report earns nothing from their
+                # decision (user decision 2026-10-13).
+                credited = [pk for pk in reporters if pk != moderator.pk]
         resolved = None
         if effect.appeal_status is not None:
             # One write: the database check wants `status` and `resolved_at` to change together.
@@ -119,6 +128,10 @@ def _perform(act, post_id, *, moderator, notes, public_note, now):
             notes=notes,
             created_at=now,
         )
+        if act != rules.Act.ESCALATE:
+            reputation_services.settle_post(
+                post, now=now, action=entry, credited_reporters=credited
+            )
         if effect.kind == ActionKind.RESTORED and post.status == PostStatus.PENDING:
             # Restored and not yet checked: check it now, like a new fact (the sweeper is the
             # fallback).

@@ -18,6 +18,7 @@ ROW_KEYS = {
     "bio",
     "avatar_url",
     "reputation",
+    "counts",
     "is_following",
     "is_me",
 }
@@ -153,6 +154,31 @@ def test_a_row_shows_only_public_things(api_client, ada):
     row = api_client.get(followers()).json()["results"][0]
     assert (row["display_name"], row["bio"], row["avatar_url"]) == ("Fan X", "Hello", None)
     assert row["reputation"] == {"score": None, "sample": 0}
+    assert row["counts"] == {"verified": 0}
+
+
+def test_a_row_counts_the_persons_verified_posts_as_the_profile_does(api_client, ada):
+    """Part 11B: c3's "· 84 verified". Deleted verified posts still count (as on the profile);
+    FALSE, removed and pending ones don't, and nor do other people's."""
+    from apps.posts.models import PostStatus, PostType
+    from apps.posts.tests.factories import PostFactory
+
+    fan = VerifiedUserFactory(username="fanv")
+    FollowFactory(follower=fan, following=ada)
+    for status in [PostStatus.VERIFIED_TRUE] * 3 + [
+        PostStatus.VERIFIED_FALSE,
+        PostStatus.REMOVED,
+        PostStatus.PENDING,
+    ]:
+        PostFactory(author=fan, post_type=PostType.FACT, status=status)
+    PostFactory(author=fan, post_type=PostType.FACT, status=PostStatus.VERIFIED_TRUE, deleted=True)
+    PostFactory(author=ada, post_type=PostType.FACT, status=PostStatus.VERIFIED_TRUE)
+    [row] = api_client.get(followers()).json()["results"]
+    assert row["counts"] == {"verified": 4}
+    profile = api_client.get("/api/v1/users/fanv/").json()
+    assert profile["counts"]["verified"] == row["counts"]["verified"]
+    [mine] = api_client.get(following("fanv")).json()["results"]
+    assert mine["counts"] == {"verified": 1}  # ada's
 
 
 def test_pages_have_no_repeat_and_no_gap_even_when_follows_arrive(api_client, ada):
@@ -225,10 +251,15 @@ def test_the_query_count_is_constant(api_client, auth_client, ada, make_url):
     viewer = auth_client(VerifiedUserFactory())
 
     def add(n):
+        from apps.posts.models import PostStatus, PostType
+        from apps.posts.tests.factories import PostFactory
+
         for _ in range(n):
-            other = VerifiedUserFactory()
+            other = VerifiedUserFactory(reputation_sample=4)
             FollowFactory(follower=other, following=ada)
             FollowFactory(follower=ada, following=other)
+            # Part 11B: each row counts the person's verified posts.
+            PostFactory(author=other, post_type=PostType.FACT, status=PostStatus.VERIFIED_TRUE)
 
     add(3)
     small = (queries(api_client, make_url()), queries(viewer, make_url()))
