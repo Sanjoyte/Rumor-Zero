@@ -6,8 +6,9 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 11B (Credibility score) is done** (2026-10-19), **uncommitted**: you review the diff and commit.
-  Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11 and 11B are done (Part 11 committed as `71c5e14`, Part 10 as `582905b`).
+- **Part:** **Part 11C (Emergency posts) is planned and approved** (2026-10-20), **not implemented**; the plan file is
+  new and uncommitted. Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11 and 11B are done (Part 11B committed as
+  `9d7edce`, Part 11 as `71c5e14`, Part 10 as `582905b`).
   Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11 and 11B CI have not been reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
@@ -15,15 +16,16 @@ read-only git output.
     before deploying; the stub lets an author self-label with `#true`, and from Part 11B that feeds the public score.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after Part 11B, as asked).
-- **Phase:** Part 11B implemented and validated on top of HEAD `b3df8eb` ("Planning for Part 11B"). No server is running;
-  the Docker containers are up. The dev database is migrated (`reputation 0001`, `moderation 0005`).
-- **Next action:** **you** review and commit Part 11B (and push, so CI runs). Then plan Part 11C, 11D or 12 (all three
-  depend on 11B) in a fresh session.
-- **Approved plan (implemented):**
-  [`docs/agents/plans/part-11B-credibility-score.md`](plans/part-11B-credibility-score.md) (approved 2026-10-13,
-  implemented 2026-10-14 to 2026-10-19)
+- **Owner:** none (Claude stopped after planning Part 11C, as asked).
+- **Phase:** Part 11C plan approved, nothing built. HEAD `9d7edce` ("Part 11B: Credibility score"); the only change since
+  is the new plan file and this file. No migration was run this session, so the dev database is still at `reputation 0001`,
+  `moderation 0005`. Docker and the servers were not checked or started this session.
+- **Next action:** Implement Part 11C from the approved plan.
+- **Approved plan (not implemented):**
+  [`docs/agents/plans/part-11C-emergency-posts.md`](plans/part-11C-emergency-posts.md) (approved 2026-10-20)
 - **Previous plans:**
+  - [`part-11B-credibility-score.md`](plans/part-11B-credibility-score.md), implemented 2026-10-14 to 2026-10-19
+    (committed as `9d7edce`);
   - [`part-11-appeals-removed-tombstones.md`](plans/part-11-appeals-removed-tombstones.md), implemented 2026-10-13
     (committed as `71c5e14`);
   - [`part-10-human-review-panel.md`](plans/part-10-human-review-panel.md), implemented 2026-10-13 (committed as
@@ -46,9 +48,37 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-19 by Claude (Opus 5.5), Part 11B done.
+- **Last updated:** 2026-10-20 by Claude (Opus 5.5), Part 11C planned and approved.
 
 ## Completed checkpoints
+
+- 2026-10-19 to 2026-10-20 (Claude, Opus 5.5): **Part 11C planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `9d7edce` ("Part 11B: Credibility score", committed by you), a clean tree. (The older text of
+    this file said Part 11B was uncommitted; you committed it in between.)
+  - **Dependency check:** Part 11C depends on 9 (Done 2026-10-11), 10 (Done 2026-10-13) and 11B (Done 2026-10-19); their
+    chains (11, 8, 7B, 7, 6, 5, 4, 3, 2, 1, 0C, 0A/0B/0D) are Done. Open but not blocking: Part 3 criterion 4, CI for
+    Parts 2 to 11B, the Part 17 stub launch blocker.
+  - **Research (read-only):** direct reads of the docs (task.md, ARCHITECTURE §2/§3/§4/§4a/§4b/§6/§8/§9/§10, ANALYSIS f-1,
+    STRUCTURE, MEMORY) and of the posts, pipeline, moderation, reputation, social, accounts, reports and core code; one
+    Explore agent (the frontend composer, feeds, cards, detail page, `/dev/ui`, E2E helpers; Stitch b1/b2/c1/d2 and
+    DESIGN.md); a Plan-agent design review that finished **before** approval (its findings are in the plan, marked
+    "(review)").
+  - **Changed this session:** only the new plan file and this file. No code, no setup command, no migration, no `task.md`
+    edit, no env file read, `design/` untouched.
+  - **User decisions (2026-10-19):** Block / Unblock emergency posting is for moderators and up (a new permission,
+    migration `moderation.0007`); the automatic block from a FALSE emergency lifts by itself when that FALSE is
+    overturned (unless another block still stands), a manual block lasts `emergency_false_cooldown_days`, and a logged
+    Unblock lifts any block early; the pinned section's × collapses it to a one-line bar, remembered per tab in
+    sessionStorage until a new emergency is pinned; the post object gains `emergency_demoted` (25 keys).
+  - **Found during planning** (all handled in the plan): an `APIException` with a dict detail turns a null field into the
+    string "None" (the 403 is a hand-built response); `normalizeError` keeps only `detail` and `code` of such a body; a
+    reversal row doesn't carry the reversed row's kind (one primary-key lookup to detect an overturned FALSE); without
+    strictly increasing block rows per account, a concurrent manual Unblock could erase a new automatic block; a full
+    `User.save()` would write back a stale `emergency_blocked_until`; nothing pins the six emergency settings in tests;
+    several existing tests label an active emergency FALSE through the pipeline, which now enters review (they are
+    listed in the plan); `PostDetail.test.tsx` expects a chip on a FALSE post, a state that can't exist; the `/dev/ui`
+    test renders without an AuthProvider (so `PinnedEmergencies` is presentational with a card slot); `Checkbox`
+    overwrites a caller's `aria-describedby`.
 
 - 2026-10-14 to 2026-10-19 (Claude, Opus 5.5): **Part 11B implemented** (uncommitted). Started from HEAD `b3df8eb` ("Planning
   for Part 11B", committed by you), a clean tree that matched this file (it still said the plan was uncommitted). Baselines
