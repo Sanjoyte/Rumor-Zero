@@ -6,9 +6,9 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 11C (Emergency posts) is implemented** (2026-10-20, Claude, Opus 5.5), **uncommitted**, from the
-  approved plan you committed as `132a2c0` ("Plan Part 11C"). Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10,
-  11, 11B and 11C are done (Part 11B committed as `9d7edce`, Part 11 as `71c5e14`, Part 10 as `582905b`).
+- **Part:** **Part 11D (Charts & stats) is planned and approved** (2026-10-20, Claude, Sonnet 5.5); **not implemented
+  yet**. Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B and 11C are done (Part 11C committed as
+  `ee63914`, Part 11B as `9d7edce`, Part 11 as `71c5e14`, Part 10 as `582905b`). Part 11D depends on 7B and 11B, both Done.
   Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B and 11C CI have not been
   reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
@@ -18,16 +18,20 @@ read-only git output.
     from Part 11C a hash-chosen FALSE on an expired emergency also blocks its author.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after implementing Part 11C, as asked).
-- **Phase:** Part 11C built and validated; all changes are uncommitted on top of HEAD `132a2c0`. The dev database is at
-  `moderation 0007_emergency_permission` (rolled back to 0005 and re-applied once). Docker is up (I restarted it after
-  the machine rebooted mid-session); no server is running and ports 3000 and 8000 are free.
-- **Next action:** you review the diff and commit Part 11C (git is yours), push, and report CI. Then start a fresh
-  session for the next part (11D per the table; Part 13 now has the `emergency_demoted` hook point recorded).
-- **Implemented plan:**
-  [`docs/agents/plans/part-11C-emergency-posts.md`](plans/part-11C-emergency-posts.md) (approved 2026-10-20,
-  implemented 2026-10-20)
+- **Owner:** none (Claude stopped after planning Part 11D, as asked).
+- **Phase:** Part 11D planned and approved, no code written. HEAD is `ee63914` ("Part 11C: Emergency posts", committed by
+  you); the only change on top of it is the new plan file and this file. The dev database is at
+  `moderation 0007_emergency_permission`. Docker, servers and ports were not touched this session (not checked since the
+  Part 11C session).
+- **Next action:** **Implement Part 11D from the approved plan** (prompt: `Implement only the approved Part 11D plan,
+  validate it, update task.md and HANDOFF.md, then stop.`). Step 0 of the plan comes first: verify the workspace (HEAD, clean
+  tree apart from the plan and this file, `docker compose ps`; `docker compose up -d` if the containers are stopped) and
+  record the baselines (`pytest` 3644, `npm test` 1782, E2E 43). You commit the plan and this file (git is yours) whenever you
+  like; they need not be committed first.
+- **Approved plan:**
+  [`docs/agents/plans/part-11D-charts-stats.md`](plans/part-11D-charts-stats.md) (approved 2026-10-20, not yet implemented)
 - **Previous plans:**
+  - [`part-11C-emergency-posts.md`](plans/part-11C-emergency-posts.md), implemented 2026-10-20 (committed as `ee63914`);
   - [`part-11B-credibility-score.md`](plans/part-11B-credibility-score.md), implemented 2026-10-14 to 2026-10-19
     (committed as `9d7edce`);
   - [`part-11-appeals-removed-tombstones.md`](plans/part-11-appeals-removed-tombstones.md), implemented 2026-10-13
@@ -52,9 +56,32 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-20 by Claude (Opus 5.5), Part 11C implemented and validated.
+- **Last updated:** 2026-10-20 by Claude (Sonnet 5.5), Part 11D planned and approved.
 
 ## Completed checkpoints
+
+- 2026-10-20 (Claude, Sonnet 5.5): **Part 11D planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `ee63914` ("Part 11C: Emergency posts", committed by you), a clean tree. (The older text of this
+    file said Part 11C was uncommitted; you committed it in between, and that line was corrected.)
+  - **Dependency check:** Part 11D depends on 7B (Done 2026-10-10) and 11B (Done 2026-10-19); their chains (11, 10, 9, 8, 7, 6,
+    5, 4, 3, 2, 1, 0C, 0A/0B/0D) and 11C are Done. Open but not blocking: Part 3 criterion 4, CI for Parts 2 to 11C, the Part 17
+    stub launch blocker.
+  - **Research (read-only):** direct reads of the docs (task.md, ARCHITECTURE §2/§4/§4a/§9/§10, ANALYSIS f-5/f-6, STRUCTURE,
+    MEMORY) and of the posts, reputation, social and moderation code and the frontend post page and profile; three Explore
+    agents (backend; frontend; Stitch b3/c1/b4/c2 and DESIGN.md). No separate design-review agent was run.
+  - **Changed this session:** only the new plan file (`plans/part-11D-charts-stats.md`) and this file. No code, no setup
+    command, no migration, no `task.md` edit, no env file read, `design/` untouched.
+  - **User decisions (2026-10-20):** the meter marks the **live** `confidence_threshold` with honest wording when it was
+    raised since (storing it per verdict is a follow-up); the owner's CredibilityPanel shows the **real score** with "Others
+    see New until 3 of your posts are checked."; the spread chart is for **fact posts only**; the credibility ring, bar and
+    sparkline are **neutral grey** (the post's confidence meter keeps its verdict tone).
+  - **Found during planning** (all handled in the plan): the post stores no threshold per verdict; `moderated_at` is
+    overwritten by every moderator action, so a moderator verdict's time comes from its `ModerationAction` row; a stats or
+    trend view that stays 401-free needs `authentication_classes = []`; children of `role="img"` are presentational, so each
+    chart's hidden data table must be a **sibling**, not a child; Stitch's "Consensus Gauge" is a horizontal bar with no
+    threshold marker and its ring starts at 9 o'clock by mistake; `PostDetail.test.tsx` and `ProfilePage.test.tsx` use partial
+    API mocks and need the new calls added; the reputation endpoint's query count goes from 2 to 3 (public score) or stays 2
+    (hidden).
 
 - 2026-10-20 (Claude, Opus 5.5): **Part 11C implemented** (uncommitted). Started from HEAD `132a2c0` ("Plan Part 11C",
   committed by you), a clean tree that matched this file (it still said the plan was uncommitted). Docker was up.
