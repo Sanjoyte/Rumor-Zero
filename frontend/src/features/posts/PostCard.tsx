@@ -9,6 +9,7 @@ import { cn } from "@/lib/cn";
 import { formatRelativeTime } from "@/lib/format";
 import type { PostSource } from "@/lib/api/types";
 import { type PostStatus, type PostType, type VerdictSource, stripeTone } from "@/lib/post-display";
+import { Highlight } from "@/features/search/Highlight";
 import { SourceLink } from "./SourceLink";
 import { Tombstone } from "./Tombstone";
 
@@ -49,6 +50,8 @@ export interface PostCardProps {
    * presentational; it must sit above the stretched claim link itself (`relative z-10`).
    */
   header?: ReactNode;
+  /** Search terms to mark in the claim (Part 12, `queryTerms`). Unset or empty marks nothing. */
+  highlight?: string[];
   /** Clock for the relative timestamp; tests and the gallery pass a fixed one. */
   now?: Date;
   className?: string;
@@ -94,6 +97,7 @@ export function PostCard({
   href,
   actions,
   header,
+  highlight,
   now,
   className,
 }: PostCardProps) {
@@ -105,6 +109,7 @@ export function PostCard({
   if (status === "removed")
     return <Tombstone createdAt={createdAt} now={now} className={className} />;
 
+  const text = highlight?.length ? <Highlight text={content} terms={highlight} /> : content;
   const tone = stripeTone({ status, emergencyActive });
   const hasName = author.displayName.trim() !== "";
   const name = hasName ? author.displayName : `@${author.username}`;
@@ -164,13 +169,13 @@ export function PostCard({
               className="after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-secondary/30"
             >
               {"\u201C"}
-              {content}
+              {text}
               {"\u201D"}
             </Link>
           ) : (
             <>
               {"\u201C"}
-              {content}
+              {text}
               {"\u201D"}
             </>
           )}

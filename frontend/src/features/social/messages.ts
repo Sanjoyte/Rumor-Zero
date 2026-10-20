@@ -55,6 +55,10 @@ export function followFailureMessage(error: unknown, wasFollowing: boolean): str
 
 export function listErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 503) return SOCIAL_MESSAGES.waking;
+  // People search is limited per address (Part 12); no other list answers 429.
+  if (error instanceof ApiError && error.status === 429) {
+    return `You're going too fast. Try again ${waitText(error.retryAfter)}.`;
+  }
   return SOCIAL_MESSAGES.listFailed;
 }
 

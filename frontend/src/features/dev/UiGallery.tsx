@@ -21,6 +21,7 @@ const LINKS = [
   ["stitch-post-cards", "b1 PostCard"],
   ["stitch-stats", "b3 stats"],
   ["stitch-credibility", "Credibility"],
+  ["stitch-search", "b4 search"],
   ["stitch-signup", "a2 sign-up"],
   ["stitch-modals", "b2 and d1 modals"],
 ] as const;

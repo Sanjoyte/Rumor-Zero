@@ -4,14 +4,16 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from rest_framework import serializers
-from rest_framework.exceptions import NotAuthenticated, NotFound
+from rest_framework.exceptions import NotAuthenticated, NotFound, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsEmailVerified
+from apps.core.pagination import offset_page_number, paginate_offset
 from apps.core.services import get_platform_settings
+from apps.core.throttles import IPScopedRateThrottle
 from apps.moderation.queries import appeal_defaults, with_verdict_time
 from apps.posts import services, stats
 from apps.posts.emergency import active_emergency_q
@@ -20,9 +22,10 @@ from apps.posts.exceptions import (
     FactQuotaExceededError,
     NotAuthorError,
 )
-from apps.posts.models import Post
+from apps.posts.models import Post, PostStatus, PostType
 from apps.posts.pagination import EmergencyPagination, FeedPagination
 from apps.posts.pinned import is_first_page, pinned_page, recent_pinnable
+from apps.posts.search import QueryTooLong, clean_post_query, has_positive_term, search_posts
 from apps.posts.serializers import (
     PostCreateSerializer,
     PostSerializer,
@@ -293,3 +296,80 @@ class PostStatusView(APIView):
                 {"ids": [f"Check at most {MAX_STATUS_IDS} posts at a time."]}
             )
         return ids
+
+
+# The statuses the search filter takes: what the chips ask for. `removed` is never searchable.
+SEARCH_STATUSES = tuple(value for value in PostStatus.values if value != PostStatus.REMOVED)
+
+
+@method_decorator(never_cache, name="dispatch")
+class SearchView(APIView):
+    """`GET /api/v1/search/?q=&type=posts|users&post_type=&status=&cursor=` (Part 12).
+
+    Public and read-only. A Bearer token is still read (so `liked_by_me` and `is_following` are
+    right), the `search` throttle counts the client IP (signed in or not), and the check order is
+    authentication, permissions, the throttle, then validation: a 400 counts, a 401 never does.
+    Posts come back as the feed envelope and rank by relevance; people as `{results, next_cursor}`.
+    Both page by a bounded offset (`apps.core.pagination.paginate_offset`).
+    """
+
+    permission_classes = [AllowAny]
+    throttle_classes = [IPScopedRateThrottle]
+    throttle_scope = "search"
+
+    def get(self, request):
+        kind = request.query_params.get("type", "posts")
+        errors = {}
+        if kind not in ("posts", "users"):
+            errors["type"] = ["Choose posts or users."]
+        post_type = request.query_params.get("post_type") or None
+        if kind == "posts" and post_type not in (None, *PostType.values):
+            errors["post_type"] = ["Choose fact or opinion."]
+        status = request.query_params.get("status") or None
+        if kind == "posts" and status not in (None, *SEARCH_STATUSES):
+            errors["status"] = ["Choose one of: " + ", ".join(SEARCH_STATUSES) + "."]
+        try:
+            query = clean_post_query(request.query_params.get("q", ""))
+        except QueryTooLong:
+            errors["q"] = ["Keep it to 200 characters."]
+        else:
+            if not query:
+                errors["q"] = ["Enter something to search for."]
+        if errors:
+            raise ValidationError(errors)
+        offset_page_number(request)  # a crafted cursor is a 404 whatever the query
+        viewer = request.user if request.user.is_authenticated else None
+        if kind == "users":
+            return self._people(request, query, viewer)
+        return self._posts(request, query, viewer, post_type, status)
+
+    def _posts(self, request, query, viewer, post_type, status):
+        if not has_positive_term(query):
+            # `-foo` alone matches nearly every post and walks the whole index: answer empty.
+            return FeedPagination.envelope([], None)
+        rows, next_cursor = paginate_offset(
+            search_posts(query, viewer, post_type=post_type, status=status), request
+        )
+        context = {"request": request, "now": timezone.now()}
+        posts = PostSerializer(rows, many=True, context=context).data
+        return FeedPagination.envelope([feed_item(data) for data in posts], next_cursor)
+
+    def _people(self, request, query, viewer):
+        # Imported here: `social` depends on `posts` (the pattern of `PostQuerySet.for_list`).
+        from apps.social.search import clean_people_query, search_people
+        from apps.social.serializers import user_row
+
+        text = clean_people_query(query)
+        if not text:
+            return Response({"results": [], "next_cursor": None})
+        rows, next_cursor = paginate_offset(search_people(text, viewer), request)
+        results = [
+            user_row(
+                user,
+                is_following=bool(getattr(user, "viewer_follows", False)),
+                viewer=viewer,
+                verified=user.verified_n,
+            )
+            for user in rows
+        ]
+        return Response({"results": results, "next_cursor": next_cursor})

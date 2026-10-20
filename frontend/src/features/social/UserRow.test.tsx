@@ -68,4 +68,24 @@ describe("UserRow", () => {
     renderWithComposer(<UserRow user={makeRow({ bio: "<b>bold</b>" })} />);
     expect(screen.getByText("<b>bold</b>")).toBeInTheDocument();
   });
+
+  it("marks the search terms in the name, the handle and the bio (Part 12)", () => {
+    const { container } = renderWithComposer(
+      <UserRow
+        user={makeRow({ username: "ada_l", display_name: "Ada Lovelace", bio: "Ada writes code" })}
+        highlight={["ada"]}
+      />,
+    );
+    expect([...container.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual([
+      "Ada",
+      "ada",
+      "Ada",
+    ]);
+    expect(screen.getByRole("link", { name: /Ada Lovelace/ })).toHaveAttribute("href", "/u/ada_l");
+  });
+
+  it("marks nothing without terms", () => {
+    const { container } = renderWithComposer(<UserRow user={makeRow()} />);
+    expect(container.querySelector("mark")).toBeNull();
+  });
 });

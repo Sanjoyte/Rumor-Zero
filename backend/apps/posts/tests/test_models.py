@@ -199,6 +199,7 @@ def constraint_and_index_names():
         "posts_review_queue_idx",
         "posts_pinned_emerg_idx",
         "posts_recent_idx",
+        "posts_search_idx",
     ],
 )
 def test_every_planned_constraint_and_index_exists(name):
@@ -214,8 +215,13 @@ def test_the_recent_index_is_partial_and_ordered_like_the_feed():
     assert "removed" in definition
 
 
-def test_there_is_no_search_vector_yet():
-    assert "search_vector" not in {field.name for field in Post._meta.get_fields()}
+def test_search_vector_is_a_stored_generated_column_with_a_gin_index():
+    field = Post._meta.get_field("search_vector")
+    assert field.generated and field.db_persist
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT indexdef FROM pg_indexes WHERE indexname = %s", ["posts_search_idx"])
+        (definition,) = cursor.fetchone()
+    assert "USING gin (search_vector)" in definition
 
 
 def test_visible_leaves_out_removed_and_deleted_posts():
@@ -241,6 +247,7 @@ def test_for_list_joins_the_author_and_defers_the_pipeline_blob(django_assert_nu
         (post,) = list(Post.objects.for_list())
         assert post.author.username
         assert "pipeline_result" not in post.__dict__
+        assert "search_vector" not in post.__dict__
 
 
 def test_deleting_the_author_deletes_their_posts():

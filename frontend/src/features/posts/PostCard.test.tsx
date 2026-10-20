@@ -350,4 +350,62 @@ describe("PostCard removed guard (Part 11)", () => {
     expect(screen.queryByRole("link")).toBeNull();
     expect(container.querySelector("time")).toHaveAttribute("datetime", BASE.createdAt);
   });
+
+  describe("search highlight (Part 12)", () => {
+    const marks = (container: HTMLElement) =>
+      [...container.querySelectorAll("mark")].map((mark) => mark.textContent);
+
+    it("marks the words of the claim that match the terms", () => {
+      const { container } = render(<PostCard {...BASE} highlight={["capacity", "year"]} />);
+      expect(marks(container)).toEqual(["capacity", "year"]);
+      // The claim's text is unchanged around the marks.
+      expect(screen.getByRole("blockquote", { hidden: true }).textContent).toBe(
+        "\u201CSolar capacity grew 30% last year.\u201D",
+      );
+    });
+
+    it("marks nothing without terms, or with an empty list", () => {
+      const plain = render(<PostCard {...BASE} />);
+      expect(marks(plain.container)).toEqual([]);
+      plain.unmount();
+      const empty = render(<PostCard {...BASE} highlight={[]} />);
+      expect(empty.container.querySelector("mark")).toBeNull();
+    });
+
+    it("marks inside the link of a card that opens the post", () => {
+      const { container } = render(<PostCard {...BASE} href="/p/1" highlight={["solar"]} />);
+      expect(container.querySelector("a mark")?.textContent).toBe("Solar");
+    });
+
+    it("keeps an opinion's marks upright inside the italic claim", () => {
+      const { container } = render(
+        <PostCard {...BASE} postType="opinion" status="published" highlight={["solar"]} />,
+      );
+      expect(container.querySelector("mark")).toHaveClass("not-italic");
+    });
+
+    it("shows text that looks like HTML as text", () => {
+      const { container } = render(
+        <PostCard {...BASE} content="<img src=x onerror=alert(1)> solar" highlight={["solar"]} />,
+      );
+      expect(container.querySelector("img")).toBeNull();
+      expect(marks(container)).toEqual(["solar"]);
+    });
+
+    it("does not mark the author's name or the handle", () => {
+      const { container } = render(
+        <PostCard
+          {...BASE}
+          author={{ displayName: "Solar Sam", username: "solar" }}
+          highlight={["solar"]}
+        />,
+      );
+      expect(container.querySelectorAll("mark")).toHaveLength(1);
+    });
+
+    it("never marks a removed post's tombstone", () => {
+      const { container } = render(<PostCard {...BASE} status="removed" highlight={["solar"]} />);
+      expect(container.querySelector("mark")).toBeNull();
+    });
+  });
 });

@@ -100,7 +100,7 @@ not let the review expand the part's scope without user approval.
 | 11B | Credibility score | 7B, 10, 11 | [x] Done (2026-10-19) |
 | 11C | Emergency posts | 9, 10, 11B | [x] Done (2026-10-20) |
 | 11D | Charts & stats | 7B, 11B | [x] Done (2026-10-20) |
-| 12 | Search | 6, 11B | [ ] |
+| 12 | Search | 6, 11B | [x] Done (2026-10-20) |
 | 13 | Notifications | 7, 7B, 10, 11, 11C | [ ] |
 | 14 | Account settings, data export, deletion | 6, 7, 7B, 11B, 11D | [ ] |
 | 14B | Photo avatars | 14 | [ ] |
@@ -1260,6 +1260,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
   - **Part 11D:** the trend reads the last `score_after` per UTC day (times are strictly increasing per person); `CredibilityPanel` reads `GET /api/v1/me/reputation/events/` and its `appeal` block; the "Ask for another look" link goes on own-post negative rows only.
   - **Part 12:** people search reuses the user row's `reputation` and `counts.verified`.
   - **Part 14:** the export includes the ledger; account deletion cascades it and must never lock a user before its posts.
+  - **From Part 12:** the export must skip `posts_post.search_vector` (a stored generated column, nothing to export or restore).
   - **Part 15:** the `/how-it-works#credibility` text and anchor.
   - **Part 16:** the per-write aggregate cost, the lock fan-out on a post with thousands of reposters, a moderator deciding a post they reposted (the +0.25 gain), report-credit farming with real data.
   - **Part 17:** the stub in production would feed this public score (the existing launch blocker).
@@ -1438,7 +1439,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 ---
 
 ## Part 12: Search
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-20)
 **Goal:** Postgres full-text search over posts, plus people search (guide §10), with no new service.
 **Depends on:** 6, 11B (the credibility score in people results).
 **Stitch files to convert:** `b4_search_results`: query box, Posts/People tabs, filter chips, result cards, load more. Drop Primary Sources, certainty sort, the claim-data telemetry box and the contributor spotlight (ANALYSIS b-3).
@@ -1457,11 +1458,35 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 **API endpoints:** `GET /api/v1/search/`.
 
 **Acceptance criteria**
-- [ ] "running" finds "run" (stemming); `EXPLAIN` shows the GIN index being used
-- [ ] Removed and deleted posts never appear; filters combine correctly
-- [ ] An empty query shows the empty state (API 400)
+- [x] "running" finds "run" (stemming); `EXPLAIN` shows the GIN index being used
+- [x] Removed and deleted posts never appear; filters combine correctly
+- [x] An empty query shows the empty state (API 400)
 
 **Required tests:** search API (stemming, ranking, filters, exclusions); an EXPLAIN index-usage test; user prefix search; the highlight util (escaping, no injection); SearchResults component; E2E: find a known post.
+
+**Decisions and deviations (plan approved 2026-10-20; built 2026-10-20; recorded in ARCHITECTURE §2/§3/§9/§10/§12, ANALYSIS c-46, STRUCTURE, MEMORY):**
+- **User decisions (2026-10-20):**
+  - **People search** matches the username prefix plus any word of the display name (the start, or after a space, hyphen or apostrophe); no extension and no new index. A trigram index is a Part 16 option.
+  - **Filter chips** are one row of six, pick one: All / Facts / Opinions / Verified / FALSE / Under review (the API still takes `post_type` and `status` together).
+  - **Rate limit:** `search` is 60/min per client IP, counted by IP for signed-in users too (`apps/core/throttles.py`, a small `ScopedRateThrottle` subclass).
+  - **People order:** username matches first, then display-name matches, A to Z inside each; never by credibility or followers.
+- **Defaults approved with the plan:** submit-only search (no live search); `q` 1 to 200 characters; a negation-only or stop-word-only query is an empty 200 with no database query; suspended authors' posts stay searchable (as in Recent), suspended people don't; tabs show no counts; a search page is `noindex, follow` with a fixed title; highlighting is client-side and approximate; pending facts are searchable and show "Checking facts…" with the usual polling; the 100-result note shows when page 5 was loaded and full.
+- **Documented deviation:** search pages by a **bounded offset** (20 a page, 5 pages, `next_cursor` is the next page number as a string) instead of a cursor, because rank order has no timestamp (ARCHITECTURE §9).
+- **Built differently from the plan (found while building):**
+  - **The exact-username tier of the people order is not a separate `CASE` branch:** the query is a prefix of every other username match, so an exact match already sorts first among them A to Z (a mutation check showed the branch had no effect). The order is the same as decided.
+  - **No search types were added to `lib/api/types.ts`:** the answers are the existing `FeedResponse` and `UserListResponse`.
+  - **The highlighter's stemmer has no separate `ies` rule:** `stories` becomes `storie` and then `stori` through the plural-`s` and final-`e` rules, the same stem `story` gets from the `y` rule. A final `ee` loses both letters (`agree` and `agreed` share `agr`).
+  - **A blank people query is a 400** like a blank post query (the plan listed whitespace-only as an empty 200 in one place); only text with no letter, digit or `_` left after cleaning (`-`, `'`, `@`) is an empty 200.
+  - **`status=removed` is refused** (400) and `post_type`, `status` are validated for `type=posts` only.
+  - **The EXPLAIN gate uses 3,000 rows:** with 200 rows Postgres prefers the partial Recent index even with sequential scans off; at 3,000 (and at 100,000 with no setting changed) it uses `posts_search_idx`.
+  - **Existing tests changed on purpose:** `posts/tests/test_models.py` (the column and the seventh index now exist; `for_list` leaves `search_vector` out), `core/tests/test_settings.py` (twelve throttle scopes), `app/dev/ui/page.test.tsx`.
+  - **Frontend additions are all additive:** `PostCard` and `UserRow` take `highlight`, `FeedList` takes `highlight` and `endLabel`, both list-error helpers gained a 429 branch, `RowSkeleton` is exported from `Connections.tsx`, the dev gallery has a `stitch-search` section.
+- **Not done (later parts):**
+  - **Part 14:** the data export must not include `search_vector` (a generated column nobody writes).
+  - **Part 16:** search under load (ranking a very common word sorts every match; the throttle is per IP only); scrubbing the search text from Sentry request URLs and access logs; a trigram index for people; `ts_headline` if the client highlight proves too approximate.
+  - **Later:** typo tolerance (the guide's Meilisearch upgrade path); searching comments or sources.
+- **Validated by:** 38 backend and 55 frontend mutation checks (every one caught or shown equivalent after the fixes; the first runs had survivors that became tests: the people order with a name match that sorts first by name, neighbouring unmarked text joining into one part, the upright mark, a request waiting for the session); `EXPLAIN ANALYZE` of the real query on 100,000 rows rolled back (a bitmap scan of `posts_search_idx`, about 4 ms); a scripted headless-Chromium check at 1280 and 390 px (the prompt, a result with marks, each chip, People, no results, the throttled message), no horizontal scroll, screenshots looked at; the Linux blocks of `docs/test-command.md` Part 12 run in order against live Django.
+- **Verified:** see HANDOFF (backend 3894 tests, frontend 2043, E2E 51 in dev and CI mode). The PowerShell blocks of the `docs/test-command.md` section were not run on Windows. CI itself runs when you push.
 
 **Recommended models**
 - **Plan:** Sonnet 5.5 · high. The FTS details (GeneratedField, ranking, index usage) need care.
@@ -1648,6 +1673,7 @@ Plus toasts and field errors.
   - the credibility score's appeal and audit path
   - **From Part 11B:** the per-write totals aggregate in `settle_post`, the user-lock fan-out on a post with thousands of reposters, a moderator deciding a post they reposted (their +0.25), and report-credit farming with real data
   - **From Part 11C:** the pinned query on every first page of Recent and Following, the Following reposts side's `NOT IN` the pinnable ids, `posts_pending_queue_idx` no longer serving the processor's `Case` ordering (it still serves the filter), and emergency abuse with real data (the daily limit, the block, the lower report threshold)
+  - **From Part 12:** search under load (a very common word ranks every match before the 20 are cut; `search` is throttled per IP only), the search text in Sentry request URLs and access logs (ARCHITECTURE §12), a trigram index for people, and the Part 17 `migrate` of `posts.0003` (a stored generated column rewrites `posts_post` and the GIN build blocks writes: fine before launch).
 - `check --deploy` clean.
 - Security headers and cookie flags verified by tests; admin path confirmed.
 - Throttle review; secret-leak scan of the repo (patterns); logging review (no tokens or PII).

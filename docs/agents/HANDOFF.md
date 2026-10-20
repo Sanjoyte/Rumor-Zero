@@ -6,28 +6,28 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 12 (Search) is planned and approved** (2026-10-20, Claude, Sonnet 5.5); **not implemented**. Parts 0A, 0B, 0D, 0C,
-  1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C and 11D are done (Part 11C committed as `ee63914`, Part 11D as `b2f8ad5`).
-  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C and 11D CI have not been
+- **Part:** **Part 12 (Search) is implemented and verified** (2026-10-20, Claude, Sonnet 5.5); **uncommitted**. Parts 0A, 0B, 0D, 0C,
+  1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D and 12 are done (Part 11C committed as `ee63914`, Part 11D as `b2f8ad5`).
+  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D and 12 CI have not been
   reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
   - **Part 17 has a launch blocker from Part 9** (your decision 2026-10-11): decide how production gets verdicts
     before deploying; the stub lets an author self-label with `#true`, from Part 11B that feeds the public score, and
     from Part 11C a hash-chosen FALSE on an expired emergency also blocks its author.
+  - **Part 17 also runs `posts.0003_search_vector`** (a stored generated column rewrites `posts_post`; the GIN build blocks
+    writes): fine before launch.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after planning Part 12, as asked).
-- **Phase:** Part 12 planned and approved, nothing implemented. HEAD is `b2f8ad5` ("Implemented Part 11D: Charts & stats", committed by
-  you); the working tree was clean when the plan was written. The only files changed in this session are the new plan file and this
-  file: no code, no setup command, no migration, no `task.md` edit, no env file read, `design/` untouched. The dev database is still at
-  `moderation 0007_emergency_permission` (`posts` at `0002`). Docker is up; no server is running (ports 3000 and 8000 free).
-- **Next action:** **Implement Part 12 from the approved plan** ([`part-12-search.md`](plans/part-12-search.md)), starting at its
-  step 0 (verify the workspace, re-measure the baselines: `pytest` 3715, `npm test` 1933, E2E 45 per the Part 11D checkpoint), then
-  step 1, the generated-column spike, which is a stop-and-ask gate. Implement with Sonnet 5.5 · medium. Then update `task.md`
-  (both status spots), this file and MEMORY, and stop.
+- **Owner:** none (Claude stopped after implementing Part 12, as asked).
+- **Phase:** Part 12 done, **not committed** (HEAD is `e259253`, "Plan part 12"). Docker is up; no server is running (ports 3000 and
+  8000 free). The dev database is at `posts 0003_search_vector` (`moderation 0007_emergency_permission`). The `part12-` accounts and
+  posts of the guide run were deleted; E2E-made accounts and posts (`seed_`, `srch_`, `e2e_`…) remain in the dev database, as after
+  earlier parts.
+- **Next action:** **commit Part 12** (you do all git operations), then give Claude the next part. Part 13 (Notifications) is next in
+  `task.md`; read its "Depends on" and the notes left by 7, 7B, 10, 11 and 11C first.
 - **Approved plan:**
-  [`docs/agents/plans/part-12-search.md`](plans/part-12-search.md) (approved 2026-10-20; not yet implemented)
+  [`docs/agents/plans/part-12-search.md`](plans/part-12-search.md) (approved 2026-10-20; implemented 2026-10-20)
 - **Previous plans:**
   - [`part-11D-charts-stats.md`](plans/part-11D-charts-stats.md), implemented 2026-10-20 (committed as `b2f8ad5`);
   - [`part-11C-emergency-posts.md`](plans/part-11C-emergency-posts.md), implemented 2026-10-20 (committed as `ee63914`);
@@ -55,9 +55,59 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-20 by Claude (Sonnet 5.5), Part 12 planned and approved.
+- **Last updated:** 2026-10-20 by Claude (Sonnet 5.5), Part 12 implemented.
 
 ## Completed checkpoints
+
+- 2026-10-20 (Claude, Sonnet 5.5): **Part 12 implemented** (uncommitted). Started from HEAD `e259253` ("Plan part 12"), a clean tree that
+  matched this file; Docker up, ports free. Baselines measured first: `pytest` **3715 passed**, `npm test` **1933 passed** (the E2E
+  baseline, 45, was taken from the Part 11D checkpoint and not re-run before the changes).
+  - **Step 1 spike (the stop-and-ask gate) passed:** `sqlmigrate` shows `GENERATED ALWAYS AS (to_tsvector('english'::regconfig,
+    COALESCE("content", ''))) STORED`; `migrate`, `makemigrations --check`, `migrate posts 0002` and a re-apply all worked.
+  - **Backend** (`backend/`): new `apps/posts/migrations/0003_search_vector.py`, `apps/posts/search.py` (query cleaning,
+    `has_positive_term`, `search_posts`), `apps/social/search.py` (`clean_people_query`, `search_people`), `apps/core/throttles.py`
+    (`IPScopedRateThrottle`); tests `posts/tests/{test_search_query,test_api_search_posts,test_search_index}.py`,
+    `social/tests/test_api_search_people.py`, `core/tests/{test_pagination_offset,test_throttles}.py` (+179 tests). Changed:
+    `posts/{models,views,urls}.py` (the generated field, `GinIndex`, `defer("search_vector")`, `SearchView`, the route),
+    `core/pagination.py` (`offset_page_number`, `paginate_offset`), `rumor_zero/settings.py` (`search` 60/min). Existing tests changed
+    on purpose: `posts/tests/test_models.py`, `core/tests/test_settings.py`. **No dependency, no variable.** `makemigrations --check`: clean.
+  - **Frontend** (`frontend/`): new `src/features/search/` (`SearchPage`, `SearchBar`, `PostResults`, `PeopleResults`, `Highlight`,
+    `highlight.ts`, `search-api.ts`, `search-params.ts`, `messages.ts` + tests), `src/app/(app)/search/page.test.tsx`,
+    `e2e/search.spec.ts` (6 tests). Changed: `app/(app)/search/page.tsx` (static page, `noindex`), `features/posts/{PostCard,FeedList,
+    messages}.ts(x)`, `features/social/{UserRow,Connections,messages}.ts(x)` (additive: `highlight`, `endLabel`, the `RowSkeleton`
+    export, the 429 branches; their tests), `features/dev/{StitchSections,UiGallery}.tsx`, `app/dev/ui/page.test.tsx`,
+    `e2e/helpers.ts` (`setPostState(…, "deleted")`).
+  - **Docs:** ARCHITECTURE §2/§3/§9/§10/§12, ANALYSIS c-46, STRUCTURE, MEMORY (one Part 12 entry), `task.md` (criteria ticked,
+    decisions and deviations, both status spots, notes in 14 and 16), the plan's status line, and `docs/test-command.md`: a
+    `### Part 12: Search` section in **both** guides (15 steps each) and "12" in its intro line; nothing else in that file touched.
+    (The file has **no comment marker at the bottom** to keep: it ends with the last bullets of the Windows Part 11D section, now
+    Part 12's.)
+  - **Validation (all green, final state):**
+    - Backend: `ruff check .` (All checks passed!), `ruff format --check .` (293 files already formatted), `makemigrations --check
+      --dry-run` (No changes detected), `manage.py check` (no issues), `pytest` **3894 passed** (3715 before). One earlier full run had
+      a single failure, `test_email_verification.py::test_a_link_lasts_exactly_24_hours`, which passed alone and in the later full run
+      (a time-boundary flake unrelated to this part; recorded in MEMORY).
+    - **38 backend mutation checks:** 35 caught first time; the 3 survivors were the people order (a name match whose username sorts
+      first), fixed by a better test and by dropping a redundant `CASE` branch, then caught. **55 frontend mutation checks:** 46 caught;
+      the 9 survivors were 5 equivalent (a rule made redundant by others, an `or` that is also a stop word, an early return, a
+      guard, a `filter` that is "all" anyway), 1 harness artefact (the first `not-italic` was in a comment) and 3 real gaps (merging
+      unmarked text, a request waiting for the session, both now tests); the reruns were all caught.
+    - Frontend: `npm run lint`, `lint:tokens`, `typecheck`, `format:check` clean; `npm test` **2043 passed** (148 files; 1933 before);
+      `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` OK (`○ /search` is static); `npm run test:e2e` **51 passed** in dev mode and with
+      `CI=1` (45 before), run again on the final code. The first `CI=1` run failed 6 search tests only because `.next` was an old
+      build: rebuild first.
+    - `EXPLAIN ANALYZE` of the endpoint's query on 100,000 rolled-back rows with no setting changed: a bitmap scan of
+      `posts_search_idx`, about 4 ms. At 10,000 rows Postgres chooses a sequential scan (a small table), so the automated EXPLAIN gate
+      builds 3,000 rows and disables sequential scans for its transaction.
+    - Headless Chromium at 1280 and 390 px (a scripted run against `runserver` and `next dev`, screenshots looked at): the prompt, a
+      result with marks, the Verified and FALSE chips, People, no results, the throttled message; **0 px horizontal overflow**
+      everywhere; the six chips wrap to two rows on a phone.
+  - **Test-command notes:** the Linux blocks of the Part 12 section were run in order against live Django (steps 3 to 11 and 15; 12 and
+    the browser steps with curl and headless Chromium); the PowerShell blocks were **not run**. Step 11 uses a made-up client address
+    (`X-Forwarded-For`) for a fresh 60-a-minute bucket; steps 5 to 9 make about 40 searches from 127.0.0.1, so don't repeat them within
+    a minute.
+  - **Left for you:** commit; run CI when you push; Part 14 (the export must skip `search_vector`), Part 16 (search under load, Sentry
+    URLs, a trigram index) and Part 17 (the migration) have notes in `task.md`.
 
 - 2026-10-20 (Claude, Sonnet 5.5): **Part 12 planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `b2f8ad5` ("Implemented Part 11D: Charts & stats", committed by you), a clean tree. (The older text of this

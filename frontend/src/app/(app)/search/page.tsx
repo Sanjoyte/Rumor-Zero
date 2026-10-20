@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
-import { Placeholder } from "@/components/shell/Placeholder";
+import { Suspense } from "react";
+import { SearchPage, SearchSkeleton } from "@/features/search/SearchPage";
 
-export const metadata: Metadata = { title: "Search" };
+// A fixed title and no index: a results page is for the person who searched. The page stays
+// static (the client reads `?q=`), so a query, tab or chip change costs no Worker request.
+export const metadata: Metadata = { title: "Search", robots: { index: false, follow: true } };
 
-/** Placeholder; the screen arrives in a later part. */
 export default function Page() {
-  return <Placeholder title="Search" />;
+  return (
+    <Suspense fallback={<SearchSkeleton />}>
+      <SearchPage />
+    </Suspense>
+  );
 }

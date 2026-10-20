@@ -2,6 +2,8 @@ import uuid
 
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.postgres.search import SearchVector, SearchVectorField
 from django.db import models
 from django.db.models import Func, IntegerField, Q, Value
 from django.db.models.functions import Length
@@ -74,7 +76,7 @@ class PostQuerySet(models.QuerySet):
         from apps.moderation.queries import with_appeal_fields
         from apps.social.engagement import with_engagement
 
-        queryset = self.select_related("author").defer("pipeline_result")
+        queryset = self.select_related("author").defer("pipeline_result", "search_vector")
         return with_appeal_fields(with_engagement(queryset, viewer), viewer)
 
 
@@ -138,6 +140,14 @@ class Post(models.Model):
     )
     moderated_at = models.DateTimeField(null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
+
+    # Full-text search (Part 12): Postgres keeps it in step with `content` (a stored generated
+    # column, never written by Django) and the GIN index below answers `search_vector @@ query`.
+    search_vector = models.GeneratedField(
+        expression=SearchVector("content", config="english"),
+        output_field=SearchVectorField(),
+        db_persist=True,
+    )
 
     # Not auto_now_add: the service passes `now`, and tests place posts in the past.
     created_at = models.DateTimeField(default=timezone.now)
@@ -265,6 +275,7 @@ class Post(models.Model):
                 condition=Q(deleted_at__isnull=True) & ~Q(status=PostStatus.REMOVED),
                 name="posts_recent_idx",
             ),
+            GinIndex(fields=["search_vector"], name="posts_search_idx"),
         ]
 
     def __str__(self):

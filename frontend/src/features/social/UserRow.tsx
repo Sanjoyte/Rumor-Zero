@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Avatar } from "@/components/ui/Avatar";
 import { CredibilityBadge } from "@/features/reputation/CredibilityBadge";
+import { Highlight } from "@/features/search/Highlight";
 import type { UserRowData } from "@/lib/api/types";
 import { FollowButton } from "./FollowButton";
 
@@ -14,12 +15,17 @@ import { FollowButton } from "./FollowButton";
 export function UserRow({
   user,
   onFollowChange,
+  highlight,
 }: {
   user: UserRowData;
   onFollowChange?: (following: boolean) => void;
+  /** Search terms to mark in the name, handle and bio (Part 12, `queryTerms`). */
+  highlight?: string[];
 }) {
   const hasName = user.display_name.trim() !== "";
   const name = hasName ? user.display_name : `@${user.username}`;
+  const mark = (text: string) =>
+    highlight?.length ? <Highlight text={text} terms={highlight} /> : text;
   return (
     <article className="p-space-md transition-colors hover:bg-surface-container-low/50">
       <div className="flex items-start justify-between gap-space-md">
@@ -31,11 +37,11 @@ export function UserRow({
           <Avatar name={name} src={user.avatar_url} size={10} decorative />
           <span className="flex min-w-0 flex-col justify-center">
             <span className="truncate font-body-md text-body-md font-bold text-on-surface group-hover:underline">
-              {name}
+              {mark(name)}
             </span>
             {hasName && (
               <span className="truncate font-label-code text-label-badge text-outline">
-                @{user.username}
+                @{mark(user.username)}
               </span>
             )}
           </span>
@@ -51,7 +57,7 @@ export function UserRow({
       </div>
       {user.bio && (
         <p className="mt-space-sm pl-12 font-body-sm text-body-sm break-words whitespace-pre-wrap text-on-surface-variant">
-          {user.bio}
+          {mark(user.bio)}
         </p>
       )}
       <div className="mt-space-xs pl-12">

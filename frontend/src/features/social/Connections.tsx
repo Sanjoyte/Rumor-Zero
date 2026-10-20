@@ -21,7 +21,7 @@ import { useProfile } from "./useProfile";
 const PREFIX = "connections";
 const userKey = (user: UserRowData) => user.id;
 
-function RowSkeleton() {
+export function RowSkeleton() {
   return (
     <div className="flex items-center gap-space-sm p-space-md">
       <Skeleton className="h-10 w-10 rounded-full" />

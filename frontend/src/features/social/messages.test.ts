@@ -45,6 +45,15 @@ describe("listErrorMessage", () => {
     expect(listErrorMessage(err(503, "backend_waking"))).toBe(SOCIAL_MESSAGES.waking);
     expect(listErrorMessage(new Error("x"))).toBe(SOCIAL_MESSAGES.listFailed);
   });
+
+  it("says a 429 is the rate limit and when to try again (people search, Part 12)", () => {
+    expect(listErrorMessage(err(429, "throttled", 20))).toBe(
+      "You're going too fast. Try again in a minute.",
+    );
+    expect(listErrorMessage(err(429, "throttled", 3600))).toBe(
+      "You're going too fast. Try again in about 60 minutes.",
+    );
+  });
 });
 
 describe("likeFailureMessage", () => {

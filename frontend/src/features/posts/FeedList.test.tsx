@@ -561,3 +561,51 @@ describe("FeedList: posts shown above it (Part 11C)", () => {
     expect(screen.getByText("No other posts yet")).toBeInTheDocument();
   });
 });
+
+describe("FeedList: search additions (Part 12)", () => {
+  it("passes the highlight terms to every card", () => {
+    const { container } = render(
+      <FeedList
+        feed={feedWith({
+          items: [
+            entry(post("a", { content: "Solar power" })),
+            repostEntry(post("b", { content: "More solar" })),
+          ],
+        })}
+        highlight={["solar"]}
+      />,
+    );
+    expect([...container.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual([
+      "Solar",
+      "solar",
+    ]);
+  });
+
+  it("marks nothing when no highlight is given", () => {
+    const { container } = render(
+      <FeedList feed={feedWith({ items: [entry(post("a", { content: "Solar power" }))] })} />,
+    );
+    expect(container.querySelector("mark")).toBeNull();
+  });
+
+  it('says what it is told at the end of the list, and "You\'re caught up." otherwise', () => {
+    const items = [entry(post("a"))];
+    const first = render(<FeedList feed={feedWith({ items })} endLabel="That's the first 100." />);
+    expect(screen.getByText("That's the first 100.")).toBeInTheDocument();
+    first.unmount();
+    render(<FeedList feed={feedWith({ items })} />);
+    expect(screen.getByText("You're caught up.")).toBeInTheDocument();
+  });
+
+  it("shows the rate-limit message when the first page was throttled", () => {
+    render(
+      <FeedList
+        feed={feedWith({
+          phase: "error",
+          error: new ApiError({ status: 429, code: "throttled", detail: "x", retryAfter: 30 }),
+        })}
+      />,
+    );
+    expect(screen.getByText("You're going too fast. Try again in a minute.")).toBeInTheDocument();
+  });
+});

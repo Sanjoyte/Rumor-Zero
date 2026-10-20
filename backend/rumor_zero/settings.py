@@ -202,6 +202,8 @@ REST_FRAMEWORK = {
         "avatar_upload": "5/day",
         "username_check": "30/min",
         "status_poll": "120/min",
+        # Counted per client IP, signed in or not (apps.core.throttles).
+        "search": "60/min",
     },
 }
 

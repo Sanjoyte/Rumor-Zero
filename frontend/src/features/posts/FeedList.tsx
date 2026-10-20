@@ -31,10 +31,13 @@ export function FeedCard({
   post,
   reposter,
   overlay,
+  highlight,
 }: {
   post: Post;
   reposter: UserSummary | null;
   overlay: StatusOverlay;
+  /** Search terms to mark in the claim (Part 12). */
+  highlight?: string[];
 }) {
   const shown = applyStatus(post, overlay);
   // Removed (loaded so, or found so by the poll): a tombstone for everyone, and for the author on
@@ -45,6 +48,7 @@ export function FeedCard({
       {...toPostCardProps(shown)}
       header={reposter ? <RepostHeader user={reposter} /> : undefined}
       actions={<PostActions post={shown} />}
+      highlight={highlight}
     />
   );
 }
@@ -100,6 +104,8 @@ export function FeedList({
   gone,
   empty,
   alreadyShown,
+  highlight,
+  endLabel = "You're caught up.",
 }: {
   /** Any feed of items; its first-page `head` (the pinned emergencies) is the caller's. */
   feed: CursorFeed<FeedItem, unknown>;
@@ -111,6 +117,10 @@ export function FeedList({
   empty?: ReactNode;
   /** Posts shown above the list (the pinned emergencies): never repeated in it. */
   alreadyShown?: ReadonlySet<string>;
+  /** Search terms to mark in each claim (Part 12). */
+  highlight?: string[];
+  /** The line at the end of the list (search says it stops at 100 results). */
+  endLabel?: ReactNode;
 }) {
   const { phase } = feed;
   const items = visibleItems(feed.items, gone, alreadyShown);
@@ -154,7 +164,15 @@ export function FeedList({
       {items.map((item) => {
         const key = feedItemKey(item);
         if (item.kind === "post") {
-          return <FeedCard key={key} post={item.post} reposter={null} overlay={statusUpdates} />;
+          return (
+            <FeedCard
+              key={key}
+              post={item.post}
+              reposter={null}
+              overlay={statusUpdates}
+              highlight={highlight}
+            />
+          );
         }
         const original = item.post;
         // The original is gone: deleted, removed, or just found so by the poll.
@@ -170,7 +188,13 @@ export function FeedList({
             onRemoved={() => feed.remove(key)}
           />
         ) : (
-          <FeedCard key={key} post={original} reposter={item.reposted_by} overlay={statusUpdates} />
+          <FeedCard
+            key={key}
+            post={original}
+            reposter={item.reposted_by}
+            overlay={statusUpdates}
+            highlight={highlight}
+          />
         );
       })}
       {feed.moreError !== null && <Alert tone="error">{POST_MESSAGES.moreFailed} Try again.</Alert>}
@@ -178,7 +202,7 @@ export function FeedList({
         hasMore={feed.hasMore}
         loading={feed.loadingMore}
         onClick={feed.loadMore}
-        endLabel="You're caught up."
+        endLabel={endLabel}
       />
     </div>
   );

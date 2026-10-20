@@ -22,6 +22,7 @@ describe("/dev/ui", () => {
       "Charts: MeterBar, StatTile, BarChart, RingGauge, Sparkline",
       "Stitch b3: How this was checked",
       "Stitch c1, b4 and c2: Credibility",
+      "Stitch b4: search results",
       "Stitch b2 and d1: modals",
     ]) {
       expect(screen.getByRole("heading", { level: 2, name })).toBeInTheDocument();
@@ -94,5 +95,17 @@ describe("/dev/ui", () => {
     expect(within(credibility).getAllByRole("heading", { name: "Credibility" })).toHaveLength(3);
     expect(within(credibility).getByText("Ask for another look")).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/debunk/i);
+  });
+
+  it("shows the search specimens with the terms marked (Part 12)", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    render(<ToastProvider>{DevUiPage()}</ToastProvider>);
+    const search = document.getElementById("stitch-search") as HTMLElement;
+    const marks = [...search.querySelectorAll("mark")].map((mark) => mark.textContent);
+    expect(marks).toContain("capacity");
+    expect(within(search).getByRole("search", { name: "Search results" })).toBeInTheDocument();
+    expect(within(search).getByText("Search Rumor Zero")).toBeInTheDocument();
+    expect(within(search).getByText(/No results for/)).toBeInTheDocument();
+    expect(within(search).getByText(/going too fast/)).toBeInTheDocument();
   });
 });

@@ -2,7 +2,7 @@
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-20, together with the four decisions and the defaults below;
   drafted 2026-10-20 by Claude (Sonnet 5.5). Saved here and linked from HANDOFF at approval (HANDOFF's stale "11D is uncommitted at
-  `5704bb7`" lines were corrected then), so step 0 only needs to verify the workspace and record the baselines. **Not implemented yet.**
+  `5704bb7`" lines were corrected then), so step 0 only needs to verify the workspace and record the baselines. **Implemented 2026-10-20** (Claude, Sonnet 5.5); the deviations found while building are in `task.md` Part 12 and HANDOFF.
 - **Implement with:** Sonnet 5.5 · medium (task.md).
 - **Evidence (all read-only):** HANDOFF, MEMORY, `task.md` (Part 12 and the notes left by 6/11B/11D), ARCHITECTURE §2/§3/§9/§10/§12,
   ANALYSIS b-3/c-31/b4, STRUCTURE, the guide's §10 (PDF text; it only says "Postgres full-text, stemming, GIN"), the 11D plan (format);

@@ -152,11 +152,12 @@ export function seedReports(postId: string): number {
 /**
  * Changes a post's status straight in the database, the way a moderator or the pipeline will
  * (Parts 9 and 10) and the way the manual check does it in the Django shell. Runs the backend's own
- * `manage.py shell` against the same database the E2E backend uses. A fact post only.
+ * `manage.py shell` against the same database the E2E backend uses. A fact post only for the two
+ * verdicts; `removed` and `deleted` take any post.
  */
 export function setPostState(
   postId: string,
-  state: "verified_true" | "verified_false" | "removed",
+  state: "verified_true" | "verified_false" | "removed" | "deleted",
 ) {
   if (!/^[0-9a-f-]{36}$/.test(postId)) throw new Error("not a post id");
   const fields = {
@@ -165,9 +166,11 @@ export function setPostState(
     verified_false:
       "status='verified_false', verdict_source='pipeline', pipeline_verdict='false', confidence_score=90",
     removed: "status='removed'",
+    // The author's soft delete (Part 12: search must not find it), whatever the status.
+    deleted: "deleted_at=timezone.now()",
   }[state];
   runShell(
-    `from apps.posts.models import Post; assert Post.objects.filter(pk='${postId}').update(${fields}) == 1`,
+    `from django.utils import timezone; from apps.posts.models import Post; assert Post.objects.filter(pk='${postId}').update(${fields}) == 1`,
   );
 }
 

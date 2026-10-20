@@ -78,3 +78,32 @@ class TimestampCursorMixin:
             if moment is None or moment.tzinfo is None:
                 raise NotFound(self.invalid_cursor_message)
         return cursor
+
+
+OFFSET_PAGE_SIZE = 20
+OFFSET_MAX_PAGES = 5
+
+
+def offset_page_number(request, *, max_pages=OFFSET_MAX_PAGES):
+    """The page asked for by `?cursor=`: 1 when it is missing or empty, otherwise the string of
+    a number from 2 to `max_pages`. Anything else ("1", "0", "6", "02", "abc") is a 404 like
+    every crafted cursor, so the client restarts from the top."""
+    token = request.query_params.get("cursor")
+    if token is None or token == "":
+        return 1
+    if token not in {str(number) for number in range(2, max_pages + 1)}:
+        raise NotFound(pagination.CursorPagination.invalid_cursor_message)
+    return int(token)
+
+
+def paginate_offset(queryset, request, *, page_size=OFFSET_PAGE_SIZE, max_pages=OFFSET_MAX_PAGES):
+    """`(rows, next_cursor)` for a list ordered by relevance, which has no timestamp to put in a
+    cursor (ARCHITECTURE §9: the documented deviation): a bounded offset, at most `max_pages`
+    pages. `next_cursor` is the next page number as a plain string, null when there is no
+    further row (one extra is read to know) or the cap is reached. Results can shift between
+    pages while posts arrive; that is accepted."""
+    page = offset_page_number(request, max_pages=max_pages)
+    start = (page - 1) * page_size
+    rows = list(queryset[start : start + page_size + 1])
+    has_more = len(rows) > page_size and page < max_pages
+    return rows[:page_size], str(page + 1) if has_more else None

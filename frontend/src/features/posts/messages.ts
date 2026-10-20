@@ -14,6 +14,7 @@ export const POST_MESSAGES = {
   generic: "Something went wrong. Try again.",
   feedFailed: "Couldn't load posts. Check your connection and try again.",
   feedWaking: "The server is waking up. Try again in a minute.",
+  tooFast: "You're going too fast.",
   moreFailed: "Couldn't load more posts.",
 } as const;
 
@@ -99,5 +100,9 @@ export function composerFailure(error: unknown): ComposerFailure {
 /** Why the first page of a feed failed. */
 export function feedErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 503) return POST_MESSAGES.feedWaking;
+  // Search is limited per address (Part 12); no other list answers 429.
+  if (error instanceof ApiError && error.status === 429) {
+    return `${POST_MESSAGES.tooFast} Try again ${waitText(error.retryAfter)}.`;
+  }
   return POST_MESSAGES.feedFailed;
 }

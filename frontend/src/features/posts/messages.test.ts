@@ -4,6 +4,24 @@ import { composerFailure, feedErrorMessage, POST_MESSAGES, waitText } from "./me
 
 const api = (init: ConstructorParameters<typeof ApiError>[0]) => new ApiError(init);
 
+describe("feedErrorMessage", () => {
+  it("says a 429 is the rate limit and when to try again (search, Part 12)", () => {
+    expect(
+      feedErrorMessage(api({ status: 429, code: "throttled", detail: "x", retryAfter: 30 })),
+    ).toBe("You're going too fast. Try again in a minute.");
+    expect(
+      feedErrorMessage(api({ status: 429, code: "throttled", detail: "x", retryAfter: 600 })),
+    ).toBe("You're going too fast. Try again in about 10 minutes.");
+  });
+
+  it("keeps the other answers", () => {
+    expect(feedErrorMessage(api({ status: 503, code: "backend_waking", detail: "x" }))).toBe(
+      POST_MESSAGES.feedWaking,
+    );
+    expect(feedErrorMessage(new Error("x"))).toBe(POST_MESSAGES.feedFailed);
+  });
+});
+
 describe("composerFailure", () => {
   it("reads the quota refusal by its code, not its 429", () => {
     const failure = composerFailure(

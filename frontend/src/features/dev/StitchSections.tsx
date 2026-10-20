@@ -5,12 +5,15 @@ import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Checkbox } from "@/components/ui/Checkbox";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { FilterChips, type FilterChip } from "@/components/ui/FilterChips";
 import { Icon } from "@/components/ui/Icon";
 import { Modal } from "@/components/ui/Modal";
 import { PasswordField } from "@/components/ui/PasswordField";
 import { PasswordStrengthMeter } from "@/components/ui/PasswordStrengthMeter";
 import { RadioCardGroup } from "@/components/ui/RadioCard";
 import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import { Tabs } from "@/components/ui/Tabs";
 import { TextField } from "@/components/ui/TextField";
 import { Textarea } from "@/components/ui/Textarea";
 import { Toggle } from "@/components/ui/Toggle";
@@ -22,7 +25,10 @@ import { PostStatsView } from "@/features/posts/PostStats";
 import { CredibilityPanelView } from "@/features/reputation/CredibilityPanel";
 import { CredibilityWidgetView } from "@/features/reputation/CredibilityWidget";
 import { RemovedPostCard } from "@/features/posts/RemovedPostCard";
-import type { DailyBucket, LedgerEntry, Post, PostStats } from "@/lib/api/types";
+import { queryTerms } from "@/features/search/highlight";
+import { SearchBar } from "@/features/search/SearchBar";
+import { UserRow } from "@/features/social/UserRow";
+import type { DailyBucket, LedgerEntry, Post, PostStats, UserRowData } from "@/lib/api/types";
 import { scorePassword } from "@/lib/password-strength";
 import { Section } from "./GalleryLayout";
 
@@ -576,6 +582,42 @@ function ReportModal({ open, onClose }: { open: boolean; onClose: () => void }) 
   );
 }
 
+const SEARCH_QUERY = "solar capacity";
+const SEARCH_TERMS = queryTerms(SEARCH_QUERY);
+const SEARCH_CHIPS: FilterChip[] = [
+  { id: "all", label: "All" },
+  { id: "facts", label: "Facts" },
+  { id: "opinions", label: "Opinions", dot: "outline-variant" },
+  { id: "verified", label: "Verified", dot: "primary" },
+  { id: "false", label: "FALSE", dot: "error" },
+  { id: "review", label: "Under review", dot: "verdict-review" },
+];
+// `is_me` rows have no Follow button, which needs a session this gallery doesn't have.
+const SEARCH_PEOPLE: UserRowData[] = [
+  {
+    id: "search-1",
+    username: "solar_sam",
+    display_name: "Sam Solar",
+    bio: "Writes about solar capacity and the grid.",
+    avatar_url: null,
+    reputation: { score: 86, sample: 14 },
+    counts: { verified: 31 },
+    is_following: false,
+    is_me: true,
+  },
+  {
+    id: "search-2",
+    username: "wren",
+    display_name: "Wren Capacity-Lee",
+    bio: "",
+    avatar_url: null,
+    reputation: { score: null, sample: 1 },
+    counts: { verified: 0 },
+    is_following: false,
+    is_me: true,
+  },
+];
+
 export function StitchSections() {
   const [password, setPassword] = useState("");
   const [composer, setComposer] = useState(false);
@@ -761,6 +803,63 @@ export function StitchSections() {
         </div>
         <ComposerModal open={composer} onClose={() => setComposer(false)} />
         <ReportModal open={report} onClose={() => setReport(false)} />
+      </Section>
+
+      <Section
+        id="stitch-search"
+        title="Stitch b4: search results"
+        note="Part 12. Compare with b4_search_results/code.html at 1280px: no counts, no sort menu, no Primary Sources."
+      >
+        <div className="max-w-reading space-y-space-lg">
+          <section className="space-y-space-md rounded-lg border border-outline-variant/30 bg-surface-container-lowest p-space-lg shadow-sm">
+            <SearchBar q={SEARCH_QUERY} type="posts" filter="verified" />
+            <hr className="border-outline-variant/30" />
+            <Tabs
+              tabs={[
+                { id: "posts", label: "Posts" },
+                { id: "users", label: "People" },
+              ]}
+              value="posts"
+              onChange={NOOP}
+              label="Search in (specimen)"
+            />
+            <FilterChips
+              label="Filter posts (specimen)"
+              chips={SEARCH_CHIPS}
+              selected={["verified"]}
+              onChange={NOOP}
+              className="pt-space-xs"
+            />
+          </section>
+          <PostCard
+            {...CARDS[0].props}
+            content="Solar capacity grew 30% last year, and capacity auctions broke records."
+            highlight={SEARCH_TERMS}
+          />
+          <PostCard
+            author={{ displayName: "Dev Opinion", username: "dev_opinion" }}
+            content="I think more solar capacity belongs on every school roof."
+            postType="opinion"
+            status="published"
+            createdAt="2026-09-30T08:00:00Z"
+            now={NOW}
+            highlight={SEARCH_TERMS}
+          />
+          <div className="divide-y divide-outline-variant/30 overflow-hidden rounded-lg border border-outline-variant/30 bg-surface-container-lowest">
+            {SEARCH_PEOPLE.map((row) => (
+              <UserRow key={row.id} user={row} highlight={SEARCH_TERMS} />
+            ))}
+          </div>
+          <EmptyState icon="search" title="Search Rumor Zero">
+            Type a word or a phrase to find posts, or a name to find people.
+          </EmptyState>
+          <EmptyState icon="search_off" title={"No results for \u201Czzz\u201D"}>
+            Try different words or remove a filter.
+          </EmptyState>
+          <Alert tone="error" title="Couldn't load posts">
+            <p>You&apos;re going too fast. Try again in a minute.</p>
+          </Alert>
+        </div>
       </Section>
     </>
   );

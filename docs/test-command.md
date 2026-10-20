@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -9801,6 +9801,618 @@ python manage.py recompute_reputation --check          # Checked … accounts: e
 (15, {'social.Comment': 2, 'social.Repost': 2, 'posts.Post': 11})
 (25, {'accounts.User_groups': 2, 'account.EmailAddress': 7, 'reputation.ReputationEvent': 9, 'accounts.User': 7})
 Checked 1562 accounts: every stored score matches the ledger.
+```
+
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
+  database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway.
+
+### Part 12: Search
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and `frontend/.env.local`.
+Part 12 adds **one migration** (`posts.0003_search_vector`: a stored `search_vector` column and its GIN index), **one
+endpoint**, `GET /api/v1/search/` (posts and people), **one throttle scope** (`search`, 60 a minute per address) and the
+**`/search` page** (Stitch b4). It adds no app, no dependency and no environment variable.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 14 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 11 and 15**: the variables and the function you set in step 3 (`id`, `tag`, `api`, `texts`, `get`) only live in that one terminal. If you close it, open a new one, run `cd backend` and `source .venv/bin/activate` from the repo root, and set them again: `id=<your number from step 3>`, then the lines from `tag=qx$id` down to `texts=…` of the step 3 block. | 3 to 11, 15 |
+| Window 3 (frontend) | `npm run dev` in `frontend`. Leave it running. | 12 to 14 |
+| Browser | Steps 13 and 14 | 13 to 14 |
+
+Things to know first:
+
+- **What a search matches.** Posts are matched on their text with Postgres full-text search, English, with stemming:
+  `running` finds `run` and `runs` (but not `runner` or `runway`, which Postgres stems differently). The query takes the
+  "websearch" syntax: `"an exact phrase"`, `-word` to leave a word out, `or` between two words. Best match first, then
+  the newest. A post's author, sources and comments are not searched.
+- **What is never found.** Removed posts and posts their author deleted, for everyone (the author included). Everything
+  else the feeds show is found, a fact that is still "Checking facts…" and a post under review included.
+- **People** are matched on the start of the username or the start of any word of the display name (after a space, a
+  hyphen or an apostrophe). `_` and `%` are plain characters. Order: username matches first, then name matches, A to Z
+  inside each, **never by credibility**. Each row is the follower row, with the credibility chip and a Follow button.
+- **Pages.** 20 a page and at most **5 pages (100 results)**: a ranked list has no timestamp to put in a cursor, so
+  `next_cursor` is the next page number (`"2"` to `"5"`). This is the documented deviation from the cursor rule in
+  ARCHITECTURE §9.
+- **The limit** is 60 searches a minute **per address**, signed in or not. Locally every request comes from your own
+  address, so step 11 uses a made-up one (`X-Forwarded-For`, which the dev server accepts) to get a fresh allowance.
+  Steps 5 to 9 together make about 40 searches from your own address, so don't repeat them all inside one minute (a
+  429 `Request was throttled` then answers some of them).
+- **The accounts.** Step 3 makes two straight in the database with the throwaway password `correct-horse-battery-42`:
+  `ada` (display name "Ada Lovelace") and `bo` ("Bo Run-Lee"), and eleven posts. No sign-up and no email are needed.
+- **Your admin address** isn't needed in this part.
+- The outputs below were recorded on Linux on 2026-10-20 by running the blocks below in order. The browser steps were
+  checked the same day with headless Chromium (at 1280 and 390 px, screenshots looked at), not by a person at a keyboard.
+  Ids, numbers in names, the date, times and the milliseconds differ on every run.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies the migration, runs the
+whole backend test suite and Part 12's own tests, the linter and the formatter check.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                            # Applying posts.0003_search_vector... OK  (or "No migrations to apply." if it was already applied)
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 3894 passed
+python -m pytest apps/posts/tests/test_search_query.py apps/posts/tests/test_api_search_posts.py apps/posts/tests/test_search_index.py apps/social/tests/test_api_search_people.py apps/core/tests/test_pagination_offset.py apps/core/tests/test_throttles.py -q   # 178 passed
+ruff check . ; ruff format --check .                # All checks passed! / 293 files already formatted
+```
+
+**You should see:** `Applying posts.0003_search_vector... OK` (or `No migrations to apply.`), `No changes detected`, `System
+check identified no issues (0 silenced).`, then `3894 passed`, `178 passed`, `All checks passed!` and `293 files already
+formatted`. Counts may grow later; what matters is that nothing fails.
+
+- The new tests pin: the stemming and the websearch syntax; ranking (more occurrences first, newest on ties); that removed
+  and deleted posts are never found, for any viewer; every filter alone and combined; the 400s; the page cap and every
+  crafted cursor; the query counts (1 for a visitor, 2 signed in); the people rules (prefix, name words, `_` and `%` as
+  plain characters, the order, the nine-key rows); the generated column and the GIN index; **an `EXPLAIN` test that the
+  very query the endpoint runs uses `posts_search_idx`**; and the 60-a-minute limit per address.
+- Existing tests changed on purpose: `posts/tests/test_models.py` (the column and the seventh index now exist, and `for_list`
+  leaves `search_vector` out of the row) and `core/tests/test_settings.py` (twelve throttle scopes, `search` is 60/min).
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last commands) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests, once against the dev servers and once against the production build.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 148 files, 2043 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 51 passed
+CI=1 npm run test:e2e                               # 51 passed (this one runs against the build above)
+cd ../backend                                       # back to backend/ for steps 3 to 11
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  148 passed (148)` and `Tests  2043
+passed (2043)`. `npm run build` lists `○ /search` (the page is **static**: it is prerendered, and the browser reads
+`?q=` itself, so a search costs no extra Worker request). Both end-to-end runs end with `51 passed`.
+
+- The six new end-to-end tests (`e2e/search.spec.ts`) sign nobody up (the suite already uses most of the 20 sign-ups a
+  minute) and make about 15 searches in all (the limit is 60 a minute per address, and every test request comes from the
+  same one). They check: the empty page and a phone width; finding a post by a stem with the words marked, and the box
+  submitting; removed and deleted posts never found; the chips narrowing the results and each being in the address;
+  a person found by the start of a username that contains `_` (and `%` matching nobody); and your own row having no Follow
+  button.
+- **Run the build before the `CI=1` run**: that mode serves `.next`, and an old build still has the placeholder page.
+
+#### Step 3: Start the server and make two accounts and eleven posts
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 11 and
+15.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 a shell command makes two accounts and eleven
+posts (every post ends with a made-up word, `tag`, that only this run has, so your own data never gets in the way), and
+you save a helper, `get`, that prints the status code and then the answer.
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend` with the venv active: steps 1 and 2 leave you there; needs `jq`, `sudo apt install jq`). If you
+opened a new terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the names are new each run
+python manage.py shell -c "
+import datetime
+from allauth.account.models import EmailAddress
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.posts.models import Post
+now = timezone.now()
+tag = 'qx$id'
+def person(name, display):
+    user = User.objects.create_user(email=f'part12-{name}-$id@example.test', username=f'part12_{name}_$id', password='correct-horse-battery-42', is_email_verified=True, display_name=display)
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+    return user
+ada = person('ada', 'Ada Lovelace')
+bo = person('bo', 'Bo Run-Lee')
+def post(author, text, minutes, **fields):
+    fields.setdefault('post_type', 'opinion')
+    fields.setdefault('status', 'published')
+    return Post.objects.create(author=author, content=f'{text} {tag}', created_at=now - datetime.timedelta(minutes=minutes), **fields)
+post(ada, 'I run every morning', 1)
+post(ada, 'She runs far', 2)
+post(bo, 'Walking is nice', 3)
+post(ada, 'Storm warning storm', 4)
+post(bo, 'Storm', 5)
+post(ada, 'Flood shown', 6)
+post(ada, 'Flood removed', 7, status='removed')
+post(ada, 'Flood deleted', 8, deleted_at=now)
+post(bo, 'Bridge opinion', 9)
+post(bo, 'Bridge fact', 10, post_type='fact', status='verified_true', verdict_source='pipeline', pipeline_verdict='true', confidence_score=94)
+post(ada, 'Bridge claim', 11, post_type='fact', status='verified_false', verdict_source='pipeline', pipeline_verdict='false', confidence_score=90)
+print(Post.objects.filter(content__endswith=tag).count(), 'posts made')
+" | tail -1
+tag=qx$id                                           # a word that only this run's posts contain
+api=http://localhost:8000/api/v1
+get() { local out; out=$(curl -s -w '\n%{http_code}' ${2:+-H "Authorization: Bearer $2"} "$api$1"); printf '%s  ' "${out##*$'\n'}"; printf '%s' "${out%$'\n'*}" | jq -c "${3:-.}"; }   # get <path> [token] [jq filter]: prints the status code, then the answer
+texts='[.results[].post.content]'                   # a jq filter: just the words of each result
+echo "id=$id"                                       # write this down: the browser steps use it
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+11 posts made
+id=184323
+```
+
+- The posts are: "I run every morning", "She runs far", "Walking is nice", "Storm warning storm", "Storm", "Flood shown",
+  "Flood removed" (removed by a moderator), "Flood deleted" (deleted by its author), and three about a bridge: an opinion,
+  a fact verified TRUE and a fact labelled FALSE.
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+
+**If it differs:** no `11 posts made` line means the shell command failed: read the error above it (Postgres not up:
+`docker compose ps`; a name already taken: run the block again, `id` changes every second).
+
+#### Step 4: The migration, the stored column and the index in the database
+
+**Where:** Terminal window 2.
+
+**What this does:** Shows that the migration is applied, the SQL it ran, and that the database itself keeps `search_vector`
+in step with the text (a stored **generated** column: Django never writes it) and has the GIN index on it. The last line
+is the stored vector of "I run every morning" + the tag: stems and positions (`run` at 2, `everi` is "every").
+
+```bash
+python manage.py showmigrations posts               # all three have [X]
+python manage.py sqlmigrate posts 0003 | grep -E "ALTER|CREATE"
+python manage.py shell -c "
+from django.db import connection
+with connection.cursor() as cursor:
+    cursor.execute(\"SELECT is_generated, generation_expression FROM information_schema.columns WHERE table_name = 'posts_post' AND column_name = 'search_vector'\")
+    print(cursor.fetchone())
+    cursor.execute(\"SELECT indexdef FROM pg_indexes WHERE indexname = 'posts_search_idx'\")
+    print(cursor.fetchone()[0])
+    cursor.execute(\"SELECT search_vector::text FROM posts_post WHERE content = 'I run every morning ' || %s\", ['$tag'])
+    print(cursor.fetchone()[0])
+" | tail -3
+```
+
+**You should see:**
+
+```text
+posts
+ [X] 0001_initial
+ [X] 0002_review_started_at
+ [X] 0003_search_vector
+ALTER TABLE "posts_post" ADD COLUMN "search_vector" tsvector GENERATED ALWAYS AS (to_tsvector('english'::regconfig, COALESCE("content", ''))) STORED;
+CREATE INDEX "posts_search_idx" ON "posts_post" USING gin ("search_vector");
+('ALWAYS', "to_tsvector('english'::regconfig, COALESCE(content, ''::text))")
+CREATE INDEX posts_search_idx ON public.posts_post USING gin (search_vector)
+'everi':3 'morn':4 'qx184323':5 'run':2
+```
+
+**If it differs:** `[ ]` before `0003_search_vector` means the migration isn't applied: run `python manage.py migrate`.
+
+#### Step 5: Stemming, ranking, phrases, a minus word and `or`
+
+**Where:** Terminal window 2.
+
+**What this does:** Searches the posts of step 3 (the `tag` keeps your other posts out). Each line prints the status code
+and the **text of each result**, best match first.
+
+```bash
+echo "--- 'running' finds 'run' and 'runs' (stemming), best match first"; get "/search/?q=running+$tag" "" "$texts"
+echo "--- a word that isn't a stem of anything finds nothing ('runner')"; get "/search/?q=runner+$tag" "" "$texts"
+echo "--- more occurrences rank higher"; get "/search/?q=storm+$tag" "" "$texts"
+echo "--- an exact phrase"; get "/search/?q=%22storm+warning%22+$tag" "" "$texts"
+echo "--- a minus leaves a word out"; get "/search/?q=storm+$tag+-warning" "" "$texts"
+echo "--- or: either word (the tag goes on both sides: 'or' binds loosest)"; get "/search/?q=$tag+walking+or+$tag+bridge" "" "$texts"
+```
+
+**You should see** (the word after each text is your `tag`):
+
+```text
+--- 'running' finds 'run' and 'runs' (stemming), best match first
+200  ["She runs far qx184323","I run every morning qx184323"]
+--- a word that isn't a stem of anything finds nothing ('runner')
+200  []
+--- more occurrences rank higher
+200  ["Storm warning storm qx184323","Storm qx184323"]
+--- an exact phrase
+200  ["Storm warning storm qx184323"]
+--- a minus leaves a word out
+200  ["Storm qx184323"]
+--- or: either word (the tag goes on both sides: 'or' binds loosest)
+200  ["Walking is nice qx184323","Bridge opinion qx184323","Bridge fact qx184323","Bridge claim qx184323"]
+```
+
+- Both "run" posts are found; their order is Postgres's relevance score (then the newest first when two tie), so yours may
+  differ from this line. `runner` finds nothing: Postgres keeps `runner` as its own word.
+- "Storm warning storm" (two occurrences) ranks above "Storm" (one).
+- `or` binds more loosely than the implicit "and": `tag walking or bridge` would mean "(tag and walking) or bridge" and
+  match every post about a bridge in your database, so the tag goes on both sides.
+
+#### Step 6: Removed and deleted posts never appear, and the filters
+
+**Where:** Terminal window 2.
+
+**What this does:** Searches "flood" (three posts: one shown, one removed by a moderator, one deleted by its author), then
+narrows "bridge" (an opinion, a verified fact and a FALSE fact) by `post_type` and `status`, alone and together.
+
+```bash
+echo "--- removed and deleted posts never appear"; get "/search/?q=flood+$tag" "" "$texts"
+echo "--- 3 bridge posts; one filter at a time"
+get "/search/?q=bridge+$tag" "" "$texts"
+get "/search/?q=bridge+$tag&post_type=fact" "" "$texts"
+get "/search/?q=bridge+$tag&post_type=opinion" "" "$texts"
+get "/search/?q=bridge+$tag&status=verified_true" "" "$texts"
+get "/search/?q=bridge+$tag&status=verified_false" "" "$texts"
+echo "--- filters combine (AND)"; get "/search/?q=bridge+$tag&post_type=opinion&status=verified_true" "" "$texts"
+echo "--- the answer is the feed's: four keys, 25-key posts"; get "/search/?q=storm+$tag" "" '{keys: keys, post_keys: (.results[0].post | keys | length), pinned, next_cursor}'
+```
+
+**You should see:**
+
+```text
+--- removed and deleted posts never appear
+200  ["Flood shown qx184323"]
+--- 3 bridge posts; one filter at a time
+200  ["Bridge opinion qx184323","Bridge fact qx184323","Bridge claim qx184323"]
+200  ["Bridge fact qx184323","Bridge claim qx184323"]
+200  ["Bridge opinion qx184323"]
+200  ["Bridge fact qx184323"]
+200  ["Bridge claim qx184323"]
+--- filters combine (AND)
+200  []
+--- the answer is the feed's: four keys, 25-key posts
+200  {"keys":["next_cursor","pinned","pinned_total","results"],"post_keys":25,"pinned":[],"next_cursor":null}
+```
+
+- The last line shows the answer is the feed's: `pinned`, `pinned_total`, `results` and `next_cursor`, each result a post with
+  the usual 25 keys, so the same cards render it.
+- Filters accept `post_type` = `fact` or `opinion`, and `status` = `pending`, `published`, `verified_true`,
+  `verified_false` or `under_review`. They are ANDed, and a fact that is not checked yet is found too.
+
+#### Step 7: The 400s, the 404, and what an empty search answers
+
+**Where:** Terminal window 2.
+
+**What this does:** Asks the endpoint the wrong questions.
+
+```bash
+echo "--- a blank query and a missing one are a 400"; get "/search/?q=%20%20"; get "/search/"
+echo "--- 201 characters"; get "/search/?q=$(printf 'x%.0s' $(seq 201))"
+echo "--- bad type, status, post_type; a removed filter is refused too"; get "/search/?q=storm&type=videos"; get "/search/?q=storm&status=removed"; get "/search/?q=storm&post_type=other"
+echo "--- a crafted cursor is a 404"; get "/search/?q=storm&cursor=abc"
+echo "--- only minus words, or only a stop word: an empty 200 (no database query)"; get "/search/?q=-storm"; get "/search/?q=the"
+echo "--- only GET is allowed"; curl -s -o /dev/null -w '%{http_code}\n' -X POST "$api/search/?q=storm"
+echo "--- never cached"; curl -s -D - -o /dev/null "$api/search/?q=storm" | grep -i "^cache-control"
+```
+
+**You should see:**
+
+```text
+--- a blank query and a missing one are a 400
+400  {"q":["Enter something to search for."]}
+400  {"q":["Enter something to search for."]}
+--- 201 characters
+400  {"q":["Keep it to 200 characters."]}
+--- bad type, status, post_type; a removed filter is refused too
+400  {"type":["Choose posts or users."]}
+400  {"status":["Choose one of: pending, published, verified_true, verified_false, under_review."]}
+400  {"post_type":["Choose fact or opinion."]}
+--- a crafted cursor is a 404
+404  {"detail":"Invalid cursor","code":"not_found"}
+--- only minus words, or only a stop word: an empty 200 (no database query)
+200  {"pinned":[],"pinned_total":0,"results":[],"next_cursor":null}
+200  {"pinned":[],"pinned_total":0,"results":[],"next_cursor":null}
+--- only GET is allowed
+405
+--- never cached
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+```
+
+- A query of only minus words (`-storm`) or only a stop word (`the`) is an **empty 200**, not an error and not a search: `-storm`
+  alone would match nearly every post and walk the whole index, so the server doesn't ask the database at all.
+- `status=removed` is refused: removed posts are never searchable.
+
+#### Step 8: People
+
+**Where:** Terminal window 2.
+
+**What this does:** Searches people by username prefix and by the words of their display names ("Ada Lovelace",
+"Bo Run-Lee"), then shows what a row holds. The `select(.username | endswith(…))` in two filters keeps only your two
+accounts out of everyone else's in the database.
+
+```bash
+echo "--- a username prefix ('_' is a letter here, not a wildcard)"; get "/search/?type=users&q=part12_ada_$id" "" '[.results[].username]'
+echo "--- a word of the display name (the start, or after a hyphen)"; get "/search/?type=users&q=Ada+Love" "" "[.results[] | select(.username | endswith(\"_$id\")) | .username]"; get "/search/?type=users&q=lee" "" "[.results[] | select(.username | endswith(\"_$id\")) | .username]"
+echo "--- a % or a leading @"; get "/search/?type=users&q=part12%25" "" '[.results[].username]'; get "/search/?type=users&q=@part12_bo_$id" "" '[.results[].username]'
+echo "--- nothing searchable ('-') is an empty answer"; get "/search/?type=users&q=-"
+echo "--- a row is the follower row: nine keys, nothing else added"; get "/search/?type=users&q=part12_bo_$id" "" '.results[0] | {keys: keys, reputation, counts, is_following, is_me}'
+echo "--- A to Z by username, and the answer has no 'pinned' keys"; get "/search/?type=users&q=part12_" "" "[.results[] | select(.username | endswith(\"_$id\")) | .username], keys"
+```
+
+**You should see** (your `id` in the names):
+
+```text
+--- a username prefix ('_' is a letter here, not a wildcard)
+200  ["part12_ada_184323"]
+--- a word of the display name (the start, or after a hyphen)
+200  ["part12_ada_184323"]
+200  ["part12_bo_184323"]
+--- a % or a leading @
+200  []
+200  ["part12_bo_184323"]
+--- nothing searchable ('-') is an empty answer
+200  {"results":[],"next_cursor":null}
+--- a row is the follower row: nine keys, nothing else added
+200  {"keys":["avatar_url","bio","counts","display_name","id","is_following","is_me","reputation","username"],"reputation":{"score":null,"sample":0},"counts":{"verified":1},"is_following":false,"is_me":false}
+--- A to Z by username, and the answer has no 'pinned' keys
+200  ["part12_ada_184323","part12_bo_184323"]
+["next_cursor","results"]
+```
+
+- `lee` is found after a hyphen ("Run-Lee"), `Ada Love` is a phrase prefix ("Ada Lovelace"), and `part12%` matches nobody:
+  `%` (and `_`) are plain characters.
+- A row is exactly the follower list's row: `reputation.score` is `null` ("New") until three of the person's posts are
+  checked, and `counts.verified` counts their verified posts, deleted ones included (bo has one).
+
+#### Step 9: Pages, and the 100-result cap
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes 110 posts that all match one word and walks the pages by hand. The cursor is the **next page
+number**; page 5 is the last, even though 110 posts match.
+
+```bash
+python manage.py shell -c "
+import datetime
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.posts.models import Post
+author = User.objects.get(username='part12_ada_$id')
+now = timezone.now()
+Post.objects.bulk_create(Post(author=author, content=f'Update number {n} pg$id', post_type='opinion', status='published', created_at=now - datetime.timedelta(seconds=n)) for n in range(110))
+print(Post.objects.filter(content__endswith='pg$id').count(), 'posts made')
+" | tail -1
+cursor=""
+for page in 1 2 3 4 5 6; do
+  body=$(curl -s "$api/search/?q=pg$id${cursor:+&cursor=$cursor}")
+  echo "page $page: $(echo "$body" | jq -c '[(.results | length), .next_cursor, .results[0].post.content]')"
+  cursor=$(echo "$body" | jq -r '.next_cursor // empty'); [ -z "$cursor" ] && break
+done
+echo "--- there is no page 6, and no page 1 by number"; get "/search/?q=pg$id&cursor=6"; get "/search/?q=pg$id&cursor=1"
+echo "--- an empty cursor is page 1"; get "/search/?q=pg$id&cursor=" "" '[(.results | length), .next_cursor]'
+```
+
+**You should see:**
+
+```text
+110 posts made
+page 1: [20,"2","Update number 0 pg184323"]
+page 2: [20,"3","Update number 20 pg184323"]
+page 3: [20,"4","Update number 40 pg184323"]
+page 4: [20,"5","Update number 60 pg184323"]
+page 5: [20,null,"Update number 80 pg184323"]
+--- there is no page 6, and no page 1 by number
+404  {"detail":"Invalid cursor","code":"not_found"}
+404  {"detail":"Invalid cursor","code":"not_found"}
+--- an empty cursor is page 1
+200  [20,"2"]
+```
+
+- Each page is 20 results; `"2"` to `"5"` are the cursors; page 5 has `null` and the 10 posts after it are unreachable by
+  design (the page says "That's the first 100 results. Try more specific words to narrow them down.").
+- A cursor that isn't `"2"` to `"5"` is a 404 `Invalid cursor`, as every crafted cursor is; the page then starts again from
+  the top.
+
+#### Step 10: The query uses the GIN index (EXPLAIN)
+
+**Where:** Terminal window 2.
+
+**What this does:** Inside a transaction that is rolled back at the end, adds **100,000** posts, runs `ANALYZE`, and prints
+what Postgres does for the very query the endpoint runs, with `EXPLAIN ANALYZE`. It takes about 15 seconds and leaves
+nothing behind.
+
+```bash
+python manage.py shell -c "
+import random
+from django.db import connection, transaction
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.posts.models import Post
+from apps.posts.search import search_posts
+words = 'storm flood fire harbour bridge council school vaccine election budget river coast market energy water health transport library airport festival weather'.split()
+rng = random.Random(1)
+author = User.objects.first()
+try:
+    with transaction.atomic():
+        for _ in range(10):
+            Post.objects.bulk_create(Post(author=author, content=' '.join(rng.choices(words, k=7)) + (' zeppelin' if n % 200 == 0 else ''), post_type='opinion', status='published', created_at=timezone.now()) for n in range(10000))
+        with connection.cursor() as cursor:
+            cursor.execute('ANALYZE posts_post')
+        for line in search_posts('zeppelin storm', None).explain(analyze=True).splitlines():
+            if 'posts_search_idx' in line or 'Seq Scan on posts_post' in line or 'Execution Time' in line:
+                print(line.strip())
+        raise RuntimeError('roll back')
+except RuntimeError:
+    pass
+print('posts left over:', Post.objects.filter(content__contains='zeppelin').count())
+" | grep -E "Scan on posts|Execution Time|left over"
+```
+
+**You should see** (the cost numbers and the time differ):
+
+```text
+->  Bitmap Index Scan on posts_search_idx  (cost=0.00..2155.70 rows=142 width=0) (actual time=3.742..3.743 rows=161.00 loops=1)
+Execution Time: 5.423 ms
+posts left over: 0
+```
+
+**If it differs:** a `Seq Scan on posts_post` line instead of the `Bitmap Index Scan` means Postgres chose a scan of the
+table: that is normal for a table of a few thousand rows (the same query on the 100,000 rows here uses the index), and only
+a problem if it still happens with that many.
+
+#### Step 11: The limit, per address
+
+**Where:** Terminal window 2.
+
+**What this does:** Sends 62 searches from a made-up address. The first 60 are answered; the rest are refused with a 429 and
+a `Retry-After` (seconds). The feed from the same address and a search from another address are untouched.
+
+```bash
+ip=198.51.100.$((RANDOM % 200 + 10))                 # a made-up client address: a new 60-a-minute allowance
+for i in $(seq 1 62); do curl -s -o /dev/null -H "X-Forwarded-For: $ip" -w '%{http_code}\n' "$api/search/?q=storm"; done | sort | uniq -c
+curl -s -D - -H "X-Forwarded-For: $ip" "$api/search/?q=storm" | grep -iE "^HTTP/|^retry-after|^\{" | tr -d '\r'
+curl -s -o /dev/null -H "X-Forwarded-For: $ip" -w 'the feed, same address: %{http_code}\n' "$api/posts/"
+curl -s -o /dev/null -H "X-Forwarded-For: 198.51.100.7" -w 'search from another address: %{http_code}\n' "$api/search/?q=storm"
+```
+
+**You should see** (`Retry-After` counts down from 60):
+
+```text
+     60 200
+      2 429
+HTTP/1.1 429 Too Many Requests
+Retry-After: 59
+{"detail":"Request was throttled. Expected available in 59 seconds.","code":"throttled"}
+the feed, same address: 200
+search from another address: 200
+```
+
+- The limit counts signed-in people by address too, so accounts don't multiply it. A 401 never counts; a 400 does.
+
+#### Step 12: Start the frontend
+
+**Where:** Terminal window 3 (frontend), in `frontend`.
+
+**What this does:** Runs the Next.js dev server. Keep window 1 (Django) running too.
+
+```bash
+npm run dev                                         # leave it running; http://localhost:3000
+```
+
+**You should see:** `Ready in …` and `Local: http://localhost:3000`.
+
+Then, in window 2 (any folder), check what a crawler and the relay see:
+
+```bash
+curl -s http://localhost:3000/search | grep -oE '<title>[^<]*</title>|<meta name="robots"[^>]*>'
+curl -s -o /dev/null -w 'through the relay: %{http_code}\n' "http://localhost:3000/api/v1/search/?q=storm"
+```
+
+**You should see:**
+
+```text
+<title>Search · Rumor Zero</title>
+<meta name="robots" content="noindex, follow"/>
+through the relay: 200
+```
+
+#### Step 13: The search page (Browser)
+
+**Where:** Browser, a normal window (about 1280 px wide), signed out. Use the `tag` (`qx` + your `id` from step 3).
+
+**What this does:** Tries every state of the page.
+
+1. Open <http://localhost:3000/search>. **You should see:** a box with a magnifier, the tabs POSTS (underlined) and PEOPLE, six
+   chips (All pressed, Facts, Opinions, Verified, FALSE, Under review), and "Search Rumor Zero / Type a word or a phrase to
+   find posts, or a name to find people." No request was made.
+2. In the **top bar** box, type `running qx<id>` and press Enter. **You should see:** the address is
+   `/search?q=running+qx<id>`; two cards, "She runs far qx<id>" and "I run every morning qx<id>", with `runs`, `run` and the
+   word `qx<id>` highlighted in pale blue (not the author's name); "You're caught up." under them. The box in the page
+   holds your text and has a × that clears it and keeps the focus there.
+3. Type `bridge qx<id>` in the page's box and press Enter: three cards. Click **Verified**: the address gains `&filter=verified`
+   and one card stays, "Bridge fact", with its VERIFIED badge. Click **FALSE**: only "Bridge claim". Click **Opinions**:
+   only "Bridge opinion". Click the pressed chip again: back to all three, and the address has no `filter`. A chip
+   replaces the address, so Back doesn't step through the chips: it goes to the page before (a tab or a new search adds a
+   history entry, a chip doesn't).
+4. Click the tab **People** (the address gains `&type=users` and the chips go away). **You should see:** "No people found
+   for “bridge qx<id>”" (the query is still the bridge words). Type `run` and press Enter: "Bo Run-Lee" with `Run` highlighted, `@part12_bo_<id>`, the grey chip
+   "Credibility: New · 1 verified" and a **Follow** button (it leads to the login page while you are signed out). Click
+   the tab Posts to come back.
+5. Search for `zzzznothing`: "No results for “zzzznothing”" and "Try different words or remove a filter."
+6. Open <http://localhost:3000/search?q=storm> and, in the Network tab of the browser's developer tools, filter on `search`:
+   one request, to `/api/v1/search/?q=storm&type=posts`. (In the dev server a later tab or chip change makes two, because React
+   runs effects twice; a production build makes one.) The page itself is a static file: nothing about your query reached the
+   Next server.
+7. **Signed in:** log in as `part12_ada_<id>` with `correct-horse-battery-42` at <http://localhost:3000/login>, search
+   `part12_ada_<id>` under People: your own row has **no Follow button**. Search `running qx<id>` under Posts: the cards have
+   their action bars (like, comment, repost, bookmark, report) as on the feeds.
+8. Optional: in `frontend`, `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` then `npm start` serves the same page from the
+   production build; `/search` prerenders (see step 2).
+
+**If it differs:** "Couldn't load posts" with "You're going too fast. Try again in a minute." means you went over the 60 a minute
+(step 11's made-up address doesn't change yours): wait a minute and press Try again. "Couldn't load posts. Check your
+connection" means Django (window 1) isn't running.
+
+#### Step 14: A phone, the gallery and the clean-up of the browser
+
+**Where:** Browser.
+
+**What this does:** Checks the phone layout and the design-system gallery.
+
+1. In the browser's developer tools, switch to a phone width (390 px) and open
+   <http://localhost:3000/search?q=running+qx<id>>. **You should see:** the same cards in one column, **no sideways scroll**,
+   the bottom bar with Search highlighted, and on the empty page the six chips wrapping onto two rows.
+2. Open <http://localhost:3000/dev/ui#stitch-search> (development only; a production build answers 404). **You should
+   see:** the Stitch b4 section: the query box, tabs and chips, a fact and an opinion card with `capacity` and `solar`
+   highlighted (the opinion stays upright inside its italic claim), two people rows, the empty prompt, the "No results"
+   state and the "going too fast" message.
+
+#### Step 15: Clean up (optional)
+
+**Where:** Terminal window 2.
+
+**What this does:** Deletes the two accounts and the posts of this part (and of every earlier run that used the same names).
+Stop the servers with Ctrl+C in windows 1 and 3.
+
+```bash
+python manage.py shell -c "
+from apps.accounts.models import User
+from apps.posts.models import Post
+users = User.objects.filter(email__startswith='part12-')
+print(Post.objects.filter(author__in=users).delete())
+print(users.delete())
+" | tail -2
+```
+
+**You should see** (the numbers depend on how many runs you left over):
+
+```text
+(495, {'posts.Post': 495})
+(20, {'account.EmailAddress': 10, 'accounts.User': 10})
 ```
 
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
@@ -19985,6 +20597,639 @@ python manage.py recompute_reputation --check          # Checked … accounts: e
 (15, {'social.Comment': 2, 'social.Repost': 2, 'posts.Post': 11})
 (25, {'accounts.User_groups': 2, 'account.EmailAddress': 7, 'reputation.ReputationEvent': 9, 'accounts.User': 7})
 Checked 1562 accounts: every stored score matches the ledger.
+```
+
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
+  database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway.
+
+### Part 12: Search
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and `frontend\.env.local`.
+Part 12 adds **one migration** (`posts.0003_search_vector`: a stored `search_vector` column and its GIN index), **one
+endpoint**, `GET /api/v1/search/` (posts and people), **one throttle scope** (`search`, 60 a minute per address) and the
+**`/search` page** (Stitch b4). It adds no app, no dependency and no environment variable.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 14 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for steps 3 to 11 and 15**: the variables and functions you set in step 3 (`$id`, `$tag`, `$api`, `Send`, `Fetch`, `$texts`, `$names`, `$mine`) only live in that one terminal. If you close it, open a new one, run `cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`, and set them again: `$id = '<your number from step 3>'`, then the lines from `$tag = "qx$id"` down to the `$mine` line of the step 3 block. | 3 to 11, 15 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 12 to 14 |
+| Browser | Steps 13 and 14 | 13 to 14 |
+
+Things to know first:
+
+- **What a search matches.** Posts are matched on their text with Postgres full-text search, English, with stemming:
+  `running` finds `run` and `runs` (but not `runner` or `runway`, which Postgres stems differently). The query takes the
+  "websearch" syntax: `"an exact phrase"`, `-word` to leave a word out, `or` between two words. Best match first, then
+  the newest. A post's author, sources and comments are not searched.
+- **What is never found.** Removed posts and posts their author deleted, for everyone (the author included). Everything
+  else the feeds show is found, a fact that is still "Checking facts…" and a post under review included.
+- **People** are matched on the start of the username or the start of any word of the display name (after a space, a
+  hyphen or an apostrophe). `_` and `%` are plain characters. Order: username matches first, then name matches, A to Z
+  inside each, **never by credibility**. Each row is the follower row, with the credibility chip and a Follow button.
+- **Pages.** 20 a page and at most **5 pages (100 results)**: a ranked list has no timestamp to put in a cursor, so
+  `next_cursor` is the next page number (`"2"` to `"5"`). This is the documented deviation from the cursor rule in
+  ARCHITECTURE §9.
+- **The limit** is 60 searches a minute **per address**, signed in or not. Locally every request comes from your own
+  address, so step 11 uses a made-up one (`X-Forwarded-For`, which the dev server accepts) to get a fresh allowance.
+  Steps 5 to 9 together make about 40 searches from your own address, so don't repeat them all inside one minute (a
+  429 `Request was throttled` then answers some of them).
+- **The accounts.** Step 3 makes two straight in the database with the throwaway password `correct-horse-battery-42`:
+  `ada` (display name "Ada Lovelace") and `bo` ("Bo Run-Lee"), and eleven posts. No sign-up and no email are needed.
+- **Your admin address** isn't needed in this part.
+- The outputs below are the Linux run of 2026-10-20 with the Windows spellings applied (for example `60 x 200` instead of
+  `uniq -c`'s columns). **The PowerShell blocks were not run** (no PowerShell on the machine that wrote them); the browser steps
+  were checked with headless Chromium (at 1280 and 390 px, screenshots looked at), not by a person at a keyboard. Ids,
+  numbers in names, the date, times and the milliseconds differ on every run.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies the migration, runs the
+whole backend test suite and Part 12's own tests, the linter and the formatter check.
+
+```powershell
+# start in the repo root
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                            # Applying posts.0003_search_vector... OK  (or "No migrations to apply." if it was already applied)
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 3894 passed
+python -m pytest apps\posts\tests\test_search_query.py apps\posts\tests\test_api_search_posts.py apps\posts\tests\test_search_index.py apps\social\tests\test_api_search_people.py apps\core\tests\test_pagination_offset.py apps\core\tests\test_throttles.py -q   # 178 passed
+ruff check . ; ruff format --check .                # All checks passed! / 293 files already formatted
+```
+
+**You should see:** `Applying posts.0003_search_vector... OK` (or `No migrations to apply.`), `No changes detected`, `System
+check identified no issues (0 silenced).`, then `3894 passed`, `178 passed`, `All checks passed!` and `293 files already
+formatted`. Counts may grow later; what matters is that nothing fails.
+
+- The new tests pin: the stemming and the websearch syntax; ranking (more occurrences first, newest on ties); that removed
+  and deleted posts are never found, for any viewer; every filter alone and combined; the 400s; the page cap and every
+  crafted cursor; the query counts (1 for a visitor, 2 signed in); the people rules (prefix, name words, `_` and `%` as
+  plain characters, the order, the nine-key rows); the generated column and the GIN index; **an `EXPLAIN` test that the
+  very query the endpoint runs uses `posts_search_idx`**; and the 60-a-minute limit per address.
+- Existing tests changed on purpose: `posts/tests/test_models.py` (the column and the seventh index now exist, and `for_list`
+  leaves `search_vector` out of the row) and `core/tests/test_settings.py` (twelve throttle scopes, `search` is 60/min).
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last commands) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests against the dev servers.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 148 files, 2043 tests passed
+npm run build
+npm run test:e2e                                    # 51 passed
+cd ..\backend                                       # back to backend\ for steps 3 to 11
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  148 passed (148)` and `Tests  2043
+passed (2043)`. `npm run build` lists `○ /search` (the page is **static**: it is prerendered, and the browser reads
+`?q=` itself, so a search costs no extra Worker request). The end-to-end run ends with `51 passed` (the production-mode run, `CI=1`, is in the Linux guide: PowerShell sets it with `$env:CI = "1"`, and the build above must come first).
+
+- The six new end-to-end tests (`e2e/search.spec.ts`) sign nobody up (the suite already uses most of the 20 sign-ups a
+  minute) and make about 15 searches in all (the limit is 60 a minute per address, and every test request comes from the
+  same one). They check: the empty page and a phone width; finding a post by a stem with the words marked, and the box
+  submitting; removed and deleted posts never found; the chips narrowing the results and each being in the address;
+  a person found by the start of a username that contains `_` (and `%` matching nobody); and your own row having no Follow
+  button.
+
+#### Step 3: Start the server and make two accounts and eleven posts
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 11 and
+15.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 a shell command makes two accounts and eleven
+posts (every post ends with a made-up word, `tag`, that only this run has, so your own data never gets in the way), and
+you save a helper, `get`, that prints the status code and then the answer.
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 and 2 leave you there). If you opened a new terminal, first run
+`cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the names are new each run
+@"
+import datetime
+from allauth.account.models import EmailAddress
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.posts.models import Post
+now = timezone.now()
+tag = 'qx$id'
+def person(name, display):
+    user = User.objects.create_user(email=f'part12-{name}-$id@example.test', username=f'part12_{name}_$id', password='correct-horse-battery-42', is_email_verified=True, display_name=display)
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+    return user
+ada = person('ada', 'Ada Lovelace')
+bo = person('bo', 'Bo Run-Lee')
+def post(author, text, minutes, **fields):
+    fields.setdefault('post_type', 'opinion')
+    fields.setdefault('status', 'published')
+    return Post.objects.create(author=author, content=f'{text} {tag}', created_at=now - datetime.timedelta(minutes=minutes), **fields)
+post(ada, 'I run every morning', 1)
+post(ada, 'She runs far', 2)
+post(bo, 'Walking is nice', 3)
+post(ada, 'Storm warning storm', 4)
+post(bo, 'Storm', 5)
+post(ada, 'Flood shown', 6)
+post(ada, 'Flood removed', 7, status='removed')
+post(ada, 'Flood deleted', 8, deleted_at=now)
+post(bo, 'Bridge opinion', 9)
+post(bo, 'Bridge fact', 10, post_type='fact', status='verified_true', verdict_source='pipeline', pipeline_verdict='true', confidence_score=94)
+post(ada, 'Bridge claim', 11, post_type='fact', status='verified_false', verdict_source='pipeline', pipeline_verdict='false', confidence_score=90)
+print(Post.objects.filter(content__endswith=tag).count(), 'posts made')
+"@ | python manage.py shell | Select-Object -Last 1
+$tag = "qx$id"                                      # a word that only this run's posts contain
+$api = 'http://localhost:8000/api/v1'
+# Send <METHOD> <path> [token] [json body] [fields]: prints the HTTP status, then the answer. `fields` is a list
+# of property names to keep, or a script block `{ param($r) ... }` that picks what to show from the answer.
+function Send($method, $path, $token, $json, $show) {
+  $a = @()
+  if ($token) { $a += '-H', "Authorization: Bearer $token" }
+  if ($json) {
+    $json | Set-Content -Encoding ascii $env:TEMP\rz-body.json
+    $a += '-H', 'Content-Type: application/json', '--data-binary', "@$env:TEMP\rz-body.json"
+  }
+  $out = curl.exe -s -w "`n%{http_code}" -X $method @a "$api$path"
+  $body = if ($out.Count -gt 1) { $out[0..($out.Count - 2)] -join '' } else { '' }
+  if ($show -and $body) {
+    $r = $body | ConvertFrom-Json
+    $shown = if ($show -is [scriptblock]) { & $show $r } else { $r | Select-Object $show }
+    $body = ConvertTo-Json -InputObject $shown -Depth 5 -Compress
+  }
+  "$($out[-1])  $body"
+}
+function Fetch($path, $token, $show) { Send GET $path $token $null $show }   # Fetch <path> [token] [fields]
+$texts = { param($r) @($r.results | ForEach-Object { $_.post.content }) }   # just the words of each result
+$names = { param($r) @($r.results | ForEach-Object { $_.username }) }       # just the usernames
+$mine = { param($r) @($r.results | Where-Object { $_.username.EndsWith("_$id") } | ForEach-Object { $_.username }) }   # only your two accounts
+"id=$id"                                            # write this down: the browser steps use it
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+11 posts made
+id=184323
+```
+
+- The posts are: "I run every morning", "She runs far", "Walking is nice", "Storm warning storm", "Storm", "Flood shown",
+  "Flood removed" (removed by a moderator), "Flood deleted" (deleted by its author), and three about a bridge: an opinion,
+  a fact verified TRUE and a fact labelled FALSE.
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+
+**If it differs:** no `11 posts made` line means the shell command failed: read the error above it (Postgres not up:
+`docker compose ps`; a name already taken: run the block again, `$id` changes every second).
+
+#### Step 4: The migration, the stored column and the index in the database
+
+**Where:** Terminal window 2.
+
+**What this does:** Shows that the migration is applied, the SQL it ran, and that the database itself keeps `search_vector`
+in step with the text (a stored **generated** column: Django never writes it) and has the GIN index on it. The last line
+is the stored vector of "I run every morning" + the tag: stems and positions (`run` at 2, `everi` is "every").
+
+```powershell
+python manage.py showmigrations posts               # all three have [X]
+python manage.py sqlmigrate posts 0003 | Select-String 'ALTER|CREATE'
+@"
+from django.db import connection
+with connection.cursor() as cursor:
+    cursor.execute("SELECT is_generated, generation_expression FROM information_schema.columns WHERE table_name = 'posts_post' AND column_name = 'search_vector'")
+    print(cursor.fetchone())
+    cursor.execute("SELECT indexdef FROM pg_indexes WHERE indexname = 'posts_search_idx'")
+    print(cursor.fetchone()[0])
+    cursor.execute("SELECT search_vector::text FROM posts_post WHERE content = 'I run every morning ' || %s", ['$tag'])
+    print(cursor.fetchone()[0])
+"@ | python manage.py shell | Select-Object -Last 3
+```
+
+**You should see:**
+
+```text
+posts
+ [X] 0001_initial
+ [X] 0002_review_started_at
+ [X] 0003_search_vector
+ALTER TABLE "posts_post" ADD COLUMN "search_vector" tsvector GENERATED ALWAYS AS (to_tsvector('english'::regconfig, COALESCE("content", ''))) STORED;
+CREATE INDEX "posts_search_idx" ON "posts_post" USING gin ("search_vector");
+('ALWAYS', "to_tsvector('english'::regconfig, COALESCE(content, ''::text))")
+CREATE INDEX posts_search_idx ON public.posts_post USING gin (search_vector)
+'everi':3 'morn':4 'qx184323':5 'run':2
+```
+
+**If it differs:** `[ ]` before `0003_search_vector` means the migration isn't applied: run `python manage.py migrate`.
+
+#### Step 5: Stemming, ranking, phrases, a minus word and `or`
+
+**Where:** Terminal window 2.
+
+**What this does:** Searches the posts of step 3 (the `tag` keeps your other posts out). Each line prints the status code
+and the **text of each result**, best match first.
+
+```powershell
+"--- 'running' finds 'run' and 'runs' (stemming), best match first"; Fetch "/search/?q=running+$tag" $null $texts
+"--- a word that isn't a stem of anything finds nothing ('runner')"; Fetch "/search/?q=runner+$tag" $null $texts
+"--- more occurrences rank higher"; Fetch "/search/?q=storm+$tag" $null $texts
+"--- an exact phrase"; Fetch "/search/?q=%22storm+warning%22+$tag" $null $texts
+"--- a minus leaves a word out"; Fetch "/search/?q=storm+$tag+-warning" $null $texts
+"--- or: either word (the tag goes on both sides: 'or' binds loosest)"; Fetch "/search/?q=$tag+walking+or+$tag+bridge" $null $texts
+```
+
+**You should see** (the word after each text is your `tag`):
+
+```text
+--- 'running' finds 'run' and 'runs' (stemming), best match first
+200  ["She runs far qx184323","I run every morning qx184323"]
+--- a word that isn't a stem of anything finds nothing ('runner')
+200  []
+--- more occurrences rank higher
+200  ["Storm warning storm qx184323","Storm qx184323"]
+--- an exact phrase
+200  ["Storm warning storm qx184323"]
+--- a minus leaves a word out
+200  ["Storm qx184323"]
+--- or: either word (the tag goes on both sides: 'or' binds loosest)
+200  ["Walking is nice qx184323","Bridge opinion qx184323","Bridge fact qx184323","Bridge claim qx184323"]
+```
+
+- Both "run" posts are found; their order is Postgres's relevance score (then the newest first when two tie), so yours may
+  differ from this line. `runner` finds nothing: Postgres keeps `runner` as its own word.
+- "Storm warning storm" (two occurrences) ranks above "Storm" (one).
+- `or` binds more loosely than the implicit "and": `tag walking or bridge` would mean "(tag and walking) or bridge" and
+  match every post about a bridge in your database, so the tag goes on both sides.
+
+#### Step 6: Removed and deleted posts never appear, and the filters
+
+**Where:** Terminal window 2.
+
+**What this does:** Searches "flood" (three posts: one shown, one removed by a moderator, one deleted by its author), then
+narrows "bridge" (an opinion, a verified fact and a FALSE fact) by `post_type` and `status`, alone and together.
+
+```powershell
+"--- removed and deleted posts never appear"; Fetch "/search/?q=flood+$tag" $null $texts
+"--- 3 bridge posts; one filter at a time"
+Fetch "/search/?q=bridge+$tag" $null $texts
+Fetch "/search/?q=bridge+$tag&post_type=fact" $null $texts
+Fetch "/search/?q=bridge+$tag&post_type=opinion" $null $texts
+Fetch "/search/?q=bridge+$tag&status=verified_true" $null $texts
+Fetch "/search/?q=bridge+$tag&status=verified_false" $null $texts
+"--- filters combine (AND)"; Fetch "/search/?q=bridge+$tag&post_type=opinion&status=verified_true" $null $texts
+"--- the answer is the feed's: four keys, 25-key posts"; Fetch "/search/?q=storm+$tag" $null { param($r) [ordered]@{ keys = @($r.PSObject.Properties.Name | Sort-Object); post_keys = @($r.results[0].post.PSObject.Properties.Name).Count; pinned = @($r.pinned); next_cursor = $r.next_cursor } }
+```
+
+**You should see:**
+
+```text
+--- removed and deleted posts never appear
+200  ["Flood shown qx184323"]
+--- 3 bridge posts; one filter at a time
+200  ["Bridge opinion qx184323","Bridge fact qx184323","Bridge claim qx184323"]
+200  ["Bridge fact qx184323","Bridge claim qx184323"]
+200  ["Bridge opinion qx184323"]
+200  ["Bridge fact qx184323"]
+200  ["Bridge claim qx184323"]
+--- filters combine (AND)
+200  []
+--- the answer is the feed's: four keys, 25-key posts
+200  {"keys":["next_cursor","pinned","pinned_total","results"],"post_keys":25,"pinned":[],"next_cursor":null}
+```
+
+- The last line shows the answer is the feed's: `pinned`, `pinned_total`, `results` and `next_cursor`, each result a post with
+  the usual 25 keys, so the same cards render it.
+- Filters accept `post_type` = `fact` or `opinion`, and `status` = `pending`, `published`, `verified_true`,
+  `verified_false` or `under_review`. They are ANDed, and a fact that is not checked yet is found too.
+
+#### Step 7: The 400s, the 404, and what an empty search answers
+
+**Where:** Terminal window 2.
+
+**What this does:** Asks the endpoint the wrong questions.
+
+```powershell
+"--- a blank query and a missing one are a 400"; Fetch "/search/?q=%20%20"; Fetch "/search/"
+"--- 201 characters"; Fetch "/search/?q=$('x' * 201)"
+"--- bad type, status, post_type; a removed filter is refused too"; Fetch "/search/?q=storm&type=videos"; Fetch "/search/?q=storm&status=removed"; Fetch "/search/?q=storm&post_type=other"
+"--- a crafted cursor is a 404"; Fetch "/search/?q=storm&cursor=abc"
+"--- only minus words, or only a stop word: an empty 200 (no database query)"; Fetch "/search/?q=-storm"; Fetch "/search/?q=the"
+"--- only GET is allowed"; curl.exe -s -o NUL -w "%{http_code}`n" -X POST "$api/search/?q=storm"
+"--- never cached"; curl.exe -s -D - -o NUL "$api/search/?q=storm" | Select-String '^cache-control'
+```
+
+**You should see:**
+
+```text
+--- a blank query and a missing one are a 400
+400  {"q":["Enter something to search for."]}
+400  {"q":["Enter something to search for."]}
+--- 201 characters
+400  {"q":["Keep it to 200 characters."]}
+--- bad type, status, post_type; a removed filter is refused too
+400  {"type":["Choose posts or users."]}
+400  {"status":["Choose one of: pending, published, verified_true, verified_false, under_review."]}
+400  {"post_type":["Choose fact or opinion."]}
+--- a crafted cursor is a 404
+404  {"detail":"Invalid cursor","code":"not_found"}
+--- only minus words, or only a stop word: an empty 200 (no database query)
+200  {"pinned":[],"pinned_total":0,"results":[],"next_cursor":null}
+200  {"pinned":[],"pinned_total":0,"results":[],"next_cursor":null}
+--- only GET is allowed
+405
+--- never cached
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+```
+
+- A query of only minus words (`-storm`) or only a stop word (`the`) is an **empty 200**, not an error and not a search: `-storm`
+  alone would match nearly every post and walk the whole index, so the server doesn't ask the database at all.
+- `status=removed` is refused: removed posts are never searchable.
+
+#### Step 8: People
+
+**Where:** Terminal window 2.
+
+**What this does:** Searches people by username prefix and by the words of their display names ("Ada Lovelace",
+"Bo Run-Lee"), then shows what a row holds. `$mine` keeps only your two
+accounts out of everyone else's in the database.
+
+```powershell
+"--- a username prefix ('_' is a letter here, not a wildcard)"; Fetch "/search/?type=users&q=part12_ada_$id" $null $names
+"--- a word of the display name (the start, or after a hyphen)"; Fetch "/search/?type=users&q=Ada+Love" $null $mine; Fetch "/search/?type=users&q=lee" $null $mine
+"--- a % or a leading @"; Fetch "/search/?type=users&q=part12%25" $null $names; Fetch "/search/?type=users&q=@part12_bo_$id" $null $names
+"--- nothing searchable ('-') is an empty answer"; Fetch "/search/?type=users&q=-"
+"--- a row is the follower row: nine keys, nothing else added"; Fetch "/search/?type=users&q=part12_bo_$id" $null { param($r) $u = $r.results[0]; [ordered]@{ keys = @($u.PSObject.Properties.Name | Sort-Object); reputation = $u.reputation; counts = $u.counts; is_following = $u.is_following; is_me = $u.is_me } }
+"--- A to Z by username, and the answer has no 'pinned' keys"; Fetch "/search/?type=users&q=part12_" $null $mine; Fetch "/search/?type=users&q=part12_" $null { param($r) @($r.PSObject.Properties.Name | Sort-Object) }
+```
+
+**You should see** (your `id` in the names):
+
+```text
+--- a username prefix ('_' is a letter here, not a wildcard)
+200  ["part12_ada_184323"]
+--- a word of the display name (the start, or after a hyphen)
+200  ["part12_ada_184323"]
+200  ["part12_bo_184323"]
+--- a % or a leading @
+200  []
+200  ["part12_bo_184323"]
+--- nothing searchable ('-') is an empty answer
+200  {"results":[],"next_cursor":null}
+--- a row is the follower row: nine keys, nothing else added
+200  {"keys":["avatar_url","bio","counts","display_name","id","is_following","is_me","reputation","username"],"reputation":{"score":null,"sample":0},"counts":{"verified":1},"is_following":false,"is_me":false}
+--- A to Z by username, and the answer has no 'pinned' keys
+200  ["part12_ada_184323","part12_bo_184323"]
+200  ["next_cursor","results"]
+```
+
+- `lee` is found after a hyphen ("Run-Lee"), `Ada Love` is a phrase prefix ("Ada Lovelace"), and `part12%` matches nobody:
+  `%` (and `_`) are plain characters.
+- A row is exactly the follower list's row: `reputation.score` is `null` ("New") until three of the person's posts are
+  checked, and `counts.verified` counts their verified posts, deleted ones included (bo has one).
+
+#### Step 9: Pages, and the 100-result cap
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes 110 posts that all match one word and walks the pages by hand. The cursor is the **next page
+number**; page 5 is the last, even though 110 posts match.
+
+```powershell
+@"
+import datetime
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.posts.models import Post
+author = User.objects.get(username='part12_ada_$id')
+now = timezone.now()
+Post.objects.bulk_create(Post(author=author, content=f'Update number {n} pg$id', post_type='opinion', status='published', created_at=now - datetime.timedelta(seconds=n)) for n in range(110))
+print(Post.objects.filter(content__endswith='pg$id').count(), 'posts made')
+"@ | python manage.py shell | Select-Object -Last 1
+$cursor = $null
+foreach ($page in 1..6) {
+  $url = "$api/search/?q=pg$id" + $(if ($cursor) { "&cursor=$cursor" } else { '' })
+  $body = curl.exe -s $url | ConvertFrom-Json
+  "page ${page}: " + (ConvertTo-Json -InputObject @($body.results.Count, $body.next_cursor, $body.results[0].post.content) -Compress)
+  $cursor = $body.next_cursor
+  if (-not $cursor) { break }
+}
+"--- there is no page 6, and no page 1 by number"; Fetch "/search/?q=pg$id&cursor=6"; Fetch "/search/?q=pg$id&cursor=1"
+"--- an empty cursor is page 1"; Fetch "/search/?q=pg$id&cursor=" $null { param($r) @($r.results.Count, $r.next_cursor) }
+```
+
+**You should see:**
+
+```text
+110 posts made
+page 1: [20,"2","Update number 0 pg184323"]
+page 2: [20,"3","Update number 20 pg184323"]
+page 3: [20,"4","Update number 40 pg184323"]
+page 4: [20,"5","Update number 60 pg184323"]
+page 5: [20,null,"Update number 80 pg184323"]
+--- there is no page 6, and no page 1 by number
+404  {"detail":"Invalid cursor","code":"not_found"}
+404  {"detail":"Invalid cursor","code":"not_found"}
+--- an empty cursor is page 1
+200  [20,"2"]
+```
+
+- Each page is 20 results; `"2"` to `"5"` are the cursors; page 5 has `null` and the 10 posts after it are unreachable by
+  design (the page says "That's the first 100 results. Try more specific words to narrow them down.").
+- A cursor that isn't `"2"` to `"5"` is a 404 `Invalid cursor`, as every crafted cursor is; the page then starts again from
+  the top.
+
+#### Step 10: The query uses the GIN index (EXPLAIN)
+
+**Where:** Terminal window 2.
+
+**What this does:** Inside a transaction that is rolled back at the end, adds **100,000** posts, runs `ANALYZE`, and prints
+what Postgres does for the very query the endpoint runs, with `EXPLAIN ANALYZE`. It takes about 15 seconds and leaves
+nothing behind.
+
+```powershell
+@"
+import random
+from django.db import connection, transaction
+from django.utils import timezone
+from apps.accounts.models import User
+from apps.posts.models import Post
+from apps.posts.search import search_posts
+words = 'storm flood fire harbour bridge council school vaccine election budget river coast market energy water health transport library airport festival weather'.split()
+rng = random.Random(1)
+author = User.objects.first()
+try:
+    with transaction.atomic():
+        for _ in range(10):
+            Post.objects.bulk_create(Post(author=author, content=' '.join(rng.choices(words, k=7)) + (' zeppelin' if n % 200 == 0 else ''), post_type='opinion', status='published', created_at=timezone.now()) for n in range(10000))
+        with connection.cursor() as cursor:
+            cursor.execute('ANALYZE posts_post')
+        for line in search_posts('zeppelin storm', None).explain(analyze=True).splitlines():
+            if 'posts_search_idx' in line or 'Seq Scan on posts_post' in line or 'Execution Time' in line:
+                print(line.strip())
+        raise RuntimeError('roll back')
+except RuntimeError:
+    pass
+print('posts left over:', Post.objects.filter(content__contains='zeppelin').count())
+"@ | python manage.py shell | Select-String 'Scan on posts|Execution Time|left over'
+```
+
+**You should see** (the cost numbers and the time differ):
+
+```text
+->  Bitmap Index Scan on posts_search_idx  (cost=0.00..2155.70 rows=142 width=0) (actual time=3.742..3.743 rows=161.00 loops=1)
+Execution Time: 5.423 ms
+posts left over: 0
+```
+
+**If it differs:** a `Seq Scan on posts_post` line instead of the `Bitmap Index Scan` means Postgres chose a scan of the
+table: that is normal for a table of a few thousand rows (the same query on the 100,000 rows here uses the index), and only
+a problem if it still happens with that many.
+
+#### Step 11: The limit, per address
+
+**Where:** Terminal window 2.
+
+**What this does:** Sends 62 searches from a made-up address. The first 60 are answered; the rest are refused with a 429 and
+a `Retry-After` (seconds). The feed from the same address and a search from another address are untouched.
+
+```powershell
+$ip = "198.51.100.$(Get-Random -Minimum 10 -Maximum 210)"    # a made-up client address: a new 60-a-minute allowance
+1..62 | ForEach-Object { curl.exe -s -o NUL -H "X-Forwarded-For: $ip" -w "%{http_code}`n" "$api/search/?q=storm" } | Group-Object | ForEach-Object { "$($_.Count) x $($_.Name)" }
+curl.exe -s -D - -H "X-Forwarded-For: $ip" "$api/search/?q=storm" | Select-String '^HTTP/|^retry-after|^\{'
+curl.exe -s -o NUL -H "X-Forwarded-For: $ip" -w "the feed, same address: %{http_code}`n" "$api/posts/"
+curl.exe -s -o NUL -H "X-Forwarded-For: 198.51.100.7" -w "search from another address: %{http_code}`n" "$api/search/?q=storm"
+```
+
+**You should see** (`Retry-After` counts down from 60):
+
+```text
+60 x 200
+2 x 429
+HTTP/1.1 429 Too Many Requests
+Retry-After: 59
+{"detail":"Request was throttled. Expected available in 59 seconds.","code":"throttled"}
+the feed, same address: 200
+search from another address: 200
+```
+
+- The limit counts signed-in people by address too, so accounts don't multiply it. A 401 never counts; a 400 does.
+
+#### Step 12: Start the frontend
+
+**Where:** Terminal window 3 (frontend), in `frontend\`.
+
+**What this does:** Runs the Next.js dev server. Keep window 1 (Django) running too.
+
+```powershell
+npm run dev                                         # leave it running; http://localhost:3000
+```
+
+**You should see:** `Ready in …` and `Local: http://localhost:3000`.
+
+Then, in window 2 (any folder), check what a crawler and the relay see:
+
+```powershell
+curl.exe -s http://localhost:3000/search | Select-String -Pattern '<title>[^<]*</title>|<meta name="robots"[^>]*>' -AllMatches | ForEach-Object { $_.Matches.Value }
+curl.exe -s -o NUL -w "through the relay: %{http_code}`n" "http://localhost:3000/api/v1/search/?q=storm"
+```
+
+**You should see:**
+
+```text
+<title>Search · Rumor Zero</title>
+<meta name="robots" content="noindex, follow"/>
+through the relay: 200
+```
+
+#### Step 13: The search page (Browser)
+
+**Where:** Browser, a normal window (about 1280 px wide), signed out. Use the `tag` (`qx` + your `id` from step 3).
+
+**What this does:** Tries every state of the page.
+
+1. Open <http://localhost:3000/search>. **You should see:** a box with a magnifier, the tabs POSTS (underlined) and PEOPLE, six
+   chips (All pressed, Facts, Opinions, Verified, FALSE, Under review), and "Search Rumor Zero / Type a word or a phrase to
+   find posts, or a name to find people." No request was made.
+2. In the **top bar** box, type `running qx<id>` and press Enter. **You should see:** the address is
+   `/search?q=running+qx<id>`; two cards, "She runs far qx<id>" and "I run every morning qx<id>", with `runs`, `run` and the
+   word `qx<id>` highlighted in pale blue (not the author's name); "You're caught up." under them. The box in the page
+   holds your text and has a × that clears it and keeps the focus there.
+3. Type `bridge qx<id>` in the page's box and press Enter: three cards. Click **Verified**: the address gains `&filter=verified`
+   and one card stays, "Bridge fact", with its VERIFIED badge. Click **FALSE**: only "Bridge claim". Click **Opinions**:
+   only "Bridge opinion". Click the pressed chip again: back to all three, and the address has no `filter`. A chip
+   replaces the address, so Back doesn't step through the chips: it goes to the page before (a tab or a new search adds a
+   history entry, a chip doesn't).
+4. Click the tab **People** (the address gains `&type=users` and the chips go away). **You should see:** "No people found
+   for “bridge qx<id>”" (the query is still the bridge words). Type `run` and press Enter: "Bo Run-Lee" with `Run` highlighted, `@part12_bo_<id>`, the grey chip
+   "Credibility: New · 1 verified" and a **Follow** button (it leads to the login page while you are signed out). Click
+   the tab Posts to come back.
+5. Search for `zzzznothing`: "No results for “zzzznothing”" and "Try different words or remove a filter."
+6. Open <http://localhost:3000/search?q=storm> and, in the Network tab of the browser's developer tools, filter on `search`:
+   one request, to `/api/v1/search/?q=storm&type=posts`. (In the dev server a later tab or chip change makes two, because React
+   runs effects twice; a production build makes one.) The page itself is a static file: nothing about your query reached the
+   Next server.
+7. **Signed in:** log in as `part12_ada_<id>` with `correct-horse-battery-42` at <http://localhost:3000/login>, search
+   `part12_ada_<id>` under People: your own row has **no Follow button**. Search `running qx<id>` under Posts: the cards have
+   their action bars (like, comment, repost, bookmark, report) as on the feeds.
+8. Optional: in `frontend`, `npm run build` then `npm start` serves the same page from the
+   production build; `/search` prerenders (see step 2).
+
+**If it differs:** "Couldn't load posts" with "You're going too fast. Try again in a minute." means you went over the 60 a minute
+(step 11's made-up address doesn't change yours): wait a minute and press Try again. "Couldn't load posts. Check your
+connection" means Django (window 1) isn't running.
+
+#### Step 14: A phone, the gallery and the clean-up of the browser
+
+**Where:** Browser.
+
+**What this does:** Checks the phone layout and the design-system gallery.
+
+1. In the browser's developer tools, switch to a phone width (390 px) and open
+   <http://localhost:3000/search?q=running+qx<id>>. **You should see:** the same cards in one column, **no sideways scroll**,
+   the bottom bar with Search highlighted, and on the empty page the six chips wrapping onto two rows.
+2. Open <http://localhost:3000/dev/ui#stitch-search> (development only; a production build answers 404). **You should
+   see:** the Stitch b4 section: the query box, tabs and chips, a fact and an opinion card with `capacity` and `solar`
+   highlighted (the opinion stays upright inside its italic claim), two people rows, the empty prompt, the "No results"
+   state and the "going too fast" message.
+
+#### Step 15: Clean up (optional)
+
+**Where:** Terminal window 2.
+
+**What this does:** Deletes the two accounts and the posts of this part (and of every earlier run that used the same names).
+Stop the servers with Ctrl+C in windows 1 and 3.
+
+```powershell
+@"
+from apps.accounts.models import User
+from apps.posts.models import Post
+users = User.objects.filter(email__startswith='part12-')
+print(Post.objects.filter(author__in=users).delete())
+print(users.delete())
+"@ | python manage.py shell | Select-Object -Last 2
+```
+
+**You should see** (the numbers depend on how many runs you left over):
+
+```text
+(495, {'posts.Post': 495})
+(20, {'account.EmailAddress': 10, 'accounts.User': 10})
 ```
 
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
