@@ -37,6 +37,8 @@ export interface AuthContextValue extends AuthState {
   signInWithToken: (token: string) => Promise<void>;
   /** Throws (and changes nothing) when the server can't be reached. */
   logout: () => Promise<void>;
+  /** Become anonymous without a request: the account was just deleted (Part 14). */
+  endSession: () => void;
   reloadMe: () => Promise<void>;
 }
 
@@ -124,6 +126,7 @@ export function AuthProvider({
       signup: (input) => requireSession(session).signup(input),
       signInWithToken: (token) => requireSession(session).signInWithToken(token),
       logout: () => requireSession(session).logout(),
+      endSession: () => requireSession(session).endSession(),
       reloadMe: () => requireSession(session).reloadMe(),
     }),
     [state, session],

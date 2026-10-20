@@ -207,6 +207,12 @@ REST_FRAMEWORK = {
         "search": "60/min",
         # The list, the unread count and mark-read, per signed-in user (a tab polls 2 a minute).
         "notifications": "120/min",
+        # Settings (Part 14), per signed-in user. An Argon2 hash costs about 100 MiB, so the paths
+        # that verify or set a password stay throttled.
+        "profile_update": "30/hour",
+        "password_change": "10/hour",
+        "data_export": "10/hour",
+        "account_delete": "10/hour",
     },
 }
 

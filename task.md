@@ -102,7 +102,7 @@ not let the review expand the part's scope without user approval.
 | 11D | Charts & stats | 7B, 11B | [x] Done (2026-10-20) |
 | 12 | Search | 6, 11B | [x] Done (2026-10-20) |
 | 13 | Notifications | 7, 7B, 10, 11, 11C | [x] Done (2026-10-20) |
-| 14 | Account settings, data export, deletion | 6, 7, 7B, 11B, 11D | [ ] |
+| 14 | Account settings, data export, deletion | 6, 7, 7B, 11B, 11D | [x] Done (2026-10-21) |
 | 14B | Photo avatars | 14 | [ ] |
 | 15 | Landing & static pages | 4, 11B, 11C | [ ] |
 | 16 | Security pass, load test, E2E hardening | every part above | [ ] |
@@ -1548,7 +1548,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 ---
 
 ## Part 14: Account settings, data export, account deletion
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-21)
 **Goal:** users can edit their profile, manage their password, download their data, and delete their account (guide §16 GDPR/CCPA note).
 **Depends on:** 6, 7, 7B, 11B, 11D.
 **Stitch files to convert:** `c2_account_settings`, subset only (ANALYSIS b-1). The avatar card comes in 14B; the "Credibility Index" bar is the CredibilityPanel from 11D.
@@ -1576,11 +1576,23 @@ Plus toasts and field errors.
 **API endpoints:** the four `/me` endpoints above.
 
 **Acceptance criteria**
-- [ ] Profile edits show up everywhere; a taken username gives a field error
-- [ ] The export contains all of your own data (including bookmarks, reposts and credibility history) and nothing private about anyone else
-- [ ] Deletion removes the user and their content, logs them out, and the audit trail keeps its post snapshots
+- [x] Profile edits show up everywhere; a taken username gives a field error
+- [x] The export contains all of your own data (including bookmarks, reposts and credibility history) and nothing private about anyone else
+- [x] Deletion removes the user and their content, logs them out, and the audit trail keeps its post snapshots
 
 **Required tests:** API validation, export contents and privacy, deletion cascade and audit retention, forms; E2E: edit profile → export → delete account.
+
+**Decisions and deviations (plan approved 2026-10-21, `docs/agents/plans/part-14-account-settings-export-deletion.md`; built 2026-10-21; recorded in ARCHITECTURE §2/§3/§7/§9/§10, ANALYSIS c-48, STRUCTURE, MEMORY):**
+- **User decisions:** staff (and anyone with admin log entries) can't delete themselves (403 `staff_account`); the export includes the notifications you received; username changes are throttle-only; two new emails (password changed, Google connected).
+- **Defaults approved with the plan:** `GET /me` gains `bio` and `public_score`; `PATCH /me` needs a verified email; four per-user throttle scopes (seventeen in all); a password change keeps this device and ends the others at their next refresh; the admin's account delete runs the same routine.
+- **Built as planned.** One difference of wording: `update_profile` saves with `update_fields` as planned, but a full `User.save()` already skipped the score and emergency block (Parts 11B/11C), so the new guarantee is about `is_email_verified`, `role` and the profile fields of a stale copy.
+- **Found while building:**
+  - **allauth's `send_mail` reads the request from a context variable**, which is gone when a callback runs after the view returned: `services._send` sets it again (`request_context`).
+  - **Existing tests changed on purpose:** `core/tests/test_settings.py` (seventeen scopes), `test_me.py` (`bio`, `public_score`), `test_emails.py` (its "no template of ours" example used allauth's `password_changed`, which we now override: it uses `password_set`; the shared email checks also run on the two new emails), and `Me` fixtures in `layout.test.tsx` and `session.test.ts`.
+  - **No migration, no dependency, no variable.**
+- **Not done (later parts):** profile photos in the export and deletion (14B); `clearsessions` for the orphaned `django_session` rows of deleted accounts (Part 17); whether suspension hides a suspended account's content (Part 16); the username-rename race in sign-up (Part 16). Dropped c2 pieces with no backend: affiliation, ORCID, "Update address", "Disconnect", "Manage sessions", notification and visibility checkboxes.
+- **Validated by:** mutation checks that each failed a test (no discard of the notifications the account caused, no session delete, posts not locked first, no session re-stamp, no session lock, the admin hook off, `update_fields` replaced by a full save, `pipeline_result` added to the export), plus the control test in which locking the user first deadlocks.
+- **Verified:** see HANDOFF (backend 4205 tests, frontend 2222, E2E 55 in dev and CI mode). Headless Chromium at 1280, 1024 and 390 px: 0 px horizontal overflow, screenshots looked at. The API steps of `docs/test-command.md` Part 14 were run against live Django on Linux; its PowerShell version was not run on Windows.
 
 **Recommended models**
 - **Plan:** Opus 5.5 · medium. Deletion cascades and privacy correctness deserve the stronger model.

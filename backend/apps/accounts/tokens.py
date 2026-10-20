@@ -33,6 +33,12 @@ def session_key_of(refresh_token):
     return internal.session_key_from_sid(payload["sid"]) or None
 
 
+def session_key_of_payload(payload):
+    """The session key behind a verified access-token payload (`request.auth`), else None."""
+    sid = payload.get("sid") if isinstance(payload, dict) else None
+    return (internal.session_key_from_sid(sid) or None) if isinstance(sid, str) else None
+
+
 class RumorZeroJWTTokenStrategy(JWTTokenStrategy):
     def refresh_token(self, refresh_token):
         session_key = session_key_of(refresh_token)

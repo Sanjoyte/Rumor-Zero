@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { AppShell } from "@/components/shell/AppShell";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
@@ -9,6 +9,7 @@ import { MESSAGES } from "@/features/auth/messages";
 import { UnreadCountProvider, useUnreadCount } from "@/features/notifications/UnreadCountProvider";
 import { useResendVerification } from "@/features/auth/useResendVerification";
 import { ComposerProvider, useComposer } from "@/features/posts/ComposerProvider";
+import { AccountExitContext } from "@/features/settings/account-exit";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { isProtectedPath, loginRedirectFor } from "@/lib/auth/route-guard";
 
@@ -51,6 +52,22 @@ function AppFrame({ children }: { children: ReactNode }) {
     router.replace(loginRedirectFor(window.location.pathname + window.location.search));
   }, [guarded, status, router]);
 
+  // Once the visitor has left the protected page (the login, or /home after an account deletion)
+  // the guard is armed again for the next visit.
+  useEffect(() => {
+    if (!guarded) loggingOut.current = false;
+  }, [guarded]);
+
+  // After an account deletion the page sends the visitor to /home itself (Part 14).
+  const accountExit = useMemo(
+    () => ({
+      begin: () => {
+        loggingOut.current = true;
+      },
+    }),
+    [],
+  );
+
   const onLogout = useCallback(() => {
     // Logging out on a protected page must go to /login, not /login?next=<that page>.
     loggingOut.current = true;
@@ -75,7 +92,9 @@ function AppFrame({ children }: { children: ReactNode }) {
       resending={resend.busy}
       unreadCount={unread.count}
     >
-      {guarded && status !== "authenticated" ? <PageSkeleton /> : children}
+      <AccountExitContext.Provider value={accountExit}>
+        {guarded && status !== "authenticated" ? <PageSkeleton /> : children}
+      </AccountExitContext.Provider>
     </AppShell>
   );
 }

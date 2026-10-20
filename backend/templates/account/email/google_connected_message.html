@@ -1,0 +1,19 @@
+{% extends "account/email/base_message.html" %}
+
+{% block title %}Continue with Google is now connected{% endblock title %}
+
+{% block content %}
+<h1 style="margin:0 0 16px 0;font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:36px;font-weight:600;color:#131b2e;">Continue with Google is now connected</h1>
+<p style="margin:0 0 16px 0;">Continue with Google is now connected to your Rumor Zero account. You can use it to log in.</p>
+{% if password_removed %}<p style="margin:0 0 16px 0;">Your email address hadn't been verified before, so we removed your old password. It no longer works. To log in with a password again, set a new one with Forgot password.</p>
+{% endif %}<p style="margin:0 0 16px 0;">If this wasn't you, reset your password now so that only you can get in.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;">
+<tr>
+<td style="background-color:#006398;border-radius:8px;">
+<a href="{{ forgot_password_url }}" style="display:inline-block;padding:12px 24px;font-size:16px;line-height:24px;font-weight:600;color:#ffffff;text-decoration:none;">Reset your password</a>
+</td>
+</tr>
+</table>
+<p style="margin:0 0 8px 0;font-size:14px;line-height:20px;">Or paste this link into your browser:</p>
+<p style="margin:0;font-size:14px;line-height:20px;word-break:break-all;"><a href="{{ forgot_password_url }}" style="color:#006398;">{{ forgot_password_url }}</a></p>
+{% endblock content %}

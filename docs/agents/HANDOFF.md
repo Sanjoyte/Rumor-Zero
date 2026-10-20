@@ -6,11 +6,10 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 14 (Account settings, data export, deletion) is planned and approved** (2026-10-21, Claude, Opus 5.5); no
-  code written yet. Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12 and 13 are done (Part 11D committed as
-  `b2f8ad5`, Part 12 as `30649b4`, Part 13 as `4f2d818`).
-  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12 and 13 CI have not been
-  reported yet.**
+- **Part:** **Part 14 (Account settings, data export, deletion) is implemented** (2026-10-21, Claude, Sonnet 5.5), **uncommitted**:
+  you review and commit. Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13 and 14 are done (Part 11D committed as
+  `b2f8ad5`, Part 12 as `30649b4`, Part 13 as `4f2d818`, the Part 14 plan as `f11aca7`).
+  Part 1 CI is green (user-reported 2026-10-06); **Part 2 to 14 CI have not been reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
   - **Part 17 has a launch blocker from Part 9** (your decision 2026-10-11): decide how production gets verdicts
@@ -20,18 +19,17 @@ read-only git output.
     writes): fine before launch.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after planning Part 14, as asked).
-- **Phase:** Part 14 plan approved and saved; nothing implemented. HEAD `4f2d818` ("Implemented Part 13: Notifications"); the tree held
-  no changes before the plan was saved (only the new plan file and this HANDOFF edit now). Dependencies 6, 7, 7B, 11B and 11D are `[x] Done`
-  in both task.md spots. The dev database is at `notifications 0001_initial`; E2E-made accounts remain in it.
-- **Next action:** **Implement Part 14 from the approved plan**
-  ([`docs/agents/plans/part-14-account-settings-export-deletion.md`](plans/part-14-account-settings-export-deletion.md)), starting at its
-  step 0 (measure baselines). Last recorded baselines: `pytest` **4073**, `npm test` **2148**, E2E **53**.
-- **Approved plan:**
-  [`docs/agents/plans/part-14-account-settings-export-deletion.md`](plans/part-14-account-settings-export-deletion.md) (approved
-  2026-10-21, not implemented). User decisions recorded in it: staff accounts can't delete themselves (403 `staff_account`); the export
-  includes received notifications; username changes are throttle-only; two new emails (password changed, Google connected).
+- **Owner:** none (Claude stopped after Part 14, as asked).
+- **Phase:** Part 14 done and validated; nothing is staged. HEAD `f11aca7` ("Plan part 14"). The dev database needs no migration (Part 14 adds none);
+  E2E- and guide-made accounts remain in it. Docker was down at the start of the E2E run (containers gone after a restart) and was brought up with
+  `docker compose up -d`; both containers are up now, ports 3000 and 8000 are free.
+- **Next action:** **Part 14B (Photo avatars)** is next in `task.md` order (depends on 14, now done): start it with
+  `Plan Part 14B from task.md. Do not implement yet.` Review the Part 14 changes and commit first. Baselines for 14B: `pytest` **4205**, `npm test` **2222**, E2E **55**.
+  Part 14 left hooks for it: `avatar_version` is already in `/me`, and the export and `delete_account` must cover the avatar table when it exists
+  (`apps/accounts/export.py` names its columns; deletion relies on the CASCADE).
+- **Approved plan:** [`docs/agents/plans/part-14-account-settings-export-deletion.md`](plans/part-14-account-settings-export-deletion.md) (implemented 2026-10-21).
 - **Previous plans:**
+  - [`part-14-account-settings-export-deletion.md`](plans/part-14-account-settings-export-deletion.md), implemented 2026-10-21 (uncommitted);
   - [`part-13-notifications.md`](plans/part-13-notifications.md), implemented 2026-10-20 (committed as `4f2d818`);
   - [`part-12-search.md`](plans/part-12-search.md), implemented 2026-10-20 (committed as `30649b4`);
   - [`part-11D-charts-stats.md`](plans/part-11D-charts-stats.md), implemented 2026-10-20 (committed as `b2f8ad5`);
@@ -60,9 +58,37 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-21 by Claude (Opus 5.5), Part 14 planned and approved.
+- **Last updated:** 2026-10-21 by Claude (Sonnet 5.5), Part 14 implemented and validated.
 
 ## Completed checkpoints
+
+- 2026-10-21 (Claude, Sonnet 5.5): **Part 14 implemented** (uncommitted). Started from HEAD `f11aca7` ("Plan part 14"); the tree was clean and matched this file.
+  - **Backend** (`backend/`): new `apps/accounts/deletion.py` (`delete_account`: every post of the account locked first, then the user, then
+    `notifications.services.discard_for_actor`, this device's session, the user), `export.py` (`build_export`: 12 queries, columns named), emails
+    `templates/account/email/{password_changed,google_connected}_{subject.txt,message.txt,message.html}`. Changed: `accounts/{views,serializers,services,urls,
+    signals,tokens,admin}.py` (`MeView` GET/PATCH/DELETE, `PasswordChangeView`, `ExportView`, `update_profile`, `change_password`, the Google-connected mail in the
+    `social_account_added` receiver, `UserAdmin.delete_model/delete_queryset` use the routine), `notifications/services.py` (`discard_for_actor`),
+    `rumor_zero/settings.py` (four throttle scopes: 17). New tests: `test_profile_update` (39), `test_password_change` (18), `test_export` (13),
+    `test_account_delete` (29), `test_account_delete_races` (7, incl. a control that deadlocks with the user locked first), `populate.py`; additions to
+    `test_emails`, `test_google_login`, `test_admin_roles`. Existing tests changed on purpose: `core/tests/test_settings.py`, `test_me.py`, one test in `test_emails.py`.
+    **No migration, no dependency, no variable.**
+  - **Frontend** (`frontend/`): new `src/features/settings/` (`SettingsPage`, `ProfileForm`, `AccountSection`, `ChangePasswordModal`, `DataExportCard`,
+    `DeleteAccountModal`, `account-exit.tsx`, `settings-api.ts`, `messages.ts`, `test-helpers.tsx`, 8 test files), `e2e/settings.spec.ts` (2 tests). Changed:
+    `app/(app)/settings/page.tsx`, `app/(app)/layout.tsx` (`AccountExitContext`, guard re-armed off protected paths), `lib/api/types.ts` (`Me.bio`,
+    `Me.public_score`), `lib/auth/{session,AuthProvider}.ts(x)` (`endSession`), `features/auth/test-helpers.tsx`, and `Me` fixtures in `layout.test.tsx`/`session.test.ts`.
+  - **Docs:** ARCHITECTURE §2, §3, §7, §9, §10; ANALYSIS c-48 (list item 48); STRUCTURE; MEMORY (2026-10-21 entry); task.md (criteria, both status spots,
+    decisions); the plan's status; `docs/test-command.md` Part 14 (Linux and Windows).
+  - **Validation (all run on Linux, 2026-10-21):**
+    - `cd backend && pytest` **4205 passed** (was 4073); the five Part 14 test files **106 passed**; `ruff check .` and `ruff format --check .` clean (322 files);
+      `makemigrations --check --dry-run`: No changes detected; `manage.py check`: no issues.
+    - `cd frontend`: `npm run lint`, `lint:tokens`, `typecheck`, `format:check` clean; `npm test` **163 files, 2222 tests passed** (was 2148);
+      `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` OK (`○ /settings`); `npm run test:e2e` **55 passed** and `CI=1 npm run test:e2e` **55 passed** (was 53).
+    - Mutation checks that each failed a test: no `discard_for_actor`, no session delete, posts not locked first, no session re-stamp, no session lock,
+      admin hook off, full `save()` in `update_profile`, `pipeline_result` in the export.
+    - Headless Chromium at 1280, 1024 and 390 px (also with the password modal at 390): 0 px horizontal overflow; screenshots looked at.
+    - The API steps of `docs/test-command.md` Part 14 (steps 3 to 8) were run for real against live Django and their outputs recorded; step 9 rests on
+      `e2e/settings.spec.ts` and the screenshots. **The PowerShell version was not run** (no Windows machine here).
+  - **Not done / follow-ups:** see task.md Part 14 ("Not done") and MEMORY 2026-10-21.
 
 - 2026-10-20 (Claude, Sonnet 5.5): **Part 13 implemented** (uncommitted). Started from HEAD `30649b4` ("Implemented Part 12: Search"); the tree
   matched this file (only the plan and this file, which you had staged). Docker was up, ports free. Baselines measured first: `pytest`

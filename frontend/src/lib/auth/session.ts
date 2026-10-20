@@ -159,6 +159,16 @@ export class AuthSession {
     this.deps.channel?.post({ type: "logout" });
   }
 
+  /**
+   * The account no longer exists (it was just deleted): become anonymous at once and tell the
+   * other tabs. No request, unlike `logout()`: the server already ended the session and expired
+   * the cookies in its answer.
+   */
+  endSession(): void {
+    this.becomeAnonymous();
+    this.deps.channel?.post({ type: "logout" });
+  }
+
   /** Sign in with an access token that another call returned (the password reset logs in). */
   async signInWithToken(token: string): Promise<void> {
     await this.signIn(token);

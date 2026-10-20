@@ -10,6 +10,7 @@ import logging
 import pytest
 from allauth.account.models import EmailAddress
 from allauth.socialaccount.models import SocialAccount
+from django.core import mail
 from django.test import Client
 
 from apps.accounts.models import Role, User
@@ -440,3 +441,55 @@ def test_thirty_sign_ins_a_minute_then_429(site_client, google):
     assert response.status_code == 429
     assert body(response) == {"status": 429}
     assert google.fetches == 0
+
+
+# ---------- Part 14: the "Google connected" email ----------
+
+
+def connected_emails():
+    return [m for m in mail.outbox if "Continue with Google is now connected" in m.subject]
+
+
+def test_linking_to_an_existing_account_tells_its_owner(
+    site_client, google, django_capture_on_commit_callbacks
+):
+    user = UserFactory(email="ada@gmail.com")
+    verified_address(user)
+    mail.outbox.clear()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        assert google.login(site_client, email="ada@gmail.com", sub="sub-mail").status_code == 200
+
+    (message,) = connected_emails()
+    assert message.to == ["ada@gmail.com"]
+    assert "removed your old password" not in message.body  # the verified address kept it
+    assert user.check_password(DEFAULT_PASSWORD)
+
+
+def test_when_the_link_wiped_the_password_the_email_says_so(
+    site_client, google, django_capture_on_commit_callbacks
+):
+    user = UserFactory(email="bob@gmail.com")  # no verified address row: allauth wipes the password
+    mail.outbox.clear()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        assert google.login(site_client, email="bob@gmail.com").status_code == 200
+
+    user.refresh_from_db()
+    assert not user.has_usable_password()
+    (message,) = connected_emails()
+    assert "hadn't been verified" in message.body
+    assert "It no longer works" in message.body
+    assert "/forgot-password" in message.body
+    assert "hadn't been verified" in message.alternatives[0][0]
+
+
+def test_a_new_google_user_and_a_returning_one_get_no_such_email(
+    site_client, google, django_capture_on_commit_callbacks
+):
+    mail.outbox.clear()
+    with django_capture_on_commit_callbacks(execute=True):
+        assert google.login(site_client, email="new@gmail.com", sub="sub-new").status_code == 200
+    with django_capture_on_commit_callbacks(execute=True):
+        assert google.login(Client(headers=SITE_HEADERS), email="new@gmail.com", sub="sub-new")
+    assert connected_emails() == []

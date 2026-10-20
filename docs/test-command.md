@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13, 14).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -11034,6 +11034,373 @@ comment or account they are about. Only a superuser sees the list by default (no
 
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
   database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway.
+
+### Part 14: Account settings, data export, account deletion
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and `frontend/.env.local`.
+Part 14 adds **four endpoints** (`PATCH /api/v1/me/`, `POST /api/v1/me/password/`, `GET /api/v1/me/export/`, `DELETE
+/api/v1/me/`), **four throttle scopes** (`profile_update` 30 an hour, `password_change`, `data_export` and `account_delete`
+10 an hour each, per signed-in person), the **`/settings` page** (Stitch c2), **two emails** ("password changed" and
+"Continue with Google is now connected") and one shared **deletion routine** that Django Admin uses too. `GET /api/v1/me/`
+gains `bio` and `public_score`. It adds no migration, no dependency and no environment variable.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 9 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 8**: the variables and functions you set in step 3 (`id`, `ada`, `bo`, `mod`, `una`, `api`, `send`, `h`, `login`) only live in that one terminal. If you close it, start again from step 3. | 1 to 8 |
+| Window 3 (frontend) | `npm run dev` in `frontend`. Leave it running. | 9 |
+| Browser | Step 9 | 9 |
+
+Things to know first:
+
+- **What you can edit.** Display name (up to 50 characters, one line), username (3 to 30 of `a-z 0-9 _`, not reserved) and bio
+  (up to 280 characters, plain text). Everything else in the body of `PATCH /me` (email, role, score, ...) is ignored. An
+  account whose email isn't verified can read but not edit (403 `email_unverified`).
+- **A new username frees the old one.** The old `/u/<name>` becomes a 404 and anyone may take the name. There is no cooldown,
+  only the 30-an-hour limit.
+- **Password change.** Needs the current password. This device stays signed in; every other device is signed out at its next
+  refresh. A Google-only account (no password) gets 409 `password_not_set` and uses Forgot password instead.
+- **The export** is one JSON file of everything stored about you, including posts you deleted and ones a moderator removed,
+  the notifications you received and your whole credibility ledger. It never holds another person's email, a moderator's
+  name, the moderators' notes, report counts or the pipeline's internals.
+- **Deleting** removes the account, its posts, comments, likes, follows, bookmarks, reposts, reports, appeals, ledger rows,
+  the notifications it received **and the ones it caused**, and signs the device out. Moderation records keep a copy of the
+  removed post's text with no name. Staff accounts (moderators, seniors, superusers) and anyone who wrote Django Admin log
+  entries get 403 `staff_account`: ask an admin to remove the role first. Nothing here can be undone.
+- **The accounts.** Step 3 makes four straight in the database, all with the throwaway password `correct-horse-battery-42`:
+  `ada` (the account you edit and delete), `bo` (made password-less to play a Google-only account), `mod` (a moderator) and
+  `una` (email not verified). No sign-up and no email provider are needed, so this part works offline.
+- **Emails** print in window 1 (`EMAIL_PROVIDER=console`, the default).
+- The outputs below were recorded on Linux on 2026-10-20 by running the commands of steps 3 to 8 in order against live
+  Django. Step 9 was checked the same day with headless Chromium (Playwright's `e2e/settings.spec.ts`, and screenshots at
+  1280, 1024 and 390 px with 0 px of horizontal overflow), not by a person at a keyboard. Ids, numbers in names, the date and
+  your counts differ on every run.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, confirms there is no migration, runs
+the whole backend test suite and Part 14's own tests, the linter and the formatter check.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 4205 passed
+python -m pytest apps/accounts/tests/test_profile_update.py apps/accounts/tests/test_password_change.py apps/accounts/tests/test_export.py apps/accounts/tests/test_account_delete.py apps/accounts/tests/test_account_delete_races.py -q   # 106 passed
+ruff check . ; ruff format --check .                # All checks passed! / 322 files already formatted
+```
+
+**You should see:** `No changes detected`, `System check identified no issues (0 silenced).`, `4205 passed`, `106 passed`,
+`All checks passed!` and `322 files already formatted`. Counts may grow later; what matters is that nothing fails.
+
+- The new tests pin: every field and limit of `PATCH /me` (and that other keys change nothing, a stale copy of the user
+  can't write a score or verification back, and two renames to one name make one winner); the password change (wrong
+  current, weak new, this session survives and another dies, the email goes out after the commit, Google-only is 409); the
+  export (every section, the fixed query count, nothing private or internal in it); the deletion (everything that goes,
+  everything that stays, cookies, sessions, staff refusals, the confirmation, the 10-an-hour limit); and, in real threads,
+  that a verdict and the deletion of its author never deadlock (the same race with the user locked first does).
+- Existing tests changed on purpose: `core/tests/test_settings.py` (seventeen throttle scopes), `test_me.py` (`bio` and
+  `public_score`) and one test in `test_emails.py` that used allauth's stock `password_changed` template as its example of
+  "no template of ours" (it uses `password_set` now). The email checks now also run on the two new emails.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last commands) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end tests,
+once against the dev servers and once against the production build.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 163 files, 2222 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 55 passed
+CI=1 npm run test:e2e                               # 55 passed (this one runs against the build above)
+cd ../backend                                       # back to backend/ for steps 3 to 8
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  163 passed (163)` and `Tests  2222
+passed (2222)`. `npm run build` lists `○ /settings`. Both end-to-end runs end with `55 passed`.
+
+- The two new end-to-end tests (`e2e/settings.spec.ts`) sign nobody up: one edits the profile, checks the rail and
+  `/u/<new>` (and that `/u/<old>` is a 404), changes the password, downloads the export and logs in again; the other
+  deletes an account (a wrong password first), lands on `/home` signed out and fails to log in.
+- **Run the build before the `CI=1` run**: that mode serves `.next`.
+
+#### Step 3: Start the server and make four accounts
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 8.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you make the four accounts with a shell
+command, log them in through the API (keeping their login tokens in `ada`, `bo`, `mod` and `una`), and save the helper
+`send` (any request: it prints the status code, then the answer).
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend` with the venv active; needs `jq`, `sudo apt install jq`). If you opened a new terminal, first run
+`cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the names are new each run
+python manage.py shell -c "
+from allauth.account.models import EmailAddress
+from apps.accounts.models import Role, User
+for name, role in (('ada', Role.USER), ('bo', Role.USER), ('mod', Role.MODERATOR), ('una', Role.USER)):
+    user = User.objects.create_user(email=f'part14-{name}-$id@example.test', username=f'part14_{name}_$id', password='correct-horse-battery-42', is_email_verified=(name != 'una'), role=role)
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+print(User.objects.filter(email__startswith='part14-', email__endswith='$id@example.test').count(), 'accounts made')
+" | tail -1
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+login() { jq -nc --arg e "part14-$1-$id@example.test" '{email: $e, password: "correct-horse-battery-42"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/login | jq -r .meta.access_token; }   # login <name>: prints a login token
+ada=$(login ada); bo=$(login bo); mod=$(login mod); una=$(login una)
+echo ${ada:0:10} ${bo:0:10} ${mod:0:10} ${una:0:10}  # four token prefixes, not an empty line
+api=http://localhost:8000/api/v1
+send() { local out; out=$(curl -s -w '\n%{http_code}' -X "$1" ${3:+-H "Authorization: Bearer $3"} ${4:+-H "Content-Type: application/json" --data-binary "$4"} "$api$2"); printf '%s  %s\n' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | jq -c "${5:-.}" 2>/dev/null)"; }   # send <METHOD> <path> [token] [json body] [jq filter]: prints the status code, then the answer
+echo "id=$id"                                       # write this down
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+4 accounts made
+eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi
+id=015345
+```
+
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- A login token lasts 15 minutes by default: if a later command answers `401`, run `ada=$(login ada)` again (but not after
+  step 6, which changes her password).
+
+**If it differs:** an empty or `null` token line means the logins failed: `runserver` isn't running in window 1, or `jq` is
+missing. Fix that and run the block again from `id=$(date +%H%M%S)`.
+
+#### Step 4: `/me` now carries your bio and public score
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads your own account object.
+
+```bash
+send GET /me/ "$ada"
+```
+
+**You should see:**
+
+```text
+200  {"id":"377ce980-8208-42a6-a81f-d01730830348","username":"part14_ada_015345","display_name":"","bio":"","email":"part14-ada-015345@example.test","is_email_verified":true,"role":"user","has_usable_password":true,"google_connected":false,"avatar_url":null,"public_score":null}
+```
+
+- `public_score` is `null` until three of your posts have been checked (Part 11B); `bio` is `""` until you set one.
+
+#### Step 5: Edit the profile
+
+**Where:** Terminal window 2.
+
+**What this does:** Sets a display name and bio; then tries a username somebody has, a reserved one, a name with a line break,
+and a body that also asks for a new email and role (ignored); an unverified account tries to edit; finally `ada` renames
+herself and you look at the old and new profile pages.
+
+```bash
+send PATCH /me/ "$ada" '{"display_name":"Ada Lovelace","bio":"Maths and engines."}' '{display_name, bio}'
+send PATCH /me/ "$ada" "{\"username\":\"part14_bo_$id\"}"                  # a name that is taken
+send PATCH /me/ "$ada" '{"username":"admin"}'                              # a reserved name
+send PATCH /me/ "$ada" '{"display_name":"two\nlines"}'                     # a line break
+send PATCH /me/ "$ada" '{"email":"evil@example.test","role":"moderator","bio":"still just a bio"}' '{email, role, bio}'
+send PATCH /me/ "$una" '{"bio":"hello"}'                                   # email not verified
+send PATCH /me/ "$ada" "{\"username\":\"part14_ada2_$id\"}" '{username}'   # a new username
+echo "--- the old and the new profile"
+send GET /users/part14_ada_$id/ "" '.username'
+send GET /users/part14_ada2_$id/ "" '{username, bio}'
+```
+
+**You should see:**
+
+```text
+200  {"display_name":"Ada Lovelace","bio":"Maths and engines."}
+400  {"username":["That username is taken."]}
+400  {"username":["This username is reserved."]}
+400  {"display_name":["Display names are one line of plain text."]}
+200  {"email":"part14-ada-015345@example.test","role":"user","bio":"still just a bio"}
+403  {"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}
+200  {"username":"part14_ada2_015345"}
+--- the old and the new profile
+404  {"detail":"Not found.","code":"not_found"}
+200  {"username":"part14_ada2_015345","bio":"still just a bio"}
+```
+
+- The `email` and `role` in the fifth answer are unchanged: `PATCH` only reads the three profile fields. The bio of that
+  request was saved.
+
+#### Step 6: Change the password
+
+**Where:** Terminal window 2 (the same one: it needs `ada` and `bo`), and window 1 for the email.
+
+**What this does:** Tries a wrong current password and a too-common new one, then changes it for real; shows that the old
+password no longer logs in and the new one does; looks for the email in window 1's output; then makes `bo` a password-less
+account and tries again.
+
+```bash
+send POST /me/password/ "$ada" '{"current_password":"wrong-password-1","new_password":"a-brand-new-passphrase-77"}'
+send POST /me/password/ "$ada" '{"current_password":"correct-horse-battery-42","new_password":"password1234"}'
+send POST /me/password/ "$ada" '{"current_password":"correct-horse-battery-42","new_password":"a-brand-new-passphrase-77"}'
+echo "--- the old password logs in?"; login ada
+echo "--- the new password logs in?"
+jq -nc --arg e "part14-ada-$id@example.test" '{email: $e, password: "a-brand-new-passphrase-77"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/login | jq -r '.meta.access_token[0:10]'
+echo "--- bo has no password (a Google-only account)"
+python manage.py shell -c "
+from apps.accounts.models import User
+u = User.objects.get(email='part14-bo-$id@example.test'); u.set_unusable_password(); u.save(update_fields=['password'])" >/dev/null 2>&1
+send POST /me/password/ "$bo" '{"current_password":"x","new_password":"a-brand-new-passphrase-77"}'
+```
+
+**You should see:**
+
+```text
+400  {"current_password":["That password is not right."]}
+400  {"new_password":["This password is too common."]}
+204  
+--- the old password logs in?
+null
+--- the new password logs in?
+eyJhbGciOi
+--- bo has no password (a Google-only account)
+409  {"detail":"This account has no password. Use Forgot password to set one.","code":"password_not_set"}
+```
+
+**Look in window 1** for the email the change sent (subject `[Rumor Zero] Your password was changed`, with a link to
+`http://localhost:3000/forgot-password` and the line "Your other devices were signed out."). I counted it in the server's
+output: `grep -c "Subject: \[Rumor Zero\] Your password was changed"` printed `1`.
+
+- This device's own token session survives the change (the test `test_this_device_stays_signed_in_and_every_other_one_ends`
+  proves it with real logins: a refresh on the changing device still works, one on another device answers 400).
+
+#### Step 7: Download your data
+
+**Where:** Terminal window 2.
+
+**What this does:** Downloads the export, shows the headers, the top-level keys and the account section, and counts how many
+times the internal column names appear (never).
+
+```bash
+curl -s -D export.h -o export.json -H "Authorization: Bearer $ada" $api/me/export/
+grep -iE "^(HTTP|content-type|content-disposition)" export.h | tr -d '\r'
+jq -c 'keys' export.json
+jq -c '.account | {username, display_name, bio, has_usable_password, google_connected, credibility}' export.json
+grep -c "search_vector\|pipeline_result" export.json
+rm export.h export.json
+```
+
+**You should see** (the date and the name differ):
+
+```text
+HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Disposition: attachment; filename="rumor-zero-part14_ada2_015345-2026-10-20.json"
+["account","appeals","bookmarks","comments","credibility_history","exported_at","followers","following","format","likes","notifications","posts","reports","reposts","version"]
+{"username":"part14_ada2_015345","display_name":"Ada Lovelace","bio":"still just a bio","has_usable_password":true,"google_connected":false,"credibility":{"score":50,"sample":0,"public_score":null}}
+0
+```
+
+- The export is limited to 10 an hour per person (429 after that).
+
+#### Step 8: Delete accounts
+
+**Where:** Terminal window 2.
+
+**What this does:** Tries a wrong password, a moderator (refused), and a wrong username for a password-less account; then
+`bo` deletes the account with her username, you see the cookies being expired and that her token and page are dead; then
+`ada` deletes hers with her new password and cannot log in.
+
+```bash
+send DELETE /me/ "$ada" '{"password":"wrong"}'
+send DELETE /me/ "$mod" '{"password":"correct-horse-battery-42"}'
+send DELETE /me/ "$bo" '{"username":"someone_else"}'
+echo "--- bo confirms with her username"
+curl -s -i -X DELETE -H "Authorization: Bearer $bo" -H "Content-Type: application/json" --data-binary "{\"username\":\"part14_bo_$id\"}" $api/me/ | tr -d '\r' | grep -iE "^(HTTP|set-cookie)"
+send GET /me/ "$bo"
+send GET /users/part14_bo_$id/
+echo "--- ada confirms with her password"
+send DELETE /me/ "$ada" '{"password":"a-brand-new-passphrase-77"}'
+send GET /users/part14_ada2_$id/
+echo "--- ada's login"
+jq -nc --arg e "part14-ada-$id@example.test" '{email: $e, password: "a-brand-new-passphrase-77"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/login | jq -c '.errors[0].code'
+```
+
+**You should see:**
+
+```text
+400  {"password":["That password is not right."]}
+403  {"detail":"Staff accounts can't delete themselves. Ask an admin to remove the role first.","code":"staff_account"}
+400  {"username":["Type your username exactly to confirm."]}
+--- bo confirms with her username
+HTTP/1.1 204 No Content
+Set-Cookie: rz_refresh=""; expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; Max-Age=0; Path=/api/auth/; SameSite=Lax
+Set-Cookie: rz_session=""; expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/; SameSite=Lax
+401  {"detail":"Invalid token.","code":"authentication_failed"}
+404  {"detail":"Not found.","code":"not_found"}
+--- ada confirms with her password
+204  
+404  {"detail":"Not found.","code":"not_found"}
+--- ada's login
+"email_password_mismatch"
+```
+
+- The two `Set-Cookie` lines are how the browser forgets its session (the relay forwards them). Their attribute order and
+  spacing can differ a little from what is shown; what matters is the empty value and `Max-Age=0` on both.
+- Deleting also removes the notifications the account caused for other people, and Django Admin's delete page for an
+  account runs the same routine (an admin can't leave "Someone liked your post" behind either).
+
+#### Step 9: Settings in the browser
+
+**Where:** Window 1 keeps `runserver`; window 3: `cd frontend` and `npm run dev`. Then the Browser.
+
+**What this does:** Walks the page a person sees. Log in as a fresh account first: in window 2 run
+`python manage.py shell -c "from apps.accounts.models import User; from allauth.account.models import EmailAddress; u = User.objects.create_user(email='part14-web@example.test', username='part14_web', password='correct-horse-battery-42', is_email_verified=True); EmailAddress.objects.create(user=u, email=u.email, verified=True, primary=True)"`.
+
+1. **Browser:** open `http://localhost:3000/login` and log in with `part14-web@example.test` and
+   `correct-horse-battery-42`. **You should see** the home feed.
+2. **Browser:** open `http://localhost:3000/settings`. **You should see** the heading "Settings", an anchor nav (Profile,
+   Account, Credibility, Your data) and four sections: **Profile** with Display name, Username and Bio (a "0 / 280
+   characters" counter), **Account** with your email and a green VERIFIED chip and a "Change password" button,
+   **Credibility** (an open panel: "Your score: 50", "No credibility history yet") and **Your data** with a "Download your
+   data (JSON)" button and a red box with "Delete account…".
+3. **Browser:** type a display name. **You should see** a blue "You have unsaved changes" bar with Cancel and Save changes.
+   Cancel puts the old text back and the bar disappears.
+4. **Browser:** change the username to `admin` and click Save changes. **You should see** "This username is reserved." under
+   the field and the field focused. Change it to `part14_web2` (the field says "Available: @part14_web2" after a moment),
+   add a bio and Save. **You should see** the toast "Profile saved.", the bar gone and `@part14_web2` in the left rail.
+   `http://localhost:3000/u/part14_web2` shows the bio; `http://localhost:3000/u/part14_web` is "Page not found".
+5. **Browser:** click Change password. **You should see** a dialog with Current, New (with a strength meter) and Confirm
+   fields. Submit with different confirmations ("The two passwords don't match."), then with the right ones. **You should
+   see** the toast "Password changed. Your other devices are signed out." and you stay logged in.
+6. **Browser:** click "Download your data (JSON)". **You should see** a file `rumor-zero-part14_web2-<date>.json` download;
+   open it: `format` is `rumor-zero-export` and there is no `search_vector` anywhere.
+7. **Browser:** click "Delete account…". **You should see** a dialog that says what goes and what stays, with a password field
+   and the red button disabled until you type something. A wrong password shows "That password is not right."; the right
+   one (`correct-horse-battery-42` was changed in step 5: use the new one) takes you to `/home` signed out with the toast
+   "Your account has been deleted." and "Log in" in the rail. Logging in again with the old details fails.
+8. **Browser:** (optional) log in as a moderator and open `/settings`. **You should see** the explanation "Staff accounts
+   can't delete themselves…" instead of a delete button.
+
+**If it differs:** a page stuck on "Loading…" means `npm run dev` isn't running or Django isn't (the relay needs it).
+
+- Window 1 and 3 can be stopped with Ctrl+C when you are done. `docker compose down` (repo root) stops the containers and
+  keeps the data; `docker compose down -v` wipes the whole local database, which is destructive.
 - No real secret was used: the password of the test accounts is a throwaway.
 
 ---
@@ -22498,3 +22865,267 @@ about. Only a superuser sees the list by default (no moderator permission was ad
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
   database, which is destructive.
 - No real secret was used: the password of the test accounts is a throwaway.
+
+### Part 14: Account settings, data export, account deletion
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and `frontend\.env.local`.
+Part 14 adds **four endpoints** (`PATCH /api/v1/me/`, `POST /api/v1/me/password/`, `GET /api/v1/me/export/`, `DELETE
+/api/v1/me/`), **four throttle scopes** (`profile_update` 30 an hour, `password_change`, `data_export` and `account_delete`
+10 an hour each, per signed-in person), the **`/settings` page** (Stitch c2), **two emails** ("password changed" and
+"Continue with Google is now connected") and one shared **deletion routine** that Django Admin uses too. `GET /api/v1/me/`
+gains `bio` and `public_score`. It adds no migration, no dependency and no environment variable.
+
+**Which window for what.** As in the Linux guide: window 1 runs `python manage.py runserver` in `backend\` (start it in step 3,
+**after** step 2, because Playwright starts its own servers and needs ports 3000 and 8000 free); window 2 runs every `curl.exe`
+and `python manage.py` command (**use the same window for steps 3 to 8**: `$id`, `$ada`, `$bo`, `$mod`, `$una`, `$api`,
+`Send` and `Login` only live in that terminal); window 3 runs `npm run dev` in `frontend\` (step 9); step 9 also needs the
+Browser.
+
+Things to know first (the same rules as the Linux guide):
+
+- **What you can edit.** Display name (up to 50 characters, one line), username (3 to 30 of `a-z 0-9 _`, not reserved) and bio
+  (up to 280 characters, plain text). Other keys in the body of `PATCH /me` are ignored. An account whose email isn't
+  verified can read but not edit (403 `email_unverified`). A new username frees the old one (its `/u/<name>` becomes a 404).
+- **Password change** needs the current password; this device stays signed in and every other one is signed out at its next
+  refresh. A Google-only account gets 409 `password_not_set` and uses Forgot password.
+- **The export** is one JSON file of everything stored about you (including deleted and removed posts, notifications you
+  received and your credibility ledger), never another person's email, a moderator's name or the pipeline's internals.
+- **Deleting** removes the account and everything it owns, plus the notifications it caused for others, and signs the device
+  out. Staff accounts and anyone who wrote Django Admin log entries get 403 `staff_account`. It can't be undone.
+- **The accounts.** Step 3 makes four straight in the database with the throwaway password `correct-horse-battery-42`: `ada`
+  (edited and deleted), `bo` (made password-less to play a Google-only account), `mod` (a moderator) and `una` (email not
+  verified). No sign-up and no email provider are needed. Emails print in window 1.
+- **Not run on Windows.** The Linux guide's commands were run for real on 2026-10-20 and their outputs recorded. These
+  PowerShell versions are the same requests written for PowerShell 5.1 (JSON goes through a file, see MEMORY 2026-10-03);
+  they were **not** run on a Windows machine, so a wrong quote or property name here is possible. The answers you should
+  get are the ones shown in the Linux guide's steps 4 to 8 (ids, numbers in names and dates differ).
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root `C:\Users\Nafis\Downloads\Rumor-Zero`.
+
+**What this does:** Starts the database containers, activates the Python environment, confirms there is no migration, runs
+the whole backend test suite and Part 14's own tests, the linter and the formatter check.
+
+```powershell
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 4205 passed
+python -m pytest apps\accounts\tests\test_profile_update.py apps\accounts\tests\test_password_change.py apps\accounts\tests\test_export.py apps\accounts\tests\test_account_delete.py apps\accounts\tests\test_account_delete_races.py -q   # 106 passed
+ruff check . ; ruff format --check .                # All checks passed! / 322 files already formatted
+```
+
+**You should see:** `No changes detected`, `System check identified no issues (0 silenced).`, `4205 passed`, `106 passed`,
+`All checks passed!` and `322 files already formatted`. Counts may grow later; what matters is that nothing fails. (These
+numbers were recorded on Linux.)
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. **No servers may be running on ports 3000 and 8000** (Playwright starts
+its own). The production build and `CI=1` run need Linux (`@opennextjs/cloudflare` doesn't build on Windows), so on Windows
+run the development end-to-end run only.
+
+**What this does:** Runs the linters, the type check, the component tests and the end-to-end tests against the dev servers.
+
+```powershell
+cd ..\frontend
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 163 files, 2222 tests passed
+npm run test:e2e                                    # 55 passed
+cd ..\backend                                       # back to backend\ for steps 3 to 8
+```
+
+**You should see:** nothing from ESLint and TypeScript, `lint:tokens OK (…)`, `All matched files use Prettier code style!`,
+`Test Files  163 passed (163)`, `Tests  2222 passed (2222)` and `55 passed`.
+
+#### Step 3: Start the server and make four accounts
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 8.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you make the four accounts, log them in
+through the API (tokens in `$ada`, `$bo`, `$mod` and `$una`), and save the helper `Send` (any request: it prints the status
+code, then the answer).
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend\` with the venv active). If you opened a new terminal, first run
+`cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the names are new each run
+@"
+from allauth.account.models import EmailAddress
+from apps.accounts.models import Role, User
+for name, role in (('ada', Role.USER), ('bo', Role.USER), ('mod', Role.MODERATOR), ('una', Role.USER)):
+    user = User.objects.create_user(email=f'part14-{name}-$id@example.test', username=f'part14_{name}_$id', password='correct-horse-battery-42', is_email_verified=(name != 'una'), role=role)
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+print(User.objects.filter(email__startswith='part14-', email__endswith='$id@example.test').count(), 'accounts made')
+"@ | python manage.py shell | Select-Object -Last 1
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+# Login <name> [password]: prints a login token
+function Login($name, $password = 'correct-horse-battery-42') {
+@"
+{"email": "part14-$name-$id@example.test", "password": "$password"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-login.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-login.json" http://localhost:8000/api/auth/app/v1/auth/login | ConvertFrom-Json).meta.access_token
+}
+$ada = Login ada; $bo = Login bo; $mod = Login mod; $una = Login una
+"$($ada.Substring(0,10)) $($bo.Substring(0,10)) $($mod.Substring(0,10)) $($una.Substring(0,10))"   # four token prefixes
+$api = 'http://localhost:8000/api/v1'
+# Send <METHOD> <path> [token] [json body] [fields]: prints the HTTP status, then the answer. `fields` is a list of
+# property names to keep, or a script block `{ param($r) ... }` that picks what to show from the answer.
+function Send($method, $path, $token, $json, $show) {
+  $a = @()
+  if ($token) { $a += '-H', "Authorization: Bearer $token" }
+  if ($json) {
+    $json | Set-Content -Encoding ascii $env:TEMP\rz-body.json
+    $a += '-H', 'Content-Type: application/json', '--data-binary', "@$env:TEMP\rz-body.json"
+  }
+  $out = curl.exe -s -w "`n%{http_code}" -X $method @a "$api$path"
+  $body = if ($out.Count -gt 1) { $out[0..($out.Count - 2)] -join '' } else { '' }
+  if ($show -and $body) {
+    $r = $body | ConvertFrom-Json
+    $shown = if ($show -is [scriptblock]) { & $show $r } else { $r | Select-Object $show }
+    $body = ConvertTo-Json -InputObject $shown -Depth 5 -Compress
+  }
+  "$($out[-1])  $body"
+}
+"id=$id"                                            # write this down
+```
+
+**You should see:** `4 accounts made`, then four token prefixes such as `eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi`, then
+`id=` and your suffix.
+
+**If it differs:** an error on `.Substring` means a login failed: `runserver` isn't running in window 1. Fix that and run the
+block again from `$id = ...`. A login token lasts 15 minutes: run `$ada = Login ada` again if a later command answers `401`
+(but not after step 6, which changes her password).
+
+#### Step 4: `/me` now carries your bio and public score
+
+**Where:** Terminal window 2.
+
+```powershell
+Send GET /me/ $ada
+```
+
+**You should see:** `200` and a body with `username`, `display_name` `""`, `bio` `""`, `has_usable_password` `true` and
+`public_score` `null` (it stays `null` until three of your posts have been checked).
+
+#### Step 5: Edit the profile
+
+**Where:** Terminal window 2.
+
+**What this does:** Sets a display name and bio; tries a taken username, a reserved one, a name with a line break and a body
+that also asks for a new email and role (ignored); an unverified account tries to edit; `ada` renames herself and you look
+at the old and new profile.
+
+```powershell
+Send PATCH /me/ $ada '{"display_name":"Ada Lovelace","bio":"Maths and engines."}' display_name, bio
+Send PATCH /me/ $ada "{`"username`":`"part14_bo_$id`"}"
+Send PATCH /me/ $ada '{"username":"admin"}'
+Send PATCH /me/ $ada '{"display_name":"two\nlines"}'
+Send PATCH /me/ $ada '{"email":"evil@example.test","role":"moderator","bio":"still just a bio"}' email, role, bio
+Send PATCH /me/ $una '{"bio":"hello"}'
+Send PATCH /me/ $ada "{`"username`":`"part14_ada2_$id`"}" username
+"--- the old and the new profile"
+Send GET /users/part14_ada_$id/
+Send GET /users/part14_ada2_$id/ $null $null username, bio
+```
+
+**You should see:** `200` with the display name and bio; `400` `{"username":["That username is taken."]}`; `400`
+`{"username":["This username is reserved."]}`; `400` `{"display_name":["Display names are one line of plain text."]}`; `200`
+with `email` unchanged, `role` `user` and the new bio; `403` with `"code":"email_unverified"`; `200` with the new username;
+then `404` for the old profile and `200` for the new one.
+
+#### Step 6: Change the password
+
+**Where:** Terminal window 2 (the same one), and window 1 for the email.
+
+```powershell
+Send POST /me/password/ $ada '{"current_password":"wrong-password-1","new_password":"a-brand-new-passphrase-77"}'
+Send POST /me/password/ $ada '{"current_password":"correct-horse-battery-42","new_password":"password1234"}'
+Send POST /me/password/ $ada '{"current_password":"correct-horse-battery-42","new_password":"a-brand-new-passphrase-77"}'
+"--- the old password logs in?"; Login ada
+"--- the new password logs in?"; (Login ada 'a-brand-new-passphrase-77').Substring(0,10)
+"--- bo has no password (a Google-only account)"
+@"
+from apps.accounts.models import User
+u = User.objects.get(email='part14-bo-$id@example.test'); u.set_unusable_password(); u.save(update_fields=['password'])
+"@ | python manage.py shell
+Send POST /me/password/ $bo '{"current_password":"x","new_password":"a-brand-new-passphrase-77"}'
+```
+
+**You should see:** `400` `{"current_password":["That password is not right."]}`; `400` `{"new_password":["This password is too
+common."]}`; `204` with an empty body; then an **empty line** for the old password (no token), `eyJhbGciOi` for the new one,
+and `409` with `"code":"password_not_set"`. **Look in window 1** for the email `[Rumor Zero] Your password was changed` with
+a link to `http://localhost:3000/forgot-password`.
+
+#### Step 7: Download your data
+
+**Where:** Terminal window 2.
+
+```powershell
+curl.exe -s -D $env:TEMP\rz-export.h -o $env:TEMP\rz-export.json -H "Authorization: Bearer $ada" "$api/me/export/"
+Select-String -Path $env:TEMP\rz-export.h -Pattern '^(HTTP|content-type|content-disposition)' | ForEach-Object { $_.Line }
+$export = Get-Content -Raw $env:TEMP\rz-export.json | ConvertFrom-Json
+($export | Get-Member -MemberType NoteProperty).Name -join ','
+$export.account | Select-Object username, display_name, bio, has_usable_password, google_connected | ConvertTo-Json -Compress
+(Select-String -Path $env:TEMP\rz-export.json -Pattern 'search_vector|pipeline_result').Count
+Remove-Item $env:TEMP\rz-export.h, $env:TEMP\rz-export.json
+```
+
+**You should see:** `HTTP/1.1 200 OK`, `Content-Type: application/json`, a `Content-Disposition: attachment;
+filename="rumor-zero-part14_ada2_<id>-<date>.json"` line, the section names (`account,appeals,bookmarks,...,version`), the
+account object with the new name and bio, and `0` (the internal column names never appear).
+
+#### Step 8: Delete accounts
+
+**Where:** Terminal window 2.
+
+```powershell
+Send DELETE /me/ $ada '{"password":"wrong"}'
+Send DELETE /me/ $mod '{"password":"correct-horse-battery-42"}'
+Send DELETE /me/ $bo '{"username":"someone_else"}'
+"--- bo confirms with her username"
+"{`"username`":`"part14_bo_$id`"}" | Set-Content -Encoding ascii $env:TEMP\rz-body.json
+curl.exe -s -i -X DELETE -H "Authorization: Bearer $bo" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-body.json" "$api/me/" | Select-String -Pattern '^(HTTP|set-cookie)' | ForEach-Object { $_.Line }
+Send GET /me/ $bo
+Send GET /users/part14_bo_$id/
+"--- ada confirms with her password"
+Send DELETE /me/ $ada '{"password":"a-brand-new-passphrase-77"}'
+Send GET /users/part14_ada2_$id/
+"--- ada's login"
+(Login ada 'a-brand-new-passphrase-77')
+```
+
+**You should see:** `400` `{"password":["That password is not right."]}`; `403` with `"code":"staff_account"`; `400`
+`{"username":["Type your username exactly to confirm."]}`; for `bo`: `HTTP/1.1 204 No Content` and two `Set-Cookie` lines
+that empty `rz_refresh` and `rz_session` (`Max-Age=0`); then `401` for her token and `404` for her profile; for `ada`: `204`,
+`404`, and an **empty line** (her login fails with `email_password_mismatch`).
+
+#### Step 9: Settings in the browser
+
+**Where:** Window 1 keeps `runserver`; window 3: `cd frontend` and `npm run dev`. Then the Browser. First make a web
+account in window 2:
+
+```powershell
+@"
+from apps.accounts.models import User
+from allauth.account.models import EmailAddress
+u = User.objects.create_user(email='part14-web@example.test', username='part14_web', password='correct-horse-battery-42', is_email_verified=True)
+EmailAddress.objects.create(user=u, email=u.email, verified=True, primary=True)
+"@ | python manage.py shell
+```
+
+The browser steps are the same as the Linux guide's step 9 (log in at `http://localhost:3000/login`, open
+`http://localhost:3000/settings`, edit the profile, change the password, download the JSON, delete the account) and show
+the same things; that step lists each one with what you should see. `Ctrl+C` stops windows 1 and 3. `docker compose down`
+stops the containers and keeps the data; `docker compose down -v` wipes the local database, which is destructive. No real
+secret was used.

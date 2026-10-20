@@ -57,6 +57,9 @@ rumor-zero/
 │   │   │                            views.py + urls.py (health), admin.py, migrations/0002_seed_platform_settings.py
 │   │   ├── accounts/            0A  custom User (UUID, role, avatar/credibility/emergency fields; must exist before the first migrate),
 │   │   │                            validators.py (username/email rules, RESERVED_USERNAMES), UserManager, admin.py
+│   │   │                        ✅ 14 deletion.py (`delete_account`: every post, then the user), export.py (`build_export`, one query per section),
+│   │   │                            services.py (`update_profile`, `change_password`, the two emails), PATCH/POST/GET/DELETE under /api/v1/me/,
+│   │   │                            tests (test_profile_update, test_password_change, test_export, test_account_delete{,_races}, populate.py)
 │   │                        ✅ 10 admin.py (senior-moderator rules: only `role` and `is_active`, no password, not superusers or self, one-at-a-time
 │   │                            delete with a summary page, Mark email verified), services.py (verify_email_by_staff)
 │   │                        ✅ 11B models.py (a full `User.save()` never writes the two score columns), admin.py (the read-only
@@ -233,7 +236,7 @@ rumor-zero/
 │       │   │   ├── u/[username]/            ✅ 6 ← c1 (light SSR + generateMetadata; ProfilePage; credibility 11B/11D)
 │       │   │   ├── u/[username]/followers/, following/   ✅ 6 ← c3 (Connections, client-rendered)
 │       │   │   ├── notifications/           "/notifications" ✅ 13 ← c4 (static page; NotificationsPage; noindex)
-│       │   │   └── settings/                ← c2 (14, photo 14B)
+│       │   │   └── settings/                ✅ 14 ← c2 (photo 14B)
 │       │   ├── dev/shell/       ✅ 0C  dev-only shell preview with a sample user (404 in production)
 │       │   └── api/[...path]/route.ts       ✅ 0C  **API relay** to BACKEND_ORIGIN (not Next's proxy.ts); logic in lib/api/relay.ts
 │       ├── components/
@@ -278,7 +281,8 @@ rumor-zero/
 │       │   │                        search-params.ts, messages.ts
 │       │   ├── notifications/   ✅ 13 NotificationsPage, NotificationList, NotificationItem, UnreadCountProvider (+ `useUnreadCount`; the 30 s
 │       │   │                        visible-only poll), notifications-api.ts, messages.ts; the badge is `components/shell/UnreadBadge.tsx`
-│       │   ├── settings/        14   ProfileForm, PasswordForm (uses ui/DangerZone); 14B AvatarUploader
+│       │   ├── settings/        ✅ 14 SettingsPage, ProfileForm, AccountSection, ChangePasswordModal, DataExportCard, DeleteAccountModal,
+│       │   │                        account-exit.tsx (`AccountExitContext`), settings-api.ts, messages.ts (uses ui/DangerZone); 14B AvatarUploader
 │       │   └── dev/             ✅ 0B  UiGallery and its sections, served at /dev/ui (404 in production builds); 0C ShellPreview (/dev/shell)
 │       ├── lib/
 │       │   ├── api/             ✅ 0C  client.ts (fetch wrapper: base "/api", bearer token, single-flight 401 hook with one retry,

@@ -14,12 +14,14 @@ FIELDS = {
     "id",
     "username",
     "display_name",
+    "bio",
     "email",
     "is_email_verified",
     "role",
     "has_usable_password",
     "google_connected",
     "avatar_url",
+    "public_score",
 }
 
 
@@ -41,14 +43,25 @@ def test_the_fields_for_an_ordinary_user(api_client, django_assert_num_queries):
         "id": str(user.pk),
         "username": user.username,
         "display_name": "Ada Lovelace",
+        "bio": "",
         "email": user.email,
         "is_email_verified": False,
         "role": "user",
         "has_usable_password": True,
         "google_connected": False,
         "avatar_url": None,
+        "public_score": None,
     }
     assert "no-cache" in response["Cache-Control"]
+
+
+def test_the_bio_and_the_public_score_come_with_no_extra_query(api_client):
+    # Hidden below the sample size (§4a), shown from it; both are columns of the user row.
+    hidden = UserFactory(bio="Hello there", reputation_score=70, reputation_sample=2)
+    shown = UserFactory(reputation_score=70, reputation_sample=3)
+    assert get_me(api_client, hidden).json()["bio"] == "Hello there"
+    assert get_me(api_client, hidden).json()["public_score"] is None
+    assert get_me(api_client, shown).json()["public_score"] == 70
 
 
 def test_google_connected_follows_the_social_account(api_client):

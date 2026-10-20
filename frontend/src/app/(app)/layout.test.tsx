@@ -2,9 +2,10 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/ui/Toast";
+import { useAccountExit } from "@/features/settings/account-exit";
 import { ApiError } from "@/lib/api/client";
 import type { AuthApi } from "@/lib/auth/auth-api";
-import { AuthProvider } from "@/lib/auth/AuthProvider";
+import { AuthProvider, useAuth } from "@/lib/auth/AuthProvider";
 import { AuthSession } from "@/lib/auth/session";
 import AppLayout from "./layout";
 
@@ -35,12 +36,14 @@ const ME = {
   id: "u-1",
   username: "ada",
   display_name: "Ada Lovelace",
+  bio: "",
   email: "ada@example.test",
   is_email_verified: true,
   role: "user" as const,
   has_usable_password: true,
   google_connected: false,
   avatar_url: null,
+  public_score: null,
 };
 
 function sessionWith(kind: "loading" | "anonymous" | "authenticated", api: Partial<AuthApi> = {}) {
@@ -124,6 +127,82 @@ describe("(app) layout guard", () => {
     expect(await screen.findByText("Secret settings")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("complementary")).toBeInTheDocument());
     expect(replace).not.toHaveBeenCalled();
+  });
+});
+
+describe("(app) layout after an account deletion", () => {
+  function DeleteNow() {
+    const { endSession } = useAuth();
+    const exit = useAccountExit();
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          exit.begin();
+          endSession();
+        }}
+      >
+        Delete now
+      </button>
+    );
+  }
+
+  function renderDeleter(session: AuthSession) {
+    render(
+      <AuthProvider session={session}>
+        <ToastProvider>
+          <AppLayout>
+            <DeleteNow />
+          </AppLayout>
+        </ToastProvider>
+      </AuthProvider>,
+    );
+  }
+
+  it("does not send a visitor whose account was just deleted to the login page", async () => {
+    const user = userEvent.setup();
+    renderDeleter(sessionWith("authenticated"));
+    await user.click(await screen.findByRole("button", { name: "Delete now" }));
+    await waitFor(() => expect(screen.getByText("Loading…")).toBeInTheDocument());
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("guards the page again once the visitor has left the protected area", async () => {
+    const user = userEvent.setup();
+    const session = sessionWith("authenticated");
+    const view = render(
+      <AuthProvider session={session}>
+        <ToastProvider>
+          <AppLayout>
+            <DeleteNow />
+          </AppLayout>
+        </ToastProvider>
+      </AuthProvider>,
+    );
+    await user.click(await screen.findByRole("button", { name: "Delete now" }));
+    pathname = "/home"; // the page went to /home
+    view.rerender(
+      <AuthProvider session={session}>
+        <ToastProvider>
+          <AppLayout>
+            <DeleteNow />
+          </AppLayout>
+        </ToastProvider>
+      </AuthProvider>,
+    );
+    pathname = "/settings"; // and the (anonymous) visitor asks for settings again
+    view.rerender(
+      <AuthProvider session={session}>
+        <ToastProvider>
+          <AppLayout>
+            <DeleteNow />
+          </AppLayout>
+        </ToastProvider>
+      </AuthProvider>,
+    );
+    await waitFor(() =>
+      expect(replace).toHaveBeenCalledWith(expect.stringMatching(/^\/login\?next=/)),
+    );
   });
 });
 

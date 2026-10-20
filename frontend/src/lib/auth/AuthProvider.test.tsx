@@ -125,6 +125,26 @@ describe("AuthProvider", () => {
     expect(getAccessToken()).toBe(token(100));
   });
 
+  it("ends the session through the context without calling the server (a deleted account)", async () => {
+    function EndButton() {
+      const { endSession } = useAuth();
+      return <button onClick={() => endSession()}>end</button>;
+    }
+    setHint(true);
+    render(
+      <AuthProvider>
+        <Probe />
+        <EndButton />
+      </AuthProvider>,
+    );
+    await screen.findByText("authenticated:ada");
+    calls = [];
+    act(() => screen.getByRole("button", { name: "end" }).click());
+    await screen.findByText("anonymous:no user");
+    expect(getAccessToken()).toBeNull();
+    expect(calls).toEqual([]);
+  });
+
   it("throws a clear error outside the provider", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     expect(() => render(<Probe />)).toThrow("useAuth() must be used inside <AuthProvider>");

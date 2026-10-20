@@ -99,6 +99,14 @@ def login(client, email, password=DEFAULT_PASSWORD, **extra):
     return post_json(client, LOGIN_URL, {"email": email, "password": password}, **extra)
 
 
+def sign_in(user, password=DEFAULT_PASSWORD):
+    """A browser (own cookies) logged in for real, with its own token session: (client, token)."""
+    browser = Client(headers=SITE_HEADERS)
+    response = login(browser, user.email, password)
+    assert response.status_code == 200
+    return browser, response.json()["meta"]["access_token"]
+
+
 def refresh(client, **extra):
     return post_json(client, REFRESH_URL, **extra)
 

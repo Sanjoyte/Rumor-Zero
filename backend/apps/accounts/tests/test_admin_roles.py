@@ -13,6 +13,8 @@ from apps.accounts.tests.conftest import access_token_for, login, refresh
 from apps.accounts.tests.factories import DEFAULT_PASSWORD, UserFactory
 from apps.moderation.models import ModerationAction
 from apps.moderation.tests.factories import ModerationActionFactory
+from apps.notifications.models import Notification
+from apps.notifications.tests.factories import NotificationFactory
 from apps.posts.tests.factories import PostFactory
 from apps.social.tests.factories import BookmarkFactory, CommentFactory
 
@@ -258,3 +260,41 @@ def test_an_account_that_wrote_admin_log_entries_cannot_be_deleted_only_suspende
         assert client.post(change_url(former_senior, "delete"), {"post": "yes"}).status_code == 200
         assert User.objects.filter(pk=former_senior.pk).exists()
     assert LogEntry.objects.filter(user=former_senior).exists()
+
+
+def test_the_admin_delete_uses_the_owners_routine_and_discards_the_notifications_it_caused(client):
+    """Part 14: Django's own delete would leave "Someone liked your post" behind (SET_NULL)."""
+    client.force_login(senior())
+    target = UserFactory()
+    other = UserFactory()
+    post = PostFactory(author=other)
+    caused = NotificationFactory(recipient=other, actor=target, post=post)
+    unrelated = NotificationFactory(recipient=other, actor=UserFactory(), post=post)
+
+    assert client.post(change_url(target, "delete"), {"post": "yes"}).status_code == 302
+
+    assert not User.objects.filter(pk=target.pk).exists()
+    assert not Notification.objects.filter(pk=caused.pk).exists()
+    assert Notification.objects.filter(pk=unrelated.pk).exists()
+
+
+def test_a_superusers_bulk_delete_goes_through_the_same_routine(client):
+    admin = UserFactory(is_superuser=True)
+    client.force_login(admin)
+    first, second, other = UserFactory(), UserFactory(), UserFactory()
+    post = PostFactory(author=other)
+    items = [
+        NotificationFactory(recipient=other, actor=user, post=post) for user in (first, second)
+    ]
+    data = {
+        "action": "delete_selected",
+        "_selected_action": [str(first.pk), str(second.pk)],
+        "post": "yes",
+    }
+
+    response = client.post(reverse("admin:accounts_user_changelist"), data)
+
+    assert response.status_code == 302
+    assert not User.objects.filter(pk__in=[first.pk, second.pk]).exists()
+    assert not Notification.objects.filter(pk__in=[item.pk for item in items]).exists()
+    assert User.objects.filter(pk=other.pk).exists()

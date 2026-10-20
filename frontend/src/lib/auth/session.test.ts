@@ -29,12 +29,14 @@ function me(id = "user-1", username = "ada"): Me {
     id,
     username,
     display_name: "",
+    bio: "",
     email: `${username}@example.test`,
     is_email_verified: false,
     role: "user",
     has_usable_password: true,
     google_connected: false,
     avatar_url: null,
+    public_score: null,
   };
 }
 
@@ -392,6 +394,21 @@ describe("login, signup, logout and other tabs", () => {
     expect(lockCalls).toBe(2); // the bootstrap refresh, then the logout
     expect(tabA.session.getState()).toEqual({ status: "anonymous", user: null });
     expect(tabA.store.value).toBeNull();
+    expect(tabB.session.getState().status).toBe("anonymous");
+    expect(tabB.store.value).toBeNull();
+  });
+
+  it("ends the session without a request and tells the other tabs (the account was deleted)", async () => {
+    const bus = fakeBus();
+    const tabA = makeSession({ channel: bus.channel() });
+    const tabB = makeSession({ channel: bus.channel() });
+    await Promise.all([tabA.session.bootstrap(), tabB.session.bootstrap()]);
+
+    tabA.session.endSession();
+
+    expect(tabA.session.getState()).toEqual({ status: "anonymous", user: null });
+    expect(tabA.store.value).toBeNull();
+    expect(tabA.api.logout).not.toHaveBeenCalled();
     expect(tabB.session.getState().status).toBe("anonymous");
     expect(tabB.store.value).toBeNull();
   });

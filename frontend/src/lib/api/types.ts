@@ -296,6 +296,8 @@ export interface Me {
   id: string;
   username: string;
   display_name: string;
+  /** Up to 280 characters, plain text; "" when unset (Part 14). */
+  bio: string;
   email: string;
   is_email_verified: boolean;
   role: Role;
@@ -303,6 +305,8 @@ export interface Me {
   google_connected: boolean;
   /** The shell's avatar; null (initials) until photos exist in 14B. */
   avatar_url: string | null;
+  /** The score others see: null until the sample is big enough (§4a). Part 14 mounts the panel. */
+  public_score: number | null;
   /** Django Admin URL, sent to staff only. */
   admin_url?: string;
 }

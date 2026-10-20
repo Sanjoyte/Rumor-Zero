@@ -1,6 +1,6 @@
 # Part 14: Account settings, data export, account deletion
 
-**Status:** approved by the user on 2026-10-21 (planned by Claude, Opus 5.5). Not implemented yet.
+**Status:** approved by the user on 2026-10-21 (planned by Claude, Opus 5.5). **Implemented 2026-10-21** (Claude, Sonnet 5.5); see HANDOFF and task.md for the validation and the deviations.
 
 ## Context
 

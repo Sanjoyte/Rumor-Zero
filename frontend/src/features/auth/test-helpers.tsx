@@ -17,12 +17,14 @@ export const ME: Me = {
   id: "u-1",
   username: "ada",
   display_name: "",
+  bio: "",
   email: "ada@example.test",
   is_email_verified: false,
   role: "user",
   has_usable_password: true,
   google_connected: false,
   avatar_url: null,
+  public_score: null,
 };
 
 export function allauthError(

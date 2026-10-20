@@ -10,32 +10,39 @@ from email.utils import parseaddr
 
 import pytest
 from allauth.account.adapter import get_adapter
+from allauth.account.models import EmailAddress
 from anymail.backends.brevo import EmailBackend as BrevoBackend
 from django.core import mail
+from django.test import Client
 
 from apps.accounts.tests.conftest import (
     PASSWORD_REQUEST_URL,
     RESEND_URL,
+    SITE_HEADERS,
+    STRONG_PASSWORD,
     access_token_for,
     post_json,
+    sign_in,
     signup,
 )
-from apps.accounts.tests.factories import UserFactory
+from apps.accounts.tests.factories import DEFAULT_PASSWORD, UserFactory
 
 pytestmark = pytest.mark.django_db
 
 ORIGIN = "http://localhost:3000"
 LOGO_URL = f"{ORIGIN}/brand/email-logo.png"
-KINDS = ["signup", "verify", "reset"]
+KINDS = ["signup", "verify", "reset", "password_changed", "google"]
 SUBJECTS = {
     "signup": "[Rumor Zero] Welcome to Rumor Zero: verify your email",
     "verify": "[Rumor Zero] Verify your email",
     "reset": "[Rumor Zero] Reset your password",
+    "password_changed": "[Rumor Zero] Your password was changed",
+    "google": "[Rumor Zero] Continue with Google is now connected",
 }
 
 
 @pytest.fixture
-def emails(site_client, api_client, turnstile):
+def emails(site_client, api_client, turnstile, google, django_capture_on_commit_callbacks):
     """One of each email, sent through the real endpoints, in the order of KINDS."""
     assert signup(site_client).status_code == 200
     other = UserFactory()
@@ -43,7 +50,22 @@ def emails(site_client, api_client, turnstile):
     assert api_client.post(RESEND_URL, **headers).status_code == 204
     exists = UserFactory(email="exists@example.test")
     assert post_json(site_client, PASSWORD_REQUEST_URL, {"email": exists.email}).status_code == 200
-    assert len(mail.outbox) == 3
+    # Part 14: a password change, and a Google sign-in that links to an existing account.
+    changer = UserFactory()
+    _, token = sign_in(changer)
+    with django_capture_on_commit_callbacks(execute=True):
+        response = api_client.post(
+            "/api/v1/me/password/",
+            {"current_password": DEFAULT_PASSWORD, "new_password": STRONG_PASSWORD},
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+    assert response.status_code == 204
+    linked = UserFactory(email="linker@gmail.com")
+    EmailAddress.objects.create(user=linked, email=linked.email, verified=True, primary=True)
+    with django_capture_on_commit_callbacks(execute=True):
+        assert google.login(Client(headers=SITE_HEADERS), email=linked.email).status_code == 200
+    assert len(mail.outbox) == 5
     return dict(zip(KINDS, mail.outbox, strict=True))
 
 
@@ -141,17 +163,34 @@ def test_the_wording(emails):
     assert "/verify-email/" not in reset.body
 
 
+def test_the_password_changed_wording(emails):
+    body = emails["password_changed"].body
+    assert "was just changed" in body
+    assert "Your other devices were signed out" in body
+    assert f"{ORIGIN}/forgot-password" in body
+    assert "If it wasn't you, reset your password now" in body
+    assert "/verify-email/" not in body and "/reset-password/" not in body
+    assert STRONG_PASSWORD not in body and DEFAULT_PASSWORD not in body
+
+
+def test_the_google_connected_wording_when_the_password_was_kept(emails):
+    body = emails["google"].body
+    assert "Continue with Google is now connected to your Rumor Zero account" in body
+    assert f"{ORIGIN}/forgot-password" in body
+    assert "removed your old password" not in body
+    assert "removed your old password" not in html_of(emails["google"])
+
+
 def test_the_signup_variants_use_the_welcome_templates(emails):
     assert "Welcome to Rumor Zero" in html_of(emails["signup"])
     assert "Welcome" not in html_of(emails["verify"])
 
 
 def test_an_allauth_email_without_a_template_of_ours_renders_without_the_backend_host():
+    # `password_changed` has a template of ours since Part 14, so this uses `password_set`.
     user = UserFactory()
-    rendered = get_adapter().render_mail(
-        "account/email/password_changed", user.email, {"user": user}
-    )
-    assert "Your password has been changed." in rendered.body
+    rendered = get_adapter().render_mail("account/email/password_set", user.email, {"user": user})
+    assert "Your password has been set." in rendered.body
     assert "Hello from" not in rendered.body
     assert "testserver" not in rendered.body
     assert not getattr(rendered, "alternatives", [])

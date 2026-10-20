@@ -1,0 +1,10 @@
+{% extends "account/email/base_message.txt" %}
+
+{% block content %}{% autoescape off %}Continue with Google is now connected
+
+Continue with Google is now connected to your Rumor Zero account. You can use it to log in.{% if password_removed %}
+
+Your email address hadn't been verified before, so we removed your old password. It no longer works. To log in with a password again, set a new one with Forgot password: {{ forgot_password_url }}{% endif %}
+
+If this wasn't you, reset your password now so that only you can get in:
+{{ forgot_password_url }}{% endautoescape %}{% endblock content %}

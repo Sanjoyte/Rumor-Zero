@@ -20,7 +20,7 @@ from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 from django.utils.text import Truncator, capfirst, get_text_list
 
-from apps.accounts import services
+from apps.accounts import deletion, services
 from apps.accounts.models import Role, User
 from apps.core.admin_mixins import HistoryNeedsLog
 from apps.core.services import get_platform_settings
@@ -333,6 +333,16 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
                 "Suspend the account instead (clear Active)."
             )
         return deleted, model_count, set(), protected
+
+    def delete_model(self, request, obj):
+        # The same routine as the owner's `DELETE /me`: it locks the posts before the account and
+        # first deletes the notifications the account caused (Part 14). Django's own delete would
+        # leave "Someone liked your post" items behind.
+        deletion.delete_account(obj)
+
+    def delete_queryset(self, request, queryset):
+        for user in list(queryset):
+            deletion.delete_account(user)
 
     # --- the change message: values, not just field names ---
 

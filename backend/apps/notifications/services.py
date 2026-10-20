@@ -163,6 +163,14 @@ def discard_for_post(post_id):
     Notification.objects.filter(post_id=post_id).delete()
 
 
+def discard_for_actor(user_id):
+    """Delete every item the account caused (its likes, follows, comments and reposts of other
+    people's posts). The account deletion calls it first: without it the foreign key's SET_NULL
+    would leave "Someone liked your post" behind for a person who no longer exists. Uses the
+    partial `notifications_actor_idx`."""
+    Notification.objects.filter(actor_id=user_id).delete()
+
+
 def discard_for_comment(comment_id):
     """Delete the item about a comment (its author deleted it, or a moderator hid it)."""
     Notification.objects.filter(comment_id=comment_id).delete()
