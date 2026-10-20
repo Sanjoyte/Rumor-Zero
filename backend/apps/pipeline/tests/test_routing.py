@@ -1,4 +1,5 @@
-"""The pure routing functions of ARCHITECTURE §4 (Part 8's half): no database, no clock."""
+"""The pure routing functions of ARCHITECTURE §4 (Part 8's half, and Part 11C's emergency report
+threshold): no database, no clock."""
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -19,12 +20,28 @@ NOW = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)
 CFG = SimpleNamespace(report_threshold=5, emergency_report_threshold=2)
 
 
-def post(status, flagged_reason=None, pre_review_status=None, review_started_at=None):
+def post(status, flagged_reason=None, pre_review_status=None, review_started_at=None, **emergency):
+    """A post in memory; not an emergency unless `emergency` says so (Part 11C's fields)."""
     return SimpleNamespace(
         status=status,
         flagged_reason=flagged_reason,
         pre_review_status=pre_review_status,
         review_started_at=review_started_at,
+        is_emergency=emergency.get("is_emergency", False),
+        emergency_expires_at=emergency.get("emergency_expires_at"),
+        emergency_demoted_at=emergency.get("emergency_demoted_at"),
+        deleted_at=emergency.get("deleted_at"),
+    )
+
+
+def emergency(status, *, expires_in=timedelta(hours=1), demoted=False, **fields):
+    """An emergency that expires `expires_in` after NOW (negative: already expired)."""
+    return post(
+        status,
+        is_emergency=True,
+        emergency_expires_at=NOW + expires_in,
+        emergency_demoted_at=NOW - timedelta(minutes=5) if demoted else None,
+        **fields,
     )
 
 
@@ -180,10 +197,78 @@ def test_a_post_already_under_review_only_merges_and_does_not_count_as_entering(
     assert target.pre_review_status == Status.VERIFIED_FALSE
 
 
-def test_the_normal_threshold_applies_whatever_the_emergency_one_is():
-    """Part 11C adds the emergency branch; until then only `report_threshold` is read."""
+def test_the_normal_threshold_applies_to_a_post_that_is_not_an_emergency():
     cfg = SimpleNamespace(report_threshold=5, emergency_report_threshold=1)
     assert apply_report_threshold(post(Status.PENDING), 4, cfg, NOW) is False
+
+
+# ---------- Part 11C: the emergency report threshold (§4, §4b) ----------
+
+
+@pytest.mark.parametrize(
+    "status", [Status.PENDING, Status.VERIFIED_TRUE, Status.VERIFIED_FALSE, Status.PUBLISHED]
+)
+def test_two_counting_reports_send_an_active_emergency_to_review(status):
+    target = emergency(status)
+    assert apply_report_threshold(target, 1, CFG, NOW) is False
+    assert target.status == status
+    assert apply_report_threshold(target, 2, CFG, NOW) is True
+    assert (target.status, target.flagged_reason) == (Status.UNDER_REVIEW, Flag.REPORTS)
+    assert target.pre_review_status == status
+    assert target.review_started_at == NOW
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        emergency(Status.PENDING, expires_in=-timedelta(minutes=1)),
+        emergency(Status.PENDING, expires_in=timedelta(0)),  # expires this very instant
+        emergency(Status.PENDING, demoted=True),
+        emergency(Status.PENDING, deleted_at=NOW - timedelta(minutes=1)),
+    ],
+    ids=["expired", "expires_now", "demoted", "deleted"],
+)
+def test_an_emergency_that_is_no_longer_active_needs_the_usual_five(target):
+    assert apply_report_threshold(target, 4, CFG, NOW) is False
+    assert target.status == Status.PENDING
+    assert apply_report_threshold(target, 5, CFG, NOW) is True
+
+
+def test_the_threshold_follows_the_clock_it_is_given():
+    """23 h 59 min into a 24 h emergency two reports are enough; at 24 h 01 min they are not."""
+    created = NOW - timedelta(hours=24)
+    expires = created + timedelta(hours=24)
+    early = emergency(Status.PENDING, expires_in=expires - NOW)
+    at_23_59 = created + timedelta(hours=23, minutes=59)
+    assert apply_report_threshold(early, 2, CFG, at_23_59) is True
+    late = emergency(Status.PENDING, expires_in=expires - NOW)
+    at_24_01 = created + timedelta(hours=24, minutes=1)
+    assert apply_report_threshold(late, 2, CFG, at_24_01) is False
+
+
+@pytest.mark.parametrize("count", [2, 50])
+def test_a_removed_emergency_is_never_touched(count):
+    target = emergency(Status.REMOVED)
+    assert apply_report_threshold(target, count, CFG, NOW) is False
+    assert target.status == Status.REMOVED
+
+
+def test_an_active_emergency_already_under_review_only_merges_the_reason():
+    target = emergency(
+        Status.UNDER_REVIEW,
+        flagged_reason=Flag.PIPELINE,
+        pre_review_status=Status.PENDING,
+        review_started_at=NOW - timedelta(hours=1),
+    )
+    assert apply_report_threshold(target, 2, CFG, NOW) is False
+    assert target.flagged_reason == Flag.BOTH
+    assert target.review_started_at == NOW - timedelta(hours=1)
+
+
+def test_the_emergency_threshold_is_read_from_the_settings():
+    cfg = SimpleNamespace(report_threshold=5, emergency_report_threshold=3)
+    assert apply_report_threshold(emergency(Status.PENDING), 2, cfg, NOW) is False
+    assert apply_report_threshold(emergency(Status.PENDING), 3, cfg, NOW) is True
 
 
 # ---------- pipeline_had_its_say (Part 11: a restored post isn't checked twice) ----------

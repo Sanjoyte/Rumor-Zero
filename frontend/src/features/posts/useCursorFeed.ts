@@ -3,14 +3,19 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ApiError } from "@/lib/api/client";
 
-export interface CursorPage<T> {
+export interface CursorPage<T, H = never> {
   items: T[];
   nextCursor: string | null;
+  /**
+   * What the first page carries besides its items (the pinned emergencies, Part 11C). Kept while
+   * later pages load (theirs is ignored) and cleared by a fresh load.
+   */
+  head?: H;
 }
 
-export interface UseCursorFeedOptions<T> {
+export interface UseCursorFeedOptions<T, H = never> {
   /** Fetch one page; `cursor` is null for the first. Must honour `signal`. */
-  fetchPage: (cursor: string | null, signal: AbortSignal) => Promise<CursorPage<T>>;
+  fetchPage: (cursor: string | null, signal: AbortSignal) => Promise<CursorPage<T, H>>;
   /** Must be a stable function (declared outside the component, or memoised). */
   keyOf: (item: T) => string;
   /** False while the session is still loading: a first request would go out without a token. */
@@ -21,8 +26,10 @@ export interface UseCursorFeedOptions<T> {
 
 export type FeedPhase = "idle" | "loading" | "ready" | "error";
 
-export interface CursorFeed<T> {
+export interface CursorFeed<T, H = never> {
   items: T[];
+  /** The first page's `head`, or null (none yet, or none sent). */
+  head: H | null;
   phase: FeedPhase;
   /** Why the first page failed. */
   error: unknown;
@@ -44,11 +51,12 @@ export interface CursorFeed<T> {
   remove: (key: string) => void;
 }
 
-interface State<T> {
+interface State<T, H> {
   generation: number;
   phase: FeedPhase;
   error: unknown;
   pages: T[];
+  head: H | null;
   /** Items added at the top; kept apart so one made while page 1 loads survives its arrival. */
   prepended: T[];
   /** Items added at the end; kept apart for the same reason. */
@@ -60,23 +68,24 @@ interface State<T> {
   moreError: unknown;
 }
 
-type Action<T> =
+type Action<T, H> =
   | { type: "start"; generation: number; clearPrepended: boolean }
-  | { type: "loaded"; generation: number; page: CursorPage<T> }
+  | { type: "loaded"; generation: number; page: CursorPage<T, H> }
   | { type: "failed"; generation: number; error: unknown }
   | { type: "more-start"; generation: number }
-  | { type: "more-loaded"; generation: number; page: CursorPage<T> }
+  | { type: "more-loaded"; generation: number; page: CursorPage<T, H> }
   | { type: "more-failed"; generation: number; error: unknown }
   | { type: "prepend"; item: T }
   | { type: "append"; item: T }
   | { type: "remove"; key: string };
 
-function initialState<T>(): State<T> {
+function initialState<T, H>(): State<T, H> {
   return {
     generation: 0,
     phase: "idle",
     error: null,
     pages: [],
+    head: null,
     prepended: [],
     appended: [],
     removed: [],
@@ -86,11 +95,11 @@ function initialState<T>(): State<T> {
   };
 }
 
-function reducer<T>(state: State<T>, action: Action<T>): State<T> {
+function reducer<T, H>(state: State<T, H>, action: Action<T, H>): State<T, H> {
   switch (action.type) {
     case "start":
       return {
-        ...initialState<T>(),
+        ...initialState<T, H>(),
         generation: action.generation,
         phase: "loading",
         prepended: action.clearPrepended ? [] : state.prepended,
@@ -112,6 +121,7 @@ function reducer<T>(state: State<T>, action: Action<T>): State<T> {
         ...state,
         phase: "ready",
         pages: action.page.items,
+        head: action.page.head ?? null,
         nextCursor: action.page.nextCursor,
       };
     case "failed":
@@ -136,9 +146,9 @@ function reducer<T>(state: State<T>, action: Action<T>): State<T> {
  * repeated or lost, whatever order things arrive in; the same goes for one added at the end or
  * removed. Never loads two pages at once.
  */
-export function useCursorFeed<T>(options: UseCursorFeedOptions<T>): CursorFeed<T> {
+export function useCursorFeed<T, H = never>(options: UseCursorFeedOptions<T, H>): CursorFeed<T, H> {
   const { enabled, resetKey } = options;
-  const [state, dispatch] = useReducer(reducer<T>, undefined, initialState<T>);
+  const [state, dispatch] = useReducer(reducer<T, H>, undefined, initialState<T, H>);
   const [attempt, setAttempt] = useState(0);
   const { keyOf } = options;
   const latest = useRef(options);
@@ -215,6 +225,7 @@ export function useCursorFeed<T>(options: UseCursorFeedOptions<T>): CursorFeed<T
 
   return {
     items,
+    head: state.head,
     phase: state.phase,
     error: state.error,
     hasMore: state.nextCursor !== null,

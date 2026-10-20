@@ -85,6 +85,12 @@ export function ComposerProvider({
     setIsOpen(false);
   }
 
+  // An emergency toggle the allowance no longer allows goes off (a refetched quota said no; the
+  // draft outlives the modal). Adjusted while rendering, never in an effect.
+  if (draft.emergency && quota && quota.emergency?.allowed !== true) {
+    setDraft((current) => ({ ...current, emergency: false, confirmed: false }));
+  }
+
   const refreshQuota = useCallback(async () => {
     try {
       setQuota(await fetchFactQuota());
@@ -110,7 +116,11 @@ export function ComposerProvider({
   const close = useCallback(() => setIsOpen(false), []);
 
   const onDraftChange = useCallback((patch: Partial<Draft>) => {
-    setDraft((current) => ({ ...current, ...patch }));
+    setDraft((current) => {
+      const next = { ...current, ...patch };
+      // Only a fact can be an emergency: switching to Opinion turns the toggle and the tick off.
+      return next.postType === "fact" ? next : { ...next, emergency: false, confirmed: false };
+    });
     // A quota or paused message is about Fact: choosing the other type makes it stale.
     if (patch.postType !== undefined) setFailure(null);
   }, []);
@@ -126,19 +136,29 @@ export function ComposerProvider({
           content: payload.content,
           post_type: payload.postType,
           ...(payload.postType === "fact" ? { sources: payload.sources } : {}),
+          ...(payload.postType === "fact" && payload.emergency ? { is_emergency: true } : {}),
         });
         setDraft(emptyDraft());
         close();
         listeners.current.forEach((listener) => listener(post));
-        toast.show(post.post_type === "fact" ? POST_MESSAGES.postedFact : POST_MESSAGES.posted, {
-          tone: "success",
-        });
+        const posted = post.is_emergency
+          ? POST_MESSAGES.postedEmergency
+          : post.post_type === "fact"
+            ? POST_MESSAGES.postedFact
+            : POST_MESSAGES.posted;
+        toast.show(posted, { tone: "success" });
         if (post.post_type === "fact") void refreshQuota();
         return null;
       } catch (error) {
         const result = composerFailure(error);
         if (result.kind !== "fields") setFailure(result);
         if (result.kind === "quota" || result.kind === "paused") void refreshQuota();
+        if (result.kind === "emergency") {
+          // The server refused the emergency: the refreshed allowance gives the toggle its reason,
+          // and the toggle and the tick go off (the text stays).
+          setDraft((current) => ({ ...current, emergency: false, confirmed: false }));
+          void refreshQuota();
+        }
         if (result.kind === "unverified") void reloadMe();
         if (!openRef.current) {
           const message = result.kind === "fields" ? POST_MESSAGES.postFailedKept : result.message;

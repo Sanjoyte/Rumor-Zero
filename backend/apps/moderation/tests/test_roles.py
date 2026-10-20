@@ -13,7 +13,8 @@ from apps.moderation import roles
 
 pytestmark = pytest.mark.django_db
 
-migration = importlib.import_module("apps.moderation.migrations.0005_reputation_permission")
+migration = importlib.import_module("apps.moderation.migrations.0007_emergency_permission")
+ledger_migration = importlib.import_module("apps.moderation.migrations.0005_reputation_permission")
 appeal_migration = importlib.import_module("apps.moderation.migrations.0004_appeal_permission")
 first_migration = importlib.import_module("apps.moderation.migrations.0002_role_groups")
 
@@ -49,8 +50,8 @@ def test_part_10s_migration_keeps_its_own_lists_and_gives_the_groups_exactly_tho
 
 def test_part_11s_migration_keeps_its_own_lists_and_gives_the_groups_exactly_those():
     """`0004` is frozen too: it gives moderators no ledger permission."""
-    assert appeal_migration.MODERATOR_PERMISSIONS == migration.PREVIOUS_MODERATOR_PERMISSIONS
-    assert appeal_migration.SENIOR_PERMISSIONS == migration.SENIOR_PERMISSIONS
+    assert appeal_migration.MODERATOR_PERMISSIONS == ledger_migration.PREVIOUS_MODERATOR_PERMISSIONS
+    assert appeal_migration.SENIOR_PERMISSIONS == ledger_migration.SENIOR_PERMISSIONS
     assert "reputation.view_reputationevent" not in appeal_migration.MODERATOR_PERMISSIONS
     Group.objects.all().delete()
     appeal_migration.grant(live_apps, None)
@@ -59,18 +60,32 @@ def test_part_11s_migration_keeps_its_own_lists_and_gives_the_groups_exactly_tho
     assert "moderation.view_appeal" in held(MODERATORS_GROUP)
 
 
-def test_part_11bs_migration_gives_both_groups_exactly_the_declared_permissions():
+def test_part_11bs_migration_keeps_its_own_lists_and_gives_the_groups_exactly_those():
+    """`0005` is frozen too: it gives moderators no emergency-block permission."""
+    assert ledger_migration.MODERATOR_PERMISSIONS == migration.PREVIOUS_MODERATOR_PERMISSIONS
+    assert ledger_migration.SENIOR_PERMISSIONS == migration.SENIOR_PERMISSIONS
+    assert "moderation.block_emergency_posting" not in ledger_migration.MODERATOR_PERMISSIONS
+    Group.objects.all().delete()
+    ledger_migration.grant(live_apps, None)
+    assert held(MODERATORS_GROUP) == set(ledger_migration.MODERATOR_PERMISSIONS)
+    assert "reputation.view_reputationevent" in held(MODERATORS_GROUP)
+
+
+def test_part_11cs_migration_gives_both_groups_exactly_the_declared_permissions():
     Group.objects.all().delete()
     migration.grant(live_apps, None)
     assert held(MODERATORS_GROUP) == set(roles.MODERATOR_PERMISSIONS)
     assert held(SENIORS_GROUP) == set(roles.SENIOR_PERMISSIONS)
-    assert "reputation.view_reputationevent" in held(MODERATORS_GROUP)
+    assert "moderation.block_emergency_posting" in held(MODERATORS_GROUP)
+    # Seniors hold it through the Moderators group, not as an extra.
+    assert "moderation.block_emergency_posting" not in held(SENIORS_GROUP)
 
 
-def test_the_three_migrations_run_in_order_and_end_with_the_live_lists():
+def test_the_four_migrations_run_in_order_and_end_with_the_live_lists():
     Group.objects.all().delete()
     first_migration.grant(live_apps, None)
     appeal_migration.grant(live_apps, None)
+    ledger_migration.grant(live_apps, None)
     migration.grant(live_apps, None)
     assert held(MODERATORS_GROUP) == set(roles.MODERATOR_PERMISSIONS)
 
@@ -100,10 +115,18 @@ def test_going_back_over_part_11s_migration_returns_to_part_10s_lists_not_to_not
 
 def test_going_back_over_part_11bs_migration_returns_to_part_11s_lists():
     """`migrate moderation 0004` leaves moderators the appeals, without the ledger."""
-    migration.grant(live_apps, None)
-    migration.revoke(live_apps, None)
+    ledger_migration.grant(live_apps, None)
+    ledger_migration.revoke(live_apps, None)
     assert held(MODERATORS_GROUP) == set(appeal_migration.MODERATOR_PERMISSIONS)
     assert held(SENIORS_GROUP) == set(appeal_migration.SENIOR_PERMISSIONS)
+
+
+def test_going_back_over_part_11cs_migration_returns_to_part_11bs_lists():
+    """`migrate moderation 0006` leaves moderators the ledger, without the emergency block."""
+    migration.grant(live_apps, None)
+    migration.revoke(live_apps, None)
+    assert held(MODERATORS_GROUP) == set(ledger_migration.MODERATOR_PERMISSIONS)
+    assert held(SENIORS_GROUP) == set(ledger_migration.SENIOR_PERMISSIONS)
 
 
 def test_the_test_database_got_its_groups_from_the_migration_itself():
@@ -230,3 +253,13 @@ def test_moderators_and_seniors_can_read_the_ledger_and_an_ordinary_user_cannot(
     assert "reputation.view_reputationevent" in perms_of(UserFactory(role=Role.MODERATOR))
     assert "reputation.view_reputationevent" in perms_of(UserFactory(role=Role.SENIOR_MODERATOR))
     assert "reputation.view_reputationevent" not in perms_of(UserFactory())
+
+
+def test_moderators_and_seniors_may_block_emergency_posting_and_an_ordinary_user_may_not(
+    role_groups,
+):
+    """User decision 2026-10-19 (Part 11C): moderators and up."""
+    name = "moderation.block_emergency_posting"
+    assert name in perms_of(UserFactory(role=Role.MODERATOR))
+    assert name in perms_of(UserFactory(role=Role.SENIOR_MODERATOR))
+    assert name not in perms_of(UserFactory())

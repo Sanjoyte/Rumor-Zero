@@ -117,19 +117,35 @@ describe("PostDetail (server-rendered start)", () => {
     expect(screen.getByText("Checked automatically · 94% confidence")).toBeInTheDocument();
   });
 
-  it("shows a moderator's verdict and note, and an emergency chip", () => {
+  it("shows a moderator's verdict and note, and an emergency chip while it is pinned", () => {
+    // A verified emergency stays pinned until it expires (§4b); a FALSE one never is (below).
+    renderDetail(
+      fact({
+        status: "verified_true",
+        verdict_source: "moderator",
+        verdict_note: "The report says so.",
+        is_emergency: true,
+        emergency_active: true,
+      }),
+    );
+    expect(screen.getByText("VERIFIED · REVIEWED")).toBeInTheDocument();
+    expect(screen.getByText("Reviewed by a moderator")).toBeInTheDocument();
+    expect(screen.getByText(/The report says so\./)).toBeInTheDocument();
+    expect(screen.getByText("EMERGENCY")).toBeInTheDocument();
+  });
+
+  it("never shows the emergency chip on a FALSE post, even if the flag says active", () => {
+    // A FALSE always ends the priority; a polled FALSE arrives before the refetch.
     renderDetail(
       fact({
         status: "verified_false",
         verdict_source: "moderator",
-        verdict_note: "The report says otherwise.",
+        is_emergency: true,
         emergency_active: true,
       }),
     );
     expect(screen.getByText("FALSE · REVIEWED")).toBeInTheDocument();
-    expect(screen.getByText("Reviewed by a moderator")).toBeInTheDocument();
-    expect(screen.getByText(/The report says otherwise\./)).toBeInTheDocument();
-    expect(screen.getByText("EMERGENCY")).toBeInTheDocument();
+    expect(screen.queryByText("EMERGENCY")).toBeNull();
   });
 
   it("links back home and offers Copy link, but not Delete, to a reader", () => {

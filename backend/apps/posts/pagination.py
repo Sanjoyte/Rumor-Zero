@@ -17,11 +17,24 @@ class FeedPagination(TimestampCursorMixin, CursorPagination):
     ordering = ("-created_at", "-id")
 
     @staticmethod
-    def envelope(results, next_cursor):
-        # `pinned` stays empty until emergency posts (Part 11C).
+    def envelope(results, next_cursor, *, pinned=(), pinned_total=0):
+        """The §9 feed shape. `pinned` is filled on the first page of Recent and Following only
+        (Part 11C); profiles and bookmarks keep it empty."""
         return Response(
-            {"pinned": [], "pinned_total": 0, "results": results, "next_cursor": next_cursor}
+            {
+                "pinned": list(pinned),
+                "pinned_total": pinned_total,
+                "results": results,
+                "next_cursor": next_cursor,
+            }
         )
 
     def get_paginated_response(self, data):
         return self.envelope(data, self.get_next_link())
+
+
+class EmergencyPagination(TimestampCursorMixin, CursorPagination):
+    """`GET /api/v1/posts/emergencies/`: the active emergencies, newest first, 20 a page (up to
+    50), `{results, next_cursor}`. A crafted cursor is a 404 (`TimestampCursorMixin`)."""
+
+    ordering = ("-created_at", "-id")

@@ -7,18 +7,23 @@ export interface CheckboxProps extends Omit<InputHTMLAttributes<HTMLInputElement
   wrapperClassName?: string;
 }
 
-/** Stitch c2 (and a3) checkbox: Protocol Blue when checked, label and optional description. */
+/**
+ * Stitch c2 (and a3) checkbox: Protocol Blue when checked, label and optional description. A
+ * caller's `aria-describedby` (an error under it) is kept and joined with the description's id.
+ */
 export function Checkbox({
   label,
   description,
   wrapperClassName,
   className,
   id,
+  "aria-describedby": describedBy,
   ...rest
 }: CheckboxProps) {
   const autoId = useId();
   const inputId = id ?? autoId;
   const descriptionId = description ? `${inputId}-description` : undefined;
+  const describedByIds = [describedBy, descriptionId].filter(Boolean).join(" ") || undefined;
   return (
     <label
       htmlFor={inputId}
@@ -31,7 +36,7 @@ export function Checkbox({
         {...rest}
         id={inputId}
         type="checkbox"
-        aria-describedby={descriptionId}
+        aria-describedby={describedByIds}
         className={cn(
           "mt-0.5 form-checkbox cursor-pointer rounded-lg border-outline-variant text-secondary focus:ring-secondary/30 focus:ring-offset-0",
           className,

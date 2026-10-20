@@ -5,6 +5,7 @@
 import { api } from "@/lib/api/client";
 import type {
   CreatePostBody,
+  CursorPage,
   FactQuota,
   FeedItem,
   FeedResponse,
@@ -15,12 +16,28 @@ import type {
 
 export const POSTS_PATHS = {
   posts: "/v1/posts/",
+  emergencies: "/v1/posts/emergencies/",
   factQuota: "/v1/me/fact-quota/",
 } as const;
+
+/** What a feed's first page carries above its items: the pinned emergencies (Part 11C). */
+export interface FeedHead {
+  pinned: Post[];
+  /** How many are pinned in all ("Show all (N)"); `pinned` holds at most 3. */
+  pinnedTotal: number;
+}
 
 export interface FeedPage {
   items: FeedItem[];
   nextCursor: string | null;
+  head?: FeedHead;
+}
+
+export type PinnedFeed = "recent" | "following";
+
+/** The pinned part of a feed answer (only the first page's is used). */
+export function feedHead(body: FeedResponse): FeedHead {
+  return { pinned: body.pinned, pinnedTotal: body.pinned_total };
 }
 
 export function createPost(body: CreatePostBody): Promise<Post> {
@@ -34,6 +51,20 @@ export async function fetchRecentFeed(
 ): Promise<FeedPage> {
   const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
   const body = await api.get<FeedResponse>(`${POSTS_PATHS.posts}${query}`, { signal });
+  return { items: body.results, nextCursor: body.next_cursor, head: feedHead(body) };
+}
+
+/** Every active emergency a feed pins, newest first ("Show all"). `following` needs a login. */
+export async function fetchEmergencies(
+  feed: PinnedFeed,
+  cursor: string | null,
+  signal?: AbortSignal,
+): Promise<{ items: Post[]; nextCursor: string | null }> {
+  const params = new URLSearchParams({ feed });
+  if (cursor) params.set("cursor", cursor);
+  const body = await api.get<CursorPage<Post>>(`${POSTS_PATHS.emergencies}?${params}`, {
+    signal,
+  });
   return { items: body.results, nextCursor: body.next_cursor };
 }
 

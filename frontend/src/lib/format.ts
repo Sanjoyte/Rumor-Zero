@@ -38,6 +38,18 @@ export function formatFullDateTime(value: string | Date): string {
   return `${text} UTC`;
 }
 
+/** "Oct 19, 2026": a day, in UTC so the server render and the browser agree. */
+export function formatDate(value: string | Date): string {
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
 /** "March 2024": when someone joined. UTC, so the server render and the browser agree. */
 export function formatMonthYear(value: string | Date): string {
   const date = typeof value === "string" ? new Date(value) : value;

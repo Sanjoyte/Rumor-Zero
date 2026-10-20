@@ -59,9 +59,11 @@ def test_the_first_request_fills_the_cache_and_the_second_reads_it(auth_client, 
     post(bo, "hello")
     client = auth_client(me)
     assert cache.get(feed.cache_key(me.pk)) is None
-    assert count_queries(client) == 3  # the user, the page of ids, the posts
+    # The user, the page of ids, the posts, and the pinned emergencies (Part 11C: read on every
+    # first page, a cache hit included).
+    assert count_queries(client) == 4
     assert cache.get(feed.cache_key(me.pk)) is not None
-    assert count_queries(client) == 2  # the user, the posts: no query for the ids
+    assert count_queries(client) == 3  # no query for the ids
     assert contents(client.get(URL)) == ["hello"]
 
 

@@ -1,6 +1,7 @@
 """Creating, deleting and reporting posts, the fact quota, and writing pipeline results
 (ARCHITECTURE §3, §4, §4b, §5, §6). A pipeline label also settles the author's and the reposters'
-credibility events (§4a) in the same transaction.
+credibility events (§4a) in the same transaction, and a FALSE emergency blocks its author's
+emergency posting (§4b, through `apps/moderation/services.py`, the block's only writer).
 
 Only this module and `apps/moderation/services.py` change `Post.status`. There is no HTTP
 here: the views turn these domain errors into responses.
@@ -18,6 +19,7 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.core.services import get_platform_settings
 from apps.pipeline import routing
+from apps.posts import emergency
 from apps.posts.models import Post, PostStatus, PostType
 from apps.reputation import services as reputation_services
 from apps.social.feed import bust_following_feed
@@ -30,8 +32,15 @@ logger = logging.getLogger(__name__)
 FACT_QUOTA_WINDOW = timedelta(hours=24)
 
 
-class EmergencyUnavailable(Exception):
-    """Emergency posts arrive in Part 11C; until then `is_emergency=true` is refused."""
+class EmergencyNotAllowed(Exception):
+    """The author may not post an emergency now (§4b): `reason` is an `EmergencyReason`,
+    `next_allowed_at` when that rule stops refusing (or None), `text` the plain words."""
+
+    def __init__(self, refused, text):
+        super().__init__(text)
+        self.reason = refused.reason
+        self.next_allowed_at = refused.next_allowed_at
+        self.text = text
 
 
 class FactPostsPaused(Exception):
@@ -60,31 +69,47 @@ class FactQuota:
     remaining: int
     # When a slot frees up: set only when nothing is left and posting isn't paused (limit 0).
     next_slot_at: datetime | None
+    # When each emergency of the same window was made, oldest first (§4b's daily limit, Part 11C).
+    emergency_times: tuple = ()
 
 
 def _lock_author(author):
-    """Serialise one person's fact posts: the second request counts after the first one's insert.
+    """Lock the author's row and return it fresh: the second of two fact posts counts after the
+    first one's insert, and the emergency rules see a block, a score or a verification that
+    committed meanwhile (Part 11C).
 
-    A separate function so the race test can switch it off and show what happens without it.
+    `FOR NO KEY UPDATE`, the lock every writer of a user row takes (Part 11B's rule): it still
+    serialises two posts, a block and `settle_post`, but not the `KEY SHARE` that every insert
+    pointing at the author takes at commit. A separate function so the race test can switch it
+    off and show what happens without it.
     """
-    User.objects.select_for_update().only("pk").get(pk=author.pk)
+    return (
+        User.objects.select_for_update(no_key=True)
+        .only(
+            "pk", "created_at", "is_email_verified", "reputation_score", "emergency_blocked_until"
+        )
+        .get(pk=author.pk)
+    )
 
 
 def _fact_post_times(author, since):
-    """When each of the author's fact posts since `since` was made, oldest first. Deleted and
-    removed posts are included on purpose. Separate so the race test can widen the window."""
+    """`(created_at, is_emergency)` of each of the author's fact posts since `since`, oldest
+    first. Deleted and removed posts are included on purpose. Separate so the race test can widen
+    the window."""
     return list(
         Post.objects.filter(author=author, post_type=PostType.FACT, created_at__gt=since)
         .order_by("created_at")
-        .values_list("created_at", flat=True)
+        .values_list("created_at", "is_emergency")
     )
 
 
 def fact_quota(user, *, now=None):
-    """How many fact posts `user` has left in the rolling 24 hours (at most one query)."""
+    """How many fact posts `user` has left in the rolling 24 hours, and when they posted their
+    emergencies in it (at most one query)."""
     now = now or timezone.now()
     limit = get_platform_settings().fact_posts_per_day
-    times = _fact_post_times(user, now - FACT_QUOTA_WINDOW)
+    rows = _fact_post_times(user, now - FACT_QUOTA_WINDOW)
+    times = [created_at for created_at, _ in rows]
     used = len(times)
     remaining = max(limit - used, 0)
     next_slot_at = None
@@ -92,7 +117,18 @@ def fact_quota(user, *, now=None):
         # The (used - limit + 1)-th oldest post must age out before there is room again. That is
         # right even after the limit was lowered (used 8, limit 5: the 4th oldest).
         next_slot_at = times[used - limit] + FACT_QUOTA_WINDOW
-    return FactQuota(limit=limit, used=used, remaining=remaining, next_slot_at=next_slot_at)
+    return FactQuota(
+        limit=limit,
+        used=used,
+        remaining=remaining,
+        next_slot_at=next_slot_at,
+        emergency_times=tuple(created_at for created_at, urgent in rows if urgent),
+    )
+
+
+def emergency_refusal(user, *, quota, now):
+    """Why `user` may not post an emergency now (`emergency.refusal`, §4b), or None."""
+    return emergency.refusal(user, quota=quota, cfg=get_platform_settings(), now=now)
 
 
 def create_post(*, author, content, post_type, sources=(), is_emergency=False, now=None):
@@ -100,18 +136,31 @@ def create_post(*, author, content, post_type, sources=(), is_emergency=False, n
 
     A fact shows "Checking facts…" until the pipeline answers. With `PIPELINE_INLINE_KICK` on, a
     background thread checks it right after the commit (§6); otherwise the sweeper does.
+
+    An emergency (`is_emergency`, a fact only) is checked against §4b's rules under the author's
+    lock, so two at once let one through and a block that committed first is seen; it stores
+    `emergency_expires_at = now + emergency_duration_hours` (Part 11C). A refusal of any of its
+    rules, a full fact quota included, is `EmergencyNotAllowed`.
     """
     now = now or timezone.now()
-    if is_emergency:
-        raise EmergencyUnavailable
     sources = list(sources)
     if post_type != PostType.FACT and sources:
         # The serializer refuses this first; the DB check behind it is the last line.
         raise ValidationError({"sources": ["Only fact posts can have sources."]})
+    if post_type != PostType.FACT and is_emergency:
+        # The same: the serializer first, the check `posts_post_emergency_fact_only` last.
+        raise ValidationError({"is_emergency": ["Only fact posts can be emergencies."]})
+    expires_at = None
     with transaction.atomic():
         if post_type == PostType.FACT:
-            _lock_author(author)
-            quota = fact_quota(author, now=now)
+            locked = _lock_author(author)
+            quota = fact_quota(locked, now=now)
+            if is_emergency:
+                cfg = get_platform_settings()
+                refused = emergency.refusal(locked, quota=quota, cfg=cfg, now=now)
+                if refused is not None:
+                    raise EmergencyNotAllowed(refused, emergency.refusal_text(refused, cfg))
+                expires_at = now + timedelta(hours=cfg.emergency_duration_hours)
             if quota.limit == 0:
                 raise FactPostsPaused
             if quota.remaining == 0:
@@ -125,6 +174,8 @@ def create_post(*, author, content, post_type, sources=(), is_emergency=False, n
             post_type=post_type,
             sources=sources,
             status=status,
+            is_emergency=is_emergency,
+            emergency_expires_at=expires_at,
             created_at=now,
         )
         # Your own Following feed must show the new post at once, despite its cache (Part 6).
@@ -269,7 +320,13 @@ def record_pipeline_result(post_id, result, *, claimed_attempts, now):
         if outcome == routing.Outcome.LABELLED:
             # The label is public now, so it counts (§4a). A result held back for a review
             # (`entered_review`, `updated_review`) records nothing: a late TRUE stays private.
-            reputation_services.settle_post(post, now=now)
+            rows = reputation_services.settle_post(post, now=now)
+            # A FALSE emergency blocks its author's emergency posting (§4b). Only an expired or
+            # demoted emergency can be labelled FALSE here: an active one goes to review. The
+            # import is local: `apps.moderation.services` imports this module.
+            from apps.moderation.services import block_after_emergency_false
+
+            block_after_emergency_false(post, rows, now=now, moderator=None)
         return outcome
 
 

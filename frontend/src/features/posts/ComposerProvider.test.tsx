@@ -375,3 +375,152 @@ describe("ComposerProvider: the draft and closing", () => {
     await waitFor(() => expect(dialog()).toBeNull());
   });
 });
+
+describe("ComposerProvider: emergency posts (Part 11C)", () => {
+  const emergencyToggle = () => screen.getByRole("switch", { name: "Emergency post" });
+
+  async function openFact(content = "Gas leak on Main Street") {
+    await renderProbe();
+    await open();
+    await choose("Fact");
+    await userEvent.type(text(), content);
+    await waitFor(() => expect(emergencyToggle()).toBeEnabled());
+  }
+
+  it("sends is_emergency, says it's pinned, and tells listeners", async () => {
+    const created = makePost({
+      post_type: "fact",
+      status: "pending",
+      is_emergency: true,
+      emergency_active: true,
+    });
+    api.createPost.mockResolvedValue(created);
+    await openFact();
+    await userEvent.click(emergencyToggle());
+    await userEvent.click(screen.getByRole("checkbox", { name: /I understand/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Post emergency, will be checked" }));
+    await waitFor(() => expect(dialog()).toBeNull());
+    expect(api.createPost).toHaveBeenCalledWith({
+      content: "Gas leak on Main Street",
+      post_type: "fact",
+      sources: [],
+      is_emergency: true,
+    });
+    expect(await screen.findByText("Posted. It's pinned while it's checked.")).toBeInTheDocument();
+  });
+
+  it("sends no is_emergency for a plain fact", async () => {
+    api.createPost.mockResolvedValue(makePost({ post_type: "fact", status: "pending" }));
+    await openFact();
+    await post();
+    await waitFor(() => expect(api.createPost).toHaveBeenCalled());
+    expect(api.createPost.mock.calls[0][0]).not.toHaveProperty("is_emergency");
+  });
+
+  it("turns the toggle off when switching to Opinion", async () => {
+    await openFact();
+    await userEvent.click(emergencyToggle());
+    await choose("Opinion");
+    await choose("Fact");
+    expect(emergencyToggle()).not.toBeChecked();
+  });
+
+  it("shows the server's refusal, keeps the text and turns the toggle off with its reason", async () => {
+    api.createPost.mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "emergency_not_allowed",
+        detail: "Emergency posting is blocked on your account until Nov 7, 2026 at 12:00 UTC.",
+      }),
+    );
+    await openFact();
+    api.fetchFactQuota.mockResolvedValue(
+      makeQuota({
+        emergency: {
+          allowed: false,
+          reason: "blocked",
+          next_allowed_at: "2026-11-07T12:00:00Z",
+          block_days: 30,
+        },
+      }),
+    );
+    await userEvent.click(emergencyToggle());
+    await userEvent.click(screen.getByRole("checkbox", { name: /I understand/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Post emergency, will be checked" }));
+    expect(
+      await screen.findByText(
+        "Emergency posting is blocked on your account until Nov 7, 2026 at 12:00 UTC.",
+      ),
+    ).toBeInTheDocument();
+    expect(dialog()).not.toBeNull();
+    expect(text()).toHaveValue("Gas leak on Main Street");
+    await waitFor(() => expect(emergencyToggle()).toBeDisabled());
+    expect(emergencyToggle()).not.toBeChecked();
+    expect(emergencyToggle()).toHaveAccessibleDescription(
+      "Emergency posting is blocked on your account until Nov 7, 2026.",
+    );
+    expect(api.fetchFactQuota).toHaveBeenCalledTimes(2);
+  });
+
+  it("turns a draft's toggle off when a reopened allowance says no", async () => {
+    await openFact();
+    await userEvent.click(emergencyToggle());
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    api.fetchFactQuota.mockResolvedValue(
+      makeQuota({
+        emergency: {
+          allowed: false,
+          reason: "daily_limit",
+          next_allowed_at: null,
+          block_days: 30,
+        },
+      }),
+    );
+    await open();
+    await waitFor(() => expect(emergencyToggle()).toBeDisabled());
+    expect(emergencyToggle()).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Post fact, will be checked" })).toBeVisible();
+  });
+
+  it("keeps the toggle and the tick off when the allowance says yes again later", async () => {
+    await openFact();
+    await userEvent.click(emergencyToggle());
+    await userEvent.click(screen.getByRole("checkbox", { name: /I understand/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const no = makeQuota({
+      emergency: { allowed: false, reason: "daily_limit", next_allowed_at: null, block_days: 30 },
+    });
+    api.fetchFactQuota.mockResolvedValue(no);
+    await open();
+    await waitFor(() => expect(emergencyToggle()).toBeDisabled());
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    api.fetchFactQuota.mockResolvedValue(makeQuota());
+    await open();
+    await waitFor(() => expect(emergencyToggle()).toBeEnabled());
+    // Never back on by itself, and never sent unconfirmed: the person chooses again.
+    expect(emergencyToggle()).not.toBeChecked();
+    await userEvent.click(emergencyToggle());
+    expect(screen.getByRole("checkbox", { name: /I understand/ })).not.toBeChecked();
+  });
+
+  it("turns the toggle off after a refusal even when the refreshed allowance still says yes", async () => {
+    api.createPost.mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "emergency_not_allowed",
+        detail: "You've posted 1 emergency post in the last 24 hours.",
+      }),
+    );
+    await openFact();
+    await userEvent.click(emergencyToggle());
+    await userEvent.click(screen.getByRole("checkbox", { name: /I understand/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Post emergency, will be checked" }));
+    expect(
+      await screen.findByText("You've posted 1 emergency post in the last 24 hours."),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(api.fetchFactQuota).toHaveBeenCalledTimes(2));
+    expect(emergencyToggle()).toBeEnabled();
+    expect(emergencyToggle()).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Post fact, will be checked" })).toBeVisible();
+  });
+});

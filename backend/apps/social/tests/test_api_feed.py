@@ -162,4 +162,5 @@ def test_the_query_count_is_constant_with_the_cache_off(auth_client, me, setting
     for _ in range(5):
         FollowFactory(follower=me, following=VerifiedUserFactory())
     large = queries(client)
-    assert small == large == 3  # the signed-in user, the page of ids, the posts
+    # The signed-in user, the page of ids, the posts, and the pinned emergencies (Part 11C).
+    assert small == large == 4

@@ -3,10 +3,10 @@
 `PostAdmin` is the review queue. It stays **read-only for everyone** (`has_change_permission` is
 always False, so the page has no Save and a POST to its change URL is a 403): every change goes
 through `apps/moderation/services.py`, which locks the row, re-checks the rules and writes the
-audit trail. The seven actions (Part 11 added Restore post and Keep removed, the two ways to
-resolve a removal appeal) are bulk actions with a confirmation page; the same actions are offered
-as buttons on a post's own page. The queue holds posts under review **and removed posts with an open
-removal appeal**.
+audit trail. The eight actions (Part 11 added Restore post and Keep removed, the two ways to
+resolve a removal appeal; Part 11C Demote emergency) are bulk actions with a confirmation page; the
+same actions are offered as buttons on a post's own page. The queue holds posts under review **and
+removed posts with an open removal appeal**, active emergencies first (Part 11C).
 
 `AppealAdmin` lists the appeals read-only. `ModerationActionAdmin` (the full moderation log) and
 `LogEntryAdmin` (Django's own admin log,
@@ -20,7 +20,8 @@ from collections import Counter
 from django.contrib import admin, messages
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.contrib.admin.models import LogEntry
-from django.db.models import Case, DateTimeField, F, Q, When
+from django.db.models import Case, DateTimeField, F, IntegerField, Q, Value, When
+from django.db.models.functions import Now
 from django.http import HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.urls import reverse
@@ -30,11 +31,12 @@ from django.utils.text import Truncator
 from django.utils.timesince import timesince
 
 from apps.core.admin_mixins import HistoryNeedsLog
+from apps.core.services import get_platform_settings
 from apps.moderation import rules, services
 from apps.moderation.forms import ConfirmActionForm
 from apps.moderation.models import Appeal, AppealKind, AppealStatus, ModerationAction
 from apps.moderation.rules import Act
-from apps.posts.emergency import is_active_emergency
+from apps.posts.emergency import active_emergency_q, is_active_emergency
 from apps.posts.models import FlaggedReason, Post, PostStatus, PostType
 from apps.reports.models import Report
 from apps.reputation.admin import ReputationInline
@@ -85,6 +87,12 @@ ACTIONS = {
         services.keep_removed,
         lambda n: f"Kept {n} {'post' if n == 1 else 'posts'} removed.",
     ),
+    "demote_emergency": (
+        Act.DEMOTE_EMERGENCY,
+        "Demote emergency",
+        services.demote_emergency,
+        lambda n: f"Demoted {n} emergency {'post' if n == 1 else 'posts'}.",
+    ),
 }
 BUTTON_LABELS = {
     "mark_verified": "Mark verified",
@@ -94,6 +102,7 @@ BUTTON_LABELS = {
     "escalate": "Escalate to senior",
     "restore_posts": "Restore post",
     "keep_removed": "Keep removed",
+    "demote_emergency": "Demote emergency",
 }
 
 
@@ -118,6 +127,23 @@ def queue_since():
     )
 
 
+def active_first():
+    """1 for an active emergency at the database's statement time (`Now()` is Postgres'
+    `STATEMENT_TIMESTAMP()`), else 0: the queue puts active emergencies first (Part 11C)."""
+    return Case(
+        When(active_emergency_q(Now()), then=Value(1)),
+        default=Value(0),
+        output_field=IntegerField(),
+    )
+
+
+def emergency_text(post, now):
+    """The Emergency column: "Active", "Ended" (expired or demoted) or "—"."""
+    if not post.is_emergency:
+        return "—"
+    return "Active" if is_active_emergency(post, now) else "Ended"
+
+
 def pipeline_text(post):
     """What the pipeline said, for the queue: "FALSE 92%", "TRUE 95%", "Inconclusive 40%", "—"."""
     if post.pipeline_verdict is None or post.confidence_score is None:
@@ -139,7 +165,9 @@ class QueueFilter(admin.SimpleListFilter):
 
     title = "show"
     parameter_name = "queue"
-    LEAVES_THE_QUEUE = ("status__exact", "deleted_at__isempty")
+    # The emergency filter too (Part 11C): a moderator looking for an active emergency to demote
+    # must find it whether or not it is under review.
+    LEAVES_THE_QUEUE = ("status__exact", "deleted_at__isempty", "emergency")
 
     def lookups(self, request, model_admin):
         return [("all", "All posts")]
@@ -177,6 +205,25 @@ class AppealFilter(admin.SimpleListFilter):
     def queryset(self, request, queryset):
         if self.value() in AppealKind.values:
             return queryset.filter(appeal__kind=self.value(), appeal__status=AppealStatus.OPEN)
+        return queryset
+
+
+class EmergencyFilter(admin.SimpleListFilter):
+    """Emergency posts, active (still pinned) or ended (expired or demoted). Choosing it leaves the
+    review queue (`QueueFilter.LEAVES_THE_QUEUE`)."""
+
+    title = "emergency"
+    parameter_name = "emergency"
+
+    def lookups(self, request, model_admin):
+        return [("active", "Active"), ("ended", "Ended")]
+
+    def queryset(self, request, queryset):
+        now = timezone.now()
+        if self.value() == "active":
+            return queryset.filter(active_emergency_q(now))
+        if self.value() == "ended":
+            return queryset.filter(is_emergency=True).exclude(active_emergency_q(now))
         return queryset
 
 
@@ -270,7 +317,15 @@ class ModerationHistoryInline(admin.TabularInline):
     extra = 0
     can_delete = False
     ordering = ("-created_at",)
-    fields = ("created_at", "action", "moderator", "change", "public_note", "notes")
+    fields = (
+        "created_at",
+        "action",
+        "moderator",
+        "change",
+        "public_note",
+        "notes",
+        "blocked_until",
+    )
     readonly_fields = fields
 
     def get_queryset(self, request):
@@ -320,6 +375,7 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
         "post_type",
         "status",
         EscalatedFilter,
+        EmergencyFilter,
         # "Deleted by author": the author's soft delete keeps the row, so a moderator can find it.
         ("deleted_at", admin.EmptyFieldListFilter),
     )
@@ -327,9 +383,14 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
     list_select_related = ("author", "appeal")
     list_per_page = BATCH_CAP
     show_full_result_count = False
-    # Most reported first, then the longest in the queue, then the newest: the same shape as the
-    # Part 11C ordering, which puts active emergencies above all of it.
-    ordering = ("-report_count", queue_since().asc(nulls_last=True), "-created_at")
+    # Active emergencies first (Part 11C), then the most reported, then the longest in the queue,
+    # then the newest.
+    ordering = (
+        active_first().desc(),
+        "-report_count",
+        queue_since().asc(nulls_last=True),
+        "-created_at",
+    )
     actions = list(ACTIONS)
     inlines = (AppealInline, ReportInline, ModerationHistoryInline, ReputationInline)
     change_form_template = "moderation/admin/post_change_form.html"
@@ -424,11 +485,9 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
     def escalated(self, post):
         return post.escalated_at is not None
 
-    @admin.display(description="Emergency")
+    @admin.display(description="Emergency", ordering=active_first().desc())
     def emergency(self, post):
-        if not post.is_emergency:
-            return "—"
-        return "Active" if is_active_emergency(post, timezone.now()) else "Ended"
+        return emergency_text(post, timezone.now())
 
     # --- nothing is edited here: the services own every change ---
 
@@ -448,8 +507,9 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
     def get_actions(self, request):
         actions = super().get_actions(request)
         if request.GET.get("post_type__exact") == PostType.OPINION:
-            # An opinion gets no verdict: don't offer one in a list that shows only opinions.
-            for name in ("mark_verified", "mark_false"):
+            # An opinion gets no verdict and is never an emergency: don't offer those in a list
+            # that shows only opinions.
+            for name in ("mark_verified", "mark_false", "demote_emergency"):
                 actions.pop(name, None)
         return actions
 
@@ -458,10 +518,11 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
     def render_change_form(self, request, context, add=False, change=False, form_url="", obj=None):
         if obj is not None and self.has_moderate_permission(request):
             appeal = open_appeal_of(obj)
+            now = timezone.now()
             context["moderation_buttons"] = [
                 {"action": name, "label": BUTTON_LABELS[name]}
                 for name, (act, *_rest) in ACTIONS.items()
-                if rules.refusal(act, obj, request.user, appeal=appeal) is None
+                if rules.refusal(act, obj, request.user, appeal=appeal, now=now) is None
             ]
         return super().render_change_form(request, context, add, change, form_url, obj)
 
@@ -479,7 +540,7 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
         request.POST = posted
         return super().response_action(request, queryset)
 
-    # --- the seven actions ---
+    # --- the eight actions ---
 
     @admin.action(description="Mark verified (facts only)", permissions=["moderate"])
     def mark_verified(self, request, queryset):
@@ -508,6 +569,10 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
     @admin.action(description="Keep removed (removal appeals)", permissions=["moderate"])
     def keep_removed(self, request, queryset):
         return self._moderate(request, queryset, "keep_removed")
+
+    @admin.action(description="Demote emergency (active emergencies)", permissions=["moderate"])
+    def demote_emergency(self, request, queryset):
+        return self._moderate(request, queryset, "demote_emergency")
 
     def _moderate(self, request, queryset, name):
         """First POST: show what would change and what would be skipped, with the note fields.
@@ -543,18 +608,33 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
             )
 
         now = timezone.now()
+        block_days = get_platform_settings().emergency_false_cooldown_days
         changing, skipped = [], []
         for post in posts:
             appeal = open_appeal_of(post)
-            refusal = rules.refusal(act, post, request.user, appeal=appeal)
+            refusal = rules.refusal(act, post, request.user, appeal=appeal, now=now)
             if refusal is not None:
-                skipped.append({"row": self._row(post), "why": refusal.text})
+                skipped.append({"row": self._row(post, now), "why": refusal.text})
                 continue
             after = rules.transition(
                 act, copy.copy(post), moderator=request.user, now=now, appeal=appeal
             )
-            row = self._row(post)
+            row = self._row(post, now)
             row["after"] = PostStatus(after.to_status).label
+            notes = []
+            if after.demoted or act == Act.DEMOTE_EMERGENCY:
+                notes.append("priority ends")
+            # A FALSE that changes the label blocks the author (Part 11C): an emergency that
+            # wasn't FALSE before the review (not a label appeal or a pipeline FALSE reported).
+            if (
+                act == Act.MARK_FALSE
+                and post.is_emergency
+                and post.pre_review_status != PostStatus.VERIFIED_FALSE
+                and block_days > 0
+            ):
+                notes.append(f"author blocked {block_days} {'day' if block_days == 1 else 'days'}")
+            if notes:
+                row["after"] += f" ({', '.join(notes)})"
             changing.append(row)
         cancel_url = (
             reverse("admin:posts_post_change", args=[posts[0].pk])
@@ -577,7 +657,7 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
         }
         return TemplateResponse(request, "moderation/admin/confirm_action.html", context)
 
-    def _row(self, post):
+    def _row(self, post, now):
         return {
             "post": post,
             "claim": Truncator(post.content).chars(120),
@@ -586,6 +666,7 @@ class PostAdmin(HistoryNeedsLog, admin.ModelAdmin):
             "reason": self.reason(post),
             "reports": post.report_count,
             "pipeline": pipeline_text(post),
+            "emergency": emergency_text(post, now),
             "author": post.author.username,
         }
 
@@ -622,10 +703,10 @@ class ModerationActionAdmin(admin.ModelAdmin):
     `moderation.view_moderationaction` (seniors). A moderator sees a post's own history on the
     post's page instead."""
 
-    list_display = ("created_at", "action", "moderator", "post_link", "change")
+    list_display = ("created_at", "action", "moderator", "post_link", "subject_user", "change")
     list_filter = ("action", "created_at")
-    search_fields = ("post_snapshot", "moderator__username")
-    list_select_related = ("moderator", "post")
+    search_fields = ("post_snapshot", "moderator__username", "subject_user__username")
+    list_select_related = ("moderator", "post", "subject_user")
     show_full_result_count = False
     ordering = ("-created_at",)
     fields = (
@@ -640,6 +721,7 @@ class ModerationActionAdmin(admin.ModelAdmin):
         "public_note",
         "appeal",
         "notes",
+        "blocked_until",
     )
     readonly_fields = fields
 

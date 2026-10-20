@@ -23,8 +23,11 @@ import { applyStatus, type StatusOverlay } from "./status-overlay";
 import { feedItemKey } from "./posts-api";
 import type { CursorFeed } from "./useCursorFeed";
 
-/** One card with its action bar (Part 7, 7B) and, for a repost, "Reposted by" above it. */
-function FeedCard({
+/**
+ * One card with its action bar (Part 7, 7B) and, for a repost, "Reposted by" above it. Exported for
+ * the pinned emergencies above the feed (Part 11C), so their cards work the same way.
+ */
+export function FeedCard({
   post,
   reposter,
   overlay,
@@ -96,17 +99,21 @@ export function FeedList({
   statusUpdates = {},
   gone,
   empty,
+  alreadyShown,
 }: {
-  feed: CursorFeed<FeedItem>;
+  /** Any feed of items; its first-page `head` (the pinned emergencies) is the caller's. */
+  feed: CursorFeed<FeedItem, unknown>;
   /** Polled statuses laid over the loaded posts (Part 5): a badge changes without a reload. */
   statusUpdates?: StatusOverlay;
   /** Posts the poll found deleted: they disappear. */
   gone?: ReadonlySet<string>;
   /** What an empty list says (the Following tab and profiles word it differently). */
   empty?: ReactNode;
+  /** Posts shown above the list (the pinned emergencies): never repeated in it. */
+  alreadyShown?: ReadonlySet<string>;
 }) {
   const { phase } = feed;
-  const items = visibleItems(feed.items, gone);
+  const items = visibleItems(feed.items, gone, alreadyShown);
 
   if (phase === "idle" || phase === "loading") {
     return (

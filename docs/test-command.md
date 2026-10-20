@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -8740,6 +8740,572 @@ Checked 1298 accounts: every stored score matches the ledger.
   the moderator action). `cy`'s and `bo`'s rows were written in the same transaction as `ada`'s FALSE.
 - Deleting an account deletes its ledger (other people's rows about its posts stay, with an empty post link).
   `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole
+  local database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway, and your admin address is the default one
+  unless you set `ADMIN_URL_PATH` in `backend/.env` (it is never printed here).
+
+---
+
+### Part 11C: Emergency posts
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and `frontend/.env.local`.
+Part 11C adds **two migrations** (`moderation.0006_emergency_actions`, `moderation.0007_emergency_permission`), **no
+dependency**, **no new variable**, **one endpoint** (`GET /api/v1/posts/emergencies/`) and an `emergency` block in
+`GET /api/v1/me/fact-quota/`. An author can mark a **fact** post as an **emergency**: it is **pinned** at the top of
+Recent (and of the Following tab of everyone who follows the author) for 24 hours, **checked first**, and shown in
+violet. A FALSE result from the pipeline never labels an active emergency by itself: it goes to a moderator. A FALSE
+label costs the author more credibility (N + 3) and **blocks their emergency posting for 30 days**; the block lifts if
+that FALSE is overturned. Moderators get **Demote emergency** (ends the priority), **Block / Unblock emergency posting**
+on accounts, and an emergency filter in the queue, where active emergencies come first.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 12 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 9 and 12**: the variables and functions you set in step 3 (`id`, `ada`, `bo`, `cy`, `new`, `rep1`, `rep2`, `api`, `login`, `mk`, `get`, `send`, `mine`, `modpost`, `modacct`) and in steps 5 and 6 (`p1`, `p2`) only live in that one terminal. If you close it, start again from step 3. | 1 to 9, 12 |
+| Window 3 (frontend) | `npm run dev` in `frontend`. Leave it running. | 10 |
+| Browser | Steps 10 and 11 | 10, 11 |
+
+Things to know first:
+
+- **Who may post an emergency** (checked in this order; the first rule that fails is the `reason`): a verified email
+  (`unverified`), an account at least 7 days old (`account_too_new`), a credibility score of at least 40
+  (`score_too_low`), no emergency block (`blocked`), at most 1 emergency in the last 24 hours (`daily_limit`), and room in
+  the fact allowance, which emergencies count toward (`fact_quota`). The numbers are your platform settings (Part 0A's
+  defaults: 24 h pinned, 1 a day, 7 days, 40, 2 reports, 30 days).
+- **"Active"** means: an emergency, not demoted, not removed or deleted, and its 24 hours not over. It is worked out
+  every time a post is read; no job runs.
+- **The accounts.** Step 3 makes eight straight in the database, all with the throwaway password
+  `correct-horse-battery-42`: `ada` and `cy` (authors, 30 days old), `bo` (follows `cy`, 30 days old), `new` (made
+  today), `rep1` and `rep2` (reporters, 30 days old, so their reports count), `mod1` and `mod2` (moderators). No sign-up
+  and no email are needed, so this part works offline.
+- **The pipeline is the stub** (Part 9): `#false` gives FALSE 92, `#true` VERIFIED 95%. With your `.env`'s default
+  `PIPELINE_INLINE_KICK`, a new fact is checked in the background right after it is posted; the `process_pending` lines
+  check whatever it hasn't reached.
+- **Your admin address** is `http://localhost:8000/admin/` unless `ADMIN_URL_PATH` in `backend/.env` says otherwise (then
+  use that address in step 11).
+- The outputs below were recorded on Linux on 2026-10-20 by running these blocks as written, against a server with
+  these settings. The browser steps were checked the same day with headless Chromium (at 1280 and 390 px, screenshots
+  looked at), not by a person at a keyboard. Ids, numbers in names, dates and times differ on every run. Other
+  accounts' emergencies don't show: the commands filter on this run's `id`.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies Part 11C's two
+migrations, confirms there is nothing more to make, runs the whole backend test suite and Part 11C's own test files, the
+linter and the formatter check, and audits the credibility ledger of your local database.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                            # 2 migrations the first time, then: No migrations to apply.
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 3644 passed
+python -m pytest apps/posts/tests/test_emergency.py apps/posts/tests/test_api_pinned.py apps/social/tests/test_api_feed_pinned.py apps/moderation/tests/test_services_emergency.py apps/moderation/tests/test_races_emergency.py apps/moderation/tests/test_admin_emergency.py -q   # 122 passed
+ruff check . ; ruff format --check .                # All checks passed! / 276 files already formatted
+python manage.py recompute_reputation --check       # Checked … accounts: every stored score matches the ledger.
+```
+
+**You should see:** the first `migrate` prints two `Applying …` lines:
+
+```text
+  Applying moderation.0006_emergency_actions... OK
+  Applying moderation.0007_emergency_permission... OK
+```
+
+(a second run prints `No migrations to apply.`), then `No changes detected` and `System check identified no issues (0
+silenced).`; the full run ends with `3644 passed`, Part 11C's own files with `122 passed`, the next pair is
+`All checks passed!` and `276 files already formatted`, and the last line is `Checked 1426 accounts: every stored score
+matches the ledger.` (your number of accounts differs). Counts may grow later; what matters is that nothing fails.
+
+- `moderation.0006_emergency_actions` adds the audit kind `emergency_unblocked`, a `blocked_until` column on the
+  moderation log (with a check: set exactly on a block row) and the permission "Can block or unblock emergency posting".
+  `moderation.0007_emergency_permission` gives that permission to the Moderators group. Both can be undone with
+  `python manage.py migrate moderation 0005` (the groups go back to Part 11B's permissions), as long as no
+  `emergency_unblocked` row exists yet.
+- Part 11C's own files cover the eligibility rules (every reason, their order and their edges), the pinned lists (at
+  most 3, never repeated, pinned at 23 h 59 min and not at 24 h 01 min), the moderation services and their audit rows,
+  three real-thread races (a Mark FALSE and an Unblock at once among them), and the admin. The whole suite also runs the
+  routing, processor, report-threshold and random-walk tests that changed.
+- Existing tests changed on purpose: the post object has 25 keys (`emergency_demoted`), a first feed page costs one
+  query more (the pinned list), the moderation group's permissions (`test_roles.py` now checks migration 0007), and the
+  credibility tests that labelled an *active* emergency FALSE through the pipeline now use an expired one.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last command) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 127 files, 1782 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 43 passed
+cd ../backend                                       # back to backend/ for steps 3 to 9
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  127 passed (127)` and `Tests  1782
+passed (1782)`. `npm run build` lists the same routes as in Part 11B (Part 11C adds no page). The end-to-end run ends
+with `43 passed`.
+
+- The new end-to-end file (`e2e/emergency.spec.ts`) signs nobody up. One test shows a new account the disabled toggle
+  and its reason. The other has an eligible author post a `#false` emergency through the composer, finds it pinned on
+  Recent with EMERGENCY, runs the pipeline (UNDER REVIEW, still pinned), has a moderator mark it FALSE, and checks it
+  left the pinned section and shows FALSE · REVIEWED without the chip. Both read your platform settings and skip with a
+  message if they make an emergency impossible.
+
+#### Step 3: Start the server and make eight accounts
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 9 and
+12.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you make the eight accounts with a shell
+command, log six of them in through the API (keeping their login tokens in `ada`, `bo`, `cy`, `new`, `rep1` and `rep2`),
+and save the helpers `mk` (make a post, print its id), `get` (a GET, printing the status code and then the answer),
+`send` (any request, the same way), `mine` (a `jq` filter that keeps this run's pinned posts), and `modpost` and
+`modacct`, which do what the admin's buttons do on a post or an account (and print a refusal instead of failing).
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend` with the venv active: steps 1 and 2 leave you there; needs `jq`, `sudo apt install jq`). If you
+opened a new terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the names are new each run
+python manage.py shell -c "
+import datetime
+from allauth.account.models import EmailAddress
+from django.utils import timezone
+from apps.accounts.models import Role, User
+for name, role, days in (('ada', Role.USER, 30), ('bo', Role.USER, 30), ('cy', Role.USER, 30), ('new', Role.USER, 0), ('rep1', Role.USER, 30), ('rep2', Role.USER, 30), ('mod1', Role.MODERATOR, 30), ('mod2', Role.MODERATOR, 30)):
+    user = User.objects.create_user(email=f'part11c-{name}-$id@example.test', username=f'part11c_{name}_$id', password='correct-horse-battery-42', is_email_verified=True, role=role)
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+    User.objects.filter(pk=user.pk).update(created_at=timezone.now() - datetime.timedelta(days=days))
+print(User.objects.filter(email__startswith='part11c-', email__endswith='$id@example.test').count(), 'accounts made')
+" | tail -1
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+login() { jq -nc --arg e "part11c-$1-$id@example.test" '{email: $e, password: "correct-horse-battery-42"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/login | jq -r .meta.access_token; }   # login <name>: prints a login token
+ada=$(login ada); bo=$(login bo); cy=$(login cy); new=$(login new); rep1=$(login rep1); rep2=$(login rep2)
+echo ${ada:0:10} ${bo:0:10} ${cy:0:10} ${new:0:10} ${rep1:0:10} ${rep2:0:10}   # six token prefixes, not an empty line
+api=http://localhost:8000/api/v1
+mk() { curl -s -H "Authorization: Bearer $1" -H "Content-Type: application/json" --data-binary "$2" $api/posts/ | jq -r .id; }   # mk <token> <json>: makes a post, prints its id
+get() { local out; out=$(curl -s -w '\n%{http_code}' ${2:+-H "Authorization: Bearer $2"} "$api$1"); printf '%s  ' "${out##*$'\n'}"; printf '%s' "${out%$'\n'*}" | jq -c "${3:-.}"; }   # get <path> [token] [jq filter]: prints the status code, then the answer
+send() { local out; out=$(curl -s -w '\n%{http_code}' -X "$1" ${3:+-H "Authorization: Bearer $3"} ${4:+-H "Content-Type: application/json" --data-binary "$4"} "$api$2"); printf '%s  %s\n' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | jq -c "${5:-.}" 2>/dev/null)"; }   # send <METHOD> <path> [token] [json body] [jq filter]: prints the status code, then the answer
+mine="[.pinned[] | select(.author.username | endswith(\"_$id\")) | .content]"   # a jq filter: this run's pinned posts
+modpost() { python manage.py shell -c "
+from apps.accounts.models import User
+from apps.moderation import services
+try:
+    services.$1('$2', moderator=User.objects.get(username='part11c_$3_$id'))
+    print('$3: $1 done')
+except services.ActionRefused as refused:
+    print('$3: $1 refused:', refused.refusal.code)
+" | tail -1; }   # modpost <action> <post id> <moderator>: what the admin's button does
+modacct() { python manage.py shell -c "
+from apps.accounts.models import User
+from apps.moderation import services
+try:
+    services.$1(User.objects.get(username='part11c_$2_$id').pk, moderator=User.objects.get(username='part11c_$3_$id'))
+    print('$3: $1 on $2 done')
+except services.ActionRefused as refused:
+    print('$3: $1 on $2 refused:', refused.refusal.code)
+" | tail -1; }   # modacct <action> <account> <moderator>: what the admin's account action does
+echo "id=$id"                                       # write this down: the browser steps use it
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+8 accounts made
+eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi
+id=083602
+```
+
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- Logging in is limited to 30 a minute per address (Part 1), far more than this part needs.
+
+**If it differs:** `null null …` means the logins failed: `runserver` isn't running in window 1, or `jq` is missing.
+Fix that and run the block again from `id=$(date +%H%M%S)`.
+
+#### Step 4: Who may post an emergency
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads the `emergency` block of the fact allowance for `ada` (30 days old) and for `new` (made
+today), has `new` try to post an emergency anyway, and tries an emergency **opinion**.
+
+```bash
+echo "--- ada: 30 days old, score 50"; get /me/fact-quota/ "$ada" '.emergency'
+echo "--- new: made today"; get /me/fact-quota/ "$new" '.emergency | {allowed, reason}'
+echo "--- new tries anyway"; send POST /posts/ "$new" '{"content":"Smoke over the river","post_type":"fact","is_emergency":true}' '{code, reason, detail}'
+echo "--- an emergency opinion"; send POST /posts/ "$ada" '{"content":"I think the storm will be bad","post_type":"opinion","is_emergency":true}'
+```
+
+**You should see** (the date in `new`'s answer is 7 days after you made the account):
+
+```text
+--- ada: 30 days old, score 50
+200  {"allowed":true,"reason":null,"next_allowed_at":null,"block_days":30}
+--- new: made today
+200  {"allowed":false,"reason":"account_too_new"}
+--- new tries anyway
+403  {"code":"emergency_not_allowed","reason":"account_too_new","detail":"Your account is too new to post an emergency. You can from Oct 27, 2026 at 02:36 UTC."}
+--- an emergency opinion
+400  {"is_emergency":["Only fact posts can be emergencies."]}
+```
+
+- `block_days` is the block a FALSE emergency would bring (your `emergency_false_cooldown_days`): the composer's
+  confirmation states it.
+- A refusal is a **403** `emergency_not_allowed` with the rule (`reason`), when it stops refusing (`next_allowed_at`,
+  `null` when no time will) and the words the composer shows. Only a fact can be an emergency: an opinion is a 400 on the
+  field, and the database refuses one too.
+
+#### Step 5: An emergency is pinned, checked first, and a FALSE result goes to a moderator
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts an emergency that the stub will call FALSE. You read it, let the pipeline check it,
+read it again, look at Recent's first page, and have her try a second emergency the same day.
+
+```bash
+p1=$(mk "$ada" '{"content":"Gas leak reported on Main Street #false","post_type":"fact","is_emergency":true}')
+echo "--- the new emergency"; get /posts/$p1/ "" '{is_emergency, emergency_active, emergency_demoted, created_at, emergency_expires_at}'
+sleep 3; python manage.py process_pending | tail -1                 # checks what the background check has not reached yet
+echo "--- after the check: a FALSE on an active emergency goes to review"; get /posts/$p1/ "" '{status, emergency_active}'
+echo "--- Recent's first page pins it, and its list leaves it out"; get /posts/ "" "{pinned: $mine, in_list: ([.results[].post.id] | index(\"$p1\"))}"
+echo "--- a second emergency the same day"; send POST /posts/ "$ada" '{"content":"A second warning","post_type":"fact","is_emergency":true}' '{code, reason}'
+```
+
+**You should see** (`process_pending` also checks facts left pending by earlier tests, so its number differs):
+
+```text
+--- the new emergency
+200  {"is_emergency":true,"emergency_active":true,"emergency_demoted":false,"created_at":"2026-10-20T02:36:04.015594Z","emergency_expires_at":"2026-10-21T02:36:04.015594Z"}
+Processed 9 fact posts.
+--- after the check: a FALSE on an active emergency goes to review
+200  {"status":"under_review","emergency_active":true}
+--- Recent's first page pins it, and its list leaves it out
+200  {"pinned":["Gas leak reported on Main Street #false"],"in_list":null}
+--- a second emergency the same day
+403  {"code":"emergency_not_allowed","reason":"daily_limit"}
+```
+
+- The expiry is stored when the post is made: exactly 24 hours later (`emergency_expires_at`).
+- The stub said FALSE 92, which would label any other fact FALSE. On an **active** emergency it is never applied by
+  itself: the post is UNDER REVIEW, still pinned (`emergency_active: true`), and first in the moderators' queue.
+- Recent's first page has a `pinned` list (at most 3, newest first, with `pinned_total` counting all of them; yours may
+  include other people's) and leaves every pinned post out of its `results` (`in_list: null`). Later pages have
+  `pinned: []`.
+
+#### Step 6: Two reports are enough, Show all, and the Following tab
+
+**Where:** Terminal window 2.
+
+**What this does:** `cy` posts an emergency the stub calls TRUE. `rep1` and `rep2` report it. You list every active
+emergency (what "Show all" loads), and `bo` follows `cy` and reads his Following feed.
+
+```bash
+p2=$(mk "$cy" '{"content":"The north bridge is closed until Friday #true","post_type":"fact","is_emergency":true}')
+sleep 3; python manage.py process_pending | tail -1
+echo "--- cy's emergency: verified, and still pinned"; get /posts/$p2/ "" '{status, emergency_active}'
+echo "--- two reports"; send POST /posts/$p2/report/ "$rep1" '{"reason":"inaccurate"}'; send POST /posts/$p2/report/ "$rep2" '{"reason":"misleading"}'
+echo "--- two were enough while it is pinned"; get /posts/$p2/ "" '{status, emergency_active}'
+echo "--- Show all: every active emergency, newest first"; get /posts/emergencies/ "" "[.results[] | select(.author.username | endswith(\"_$id\")) | .content]"
+echo "--- bo follows cy: his Following tab pins her post"; send POST /users/part11c_cy_$id/follow/ "$bo"; get /feed/ "$bo" '{pinned: [.pinned[].content], results: [.results[].post.content]}'
+echo "--- the following scope needs a login"; get "/posts/emergencies/?feed=following" "" '{code}'
+```
+
+**You should see:**
+
+```text
+Processed 0 fact posts.
+--- cy's emergency: verified, and still pinned
+200  {"status":"verified_true","emergency_active":true}
+--- two reports
+201  {"reported":true}
+201  {"reported":true}
+--- two were enough while it is pinned
+200  {"status":"under_review","emergency_active":true}
+--- Show all: every active emergency, newest first
+200  ["The north bridge is closed until Friday #true","Gas leak reported on Main Street #false"]
+--- bo follows cy: his Following tab pins her post
+201  {"is_following":true}
+200  {"pinned":["The north bridge is closed until Friday #true"],"results":[]}
+--- the following scope needs a login
+401  {"code":"not_authenticated"}
+```
+
+- A verified emergency stays pinned until its 24 hours are over.
+- While a post is pinned, **2** counting reports send it to review instead of 5 (your `emergency_report_threshold` and
+  `report_threshold`); it keeps its priority while it is reviewed.
+- `GET /api/v1/posts/emergencies/` lists every active emergency, 20 a page; `?feed=following` lists only the ones by the
+  people you follow and by you, and needs a login.
+- The Following feed pins the emergencies of the people `bo` follows and his own, and leaves them out of `results`
+  (here `cy` has no other post). A repost of a pinned post would be left out too; a repost of someone else's emergency
+  stays in the list, with its chip.
+
+#### Step 7: A moderator marks the emergency FALSE
+
+**Where:** Terminal window 2.
+
+**What this does:** `mod1` marks `ada`'s emergency FALSE (what the admin's **Mark FALSE** button does). You read the
+post, Recent's pinned list, her allowance, her credibility ledger and the post's audit rows.
+
+```bash
+modpost mark_false $p1 mod1
+echo "--- the post"; get /posts/$p1/ "" '{status, emergency_active, emergency_demoted}'
+echo "--- Recent no longer pins it"; get /posts/ "" "$mine"
+echo "--- ada may not post an emergency now"; get /me/fact-quota/ "$ada" '.emergency | {allowed, reason}'
+echo "--- her ledger: the emergency weight"; get /me/reputation/events/ "$ada" '[.results[] | {kind, negative, score_after}]'
+echo "--- the post's audit rows"; python manage.py shell -c "
+from apps.moderation.models import ModerationAction
+for r in ModerationAction.objects.filter(post_id='$p1').order_by('created_at'):
+    print(r.get_action_display().ljust(26), r.moderator.username.split('_')[1], r.blocked_until.date() if r.blocked_until else '')
+" | tail -3
+```
+
+**You should see** (the block's end date is 30 days after today):
+
+```text
+mod1: mark_false done
+--- the post
+200  {"status":"verified_false","emergency_active":false,"emergency_demoted":true}
+--- Recent no longer pins it
+200  ["The north bridge is closed until Friday #true"]
+--- ada may not post an emergency now
+200  {"allowed":false,"reason":"score_too_low"}
+--- her ledger: the emergency weight
+200  [{"kind":"emergency_false","negative":"3.00","score_after":38}]
+--- the post's audit rows
+Marked FALSE               mod1 
+Emergency demoted          mod1 
+Emergency posting blocked  mod1 2026-11-19
+```
+
+- Marking FALSE ends the priority at once (`emergency_demoted: true`), so the post left the pinned list.
+- An emergency labelled FALSE costs N + 3 instead of N + 1: `100 · 5 / 13` is 38.5, rounded half up to **38** (she has
+  only one counted event, so the public still sees "New").
+- Her emergency posting is now blocked for 30 days, but the allowance says `score_too_low`: the score rule comes
+  before the block rule, and 38 is below 40.
+- Three audit rows, written 1 µs apart in this order: the label, the end of the priority, the block (with its end).
+
+#### Step 8: The FALSE is overturned on appeal, and the block lifts
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` asks for another look at the FALSE label. `mod1`, who made the first decision, tries to
+decide the appeal (refused), then `mod2` marks the post verified. You read the post, her allowance, and her block rows.
+
+```bash
+echo "--- ada asks for another look"; send POST /posts/$p1/appeal/ "$ada" '{"reason":"The gas company confirmed the leak."}' '{status, appeal_status}'
+modpost mark_verified $p1 mod1
+modpost mark_verified $p1 mod2
+echo "--- the post"; get /posts/$p1/ "" '{status, emergency_active, emergency_demoted}'
+echo "--- the block is lifted; the daily limit still counts her post"; get /me/fact-quota/ "$ada" '.emergency | {allowed, reason}'
+echo "--- ada's block rows"; python manage.py shell -c "
+from apps.accounts.models import User
+from apps.moderation.models import ModerationAction
+print('blocked until:', User.objects.get(username='part11c_ada_$id').emergency_blocked_until)
+for r in ModerationAction.objects.filter(subject_user__username='part11c_ada_$id').order_by('created_at'):
+    print(r.get_action_display().ljust(28), r.moderator.username.split('_')[1], '|', r.notes)
+" | tail -3
+```
+
+**You should see:**
+
+```text
+--- ada asks for another look
+201  {"status":"under_review","appeal_status":"open"}
+mod1: mark_verified refused: original_moderator
+mod2: mark_verified done
+--- the post
+200  {"status":"verified_true","emergency_active":false,"emergency_demoted":true}
+--- the block is lifted; the daily limit still counts her post
+200  {"allowed":false,"reason":"daily_limit"}
+--- ada's block rows
+blocked until: None
+Emergency posting blocked    mod1 | Automatic: the emergency post was labelled FALSE.
+Emergency posting unblocked  mod2 | Automatic: the FALSE label was overturned.
+```
+
+- Overturning the FALSE reverses its credibility row (her score is back to 55) and **lifts the block that FALSE
+  brought**: an `emergency_unblocked` row linked to the post, by the moderator who overturned it. Another block that
+  still stood (a manual one, or another FALSE emergency) would keep her blocked.
+- The priority doesn't come back: the post stays demoted. Her next emergency waits for the daily limit (her first
+  emergency was made less than 24 hours ago).
+
+#### Step 9: Demote emergency, and Block / Unblock emergency posting
+
+**Where:** Terminal window 2.
+
+**What this does:** `mod1` demotes `cy`'s emergency (the admin's **Demote emergency**), and `mod2` tries the same. Then
+`mod1` blocks `bo`'s emergency posting by hand, `mod2` tries to block his own, and `mod2` unblocks `bo` (the account
+actions **Block emergency posting** and **Unblock emergency posting**).
+
+```bash
+modpost demote_emergency $p2 mod1
+echo "--- cy's post"; get /posts/$p2/ "" '{status, emergency_active, emergency_demoted}'
+modpost demote_emergency $p2 mod2
+modacct block_emergency_posting bo mod1
+echo "--- bo's allowance"; get /me/fact-quota/ "$bo" '.emergency | {allowed, reason}'
+modacct block_emergency_posting mod2 mod2
+modacct unblock_emergency_posting bo mod2
+echo "--- bo's allowance"; get /me/fact-quota/ "$bo" '.emergency | {allowed, reason}'
+```
+
+**You should see:**
+
+```text
+mod1: demote_emergency done
+--- cy's post
+200  {"status":"under_review","emergency_active":false,"emergency_demoted":true}
+mod2: demote_emergency refused: not_active_emergency
+mod1: block_emergency_posting on bo done
+--- bo's allowance
+200  {"allowed":false,"reason":"blocked"}
+mod2: block_emergency_posting on mod2 refused: own_account
+mod2: unblock_emergency_posting on bo done
+--- bo's allowance
+200  {"allowed":true,"reason":null}
+```
+
+- Demote ends the priority without touching the label, the review or the reports; it is refused on anything that isn't
+  an active emergency.
+- A manual block lasts as long as the automatic one (`emergency_false_cooldown_days`); an Unblock lifts every block on
+  the account early. Nobody but a superuser blocks a superuser or themselves.
+
+#### Step 10: Emergencies on the website
+
+**Where:** Browser, `http://localhost:3000` (start window 3 first).
+
+Window 3:
+
+```bash
+cd frontend                                         # from the repo root
+npm run dev                                         # leave it running
+```
+
+**What this does:** Shows the composer's emergency toggle to an account that can't use it and to one that can, posts an
+emergency, folds the pinned section away and back, and opens a post whose priority a moderator ended. The accounts'
+emails are `part11c-<name>-<id>@example.test` (your `id` from step 3) and the password `correct-horse-battery-42`.
+
+1. Log in as `new`. Click **New post**, choose **Fact**, and look at the **Emergency** row. Log out (user menu → **Log
+   out**).
+2. Log in as `bo`. Click **New post**, type `Power is out across the harbour district`, choose **Fact**, and turn on
+   **Emergency post**. Click **Post emergency, will be checked** without ticking the box, then tick it and click again.
+3. On `/home`, look above the **Recent** list, then open the **Following** tab, then go back to **Recent**.
+4. Click **×** on the pinned section. Reload the page. Click **Show**.
+5. Open `http://localhost:3000/u/part11c_ada_<id>` and click the post "Gas leak reported on Main Street #false".
+6. Make the window narrow (or open the browser's device toolbar at 390 px wide) and repeat steps 3 to 5 (log in again
+   as `bo` if needed; don't post a second emergency: `bo` may post one a day).
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 1 | The **Emergency post** switch is greyed out and can't be turned on; under the row: "Your account is too new for emergency posts. You can post one from Oct 27, 2026." (7 days after the account was made). |
+| Step 2: on | A violet switch; a violet-bordered box "**Emergency post** · Use this only for urgent safety or public-health news."; an unticked box "I understand emergency posts are checked first, and misuse lowers my credibility score and blocks emergency posting for 30 days."; the button reads **Post emergency, will be checked**. |
+| Step 2: unticked | "Tick the box to confirm." in red under the box, and the box has the focus. Nothing is sent. |
+| Step 2: posted | The composer closes; the toast says "Posted. It's pinned while it's checked." |
+| Step 3: Recent | A violet banner **EMERGENCY POSTS** · "Pinned for a limited time and checked first." with a × at the right, and under it `bo`'s post with a violet stripe and the **EMERGENCY** chip (its status chip shows what the check said: CHECKING FACTS…, then VERIFIED or UNDER REVIEW; the pipeline never labels a pinned emergency FALSE). It is not repeated in the list below. |
+| Step 3: Following | The same post pinned above the Following list (it is `bo`'s own). |
+| Step 4 | × folds the section into one line, "1 emergency post pinned" with **SHOW** at the right; after the reload it is still folded (this tab remembers it; a new emergency would open it again); the Following tab's section stays open; **Show** opens it. |
+| Step 5 | The post page shows VERIFIED · REVIEWED, **no** violet stripe or EMERGENCY chip, and under the author row a grey line: "Posted as an emergency on Oct 20, 2026. Priority removed by a moderator." |
+| Step 6: 390 px | The banner's text wraps under "EMERGENCY POSTS"; the cards and the folded bar fit the width; nothing scrolls sideways. |
+
+- With more than three emergencies pinned, the section shows the newest three and a **Show all (N)** button that loads
+  the rest in place.
+
+#### Step 11: Emergencies in Django Admin
+
+**Where:** Browser (Django Admin).
+
+**What this does:** Logs in as `mod1`, finds `bo`'s emergency with the emergency filter, demotes it from its page, then
+blocks and unblocks `new` from the account list.
+
+1. Open `http://localhost:8000/admin/` and log in with the **email** `part11c-mod1-<id>@example.test` and the password
+   `correct-horse-battery-42`.
+2. Open **Posts**. In the filter column, under **By emergency**, click **Active**.
+3. Open `bo`'s post. At the top right click **Demote emergency**, then **Yes, demote emergency**.
+4. Open **Users**, search `part11c_new_<id>`, tick the row, choose **Block emergency posting** in **Action** and click
+   **Go**. Type `Testing Part 11C` in **Internal notes** and click **Yes, block emergency posting**.
+5. In the filter column, under **By emergency posting**, click **Blocked**. Then open `part11c_new_<id>` and scroll to
+   **Account state**.
+6. Back on **Users**, tick `part11c_new_<id>` again and run **Unblock emergency posting**.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 2 | Only the active emergencies (here `bo`'s post), whether or not they are under review: choosing this filter leaves the review queue. In the queue itself, active emergencies are listed first, and the **Emergency** column says Active, Ended or —. |
+| Step 3 | The confirmation lists the post with an **Emergency** column ("Active") and the status "… → … (priority ends)"; only internal notes can be added. After **Yes**: "Demoted 1 emergency post." On `/home` the pinned section is gone after a reload. |
+| Step 4 | The confirmation says "A block lasts 30 days, as long as the block after a FALSE emergency, and is logged with your notes." and shows the block's end; after **Yes**: "Blocked emergency posting on 1 account." |
+| Step 5 | The **Blocked** filter lists `part11c_new_<id>`. Its page shows **Emergency blocked until** (30 days ahead) and **Emergency blocks**: a table with the time, "Emergency posting blocked", `part11c_mod1_<id>`, no post, the end and your note. Nothing there can be edited. |
+| Step 6 | "Unblocked emergency posting on 1 account." |
+
+- Moderators, senior moderators and superusers can run these actions; a moderator can't block a superuser or themselves
+  (those rows are listed as skipped, with the reason). Mark FALSE's confirmation on an active emergency adds "(priority
+  ends, author blocked 30 days)". Senior moderators also see every block in the full **Moderation actions** log, with
+  the account it was about.
+
+#### Step 12: Look at the rows, and clean up
+
+**Where:** Terminal window 2 (stop window 3 with `Ctrl+C` if you like; window 1 can keep running).
+
+**What this does:** Lists this run's emergency audit rows, oldest first, then deletes the eight accounts (their posts
+go with them) and audits the credibility ledger again.
+
+```bash
+python manage.py shell -c "
+from django.db.models import Q
+from apps.moderation.models import ModerationAction
+mine = Q(subject_user__username__startswith='part11c_', subject_user__username__endswith='_$id') | Q(post__author__username__startswith='part11c_', post__author__username__endswith='_$id')
+for r in ModerationAction.objects.filter(mine, action__startswith='emergency_').select_related('moderator', 'subject_user').order_by('created_at'):
+    print(r.get_action_display().ljust(28), (r.moderator.username.split('_')[1] if r.moderator else 'auto').ljust(5), r.subject_user.username.split('_')[1] if r.subject_user else '-')
+" | tail -9
+python manage.py shell -c "
+from apps.accounts.models import User
+total = User.objects.filter(email__startswith='part11c-', email__endswith='$id@example.test').delete()[0]
+print(total, 'rows deleted: the 8 accounts, their posts and what hung on them')
+" | tail -1
+python manage.py recompute_reputation --check
+```
+
+**You should see** (the list shows the last nine rows; it depends on what you did in steps 10 and 11, and the number
+of deleted rows differs):
+
+```text
+Emergency demoted            mod1  -
+Emergency posting blocked    mod1  ada
+Emergency posting unblocked  mod2  ada
+Emergency demoted            mod1  -
+Emergency posting blocked    mod1  bo
+Emergency posting unblocked  mod2  bo
+Emergency demoted            mod1  -
+Emergency posting blocked    mod1  new
+Emergency posting unblocked  mod1  new
+30 rows deleted: the 8 accounts, their posts and what hung on them
+Checked 1426 accounts: every stored score matches the ledger.
+```
+
+- Each row shows its kind, who did it (`auto` would be the pipeline's block after a FALSE result on an expired
+  emergency) and the account it was about (`-` for a row about a post).
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole
   local database, which is destructive.
 - No real secret was used: the password of the test accounts is a throwaway, and your admin address is the default one
   unless you set `ADMIN_URL_PATH` in `backend/.env` (it is never printed here).
@@ -17793,6 +18359,608 @@ Checked 1298 accounts: every stored score matches the ledger.
   the moderator action). `cy`'s and `bo`'s rows were written in the same transaction as `ada`'s FALSE.
 - Deleting an account deletes its ledger (other people's rows about its posts stay, with an empty post link).
   `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole
+  local database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway, and your admin address is the default one
+  unless you set `ADMIN_URL_PATH` in `backend\.env` (it is never printed here).
+
+---
+
+### Part 11C: Emergency posts
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and `frontend\.env.local`.
+Part 11C adds **two migrations** (`moderation.0006_emergency_actions`, `moderation.0007_emergency_permission`), **no
+dependency**, **no new variable**, **one endpoint** (`GET /api/v1/posts/emergencies/`) and an `emergency` block in
+`GET /api/v1/me/fact-quota/`. An author can mark a **fact** post as an **emergency**: it is **pinned** at the top of
+Recent (and of the Following tab of everyone who follows the author) for 24 hours, **checked first**, and shown in
+violet. A FALSE result from the pipeline never labels an active emergency by itself: it goes to a moderator. A FALSE
+label costs the author more credibility (N + 3) and **blocks their emergency posting for 30 days**; the block lifts if
+that FALSE is overturned. Moderators get **Demote emergency** (ends the priority), **Block / Unblock emergency posting**
+on accounts, and an emergency filter in the queue, where active emergencies come first.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 12 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for steps 3 to 9 and 12**: the variables and functions you set in step 3 (`$id`, `$ada`, `$bo`, `$cy`, `$new`, `$rep1`, `$rep2`, `$api`, `$mine`, `Login`, `Mk`, `Send`, `Fetch`, `ModPost`, `ModAcct`) and in steps 5 and 6 (`$p1`, `$p2`) only live in that one terminal. If you close it, start again from step 3. | 1 to 9, 12 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 10 |
+| Browser | Steps 10 and 11 | 10, 11 |
+
+Things to know first:
+
+- **Who may post an emergency** (checked in this order; the first rule that fails is the `reason`): a verified email
+  (`unverified`), an account at least 7 days old (`account_too_new`), a credibility score of at least 40
+  (`score_too_low`), no emergency block (`blocked`), at most 1 emergency in the last 24 hours (`daily_limit`), and room in
+  the fact allowance, which emergencies count toward (`fact_quota`). The numbers are your platform settings (Part 0A's
+  defaults: 24 h pinned, 1 a day, 7 days, 40, 2 reports, 30 days).
+- **"Active"** means: an emergency, not demoted, not removed or deleted, and its 24 hours not over. It is worked out
+  every time a post is read; no job runs.
+- **The accounts.** Step 3 makes eight straight in the database, all with the throwaway password
+  `correct-horse-battery-42`: `ada` and `cy` (authors, 30 days old), `bo` (follows `cy`, 30 days old), `new` (made
+  today), `rep1` and `rep2` (reporters, 30 days old, so their reports count), `mod1` and `mod2` (moderators). No sign-up
+  and no email are needed, so this part works offline.
+- **The pipeline is the stub** (Part 9): `#false` gives FALSE 92, `#true` VERIFIED 95%. With your `.env`'s default
+  `PIPELINE_INLINE_KICK`, a new fact is checked in the background right after it is posted; the `process_pending` lines
+  check whatever it hasn't reached.
+- **Your admin address** is `http://localhost:8000/admin/` unless `ADMIN_URL_PATH` in `backend\.env` says otherwise (then
+  use that address in step 11).
+- The outputs below were recorded on Linux on 2026-10-20 with the bash twin of each block (Guide 1), against a server
+  with these settings; the PowerShell blocks were written to match and **have not been run on Windows**. The browser
+  steps were checked the same day with headless Chromium (at 1280 and 390 px, screenshots looked at), not by a person
+  at a keyboard. Ids, numbers in names, dates and times differ on every run. Other
+  accounts' emergencies don't show: the commands filter on this run's `id`.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies Part 11C's two
+migrations, confirms there is nothing more to make, runs the whole backend test suite and Part 11C's own test files, the
+linter and the formatter check, and audits the credibility ledger of your local database.
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                            # 2 migrations the first time, then: No migrations to apply.
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 3644 passed
+python -m pytest apps/posts/tests/test_emergency.py apps/posts/tests/test_api_pinned.py apps/social/tests/test_api_feed_pinned.py apps/moderation/tests/test_services_emergency.py apps/moderation/tests/test_races_emergency.py apps/moderation/tests/test_admin_emergency.py -q   # 122 passed
+ruff check . ; ruff format --check .                # All checks passed! / 276 files already formatted
+python manage.py recompute_reputation --check       # Checked … accounts: every stored score matches the ledger.
+```
+
+**You should see:** the first `migrate` prints two `Applying …` lines:
+
+```text
+  Applying moderation.0006_emergency_actions... OK
+  Applying moderation.0007_emergency_permission... OK
+```
+
+(a second run prints `No migrations to apply.`), then `No changes detected` and `System check identified no issues (0
+silenced).`; the full run ends with `3644 passed`, Part 11C's own files with `122 passed`, the next pair is
+`All checks passed!` and `276 files already formatted`, and the last line is `Checked 1426 accounts: every stored score
+matches the ledger.` (your number of accounts differs). Counts may grow later; what matters is that nothing fails.
+
+- `moderation.0006_emergency_actions` adds the audit kind `emergency_unblocked`, a `blocked_until` column on the
+  moderation log (with a check: set exactly on a block row) and the permission "Can block or unblock emergency posting".
+  `moderation.0007_emergency_permission` gives that permission to the Moderators group. Both can be undone with
+  `python manage.py migrate moderation 0005` (the groups go back to Part 11B's permissions), as long as no
+  `emergency_unblocked` row exists yet.
+- Part 11C's own files cover the eligibility rules (every reason, their order and their edges), the pinned lists (at
+  most 3, never repeated, pinned at 23 h 59 min and not at 24 h 01 min), the moderation services and their audit rows,
+  three real-thread races (a Mark FALSE and an Unblock at once among them), and the admin. The whole suite also runs the
+  routing, processor, report-threshold and random-walk tests that changed.
+- Existing tests changed on purpose: the post object has 25 keys (`emergency_demoted`), a first feed page costs one
+  query more (the pinned list), the moderation group's permissions (`test_roles.py` now checks migration 0007), and the
+  credibility tests that labelled an *active* emergency FALSE through the pipeline now use an expired one.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last command) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 127 files, 1782 tests passed
+npm run build
+npm run test:e2e                                    # 43 passed
+cd ..\backend                                       # back to backend\ for steps 3 to 9
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  127 passed (127)` and `Tests  1782
+passed (1782)`. `npm run build` lists the same routes as in Part 11B (Part 11C adds no page). The end-to-end run ends
+with `43 passed`.
+
+- The new end-to-end file (`e2e/emergency.spec.ts`) signs nobody up. One test shows a new account the disabled toggle
+  and its reason. The other has an eligible author post a `#false` emergency through the composer, finds it pinned on
+  Recent with EMERGENCY, runs the pipeline (UNDER REVIEW, still pinned), has a moderator mark it FALSE, and checks it
+  left the pinned section and shows FALSE · REVIEWED without the chip. Both read your platform settings and skip with a
+  message if they make an emergency impossible.
+
+#### Step 3: Start the server and make eight accounts
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 9 and
+12.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you make the eight accounts with a shell
+command, log six of them in through the API (keeping their login tokens in `$ada`, `$bo`, `$cy`, `$new`, `$rep1` and
+`$rep2`), and save the helpers `Mk` (make a post, print its id), `Fetch` (a GET, printing the status code and then the
+answer), `Send` (any request, the same way), `$mine` (a script block that keeps this run's pinned posts), and `ModPost`
+and `ModAcct`, which do what the admin's buttons do on a post or an account (and print a refusal instead of failing).
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 and 2 leave you there). If you opened a new terminal, first run
+`cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the names are new each run
+@"
+import datetime
+from allauth.account.models import EmailAddress
+from django.utils import timezone
+from apps.accounts.models import Role, User
+for name, role, days in (('ada', Role.USER, 30), ('bo', Role.USER, 30), ('cy', Role.USER, 30), ('new', Role.USER, 0), ('rep1', Role.USER, 30), ('rep2', Role.USER, 30), ('mod1', Role.MODERATOR, 30), ('mod2', Role.MODERATOR, 30)):
+    user = User.objects.create_user(email=f'part11c-{name}-$id@example.test', username=f'part11c_{name}_$id', password='correct-horse-battery-42', is_email_verified=True, role=role)
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+    User.objects.filter(pk=user.pk).update(created_at=timezone.now() - datetime.timedelta(days=days))
+print(User.objects.filter(email__startswith='part11c-', email__endswith='$id@example.test').count(), 'accounts made')
+"@ | python manage.py shell | Select-Object -Last 1
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+# Login <name>: prints a login token
+function Login($name) {
+@"
+{"email": "part11c-$name-$id@example.test", "password": "correct-horse-battery-42"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-login.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-login.json" http://localhost:8000/api/auth/app/v1/auth/login | ConvertFrom-Json).meta.access_token
+}
+$ada = Login ada; $bo = Login bo; $cy = Login cy; $new = Login new; $rep1 = Login rep1; $rep2 = Login rep2
+"$($ada.Substring(0,10)) $($bo.Substring(0,10)) $($cy.Substring(0,10)) $($new.Substring(0,10)) $($rep1.Substring(0,10)) $($rep2.Substring(0,10))"   # six token prefixes, not an error
+$api = 'http://localhost:8000/api/v1'
+# Mk <token> <json>: makes a post, prints its id
+function Mk($token, $json) {
+  $json | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+  (curl.exe -s -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | ConvertFrom-Json).id
+}
+# Send <METHOD> <path> [token] [json body] [fields]: prints the HTTP status, then the answer. `fields` is a list
+# of property names to keep, or a script block `{ param($r) ... }` that picks what to show from the answer.
+function Send($method, $path, $token, $json, $show) {
+  $a = @()
+  if ($token) { $a += '-H', "Authorization: Bearer $token" }
+  if ($json) {
+    $json | Set-Content -Encoding ascii $env:TEMP\rz-body.json
+    $a += '-H', 'Content-Type: application/json', '--data-binary', "@$env:TEMP\rz-body.json"
+  }
+  $out = curl.exe -s -w "`n%{http_code}" -X $method @a "$api$path"
+  $body = if ($out.Count -gt 1) { $out[0..($out.Count - 2)] -join '' } else { '' }
+  if ($show -and $body) {
+    $r = $body | ConvertFrom-Json
+    $shown = if ($show -is [scriptblock]) { & $show $r } else { $r | Select-Object $show }
+    $body = ConvertTo-Json -InputObject $shown -Depth 5 -Compress
+  }
+  "$($out[-1])  $body"
+}
+function Fetch($path, $token, $show) { Send GET $path $token $null $show }   # Fetch <path> [token] [fields]
+$mine = { param($r) , @($r.pinned | Where-Object { $_.author.username -like "*_$id" } | ForEach-Object { $_.content }) }   # this run's pinned posts
+# ModPost <action> <post id> <moderator>: what the admin's button does (a refusal is printed, not raised)
+function ModPost($action, $post, $moderator) {
+@"
+from apps.accounts.models import User
+from apps.moderation import services
+try:
+    services.$action('$post', moderator=User.objects.get(username='part11c_$($moderator)_$id'))
+    print('$($moderator): $action done')
+except services.ActionRefused as refused:
+    print('$($moderator): $action refused:', refused.refusal.code)
+"@ | python manage.py shell | Select-Object -Last 1
+}
+# ModAcct <action> <account> <moderator>: what the admin's account action does
+function ModAcct($action, $account, $moderator) {
+@"
+from apps.accounts.models import User
+from apps.moderation import services
+try:
+    services.$action(User.objects.get(username='part11c_$($account)_$id').pk, moderator=User.objects.get(username='part11c_$($moderator)_$id'))
+    print('$($moderator): $action on $account done')
+except services.ActionRefused as refused:
+    print('$($moderator): $action on $account refused:', refused.refusal.code)
+"@ | python manage.py shell | Select-Object -Last 1
+}
+"id=$id"                                            # write this down: the browser steps use it
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+8 accounts made
+eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi
+id=083602
+```
+
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+- Logging in is limited to 30 a minute per address (Part 1), far more than this part needs.
+
+**If it differs:** an error about `Substring` on a null value means the logins failed (`runserver` isn't running in
+window 1). Start it and run the block again from `$id = Get-Date …`.
+
+#### Step 4: Who may post an emergency
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads the `emergency` block of the fact allowance for `ada` (30 days old) and for `new` (made
+today), has `new` try to post an emergency anyway, and tries an emergency **opinion**.
+
+```powershell
+"--- ada: 30 days old, score 50"; Fetch "/me/fact-quota/" $ada { param($r) $r.emergency }
+"--- new: made today"; Fetch "/me/fact-quota/" $new { param($r) $r.emergency | Select-Object allowed, reason }
+"--- new tries anyway"; Send POST "/posts/" $new '{"content":"Smoke over the river","post_type":"fact","is_emergency":true}' code, reason, detail
+"--- an emergency opinion"; Send POST "/posts/" $ada '{"content":"I think the storm will be bad","post_type":"opinion","is_emergency":true}'
+```
+
+**You should see** (the date in `new`'s answer is 7 days after you made the account):
+
+```text
+--- ada: 30 days old, score 50
+200  {"allowed":true,"reason":null,"next_allowed_at":null,"block_days":30}
+--- new: made today
+200  {"allowed":false,"reason":"account_too_new"}
+--- new tries anyway
+403  {"code":"emergency_not_allowed","reason":"account_too_new","detail":"Your account is too new to post an emergency. You can from Oct 27, 2026 at 02:36 UTC."}
+--- an emergency opinion
+400  {"is_emergency":["Only fact posts can be emergencies."]}
+```
+
+- `block_days` is the block a FALSE emergency would bring (your `emergency_false_cooldown_days`): the composer's
+  confirmation states it.
+- A refusal is a **403** `emergency_not_allowed` with the rule (`reason`), when it stops refusing (`next_allowed_at`,
+  `null` when no time will) and the words the composer shows. Only a fact can be an emergency: an opinion is a 400 on the
+  field, and the database refuses one too.
+
+#### Step 5: An emergency is pinned, checked first, and a FALSE result goes to a moderator
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts an emergency that the stub will call FALSE. You read it, let the pipeline check it,
+read it again, look at Recent's first page, and have her try a second emergency the same day.
+
+```powershell
+$p1 = Mk $ada '{"content":"Gas leak reported on Main Street #false","post_type":"fact","is_emergency":true}'
+"--- the new emergency"; Fetch "/posts/$p1/" $null is_emergency, emergency_active, emergency_demoted, created_at, emergency_expires_at
+Start-Sleep 3; python manage.py process_pending | Select-Object -Last 1      # checks what the background check has not reached yet
+"--- after the check: a FALSE on an active emergency goes to review"; Fetch "/posts/$p1/" $null status, emergency_active
+"--- Recent's first page pins it, and its list leaves it out"; Fetch "/posts/" $null { param($r) [ordered]@{ pinned = (& $mine $r); in_list = (@($r.results.post.id) -contains $p1) } }
+"--- a second emergency the same day"; Send POST "/posts/" $ada '{"content":"A second warning","post_type":"fact","is_emergency":true}' code, reason
+```
+
+**You should see** (`process_pending` also checks facts left pending by earlier tests, so its number differs):
+
+```text
+--- the new emergency
+200  {"is_emergency":true,"emergency_active":true,"emergency_demoted":false,"created_at":"2026-10-20T02:36:04.015594Z","emergency_expires_at":"2026-10-21T02:36:04.015594Z"}
+Processed 9 fact posts.
+--- after the check: a FALSE on an active emergency goes to review
+200  {"status":"under_review","emergency_active":true}
+--- Recent's first page pins it, and its list leaves it out
+200  {"pinned":["Gas leak reported on Main Street #false"],"in_list":false}
+--- a second emergency the same day
+403  {"code":"emergency_not_allowed","reason":"daily_limit"}
+```
+
+- The expiry is stored when the post is made: exactly 24 hours later (`emergency_expires_at`).
+- The stub said FALSE 92, which would label any other fact FALSE. On an **active** emergency it is never applied by
+  itself: the post is UNDER REVIEW, still pinned (`emergency_active: true`), and first in the moderators' queue.
+- Recent's first page has a `pinned` list (at most 3, newest first, with `pinned_total` counting all of them; yours may
+  include other people's) and leaves every pinned post out of its `results` (`in_list: false`). Later pages have
+  `pinned: []`.
+
+#### Step 6: Two reports are enough, Show all, and the Following tab
+
+**Where:** Terminal window 2.
+
+**What this does:** `cy` posts an emergency the stub calls TRUE. `rep1` and `rep2` report it. You list every active
+emergency (what "Show all" loads), and `bo` follows `cy` and reads his Following feed.
+
+```powershell
+$p2 = Mk $cy '{"content":"The north bridge is closed until Friday #true","post_type":"fact","is_emergency":true}'
+Start-Sleep 3; python manage.py process_pending | Select-Object -Last 1
+"--- cy's emergency: verified, and still pinned"; Fetch "/posts/$p2/" $null status, emergency_active
+"--- two reports"; Send POST "/posts/$p2/report/" $rep1 '{"reason":"inaccurate"}'; Send POST "/posts/$p2/report/" $rep2 '{"reason":"misleading"}'
+"--- two were enough while it is pinned"; Fetch "/posts/$p2/" $null status, emergency_active
+"--- Show all: every active emergency, newest first"; Fetch "/posts/emergencies/" $null { param($r) , @($r.results | Where-Object { $_.author.username -like "*_$id" } | ForEach-Object { $_.content }) }
+"--- bo follows cy: his Following tab pins her post"; Send POST "/users/part11c_cy_$id/follow/" $bo; Fetch "/feed/" $bo { param($r) [ordered]@{ pinned = @($r.pinned.content); results = @($r.results.post.content) } }
+"--- the following scope needs a login"; Fetch "/posts/emergencies/?feed=following" $null code
+```
+
+**You should see:**
+
+```text
+Processed 0 fact posts.
+--- cy's emergency: verified, and still pinned
+200  {"status":"verified_true","emergency_active":true}
+--- two reports
+201  {"reported":true}
+201  {"reported":true}
+--- two were enough while it is pinned
+200  {"status":"under_review","emergency_active":true}
+--- Show all: every active emergency, newest first
+200  ["The north bridge is closed until Friday #true","Gas leak reported on Main Street #false"]
+--- bo follows cy: his Following tab pins her post
+201  {"is_following":true}
+200  {"pinned":["The north bridge is closed until Friday #true"],"results":[]}
+--- the following scope needs a login
+401  {"code":"not_authenticated"}
+```
+
+- A verified emergency stays pinned until its 24 hours are over.
+- While a post is pinned, **2** counting reports send it to review instead of 5 (your `emergency_report_threshold` and
+  `report_threshold`); it keeps its priority while it is reviewed.
+- `GET /api/v1/posts/emergencies/` lists every active emergency, 20 a page; `?feed=following` lists only the ones by the
+  people you follow and by you, and needs a login.
+- The Following feed pins the emergencies of the people `bo` follows and his own, and leaves them out of `results`
+  (here `cy` has no other post). A repost of a pinned post would be left out too; a repost of someone else's emergency
+  stays in the list, with its chip.
+
+#### Step 7: A moderator marks the emergency FALSE
+
+**Where:** Terminal window 2.
+
+**What this does:** `mod1` marks `ada`'s emergency FALSE (what the admin's **Mark FALSE** button does). You read the
+post, Recent's pinned list, her allowance, her credibility ledger and the post's audit rows.
+
+```powershell
+ModPost mark_false $p1 mod1
+"--- the post"; Fetch "/posts/$p1/" $null status, emergency_active, emergency_demoted
+"--- Recent no longer pins it"; Fetch "/posts/" $null $mine
+"--- ada may not post an emergency now"; Fetch "/me/fact-quota/" $ada { param($r) $r.emergency | Select-Object allowed, reason }
+"--- her ledger: the emergency weight"; Fetch "/me/reputation/events/" $ada { param($r) , @($r.results | Select-Object kind, negative, score_after) }
+"--- the post's audit rows"
+@"
+from apps.moderation.models import ModerationAction
+for r in ModerationAction.objects.filter(post_id='$p1').order_by('created_at'):
+    print(r.get_action_display().ljust(26), r.moderator.username.split('_')[1], r.blocked_until.date() if r.blocked_until else '')
+"@ | python manage.py shell | Select-Object -Last 3
+```
+
+**You should see** (the block's end date is 30 days after today):
+
+```text
+mod1: mark_false done
+--- the post
+200  {"status":"verified_false","emergency_active":false,"emergency_demoted":true}
+--- Recent no longer pins it
+200  ["The north bridge is closed until Friday #true"]
+--- ada may not post an emergency now
+200  {"allowed":false,"reason":"score_too_low"}
+--- her ledger: the emergency weight
+200  [{"kind":"emergency_false","negative":"3.00","score_after":38}]
+--- the post's audit rows
+Marked FALSE               mod1 
+Emergency demoted          mod1 
+Emergency posting blocked  mod1 2026-11-19
+```
+
+- Marking FALSE ends the priority at once (`emergency_demoted: true`), so the post left the pinned list.
+- An emergency labelled FALSE costs N + 3 instead of N + 1: `100 · 5 / 13` is 38.5, rounded half up to **38** (she has
+  only one counted event, so the public still sees "New").
+- Her emergency posting is now blocked for 30 days, but the allowance says `score_too_low`: the score rule comes
+  before the block rule, and 38 is below 40.
+- Three audit rows, written 1 µs apart in this order: the label, the end of the priority, the block (with its end).
+
+#### Step 8: The FALSE is overturned on appeal, and the block lifts
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` asks for another look at the FALSE label. `mod1`, who made the first decision, tries to
+decide the appeal (refused), then `mod2` marks the post verified. You read the post, her allowance, and her block rows.
+
+```powershell
+"--- ada asks for another look"; Send POST "/posts/$p1/appeal/" $ada '{"reason":"The gas company confirmed the leak."}' status, appeal_status
+ModPost mark_verified $p1 mod1
+ModPost mark_verified $p1 mod2
+"--- the post"; Fetch "/posts/$p1/" $null status, emergency_active, emergency_demoted
+"--- the block is lifted; the daily limit still counts her post"; Fetch "/me/fact-quota/" $ada { param($r) $r.emergency | Select-Object allowed, reason }
+"--- ada's block rows"
+@"
+from apps.accounts.models import User
+from apps.moderation.models import ModerationAction
+print('blocked until:', User.objects.get(username='part11c_ada_$id').emergency_blocked_until)
+for r in ModerationAction.objects.filter(subject_user__username='part11c_ada_$id').order_by('created_at'):
+    print(r.get_action_display().ljust(28), r.moderator.username.split('_')[1], '|', r.notes)
+"@ | python manage.py shell | Select-Object -Last 3
+```
+
+**You should see:**
+
+```text
+--- ada asks for another look
+201  {"status":"under_review","appeal_status":"open"}
+mod1: mark_verified refused: original_moderator
+mod2: mark_verified done
+--- the post
+200  {"status":"verified_true","emergency_active":false,"emergency_demoted":true}
+--- the block is lifted; the daily limit still counts her post
+200  {"allowed":false,"reason":"daily_limit"}
+--- ada's block rows
+blocked until: None
+Emergency posting blocked    mod1 | Automatic: the emergency post was labelled FALSE.
+Emergency posting unblocked  mod2 | Automatic: the FALSE label was overturned.
+```
+
+- Overturning the FALSE reverses its credibility row (her score is back to 55) and **lifts the block that FALSE
+  brought**: an `emergency_unblocked` row linked to the post, by the moderator who overturned it. Another block that
+  still stood (a manual one, or another FALSE emergency) would keep her blocked.
+- The priority doesn't come back: the post stays demoted. Her next emergency waits for the daily limit (her first
+  emergency was made less than 24 hours ago).
+
+#### Step 9: Demote emergency, and Block / Unblock emergency posting
+
+**Where:** Terminal window 2.
+
+**What this does:** `mod1` demotes `cy`'s emergency (the admin's **Demote emergency**), and `mod2` tries the same. Then
+`mod1` blocks `bo`'s emergency posting by hand, `mod2` tries to block his own, and `mod2` unblocks `bo` (the account
+actions **Block emergency posting** and **Unblock emergency posting**).
+
+```powershell
+ModPost demote_emergency $p2 mod1
+"--- cy's post"; Fetch "/posts/$p2/" $null status, emergency_active, emergency_demoted
+ModPost demote_emergency $p2 mod2
+ModAcct block_emergency_posting bo mod1
+"--- bo's allowance"; Fetch "/me/fact-quota/" $bo { param($r) $r.emergency | Select-Object allowed, reason }
+ModAcct block_emergency_posting mod2 mod2
+ModAcct unblock_emergency_posting bo mod2
+"--- bo's allowance"; Fetch "/me/fact-quota/" $bo { param($r) $r.emergency | Select-Object allowed, reason }
+```
+
+**You should see:**
+
+```text
+mod1: demote_emergency done
+--- cy's post
+200  {"status":"under_review","emergency_active":false,"emergency_demoted":true}
+mod2: demote_emergency refused: not_active_emergency
+mod1: block_emergency_posting on bo done
+--- bo's allowance
+200  {"allowed":false,"reason":"blocked"}
+mod2: block_emergency_posting on mod2 refused: own_account
+mod2: unblock_emergency_posting on bo done
+--- bo's allowance
+200  {"allowed":true,"reason":null}
+```
+
+- Demote ends the priority without touching the label, the review or the reports; it is refused on anything that isn't
+  an active emergency.
+- A manual block lasts as long as the automatic one (`emergency_false_cooldown_days`); an Unblock lifts every block on
+  the account early. Nobody but a superuser blocks a superuser or themselves.
+
+#### Step 10: Emergencies on the website
+
+**Where:** Browser, `http://localhost:3000` (start window 3 first).
+
+Window 3:
+
+```powershell
+cd C:\Users\Nafis\Downloads\Rumor-Zero\frontend
+npm run dev                                         # leave it running
+```
+
+**What this does:** Shows the composer's emergency toggle to an account that can't use it and to one that can, posts an
+emergency, folds the pinned section away and back, and opens a post whose priority a moderator ended. The accounts'
+emails are `part11c-<name>-<id>@example.test` (your `id` from step 3) and the password `correct-horse-battery-42`.
+
+1. Log in as `new`. Click **New post**, choose **Fact**, and look at the **Emergency** row. Log out (user menu → **Log
+   out**).
+2. Log in as `bo`. Click **New post**, type `Power is out across the harbour district`, choose **Fact**, and turn on
+   **Emergency post**. Click **Post emergency, will be checked** without ticking the box, then tick it and click again.
+3. On `/home`, look above the **Recent** list, then open the **Following** tab, then go back to **Recent**.
+4. Click **×** on the pinned section. Reload the page. Click **Show**.
+5. Open `http://localhost:3000/u/part11c_ada_<id>` and click the post "Gas leak reported on Main Street #false".
+6. Make the window narrow (or open the browser's device toolbar at 390 px wide) and repeat steps 3 to 5 (log in again
+   as `bo` if needed; don't post a second emergency: `bo` may post one a day).
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 1 | The **Emergency post** switch is greyed out and can't be turned on; under the row: "Your account is too new for emergency posts. You can post one from Oct 27, 2026." (7 days after the account was made). |
+| Step 2: on | A violet switch; a violet-bordered box "**Emergency post** · Use this only for urgent safety or public-health news."; an unticked box "I understand emergency posts are checked first, and misuse lowers my credibility score and blocks emergency posting for 30 days."; the button reads **Post emergency, will be checked**. |
+| Step 2: unticked | "Tick the box to confirm." in red under the box, and the box has the focus. Nothing is sent. |
+| Step 2: posted | The composer closes; the toast says "Posted. It's pinned while it's checked." |
+| Step 3: Recent | A violet banner **EMERGENCY POSTS** · "Pinned for a limited time and checked first." with a × at the right, and under it `bo`'s post with a violet stripe and the **EMERGENCY** chip (its status chip shows what the check said: CHECKING FACTS…, then VERIFIED or UNDER REVIEW; the pipeline never labels a pinned emergency FALSE). It is not repeated in the list below. |
+| Step 3: Following | The same post pinned above the Following list (it is `bo`'s own). |
+| Step 4 | × folds the section into one line, "1 emergency post pinned" with **SHOW** at the right; after the reload it is still folded (this tab remembers it; a new emergency would open it again); the Following tab's section stays open; **Show** opens it. |
+| Step 5 | The post page shows VERIFIED · REVIEWED, **no** violet stripe or EMERGENCY chip, and under the author row a grey line: "Posted as an emergency on Oct 20, 2026. Priority removed by a moderator." |
+| Step 6: 390 px | The banner's text wraps under "EMERGENCY POSTS"; the cards and the folded bar fit the width; nothing scrolls sideways. |
+
+- With more than three emergencies pinned, the section shows the newest three and a **Show all (N)** button that loads
+  the rest in place.
+
+#### Step 11: Emergencies in Django Admin
+
+**Where:** Browser (Django Admin).
+
+**What this does:** Logs in as `mod1`, finds `bo`'s emergency with the emergency filter, demotes it from its page, then
+blocks and unblocks `new` from the account list.
+
+1. Open `http://localhost:8000/admin/` and log in with the **email** `part11c-mod1-<id>@example.test` and the password
+   `correct-horse-battery-42`.
+2. Open **Posts**. In the filter column, under **By emergency**, click **Active**.
+3. Open `bo`'s post. At the top right click **Demote emergency**, then **Yes, demote emergency**.
+4. Open **Users**, search `part11c_new_<id>`, tick the row, choose **Block emergency posting** in **Action** and click
+   **Go**. Type `Testing Part 11C` in **Internal notes** and click **Yes, block emergency posting**.
+5. In the filter column, under **By emergency posting**, click **Blocked**. Then open `part11c_new_<id>` and scroll to
+   **Account state**.
+6. Back on **Users**, tick `part11c_new_<id>` again and run **Unblock emergency posting**.
+
+**You should see:**
+
+| Where | What you see |
+|---|---|
+| Step 2 | Only the active emergencies (here `bo`'s post), whether or not they are under review: choosing this filter leaves the review queue. In the queue itself, active emergencies are listed first, and the **Emergency** column says Active, Ended or —. |
+| Step 3 | The confirmation lists the post with an **Emergency** column ("Active") and the status "… → … (priority ends)"; only internal notes can be added. After **Yes**: "Demoted 1 emergency post." On `/home` the pinned section is gone after a reload. |
+| Step 4 | The confirmation says "A block lasts 30 days, as long as the block after a FALSE emergency, and is logged with your notes." and shows the block's end; after **Yes**: "Blocked emergency posting on 1 account." |
+| Step 5 | The **Blocked** filter lists `part11c_new_<id>`. Its page shows **Emergency blocked until** (30 days ahead) and **Emergency blocks**: a table with the time, "Emergency posting blocked", `part11c_mod1_<id>`, no post, the end and your note. Nothing there can be edited. |
+| Step 6 | "Unblocked emergency posting on 1 account." |
+
+- Moderators, senior moderators and superusers can run these actions; a moderator can't block a superuser or themselves
+  (those rows are listed as skipped, with the reason). Mark FALSE's confirmation on an active emergency adds "(priority
+  ends, author blocked 30 days)". Senior moderators also see every block in the full **Moderation actions** log, with
+  the account it was about.
+
+#### Step 12: Look at the rows, and clean up
+
+**Where:** Terminal window 2 (stop window 3 with `Ctrl+C` if you like; window 1 can keep running).
+
+**What this does:** Lists this run's emergency audit rows, oldest first, then deletes the eight accounts (their posts
+go with them) and audits the credibility ledger again.
+
+```powershell
+@"
+from django.db.models import Q
+from apps.moderation.models import ModerationAction
+mine = Q(subject_user__username__startswith='part11c_', subject_user__username__endswith='_$id') | Q(post__author__username__startswith='part11c_', post__author__username__endswith='_$id')
+for r in ModerationAction.objects.filter(mine, action__startswith='emergency_').select_related('moderator', 'subject_user').order_by('created_at'):
+    print(r.get_action_display().ljust(28), (r.moderator.username.split('_')[1] if r.moderator else 'auto').ljust(5), r.subject_user.username.split('_')[1] if r.subject_user else '-')
+"@ | python manage.py shell | Select-Object -Last 9
+@"
+from apps.accounts.models import User
+total = User.objects.filter(email__startswith='part11c-', email__endswith='$id@example.test').delete()[0]
+print(total, 'rows deleted: the 8 accounts, their posts and what hung on them')
+"@ | python manage.py shell | Select-Object -Last 1
+python manage.py recompute_reputation --check
+```
+
+**You should see** (the list shows the last nine rows; it depends on what you did in steps 10 and 11, and the number
+of deleted rows differs):
+
+```text
+Emergency demoted            mod1  -
+Emergency posting blocked    mod1  ada
+Emergency posting unblocked  mod2  ada
+Emergency demoted            mod1  -
+Emergency posting blocked    mod1  bo
+Emergency posting unblocked  mod2  bo
+Emergency demoted            mod1  -
+Emergency posting blocked    mod1  new
+Emergency posting unblocked  mod1  new
+30 rows deleted: the 8 accounts, their posts and what hung on them
+Checked 1426 accounts: every stored score matches the ledger.
+```
+
+- Each row shows its kind, who did it (`auto` would be the pipeline's block after a FALSE result on an expired
+  emergency) and the account it was about (`-` for a row about a post).
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole
   local database, which is destructive.
 - No real secret was used: the password of the test accounts is a throwaway, and your admin address is the default one
   unless you set `ADMIN_URL_PATH` in `backend\.env` (it is never printed here).

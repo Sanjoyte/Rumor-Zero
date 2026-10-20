@@ -1,9 +1,11 @@
 /** What the composer and the feed say (ANALYSIS b-2, b-5). Errors map from `ApiError`. */
 import { ApiError } from "@/lib/api/client";
+import { EMERGENCY_COPY } from "./emergency-copy";
 
 export const POST_MESSAGES = {
   posted: "Posted.",
   postedFact: "Posted. Checking the facts…",
+  postedEmergency: EMERGENCY_COPY.posted,
   postFailedKept: "Couldn't post. Your text is saved, so you can try again.",
   verifyToPost: "Verify your email to post. Check your inbox for the link.",
   quotaPaused: "Fact posts are paused right now. You can still post opinions.",
@@ -24,7 +26,15 @@ export function waitText(seconds: number | null): string {
 }
 
 export type ComposerFailureKind =
-  "fields" | "quota" | "paused" | "throttled" | "unverified" | "waking" | "network" | "other";
+  | "fields"
+  | "quota"
+  | "paused"
+  | "emergency"
+  | "throttled"
+  | "unverified"
+  | "waking"
+  | "network"
+  | "other";
 
 export interface ComposerFailure {
   kind: ComposerFailureKind;
@@ -51,6 +61,9 @@ export function composerFailure(error: unknown): ComposerFailure {
       return { kind: "quota", message: error.detail, fields };
     case "fact_posts_paused":
       return { kind: "paused", message: POST_MESSAGES.quotaPaused, fields };
+    case "emergency_not_allowed":
+      // The server's words: they name the rule and the time (Part 11C).
+      return { kind: "emergency", message: error.detail || POST_MESSAGES.generic, fields };
     case "email_unverified":
       return { kind: "unverified", message: POST_MESSAGES.verifyToPost, fields };
     case "throttled":

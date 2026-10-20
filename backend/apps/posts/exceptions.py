@@ -7,12 +7,6 @@ import math
 from rest_framework.exceptions import APIException
 
 
-class EmergencyUnavailableError(APIException):
-    status_code = 400
-    default_code = "emergency_unavailable"
-    default_detail = "Emergency posts aren't available yet."
-
-
 class NotAuthorError(APIException):
     status_code = 403
     default_code = "not_author"

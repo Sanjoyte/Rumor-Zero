@@ -1,5 +1,10 @@
+import uuid
+from collections import Counter
+from datetime import timedelta
+
 from allauth.socialaccount.models import SocialApp, SocialToken
 from django.contrib import admin, messages
+from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.contrib.admin.models import LogEntry
 from django.contrib.admin.utils import NestedObjects
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
@@ -7,12 +12,22 @@ from django.contrib.auth.forms import BaseUserCreationForm
 from django.contrib.auth.forms import UserChangeForm as BaseUserChangeForm
 from django.core.exceptions import PermissionDenied
 from django.db import router
-from django.utils.html import format_html
-from django.utils.text import capfirst, get_text_list
+from django.db.models import Q
+from django.http import HttpResponseRedirect
+from django.template.response import TemplateResponse
+from django.urls import reverse
+from django.utils import timezone
+from django.utils.html import format_html, format_html_join
+from django.utils.text import Truncator, capfirst, get_text_list
 
 from apps.accounts import services
 from apps.accounts.models import Role, User
 from apps.core.admin_mixins import HistoryNeedsLog
+from apps.core.services import get_platform_settings
+from apps.moderation import rules as moderation_rules
+from apps.moderation import services as moderation_services
+from apps.moderation.forms import ConfirmActionForm
+from apps.moderation.models import ActionKind, ModerationAction
 from apps.reputation.admin import events_url
 from apps.reputation.scoring import public_score
 
@@ -44,6 +59,55 @@ def yes_no(value):
     return "yes" if value else "no"
 
 
+# ---------- Part 11C: blocking an account's emergency posting ----------
+
+BLOCK_PERMISSION = "moderation.block_emergency_posting"
+ACCOUNT_BATCH_CAP = 100  # accounts per action, as for posts
+BLOCK_KINDS = (ActionKind.EMERGENCY_BLOCKED, ActionKind.EMERGENCY_UNBLOCKED)
+Act = moderation_rules.AccountAct
+
+# action name -> (the rule's act, the label, the service, what it says when done)
+ACCOUNT_ACTIONS = {
+    "block_emergency": (
+        Act.BLOCK_EMERGENCY,
+        "Block emergency posting",
+        moderation_services.block_emergency_posting,
+        lambda n: f"Blocked emergency posting on {n} account{'' if n == 1 else 's'}.",
+    ),
+    "unblock_emergency": (
+        Act.UNBLOCK_EMERGENCY,
+        "Unblock emergency posting",
+        moderation_services.unblock_emergency_posting,
+        lambda n: f"Unblocked emergency posting on {n} account{'' if n == 1 else 's'}.",
+    ),
+}
+
+
+def when(moment):
+    """A block's end for the confirmation page, or "—"."""
+    return f"{moment:%Y-%m-%d %H:%M} UTC" if moment is not None else "—"
+
+
+class EmergencyPostingFilter(admin.SimpleListFilter):
+    """Accounts whose emergency posting is blocked right now (or not)."""
+
+    title = "emergency posting"
+    parameter_name = "emergency_posting"
+
+    def lookups(self, request, model_admin):
+        return [("blocked", "Blocked"), ("free", "Not blocked")]
+
+    def queryset(self, request, queryset):
+        now = timezone.now()
+        if self.value() == "blocked":
+            return queryset.filter(emergency_blocked_until__gt=now)
+        if self.value() == "free":
+            return queryset.filter(
+                Q(emergency_blocked_until__isnull=True) | Q(emergency_blocked_until__lte=now)
+            )
+        return queryset
+
+
 @admin.register(User)
 class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
     """Accounts in Django Admin. A **superuser** has the whole form. A **senior moderator** sees
@@ -65,10 +129,17 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
         "is_active",
         "created_at",
     )
-    list_filter = ("role", "is_staff", "is_superuser", "is_email_verified", "is_active")
+    list_filter = (
+        "role",
+        "is_staff",
+        "is_superuser",
+        "is_email_verified",
+        "is_active",
+        EmergencyPostingFilter,
+    )
     search_fields = ("username", "email")
     filter_horizontal = ()
-    actions = ["verify_email"]
+    actions = ["verify_email", "block_emergency", "unblock_emergency"]
 
     fieldsets = (
         (None, {"fields": ("email", "password")}),
@@ -83,6 +154,7 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
                     "avatar_version",
                     "avatar_uploads_blocked",
                     "emergency_blocked_until",
+                    "emergency_blocks",
                     "last_login",
                     "created_at",
                 )
@@ -94,8 +166,9 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
     )
     # is_staff and groups are derived from role/is_superuser on save. If the form edited them,
     # the admin's save_related would overwrite that sync. The remaining state fields get their own
-    # logged actions in Parts 11C and 14B ("Mark email verified" is below; Part 2 added none, since
-    # allauth's email_confirmed signal sets is_email_verified).
+    # logged actions ("Mark email verified" and Part 11C's Block / Unblock emergency posting are
+    # below; Part 14B adds the photo ones; Part 2 added none, since allauth's email_confirmed
+    # signal sets is_email_verified).
     readonly_fields = (
         "is_staff",
         "groups",
@@ -104,9 +177,55 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
         "avatar_version",
         "avatar_uploads_blocked",
         "emergency_blocked_until",
+        "emergency_blocks",
         "last_login",
         "created_at",
     )
+
+    # --- the emergency blocks (Part 11C): read-only, written only by the moderation service ---
+
+    @admin.display(description="Emergency blocks")
+    def emergency_blocks(self, user):
+        """The account's emergency blocks and unblocks, newest first: the automatic ones (a post's
+        FALSE, or its overturn) and a moderator's. A manual row has no post, so no post page shows
+        it, and the full log is seniors-only. A read-only list, not an inline: an inline formset
+        would make the account form's own POST carry its management form."""
+        rows = (
+            ModerationAction.objects.filter(subject_user=user, action__in=BLOCK_KINDS)
+            .select_related("moderator")
+            .order_by("-created_at")[:50]
+        )
+
+        def cells(row):
+            if row.post_id is not None:
+                url = reverse("admin:posts_post_change", args=[row.post_id])
+                post = format_html(
+                    '<a href="{}">{}</a>', url, Truncator(row.post_snapshot).chars(60)
+                )
+            else:
+                post = "—"
+            who = row.moderator.username if row.moderator else "automatic"
+            return (
+                when(row.created_at),
+                row.get_action_display(),
+                who,
+                post,
+                when(row.blocked_until),
+                row.notes or "—",
+            )
+
+        body = format_html_join(
+            "",
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            (cells(row) for row in rows),
+        )
+        if not body:
+            return "None"
+        return format_html(
+            "<table><thead><tr><th>Time</th><th>Action</th><th>By</th><th>Post</th>"
+            "<th>Until</th><th>Notes</th></tr></thead><tbody>{}</tbody></table>",
+            body,
+        )
 
     # --- the credibility score (Part 11B): read-only, written only by the reputation service ---
 
@@ -126,11 +245,18 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
 
     def get_fieldsets(self, request, obj=None):
         fieldsets = super().get_fieldsets(request, obj)
-        if obj is None or request.user.is_superuser:
+        if obj is None:
             return fieldsets
-        # The read-only `password` field would print the hash (`ReadOnlyPasswordHashField`).
+        hidden = set()
+        if not request.user.is_superuser:
+            # The read-only `password` field would print the hash (`ReadOnlyPasswordHashField`).
+            hidden.add("password")
+        if not request.user.has_perm(BLOCK_PERMISSION):
+            hidden.add("emergency_blocks")
+        if not hidden:
+            return fieldsets
         return [
-            (name, {**options, "fields": tuple(f for f in options["fields"] if f != "password")})
+            (name, {**options, "fields": tuple(f for f in options["fields"] if f not in hidden)})
             for name, options in fieldsets
         ]
 
@@ -260,3 +386,122 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
                 "(a superuser or yourself).",
                 messages.WARNING,
             )
+
+    # --- Block / Unblock emergency posting (Part 11C) ---
+
+    def has_block_emergency_permission(self, request):
+        """Moderators and up (user decision 2026-10-19): `moderation.block_emergency_posting`."""
+        return request.user.has_perm(BLOCK_PERMISSION)
+
+    def response_action(self, request, queryset):
+        """Django filters by the posted ids itself, and an id that isn't a UUID would raise
+        `ValidationError` (a 500), as on `PostAdmin`. Drop such ids first."""
+        posted = request.POST.copy()
+        valid = []
+        for value in posted.getlist(ACTION_CHECKBOX_NAME):
+            try:
+                valid.append(str(uuid.UUID(value)))
+            except ValueError:
+                continue
+        posted.setlist(ACTION_CHECKBOX_NAME, valid)
+        request.POST = posted
+        return super().response_action(request, queryset)
+
+    @admin.action(description="Block emergency posting", permissions=["block_emergency"])
+    def block_emergency(self, request, queryset):
+        return self._account_action(request, queryset, "block_emergency")
+
+    @admin.action(description="Unblock emergency posting", permissions=["block_emergency"])
+    def unblock_emergency(self, request, queryset):
+        return self._account_action(request, queryset, "unblock_emergency")
+
+    def _account_action(self, request, queryset, name):
+        """First POST: show which accounts change (their block now and after) and which are
+        skipped, with the internal notes. The confirmation POST (`apply`): do it, account by
+        account, through the service. As on `PostAdmin`, the apply step acts on exactly the
+        accounts shown (at most 100) and never trusts `select_across`."""
+        act, label, service, done_text = ACCOUNT_ACTIONS[name]
+        applying = "apply" in request.POST
+        if applying:
+            ids = request.POST.getlist(ACTION_CHECKBOX_NAME)
+            queryset = self.get_queryset(request).filter(pk__in=ids)
+        accounts = list(queryset.order_by("pk")[: ACCOUNT_BATCH_CAP + 1])
+        if len(accounts) > ACCOUNT_BATCH_CAP:
+            self.message_user(
+                request,
+                f"Select at most {ACCOUNT_BATCH_CAP} accounts at a time.",
+                messages.ERROR,
+            )
+            return None
+        if not accounts:
+            self.message_user(request, "No accounts to act on.", messages.WARNING)
+            return None
+        form = ConfirmActionForm(request.POST if applying else None, act=act)
+        if applying and form.is_valid():
+            return self._apply_account_action(
+                request, accounts, service, done_text, form.cleaned_data["notes"].strip()
+            )
+
+        now = timezone.now()
+        days = get_platform_settings().emergency_false_cooldown_days
+        changing, skipped = [], []
+        for account in accounts:
+            row = {
+                "account": account,
+                "username": account.username,
+                "current": when(account.emergency_blocked_until),
+            }
+            refusal = moderation_rules.account_refusal(
+                act, account, request.user, block_days=days, now=now
+            )
+            if refusal is not None:
+                skipped.append({"row": row, "why": refusal.text})
+                continue
+            if act == Act.BLOCK_EMERGENCY:
+                # The latest end of the blocks that stand: a longer block already there stays.
+                end = now + timedelta(days=days)
+                current = account.emergency_blocked_until
+                row["after"] = when(max(end, current) if current else end)
+            else:
+                row["after"] = "— (every block lifted)"
+            changing.append(row)
+        explanation = (
+            f"A block lasts {days} day{'' if days == 1 else 's'}, as long as the block after a "
+            "FALSE emergency, and is logged with your notes."
+            if act == Act.BLOCK_EMERGENCY
+            else "Unblocking lifts every block on the account early, the automatic ones too, and "
+            "is logged with your notes."
+        )
+        context = {
+            **self.admin_site.each_context(request),
+            "title": f"{label}: are you sure?",
+            "opts": self.opts,
+            "action": name,
+            "label": label,
+            "explanation": explanation,
+            "form": form,
+            "changing": changing,
+            "skipped": skipped,
+            "selected": [str(account.pk) for account in accounts],
+            "form_action": request.get_full_path(),
+            "cancel_url": request.get_full_path(),
+        }
+        return TemplateResponse(request, "moderation/admin/confirm_account_action.html", context)
+
+    def _apply_account_action(self, request, accounts, service, done_text, notes):
+        done = 0
+        skipped = Counter()
+        for account in accounts:
+            try:
+                service(account.pk, moderator=request.user, notes=notes)
+                done += 1
+            except moderation_services.ActionRefused as refused:
+                skipped[refused.refusal.text] += 1
+        if done:
+            self.message_user(request, done_text(done), messages.SUCCESS)
+        if skipped:
+            detail = ", ".join(f"{count} {why}" for why, count in sorted(skipped.items()))
+            self.message_user(
+                request, f"Skipped {sum(skipped.values())}: {detail}.", messages.WARNING
+            )
+        return HttpResponseRedirect(request.get_full_path())

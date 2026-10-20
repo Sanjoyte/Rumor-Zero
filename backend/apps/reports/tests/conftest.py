@@ -4,6 +4,7 @@ from django.conf import settings
 from apps.core.models import PlatformSettings
 from apps.core.services import get_platform_settings
 from apps.posts.tests.conftest import auth_client, verified_user  # noqa: F401  (fixtures)
+from conftest import pin_emergency_settings
 
 
 @pytest.fixture
@@ -30,3 +31,10 @@ def report_settings(db):
 @pytest.fixture(autouse=True)
 def _pinned_report_settings(report_settings):
     """Every test in this app starts from threshold 5, a 24 h window and a 24 h minimum age."""
+
+
+@pytest.fixture(autouse=True)
+def _pinned_emergency_settings(request):
+    """The six emergency settings at their defaults in every database test (Part 11C): the seed
+    comes from the developer's own `backend/.env`."""
+    pin_emergency_settings(request)

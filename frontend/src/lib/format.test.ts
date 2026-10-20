@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   countCharacters,
+  formatDate,
   formatCompactNumber,
   formatConfidence,
   formatCount,
@@ -107,5 +108,17 @@ describe("formatCount", () => {
     expect(formatCount(999)).toBe("999");
     expect(formatCount(1420)).toBe("1,420");
     expect(formatCount(1234567)).toBe("1,234,567");
+  });
+});
+
+describe("formatDate", () => {
+  it("prints the day in UTC, whatever the hour", () => {
+    expect(formatDate("2026-10-19T00:30:00Z")).toBe("Oct 19, 2026");
+    expect(formatDate("2026-10-19T23:59:59Z")).toBe("Oct 19, 2026");
+    expect(formatDate(new Date("2025-01-02T10:00:00Z"))).toBe("Jan 2, 2025");
+  });
+
+  it("prints nothing for a value that isn't a date", () => {
+    expect(formatDate("not a date")).toBe("");
   });
 });

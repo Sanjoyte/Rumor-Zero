@@ -21,6 +21,7 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     is_emergency: false,
     emergency_active: false,
     emergency_expires_at: null,
+    emergency_demoted: false,
     confidence_score: null,
     verdict_source: null,
     verdict_note: "",
@@ -73,6 +74,7 @@ export function makeQuota(overrides: Partial<FactQuota> = {}): FactQuota {
     remaining: 7,
     window_hours: 24,
     next_slot_at: null,
+    emergency: { allowed: true, reason: null, next_allowed_at: null, block_days: 30 },
     ...overrides,
   };
 }

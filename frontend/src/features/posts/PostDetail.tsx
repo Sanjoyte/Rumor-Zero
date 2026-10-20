@@ -17,13 +17,14 @@ import { VerdictStripe } from "@/components/ui/VerdictStripe";
 import type { Post } from "@/lib/api/types";
 import { cn } from "@/lib/cn";
 import { formatFullDateTime } from "@/lib/format";
-import { stripeTone } from "@/lib/post-display";
+import { emergencyShown, stripeTone } from "@/lib/post-display";
 import { AppealButton } from "@/features/appeals/AppealButton";
 import { AppealOutcome } from "@/features/appeals/AppealOutcome";
 import { CommentSection } from "@/features/social/CommentSection";
 import { PostActions } from "@/features/social/PostActions";
 import { CopyLinkButton } from "./CopyLinkButton";
 import { DeletePostModal } from "./DeletePostModal";
+import { EmergencyNote } from "./EmergencyNote";
 import { RemovedPostCard } from "./RemovedPostCard";
 import { SourceList } from "./SourceList";
 import { REMOVED_MESSAGES } from "./Tombstone";
@@ -196,7 +197,9 @@ export function PostDetail({ id, initial }: { id: string; initial: Post | null }
     );
   }
 
-  const tone = stripeTone({ status: post.status, emergencyActive: post.emergency_active });
+  // A polled FALSE ends the violet look at once, before the refetch brings `emergency_active`.
+  const urgent = emergencyShown(post);
+  const tone = stripeTone({ status: post.status, emergencyActive: urgent });
   return (
     <div className={CONTAINER}>
       <BackLink />
@@ -210,7 +213,7 @@ export function PostDetail({ id, initial }: { id: string; initial: Post | null }
             confidenceScore={post.confidence_score}
           />
           {post.appeal_status === "open" && <AppealPendingBadge />}
-          {post.emergency_active && <EmergencyBadge />}
+          {urgent && <EmergencyBadge />}
         </div>
         <h1
           className={cn(
@@ -223,6 +226,7 @@ export function PostDetail({ id, initial }: { id: string; initial: Post | null }
           {"”"}
         </h1>
         <AuthorRow post={post} />
+        <EmergencyNote post={post} />
         <div className="flex flex-wrap items-center gap-x-space-lg gap-y-space-sm border-t border-outline-variant/30 pt-space-md">
           <PostActions variant="detail" post={post} />
           <CopyLinkButton postId={post.id} />

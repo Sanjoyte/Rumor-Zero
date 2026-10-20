@@ -93,9 +93,10 @@ def test_a_report_leaves_the_query_count_unchanged(
         post = PostFactory(author=author, content=f"extra {i}")
         ReportFactory(post=post, reporter=reader)
     client = auth_client(reader)  # (building the client mints a token: keep it out of the count)
-    with django_assert_num_queries(1):  # a visitor: the page
+    # A first page also reads the pinned emergencies (Part 11C).
+    with django_assert_num_queries(2):  # a visitor: the page and the pinned list
         assert len(api_client.get("/api/v1/posts/").json()["results"]) == 20
-    with django_assert_num_queries(2):  # signed in: the user, then the page
+    with django_assert_num_queries(3):  # signed in: the user too
         assert len(client.get("/api/v1/posts/").json()["results"]) == 20
 
 

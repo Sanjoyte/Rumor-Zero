@@ -2,8 +2,10 @@
 and 5): pipeline results, reports, reposts and their undoing, appeals, every moderator action and
 author deletes, in any order the services allow.
 
-After every step the ledger must match each post's state (`pending_changes` is empty). After each
-walk:
+After every step the ledger must match each post's state (`pending_changes` is empty), and (Part
+11C) each author's `emergency_blocked_until` equals `rules.standing_block_end` of their block rows.
+The walks hold an active emergency (Mark FALSE and Demote), an expired one (the pipeline's FALSE)
+and manual Block / Unblock steps. After each walk:
 
 - `recompute_reputation --check` passes (stored scores, `score_after`, times, reversal pairs);
 - every person's stored score and sample equal what an **independent simulator** of the rules
@@ -50,7 +52,9 @@ from apps.social.models import Repost
 pytestmark = pytest.mark.django_db
 
 SEEDS = range(40)
-COVERAGE_SEEDS = range(12)  # a subset: enough to reach everything, half the time
+# A subset that reaches everything. Part 11C's fifth post and Block step made `repost_false` rarer
+# (a plain fact reposted while undecided, then labelled FALSE): 12 seeds no longer reached it.
+COVERAGE_SEEDS = range(32)
 STEPS = 40
 
 # The table, written out again for the simulator.
@@ -74,6 +78,7 @@ ACTS = {
     "escalate": Act.ESCALATE,
     "restore_post": Act.RESTORE,
     "keep_removed": Act.KEEP_REMOVED,
+    "demote_emergency": Act.DEMOTE_EMERGENCY,
 }
 
 
@@ -158,18 +163,29 @@ class Walk:
         old = timezone.now() - timedelta(days=3)  # old enough for their reports to count
         self.authors = [VerifiedUserFactory(created_at=old) for _ in range(2)]
         first, second = self.authors
-        expires = timezone.now() + timedelta(hours=24)
+        now = timezone.now()
         self.posts = [
             PostFactory(author=first, post_type=PostType.FACT, status=PostStatus.PENDING),
+            # Active for the whole walk: the pipeline's FALSE sends it to review, a moderator's
+            # Mark FALSE demotes it and blocks the author, Demote ends its priority (Part 11C).
             PostFactory(
                 author=first,
                 post_type=PostType.FACT,
                 status=PostStatus.PENDING,
                 is_emergency=True,
-                emergency_expires_at=expires,
+                emergency_expires_at=now + timedelta(hours=24),
             ),
             PostFactory(author=second, post_type=PostType.FACT, status=PostStatus.PENDING),
             PostFactory(author=second, post_type=PostType.OPINION, status=PostStatus.PUBLISHED),
+            # Its 24 hours are over: the pipeline may label it FALSE, which blocks the author.
+            PostFactory(
+                author=second,
+                post_type=PostType.FACT,
+                status=PostStatus.PENDING,
+                is_emergency=True,
+                created_at=now - timedelta(hours=25),
+                emergency_expires_at=now - timedelta(hours=1),
+            ),
         ]
         self.people = [VerifiedUserFactory(created_at=old) for _ in range(4)]
         # Two of them already hold credits from last week (3 and 4), so the cap is reached and
@@ -258,7 +274,7 @@ class Walk:
         allowed = [
             name
             for name, act in ACTS.items()
-            if rules.refusal(act, post, moderator, appeal=appeal) is None
+            if rules.refusal(act, post, moderator, appeal=appeal, now=timezone.now()) is None
         ]
         # Mostly something the rules allow (or the walk would hardly ever decide anything), and
         # sometimes anything at all, which the service must refuse without writing.
@@ -305,6 +321,22 @@ class Walk:
         self.log.append(("delete", post.content))
         return post, {}
 
+    def block(self):
+        """A moderator blocks or unblocks an author's emergency posting (Part 11C). The ledger
+        doesn't move; the block column is checked after every step."""
+        post = self.post()
+        author = self.rng.choice(self.authors)
+        moderator = self.rng.choice(self.moderators)
+        service = self.rng.choice(
+            [moderation.block_emergency_posting, moderation.unblock_emergency_posting]
+        )
+        try:
+            service(author.pk, moderator=moderator)
+        except moderation.ActionRefused:
+            return post, {}
+        self.log.append((service.__name__, author.username, moderator.username))
+        return post, {}
+
     STEP_WEIGHTS = {
         "pipeline": 4,
         "report": 6,
@@ -313,6 +345,7 @@ class Walk:
         "act": 9,
         "appeal": 3,
         "delete": 0.3,
+        "block": 1.5,
     }
 
     def run(self, steps):
@@ -325,13 +358,38 @@ class Walk:
             self.sim.settle(post, self.reposts(post), **extra)
             for each in Post.objects.filter(pk__in=[p.pk for p in self.posts]):
                 assert not services.pending_changes(each), (self.log, each.content)
+            for author in self.authors:
+                assert block_column(author) == block_end_of_rows(author), (self.log, author)
 
     def everyone(self):
         return [*self.authors, *self.people, *self.moderators]
 
 
+def block_column(author):
+    from apps.accounts.models import User
+
+    return User.objects.values_list("emergency_blocked_until", flat=True).get(pk=author.pk)
+
+
+def block_end_of_rows(author):
+    from apps.moderation.models import ActionKind, ModerationAction
+
+    rows = (
+        ModerationAction.objects.filter(
+            subject_user=author,
+            action__in=[ActionKind.EMERGENCY_BLOCKED, ActionKind.EMERGENCY_UNBLOCKED],
+        )
+        .order_by("created_at", "id")
+        .values("action", "post_id", "blocked_until")
+    )
+    return rules.standing_block_end([rules.BlockRow(**row) for row in rows])
+
+
 def control_for(author, posts, sim):
-    """A fresh author whose posts went straight to the walk's final (label, removal) pair."""
+    """A fresh author whose posts went straight to the walk's final (label, removal) pair.
+
+    An emergency copy has already expired: the pipeline labels only such a post FALSE (an active
+    one goes to review, Part 11C), and the weight depends on `is_emergency` alone."""
     control = VerifiedUserFactory()
     for post in posts:
         label, removed = sim.author_outcome(post.pk, author.pk)
@@ -340,7 +398,9 @@ def control_for(author, posts, sim):
             post_type=post.post_type,
             status=PostStatus.PENDING if post.post_type == PostType.FACT else PostStatus.PUBLISHED,
             is_emergency=post.is_emergency,
-            emergency_expires_at=post.emergency_expires_at,
+            emergency_expires_at=(
+                timezone.now() - timedelta(minutes=1) if post.is_emergency else None
+            ),
         )
         if label is not None:
             label_by_pipeline(copy, TRUE_95 if label == K.FACT_TRUE else FALSE_95)
@@ -366,14 +426,35 @@ def test_a_random_walk_keeps_the_ledger_exact(seed, pipeline_cfg):
 def test_the_walks_reach_every_kind_of_event_and_the_cap(pipeline_cfg):
     """The walks are only worth something if they go everywhere: every event kind is written
     (reversals included), and the cap both gives a fourth credit and refuses a fifth."""
+    from apps.moderation.models import ActionKind, ModerationAction
     from apps.reputation.models import ReputationEvent
 
     seen = set()
     refused = 0
+    blocks = set()
     for seed in COVERAGE_SEEDS:
         walk = Walk(seed, pipeline_cfg)
         walk.run(STEPS)
         seen |= set(ReputationEvent.objects.values_list("kind", flat=True))
         refused += walk.sim.refused_by_cap
+        # Part 11C: which block rows the walks wrote, and whether a moderator or the pipeline
+        # (no moderator) and a post (automatic) or none (manual) were behind them.
+        blocks |= {
+            (row.action, row.post_id is not None, row.moderator_id is not None)
+            for row in ModerationAction.objects.filter(
+                action__in=[
+                    ActionKind.EMERGENCY_BLOCKED,
+                    ActionKind.EMERGENCY_UNBLOCKED,
+                    ActionKind.EMERGENCY_DEMOTED,
+                ]
+            )
+        }
     assert seen == set(K)
     assert refused > 0
+    assert {
+        (ActionKind.EMERGENCY_DEMOTED, True, True),  # Demote, or Mark FALSE while active
+        (ActionKind.EMERGENCY_BLOCKED, True, True),  # a moderator's Mark FALSE
+        (ActionKind.EMERGENCY_BLOCKED, True, False),  # the pipeline's FALSE after expiry
+        (ActionKind.EMERGENCY_BLOCKED, False, True),  # a manual Block
+        (ActionKind.EMERGENCY_UNBLOCKED, False, True),  # a manual Unblock
+    } <= blocks, blocks

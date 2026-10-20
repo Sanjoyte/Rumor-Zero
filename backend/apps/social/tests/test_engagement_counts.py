@@ -159,11 +159,12 @@ def test_every_list_keeps_a_constant_number_of_queries(api_client, auth_client, 
     author = VerifiedUserFactory(username="writer")
     FollowFactory(follower=ada, following=author)
     viewer = auth_client(ada)
-    # path -> the expected (anonymous, signed-in) counts; the Following feed has no anonymous view
+    # path -> the expected (anonymous, signed-in) counts; the Following feed has no anonymous view.
+    # A first page of Recent and Following also reads its pinned emergencies (Part 11C).
     expected = {
-        "/api/v1/posts/": (1, 2),
+        "/api/v1/posts/": (2, 3),
         "/api/v1/users/writer/posts/": (3, 4),
-        "/api/v1/feed/": (None, 3),
+        "/api/v1/feed/": (None, 4),
         "/api/v1/me/bookmarks/": (None, 3),
     }
 

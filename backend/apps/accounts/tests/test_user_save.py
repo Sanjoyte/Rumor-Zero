@@ -115,3 +115,46 @@ def test_a_full_save_of_a_partly_loaded_account_writes_only_what_was_loaded():
     partial.save()
     fresh = User.objects.get(pk=user.pk)
     assert (fresh.display_name, fresh.bio) == ("Changed meanwhile", "Kept too")
+
+
+# ---------- Part 11C: the emergency block is the moderation service's too ----------
+
+
+def block_meanwhile(user, until):
+    """As if a block (or a Mark FALSE) had committed after `user` was loaded."""
+    User.objects.filter(pk=user.pk).update(emergency_blocked_until=until)
+
+
+def stored_block(user):
+    return User.objects.filter(pk=user.pk).values_list("emergency_blocked_until", flat=True).get()
+
+
+def test_a_full_save_of_a_stale_instance_leaves_the_emergency_block_alone():
+    from django.utils import timezone
+
+    stale = User.objects.get(pk=UserFactory().pk)
+    until = timezone.now().replace(microsecond=0)
+    block_meanwhile(stale, until)
+    stale.bio = "Another bio"
+    stale.save()
+    assert stored_block(stale) == until
+    assert User.objects.get(pk=stale.pk).bio == "Another bio"
+
+
+def test_allauths_set_password_leaves_the_emergency_block_alone():
+    from django.utils import timezone
+
+    stale = User.objects.get(pk=UserFactory().pk)
+    until = timezone.now().replace(microsecond=0)
+    block_meanwhile(stale, until)
+    get_adapter().set_password(stale, "yet-another-long-password-7")
+    assert stored_block(stale) == until
+
+
+def test_a_block_set_on_the_instance_is_not_written_by_a_full_save():
+    from django.utils import timezone
+
+    user = UserFactory()
+    user.emergency_blocked_until = timezone.now()
+    user.save()
+    assert stored_block(user) is None

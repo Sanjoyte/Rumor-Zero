@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/api/client";
-import { deletePost, fetchPost, fetchStatuses, MAX_STATUS_IDS } from "./posts-api";
+import {
+  deletePost,
+  fetchEmergencies,
+  fetchPost,
+  fetchRecentFeed,
+  fetchStatuses,
+  MAX_STATUS_IDS,
+} from "./posts-api";
 
 vi.mock("@/lib/api/client", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/client")>()),
@@ -44,5 +51,36 @@ describe("fetchStatuses", () => {
     await fetchStatuses(ids);
     const url = vi.mocked(api.get).mock.calls[0][0] as string;
     expect(decodeURIComponent(url.split("ids=")[1]).split(",")).toHaveLength(MAX_STATUS_IDS);
+  });
+});
+
+describe("the pinned emergencies (Part 11C)", () => {
+  it("returns the first page's pinned list as the feed's head", async () => {
+    const pinned = [{ id: "p" }];
+    vi.mocked(api.get).mockResolvedValue({
+      pinned,
+      pinned_total: 4,
+      results: [],
+      next_cursor: "c",
+    });
+    expect(await fetchRecentFeed(null)).toEqual({
+      items: [],
+      nextCursor: "c",
+      head: { pinned, pinnedTotal: 4 },
+    });
+  });
+
+  it("lists every active emergency of a feed, with the cursor", async () => {
+    vi.mocked(api.get).mockResolvedValue({ results: [{ id: "p" }], next_cursor: "n" });
+    const signal = new AbortController().signal;
+    expect(await fetchEmergencies("recent", null, signal)).toEqual({
+      items: [{ id: "p" }],
+      nextCursor: "n",
+    });
+    expect(api.get).toHaveBeenCalledWith("/v1/posts/emergencies/?feed=recent", { signal });
+    await fetchEmergencies("following", "a b/c");
+    expect(vi.mocked(api.get).mock.calls[1][0]).toBe(
+      "/v1/posts/emergencies/?feed=following&cursor=a+b%2Fc",
+    );
   });
 });

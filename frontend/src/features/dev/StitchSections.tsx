@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { Icon } from "@/components/ui/Icon";
 import { Modal } from "@/components/ui/Modal";
 import { PasswordField } from "@/components/ui/PasswordField";
@@ -14,6 +15,8 @@ import { TextField } from "@/components/ui/TextField";
 import { Textarea } from "@/components/ui/Textarea";
 import { Toggle } from "@/components/ui/Toggle";
 import { VerdictStripe } from "@/components/ui/VerdictStripe";
+import { confirmationText, EMERGENCY_COPY } from "@/features/posts/emergency-copy";
+import { PinnedEmergencies, PinnedEmergenciesBar } from "@/features/posts/PinnedEmergencies";
 import { PostCard, type PostCardProps } from "@/features/posts/PostCard";
 import { RemovedPostCard } from "@/features/posts/RemovedPostCard";
 import type { Post } from "@/lib/api/types";
@@ -142,6 +145,7 @@ const REMOVED_AS_AUTHOR: { label: string; post: Post }[] = [
       is_emergency: false,
       emergency_active: false,
       emergency_expires_at: null,
+      emergency_demoted: false,
       confidence_score: null,
       verdict_source: null,
       verdict_note: "",
@@ -171,6 +175,7 @@ const REMOVED_AS_AUTHOR: { label: string; post: Post }[] = [
       is_emergency: false,
       emergency_active: false,
       emergency_expires_at: null,
+      emergency_demoted: false,
       confidence_score: null,
       verdict_source: null,
       verdict_note: "",
@@ -189,6 +194,62 @@ const REMOVED_AS_AUTHOR: { label: string; post: Post }[] = [
     },
   },
 ];
+
+/** Pinned emergencies (Part 11C): two shown of three, so "Show all (3)" appears. */
+function pinnedPost(id: string, content: string, status: Post["status"], at: string): Post {
+  return {
+    ...REMOVED_AS_AUTHOR[0].post,
+    id,
+    author: { id: `u-${id}`, username: "cara_test", display_name: "Cara Test", avatar_url: null },
+    content,
+    status,
+    removal_reason: "",
+    appeal_status: null,
+    is_mine: false,
+    is_emergency: true,
+    emergency_active: true,
+    emergency_expires_at: "2026-10-01T11:00:00Z",
+    created_at: at,
+  };
+}
+
+const PINNED: Post[] = [
+  pinnedPost(
+    "00000000-0000-4000-8000-0000000000a1",
+    "The bridge on Route 9 is closed in both directions until further notice.",
+    "pending",
+    "2026-09-30T11:40:00Z",
+  ),
+  pinnedPost(
+    "00000000-0000-4000-8000-0000000000a2",
+    "A boil-water notice is in force for the east side until Friday.",
+    "under_review",
+    "2026-09-30T10:05:00Z",
+  ),
+];
+const PINNED_ALL: Post[] = [
+  ...PINNED,
+  pinnedPost(
+    "00000000-0000-4000-8000-0000000000a3",
+    "The north shelter is full; the school gym on Elm Street is open instead.",
+    "verified_true",
+    "2026-09-30T08:30:00Z",
+  ),
+];
+
+function pinnedCard(post: Post) {
+  return (
+    <PostCard
+      author={{ displayName: post.author.display_name, username: post.author.username }}
+      content={post.content}
+      postType={post.post_type}
+      status={post.status}
+      emergencyActive={post.emergency_active}
+      createdAt={post.created_at}
+      now={NOW}
+    />
+  );
+}
 
 const REASONS = [
   {
@@ -217,6 +278,7 @@ const REASONS = [
 function ComposerModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [kind, setKind] = useState<"opinion" | "fact" | null>("fact");
   const [emergency, setEmergency] = useState(true);
+  const [confirmed, setConfirmed] = useState(false);
   const [text, setText] = useState("");
   return (
     <Modal
@@ -239,7 +301,11 @@ function ComposerModal({ open, onClose }: { open: boolean; onClose: () => void }
             </Button>
             <Button disabled={!kind}>
               {kind === "fact" && <Icon name="bolt" size="sm" filled />}
-              {kind === "opinion" ? "Post opinion" : "Post fact, will be checked"}
+              {kind === "opinion"
+                ? "Post opinion"
+                : emergency
+                  ? EMERGENCY_COPY.submit
+                  : "Post fact, will be checked"}
             </Button>
           </div>
         </>
@@ -279,29 +345,41 @@ function ComposerModal({ open, onClose }: { open: boolean; onClose: () => void }
                 <Icon name="bolt" filled className="mt-0.5 shrink-0 text-tertiary" />
                 <div>
                   <p className="font-body-sm text-body-sm font-semibold text-on-surface">
-                    Emergency
+                    {EMERGENCY_COPY.title}
                   </p>
                   <p className="mt-0.5 font-body-sm text-body-sm text-outline">
-                    Pin this post for 24 hours. It is still fact-checked first.
+                    {EMERGENCY_COPY.description}
                   </p>
                 </div>
               </div>
               <Toggle
-                label="Toggle Emergency Mode"
+                label={EMERGENCY_COPY.toggleLabel}
                 tone="tertiary"
                 checked={emergency}
                 onCheckedChange={setEmergency}
               />
             </div>
             {emergency && (
-              <div className="flex items-start gap-space-sm rounded-lg border border-tertiary/30 bg-tertiary/5 p-space-md font-body-sm text-body-sm text-on-surface-variant">
-                <Icon name="warning" className="mt-0.5 shrink-0 text-tertiary" />
-                <p>
-                  <strong className="font-semibold text-tertiary">Misuse has consequences.</strong>{" "}
-                  A FALSE emergency lowers your credibility score and blocks emergency posts for 30
-                  days.
-                </p>
-              </div>
+              <>
+                <div className="flex items-start gap-space-sm rounded-lg border border-tertiary/30 bg-tertiary/5 p-space-md">
+                  <div className="mt-0.5 flex shrink-0 items-center text-tertiary">
+                    <Icon name="warning" className="-mr-space-xs" />
+                    <Icon name="bolt" size="xs" filled />
+                  </div>
+                  <p className="font-body-sm text-body-sm text-on-surface-variant">
+                    <strong className="font-semibold text-tertiary">
+                      {EMERGENCY_COPY.warningTitle}
+                    </strong>
+                    <br />
+                    {EMERGENCY_COPY.warning}
+                  </p>
+                </div>
+                <Checkbox
+                  label={confirmationText(30)}
+                  checked={confirmed}
+                  onChange={(event) => setConfirmed(event.target.checked)}
+                />
+              </>
             )}
           </div>
           <TextField
@@ -386,6 +464,23 @@ export function StitchSections() {
               <RemovedPostCard post={post} now={NOW} />
             </div>
           ))}
+        </div>
+      </Section>
+
+      <Section
+        id="stitch-pinned"
+        title="Stitch b1: pinned emergencies"
+        note="b1's dispatch banner as the pinned section (Part 11C): open, then folded with ×."
+      >
+        <div className="max-w-reading space-y-space-lg">
+          <PinnedEmergencies
+            feed="recent"
+            posts={PINNED}
+            total={PINNED_ALL.length}
+            renderCard={pinnedCard}
+            fetchAll={async () => ({ items: PINNED_ALL, nextCursor: null })}
+          />
+          <PinnedEmergenciesBar count={2} onShow={() => {}} />
         </div>
       </Section>
 

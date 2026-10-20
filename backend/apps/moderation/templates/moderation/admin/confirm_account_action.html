@@ -1,0 +1,86 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url 'admin:accounts_user_changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; {{ label }}
+</div>
+{% endblock %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  .moderation-confirm table { width: 100%; margin-bottom: 20px; }
+  .moderation-confirm .skipped td { color: var(--body-quiet-color); }
+  .moderation-confirm form .form-row { margin-bottom: 12px; }
+  .moderation-confirm form textarea { max-width: 100%; }
+  .moderation-confirm .actions-row { margin-top: 20px; display: flex; gap: 16px; align-items: center; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="moderation-confirm">
+<p>{{ explanation }}</p>
+{% if changing %}
+  <h2>{{ changing|length }} account{{ changing|length|pluralize }} will change</h2>
+  <table>
+    <thead>
+      <tr><th>Account</th><th>Blocked until now</th><th>Blocked until after this</th></tr>
+    </thead>
+    <tbody>
+    {% for row in changing %}
+      <tr>
+        <td><a href="{% url 'admin:accounts_user_change' row.account.pk %}">{{ row.username }}</a></td>
+        <td>{{ row.current }}</td>
+        <td>{{ row.after }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p>None of the selected accounts can have this done to them.</p>
+{% endif %}
+
+{% if skipped %}
+  <h2>{{ skipped|length }} will be skipped</h2>
+  <table class="skipped">
+    <thead><tr><th>Account</th><th>Blocked until now</th><th>Why</th></tr></thead>
+    <tbody>
+    {% for row in skipped %}
+      <tr class="skipped">
+        <td><a href="{% url 'admin:accounts_user_change' row.row.account.pk %}">{{ row.row.username }}</a></td>
+        <td>{{ row.row.current }}</td>
+        <td>{{ row.why }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+{% if changing %}
+  <form method="post" action="{{ form_action }}">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="{{ action }}">
+    <input type="hidden" name="apply" value="1">
+    {% for pk in selected %}<input type="hidden" name="_selected_action" value="{{ pk }}">{% endfor %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+      <div class="form-row">
+        {{ field.errors }}
+        {{ field.label_tag }}
+        <div>{{ field }}</div>
+        {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+      </div>
+    {% endfor %}
+    <div class="actions-row">
+      <input type="submit" class="default" value="Yes, {{ label|lower }}">
+      <a href="{{ cancel_url }}" class="button cancel-link">No, take me back</a>
+    </div>
+  </form>
+{% else %}
+  <p><a href="{{ cancel_url }}" class="button">Back</a></p>
+{% endif %}
+</div>
+{% endblock %}

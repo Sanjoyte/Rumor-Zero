@@ -67,6 +67,10 @@ class PostCreateSerializer(serializers.Serializer):
     def validate(self, attrs):
         if attrs["post_type"] != PostType.FACT and attrs.get("sources"):
             raise serializers.ValidationError({"sources": ["Only fact posts can have sources."]})
+        if attrs["post_type"] != PostType.FACT and attrs["is_emergency"]:
+            raise serializers.ValidationError(
+                {"is_emergency": ["Only fact posts can be emergencies."]}
+            )
         return attrs
 
 
@@ -138,6 +142,9 @@ class PostSerializer(serializers.BaseSerializer):
             "is_emergency": post.is_emergency,
             "emergency_active": is_active_emergency(post, now),
             "emergency_expires_at": iso(post.emergency_expires_at),
+            # A moderator ended the priority early (Demote, or Mark FALSE while active): the post
+            # page says so after the priority is over (Part 11C).
+            "emergency_demoted": post.emergency_demoted_at is not None,
             "confidence_score": None if tombstone else shown_confidence(post),
             "verdict_source": shown_verdict_source(post),  # None for a removed post too
             "verdict_note": "" if tombstone else post.verdict_note,
@@ -173,12 +180,21 @@ def feed_item(post_data, activity_at=None):
     }
 
 
-def fact_quota_data(quota):
-    """`GET /api/v1/me/fact-quota/`. Part 11C adds an `emergency` block."""
+def fact_quota_data(quota, *, refused, block_days):
+    """`GET /api/v1/me/fact-quota/`, with Part 11C's `emergency` block: whether you may post an
+    emergency now, the first rule that refuses (§4b) and when it stops, and the length of the block
+    a FALSE emergency brings (`emergency_false_cooldown_days`), so the composer's confirmation
+    states the real number."""
     return {
         "limit": quota.limit,
         "used": quota.used,
         "remaining": quota.remaining,
         "window_hours": int(FACT_QUOTA_WINDOW.total_seconds() // 3600),
         "next_slot_at": iso(quota.next_slot_at),
+        "emergency": {
+            "allowed": refused is None,
+            "reason": None if refused is None else str(refused.reason),
+            "next_allowed_at": None if refused is None else iso(refused.next_allowed_at),
+            "block_days": block_days,
+        },
     }

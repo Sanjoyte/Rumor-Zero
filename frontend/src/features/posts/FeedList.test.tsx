@@ -35,6 +35,7 @@ const render = (ui: React.ReactElement) => renderWithSessionAndToast(ui, "verifi
 function feedWith(overrides: Partial<CursorFeed<FeedItem>> = {}): CursorFeed<FeedItem> {
   return {
     items: [],
+    head: null,
     phase: "ready",
     error: null,
     hasMore: false,
@@ -533,5 +534,30 @@ describe("FeedList removed posts (Part 11)", () => {
   it("still shows a repost of somebody else's removed post as 'no longer available'", () => {
     render(<FeedList feed={feedWith({ items: [unavailableEntry("gone")] })} />);
     expect(screen.getByText("This post is no longer available")).toBeInTheDocument();
+  });
+});
+
+describe("FeedList: posts shown above it (Part 11C)", () => {
+  it("leaves out the pinned posts and a repost of one", () => {
+    const pinned = post("p");
+    render(
+      <FeedList
+        feed={feedWith({ items: [entry(post("a")), entry(pinned), repostEntry(pinned)] })}
+        alreadyShown={new Set(["p"])}
+      />,
+    );
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    expect(screen.queryByText(/Content of p/)).toBeNull();
+  });
+
+  it("shows the caller's empty state when every item is pinned above", () => {
+    render(
+      <FeedList
+        feed={feedWith({ items: [entry(post("p"))] })}
+        alreadyShown={new Set(["p"])}
+        empty={<p>No other posts yet</p>}
+      />,
+    );
+    expect(screen.getByText("No other posts yet")).toBeInTheDocument();
   });
 });

@@ -29,3 +29,26 @@ describe("Checkbox", () => {
     expect(screen.getByRole("checkbox")).toBeDisabled();
   });
 });
+
+describe("Checkbox: aria-describedby", () => {
+  it("keeps the caller's id and adds the description's", () => {
+    render(
+      <>
+        <Checkbox id="agree" label="I agree" description="Read it first." aria-describedby="err" />
+        <p id="err">Tick the box.</p>
+      </>,
+    );
+    const box = screen.getByRole("checkbox", { name: /^I agree/ });
+    expect(box.getAttribute("aria-describedby")).toBe("err agree-description");
+    expect(box).toHaveAccessibleDescription("Tick the box. Read it first.");
+  });
+
+  it("uses either alone, or none", () => {
+    const { rerender } = render(<Checkbox id="a" label="A" aria-describedby="x" />);
+    expect(screen.getByRole("checkbox").getAttribute("aria-describedby")).toBe("x");
+    rerender(<Checkbox id="a" label="A" description="Only this." />);
+    expect(screen.getByRole("checkbox").getAttribute("aria-describedby")).toBe("a-description");
+    rerender(<Checkbox id="a" label="A" />);
+    expect(screen.getByRole("checkbox")).not.toHaveAttribute("aria-describedby");
+  });
+});

@@ -33,6 +33,9 @@ ROLE_GROUPS = {
 MANAGED_GROUP_NAMES = (MODERATORS_GROUP, SENIORS_GROUP)
 # Written only by `apps/reputation/services.py` (and `recompute_reputation`), never by a save.
 REPUTATION_FIELDS = frozenset({"reputation_score", "reputation_sample"})
+# What a full `User.save()` leaves alone: the score (Part 11B) and the emergency block, which only
+# `apps/moderation/services.py` writes, with `.update()` (Part 11C).
+SERVICE_OWNED_FIELDS = REPUTATION_FIELDS | {"emergency_blocked_until"}
 
 
 class UserManager(BaseUserManager):
@@ -88,6 +91,8 @@ class User(AbstractBaseUser, PermissionsMixin):
         default=50, validators=[MinValueValidator(0), MaxValueValidator(100)]
     )
     reputation_sample = models.IntegerField(default=0, validators=[MinValueValidator(0)])
+    # Written only by apps/moderation/services.py (Part 11C): the end of the latest block still
+    # standing (`rules.standing_block_end` of the account's block rows).
     emergency_blocked_until = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
 
@@ -151,14 +156,15 @@ class User(AbstractBaseUser, PermissionsMixin):
         if update_fields is None and not self._state.adding and not kwargs.get("force_insert"):
             # A full save of a loaded account (allauth's `set_password`, the admin form) would
             # write back the score it read earlier in the request, undoing a ledger write that
-            # committed meanwhile. It writes every other loaded field instead (Part 11B).
+            # committed meanwhile (Part 11B), and likewise an emergency block (Part 11C). It
+            # writes every other loaded field instead.
             deferred = self.get_deferred_fields()
             kwargs["update_fields"] = [
                 field.attname
                 for field in self._meta.concrete_fields
                 if not field.primary_key
                 and field.attname not in deferred
-                and field.attname not in REPUTATION_FIELDS
+                and field.attname not in SERVICE_OWNED_FIELDS
             ]
 
         super().save(*args, **kwargs)

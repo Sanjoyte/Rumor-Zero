@@ -332,3 +332,60 @@ def test_the_real_clock_is_used_when_now_is_not_given():
         details="",
     )
     assert abs((report.created_at - timezone.now()).total_seconds()) < 60
+
+
+# ---------- Part 11C: the emergency threshold (§4b) ----------
+
+
+def emergency_fact(*, expires_at=NOW + timedelta(hours=20), **fields):
+    return PostFactory(
+        fact=True,
+        is_emergency=True,
+        emergency_expires_at=expires_at,
+        created_at=expires_at - timedelta(hours=24),
+        **fields,
+    )
+
+
+def test_two_counting_reports_send_an_active_emergency_to_review():
+    post = emergency_fact()
+    file(post)
+    assert reload(post).status == PostStatus.PENDING
+    file(post)
+    after = reload(post)
+    assert (after.status, after.flagged_reason) == (PostStatus.UNDER_REVIEW, FlaggedReason.REPORTS)
+    assert after.pre_review_status == PostStatus.PENDING
+    assert after.emergency_demoted_at is None  # the priority is kept through the review
+
+
+def test_the_same_emergency_after_expiry_needs_five():
+    post = emergency_fact(expires_at=NOW - timedelta(minutes=1))
+    for _ in range(4):
+        file(post)
+    assert reload(post).status == PostStatus.PENDING
+    file(post)
+    assert reload(post).status == PostStatus.UNDER_REVIEW
+
+
+def test_a_demoted_emergency_needs_five_too():
+    post = emergency_fact(emergency_demoted_at=NOW - timedelta(hours=1))
+    for _ in range(4):
+        file(post)
+    assert reload(post).status == PostStatus.PENDING
+
+
+def test_the_emergency_threshold_comes_from_the_settings(emergency_settings):
+    emergency_settings(emergency_report_threshold=3)
+    post = emergency_fact()
+    file(post)
+    file(post)
+    assert reload(post).status == PostStatus.PENDING
+    file(post)
+    assert reload(post).status == PostStatus.UNDER_REVIEW
+
+
+def test_only_counting_reports_count_toward_the_emergency_threshold():
+    post = emergency_fact()
+    file(post)
+    file(post, VerifiedUserFactory(created_at=NOW - timedelta(hours=1)))  # too new to count
+    assert reload(post).status == PostStatus.PENDING

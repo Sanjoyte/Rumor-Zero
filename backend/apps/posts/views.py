@@ -4,28 +4,31 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from rest_framework import serializers
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotAuthenticated, NotFound
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsEmailVerified
+from apps.core.services import get_platform_settings
 from apps.moderation.queries import appeal_defaults
 from apps.posts import services
+from apps.posts.emergency import active_emergency_q
 from apps.posts.exceptions import (
-    EmergencyUnavailableError,
     FactPostsPausedError,
     FactQuotaExceededError,
     NotAuthorError,
 )
 from apps.posts.models import Post
-from apps.posts.pagination import FeedPagination
+from apps.posts.pagination import EmergencyPagination, FeedPagination
+from apps.posts.pinned import is_first_page, pinned_page, recent_pinnable
 from apps.posts.serializers import (
     PostCreateSerializer,
     PostSerializer,
     fact_quota_data,
     feed_item,
+    iso,
     status_item,
 )
 from apps.social.engagement import engagement_defaults
@@ -65,12 +68,27 @@ class PostListView(APIView):
         return [ScopedRateThrottle()] if self.request.method == "POST" else []
 
     def get(self, request):
+        """Recent: every visible post but the active emergencies, which are pinned above it on the
+        first page instead (Part 11C). One `now` for the filters and the serializer."""
+        now = timezone.now()
         paginator = FeedPagination()
         page = paginator.paginate_queryset(
-            Post.objects.visible().for_list(request.user), request, view=self
+            Post.objects.visible().exclude(active_emergency_q(now)).for_list(request.user),
+            request,
+            view=self,
         )
-        posts = PostSerializer(page, many=True, context={"request": request}).data
-        return paginator.get_paginated_response([feed_item(data) for data in posts])
+        context = {"request": request, "now": now}
+        posts = PostSerializer(page, many=True, context=context).data
+        pinned, pinned_total = [], 0
+        if is_first_page(request):
+            rows, pinned_total = pinned_page(recent_pinnable(now), request.user)
+            pinned = PostSerializer(rows, many=True, context=context).data
+        return paginator.envelope(
+            [feed_item(data) for data in posts],
+            paginator.get_next_link(),
+            pinned=pinned,
+            pinned_total=pinned_total,
+        )
 
     def post(self, request):
         serializer = PostCreateSerializer(data=request.data)
@@ -86,8 +104,18 @@ class PostListView(APIView):
                 is_emergency=data["is_emergency"],
                 now=now,
             )
-        except services.EmergencyUnavailable:
-            raise EmergencyUnavailableError from None
+        except services.EmergencyNotAllowed as exc:
+            # Built by hand, not an `APIException`: a dict detail would turn a null
+            # `next_allowed_at` into the string "None".
+            return Response(
+                {
+                    "detail": exc.text,
+                    "code": "emergency_not_allowed",
+                    "reason": str(exc.reason),
+                    "next_allowed_at": iso(exc.next_allowed_at),
+                },
+                status=403,
+            )
         except services.FactPostsPaused:
             raise FactPostsPausedError from None
         except services.FactQuotaExceeded as exc:
@@ -100,13 +128,50 @@ class PostListView(APIView):
 
 
 @method_decorator(never_cache, name="dispatch")
+class EmergencyListView(APIView):
+    """`GET /api/v1/posts/emergencies/?feed=recent|following`: every active emergency the feed
+    pins, newest first, for "Show all" (Part 11C). `recent` (the default) is public; `following`
+    needs a login. `{results: [Post], next_cursor}`, 20 a page up to 50."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        scope = request.query_params.get("feed", "recent")
+        if scope not in ("recent", "following"):
+            raise serializers.ValidationError({"feed": ["Choose recent or following."]})
+        now = timezone.now()
+        if scope == "following":
+            if not request.user.is_authenticated:
+                raise NotAuthenticated
+            # Local: `social` depends on `posts`, not the other way round.
+            from apps.social.feed import following_emergencies
+
+            pinnable = following_emergencies(request.user, now)
+        else:
+            pinnable = recent_pinnable(now)
+        paginator = EmergencyPagination()
+        page = paginator.paginate_queryset(pinnable.for_list(request.user), request, view=self)
+        context = {"request": request, "now": now}
+        return paginator.get_paginated_response(
+            PostSerializer(page, many=True, context=context).data
+        )
+
+
+@method_decorator(never_cache, name="dispatch")
 class FactQuotaView(APIView):
-    """`GET /api/v1/me/fact-quota/`: how many fact posts you have left in the rolling 24 h."""
+    """`GET /api/v1/me/fact-quota/`: how many fact posts you have left in the rolling 24 h, and
+    whether you may post an emergency now (Part 11C). A login is enough (not a verified email),
+    so an unverified account learns its reason here. The same queries as before: you, and your
+    fact posts of the window."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(fact_quota_data(services.fact_quota(request.user)))
+        now = timezone.now()
+        quota = services.fact_quota(request.user, now=now)
+        refused = services.emergency_refusal(request.user, quota=quota, now=now)
+        block_days = get_platform_settings().emergency_false_cooldown_days
+        return Response(fact_quota_data(quota, refused=refused, block_days=block_days))
 
 
 @method_decorator(never_cache, name="dispatch")

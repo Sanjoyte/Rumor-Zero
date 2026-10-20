@@ -12,10 +12,10 @@ MAX_APPEAL_REASON_LENGTH = 500
 
 
 class ActionKind(models.TextChoices):
-    """Every kind the audit trail will ever hold (ARCHITECTURE §2), created now so later parts
-    never alter the database check. Part 10 writes the first five; Part 11 writes `restored` and
-    `kept_removed` (the latter was added then: "Keep removed" had no kind), `emergency_*` is Part
-    11C and `avatar_*` Part 14B."""
+    """Every kind the audit trail holds (ARCHITECTURE §2). Part 10 writes the first five; Part 11
+    writes `restored` and `kept_removed` (the latter was added then: "Keep removed" had no kind),
+    Part 11C the three `emergency_*` kinds (`emergency_unblocked` was added then: an Unblock, or the
+    automatic lift when a FALSE label is overturned, had no kind) and `avatar_*` is Part 14B."""
 
     VERIFIED = "verified", "Marked verified"
     MARKED_FALSE = "marked_false", "Marked FALSE"
@@ -26,6 +26,7 @@ class ActionKind(models.TextChoices):
     KEPT_REMOVED = "kept_removed", "Kept removed"
     EMERGENCY_DEMOTED = "emergency_demoted", "Emergency demoted"
     EMERGENCY_BLOCKED = "emergency_blocked", "Emergency posting blocked"
+    EMERGENCY_UNBLOCKED = "emergency_unblocked", "Emergency posting unblocked"
     AVATAR_REMOVED = "avatar_removed", "Photo removed"
     AVATAR_BLOCKED = "avatar_blocked", "Photo uploads blocked"
 
@@ -116,6 +117,11 @@ class ModerationAction(models.Model):
     (`SET_NULL` is an UPDATE the collector issues without calling `save`), and `post_snapshot`
     keeps what the post said. `public_note` is what the author may be shown (the verdict note, or
     the reason for a removal, user decision 2026-10-11); `notes` stay internal.
+
+    Part 11C: an `emergency_blocked` row carries the end of its block (`blocked_until`, set on
+    exactly those rows), and `subject_user` names the account. An account's block and unblock rows
+    are strictly increasing in time, so `rules.standing_block_end` reads them in the order they
+    happened.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -161,13 +167,25 @@ class ModerationAction(models.Model):
         related_name="moderation_actions",
     )
     notes = models.TextField(blank=True)
+    # The end of an `emergency_blocked` row's block (Part 11C); null on every other row.
+    blocked_until = models.DateTimeField(null=True, blank=True)
     # Not auto_now_add: the services pass `now`, and tests place rows in time.
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
+        # Block / Unblock emergency posting, on `UserAdmin` (Part 11C; user decision 2026-10-19:
+        # moderators and up).
+        permissions = [("block_emergency_posting", "Can block or unblock emergency posting")]
         constraints = [
             models.CheckConstraint(
                 condition=Q(action__in=ActionKind.values), name="moderation_action_valid"
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(action=ActionKind.EMERGENCY_BLOCKED, blocked_until__isnull=False)
+                    | (~Q(action=ActionKind.EMERGENCY_BLOCKED) & Q(blocked_until__isnull=True))
+                ),
+                name="moderation_action_blocked_until_kind",
             ),
             models.CheckConstraint(
                 condition=_in_or_null("from_status", PostStatus),

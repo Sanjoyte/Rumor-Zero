@@ -6,6 +6,7 @@ from apps.accounts.tests.conftest import access_token_for
 from apps.core.models import PlatformSettings
 from apps.core.services import get_platform_settings
 from apps.posts.tests.factories import VerifiedUserFactory
+from conftest import pin_emergency_settings
 
 
 @pytest.fixture
@@ -41,3 +42,10 @@ def fact_limit(db):
 
     set_limit(10)
     return set_limit
+
+
+@pytest.fixture(autouse=True)
+def _pinned_emergency_settings(request):
+    """The six emergency settings at their defaults in every database test (Part 11C): the seed
+    comes from the developer's own `backend/.env`."""
+    pin_emergency_settings(request)

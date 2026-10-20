@@ -51,6 +51,19 @@ def emergency_fact(author=None, **fields):
     )
 
 
+def expired_emergency_fact(author=None, **fields):
+    """An emergency whose 24 hours are over: since Part 11C only such a post (or a demoted one)
+    can be labelled FALSE by the pipeline; an active one goes to review."""
+    now = timezone.now()
+    return pending_fact(
+        author,
+        is_emergency=True,
+        emergency_expires_at=now - timedelta(minutes=1),
+        created_at=now - timedelta(hours=24, minutes=1),
+        **fields,
+    )
+
+
 def rows_of(user):
     return list(ReputationEvent.objects.filter(user=user).order_by("created_at", "id"))
 
@@ -92,7 +105,7 @@ def test_fact_false_from_the_pipeline_and_from_a_moderator():
 
 
 def test_emergency_false_replaces_the_plain_false():
-    by_pipeline = emergency_fact()
+    by_pipeline = expired_emergency_fact()
     label_by_pipeline(by_pipeline, FALSE_95)
     by_moderator = emergency_fact(
         status=PostStatus.UNDER_REVIEW,
@@ -133,7 +146,7 @@ def test_post_removed_for_a_fact_and_an_opinion(post_type):
     ],
 )
 def test_the_repost_label_kinds(result, emergency, kind, expected):
-    post = emergency_fact() if emergency else pending_fact()
+    post = expired_emergency_fact() if emergency else pending_fact()
     reposter = reposted(post)  # while pending: it counts
     label_by_pipeline(post, result)
     assert kinds(reposter) == [kind]

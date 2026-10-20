@@ -42,3 +42,17 @@ describe("toPostCardProps", () => {
     ).toBe("");
   });
 });
+
+describe("toPostCardProps: the emergency look (Part 11C)", () => {
+  it("is violet while the API says active", () => {
+    const post = makePost({ post_type: "fact", status: "under_review", emergency_active: true });
+    expect(toPostCardProps(post).emergencyActive).toBe(true);
+  });
+
+  it("ends at once on a polled FALSE or removal, before the API flag catches up", () => {
+    for (const status of ["verified_false", "removed"] as const) {
+      const post = makePost({ post_type: "fact", status, emergency_active: true });
+      expect(toPostCardProps(post).emergencyActive).toBe(false);
+    }
+  });
+});

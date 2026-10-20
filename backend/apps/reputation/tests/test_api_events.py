@@ -117,9 +117,10 @@ def test_a_negative_repost_row_has_no_appeal_of_its_own(auth_client):
     an emergency FALSE has `appeal: null`."""
     me = VerifiedUserFactory()
     for result, emergency in ((FALSE_95, False), (FALSE_95, True)):
+        # An expired emergency: an active one would go to review (Part 11C).
         post = pending_fact(
             is_emergency=emergency,
-            emergency_expires_at=timezone.now() + timedelta(hours=24) if emergency else None,
+            emergency_expires_at=timezone.now() - timedelta(minutes=1) if emergency else None,
         )
         reposted(post, me)
         label_by_pipeline(post, result)

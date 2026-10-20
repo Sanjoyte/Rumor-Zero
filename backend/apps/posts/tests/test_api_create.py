@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 from django.utils import timezone
 
@@ -7,7 +9,7 @@ from apps.posts.tests.factories import PostFactory, UserFactory, VerifiedUserFac
 pytestmark = pytest.mark.django_db
 
 URL = "/api/v1/posts/"
-# The §9 post object, in full (24 keys).
+# The §9 post object, in full (25 keys; Part 11C added `emergency_demoted`).
 POST_KEYS = {
     "id",
     "author",
@@ -18,6 +20,7 @@ POST_KEYS = {
     "is_emergency",
     "emergency_active",
     "emergency_expires_at",
+    "emergency_demoted",
     "confidence_score",
     "verdict_source",
     "verdict_note",
@@ -120,6 +123,7 @@ def test_the_defaults_of_the_fields_later_parts_fill(client):
     assert body["is_emergency"] is False
     assert body["emergency_active"] is False
     assert body["emergency_expires_at"] is None
+    assert body["emergency_demoted"] is False
     assert (body["like_count"], body["comment_count"], body["repost_count"]) == (0, 0, 0)
     assert not any(
         body[key] for key in ("liked_by_me", "reposted_by_me", "bookmarked_by_me", "reported_by_me")
@@ -234,15 +238,117 @@ def test_an_empty_source_string_is_reported(client):
 # ---------- what the client may not decide ----------
 
 
-def test_emergency_posts_are_refused_until_part_11c(client):
-    response = fact(client, is_emergency=True)
+def test_is_emergency_false_is_fine(client):
+    assert fact(client, is_emergency=False).status_code == 201
+
+
+# ---------- Part 11C: emergency posts (§4b) ----------
+
+
+@pytest.fixture
+def elder(fact_limit):
+    """Eligible for an emergency: verified, 30 days old, the starting score of 50."""
+    return VerifiedUserFactory(created_at=timezone.now() - timedelta(days=30))
+
+
+def test_an_eligible_author_posts_an_emergency(auth_client, elder):
+    before = timezone.now()
+    response = fact(auth_client(elder), is_emergency=True)
+    assert response.status_code == 201
+    body = response.json()
+    assert set(body) == POST_KEYS
+    assert body["status"] == "pending"
+    assert (body["is_emergency"], body["emergency_active"], body["emergency_demoted"]) == (
+        True,
+        True,
+        False,
+    )
+    post = Post.objects.get()
+    assert post.is_emergency and post.emergency_expires_at == post.created_at + timedelta(hours=24)
+    assert post.created_at >= before
+    assert body["emergency_expires_at"].endswith("Z")
+
+
+def test_an_emergency_opinion_is_a_400_on_the_field(client):
+    response = opinion(client, is_emergency=True)
     assert response.status_code == 400
-    assert response.json()["code"] == "emergency_unavailable"
+    assert response.json() == {"is_emergency": ["Only fact posts can be emergencies."]}
     assert not Post.objects.exists()
 
 
-def test_is_emergency_false_is_fine(client):
-    assert fact(client, is_emergency=False).status_code == 201
+def _refused(response, reason):
+    assert response.status_code == 403
+    body = response.json()
+    assert set(body) == {"detail", "code", "reason", "next_allowed_at"}
+    assert (body["code"], body["reason"]) == ("emergency_not_allowed", reason)
+    assert body["detail"] and "None" not in body["detail"]
+    assert not Post.objects.exists()
+    return body
+
+
+def test_a_new_account_is_refused_with_the_day_it_may(auth_client, fact_limit):
+    created = timezone.now() - timedelta(days=2)
+    author = VerifiedUserFactory(created_at=created)
+    body = _refused(fact(auth_client(author), is_emergency=True), "account_too_new")
+    expected = (created + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
+    assert body["next_allowed_at"].startswith(expected) and body["next_allowed_at"].endswith("Z")
+    assert "too new" in body["detail"]
+
+
+def test_a_low_score_is_refused_with_no_time(auth_client, elder):
+    from apps.accounts.models import User
+
+    User.objects.filter(pk=elder.pk).update(reputation_score=39)
+    body = _refused(fact(auth_client(elder), is_emergency=True), "score_too_low")
+    assert body["next_allowed_at"] is None  # null, never the string "None"
+
+
+def test_a_blocked_account_is_refused_until_the_block_ends(auth_client, elder):
+    from apps.accounts.models import User
+
+    until = timezone.now() + timedelta(days=12)
+    User.objects.filter(pk=elder.pk).update(emergency_blocked_until=until)
+    body = _refused(fact(auth_client(elder), is_emergency=True), "blocked")
+    assert body["next_allowed_at"].startswith(until.strftime("%Y-%m-%dT%H:%M:%S"))
+
+
+def test_the_daily_limit_is_refused_with_the_time_a_slot_frees(auth_client, elder):
+    first = fact(auth_client(elder), content="First warning", is_emergency=True)
+    assert first.status_code == 201
+    response = fact(auth_client(elder), content="Second warning", is_emergency=True)
+    assert response.status_code == 403
+    body = response.json()
+    assert body["reason"] == "daily_limit"
+    made = Post.objects.get().created_at
+    assert body["next_allowed_at"].startswith(
+        (made + timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S")
+    )
+    # A plain fact is still fine: the emergency limit is its own.
+    assert fact(auth_client(elder), content="A plain claim").status_code == 201
+
+
+def test_a_full_fact_quota_refuses_an_emergency_with_its_reason(auth_client, elder, fact_limit):
+    fact_limit(1)
+    assert fact(auth_client(elder), content="A plain claim").status_code == 201
+    response = fact(auth_client(elder), is_emergency=True)
+    assert response.status_code == 403
+    assert response.json()["reason"] == "fact_quota"
+    assert Post.objects.count() == 1
+
+
+def test_paused_settings_are_refused_with_no_time(auth_client, elder, emergency_settings):
+    emergency_settings(emergency_posts_per_day=0)
+    body = _refused(fact(auth_client(elder), is_emergency=True), "daily_limit")
+    assert body["next_allowed_at"] is None
+    assert body["detail"] == "Emergency posts are paused right now."
+
+
+def test_an_unverified_author_hears_email_unverified_first(auth_client):
+    """The permission answers before the service: the `unverified` reason reaches people through
+    the quota endpoint (and the service's own test)."""
+    old = UserFactory(created_at=timezone.now() - timedelta(days=30))
+    response = fact(auth_client(old), is_emergency=True)
+    assert (response.status_code, response.json()["code"]) == (403, "email_unverified")
 
 
 def test_fields_the_client_must_not_set_are_ignored(client, verified_user):

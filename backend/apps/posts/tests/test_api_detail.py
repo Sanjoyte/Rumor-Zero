@@ -41,7 +41,7 @@ ALL = [
 
 
 @pytest.mark.parametrize("status", ALL)
-def test_anyone_can_read_a_post_in_every_status_with_the_24_keys(status, api_client, auth_client):
+def test_anyone_can_read_a_post_in_every_status_with_the_25_keys(status, api_client, auth_client):
     post = make(status)
     other = auth_client(VerifiedUserFactory())
     author = auth_client(post.author)

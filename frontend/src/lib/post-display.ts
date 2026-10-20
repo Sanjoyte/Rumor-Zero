@@ -30,6 +30,16 @@ export interface PostDisplayInput {
 
 export const EMERGENCY_BADGE_SPEC = { label: "EMERGENCY", glyph: "bolt" } as const;
 
+/**
+ * Whether a post still shows as an emergency (the violet stripe and the EMERGENCY chip). The API's
+ * `emergency_active`, unless the post is now FALSE or removed: the status poll doesn't carry
+ * `emergency_active`, but a FALSE always ends the priority (§4b), so a polled FALSE or removal ends
+ * the violet look at once.
+ */
+export function emergencyShown(post: { emergency_active: boolean; status: PostStatus }): boolean {
+  return post.emergency_active && post.status !== "verified_false" && post.status !== "removed";
+}
+
 /** Colour of the 4px stripe, or null when the card has none (the removed tombstone). */
 export function stripeTone({
   status,

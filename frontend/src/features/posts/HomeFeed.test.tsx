@@ -405,3 +405,112 @@ describe("HomeFeed: the Following tab (Part 6)", () => {
     });
   });
 });
+
+describe("HomeFeed: pinned emergencies (Part 11C)", () => {
+  const urgent = (id: string, overrides = {}) =>
+    makePost({
+      id,
+      content: `Warning ${id}`,
+      post_type: "fact",
+      status: "pending",
+      is_emergency: true,
+      emergency_active: true,
+      is_mine: false,
+      ...overrides,
+    });
+  const withPinned = (
+    ids: string[],
+    pinned: ReturnType<typeof urgent>[],
+    total = pinned.length,
+  ) => ({
+    ...page(ids),
+    head: { pinned, pinnedTotal: total },
+  });
+  const pinnedRegion = (panel: HTMLElement) =>
+    within(panel).queryByRole("region", { name: /emergency posts/i });
+
+  beforeEach(() => window.sessionStorage.clear());
+
+  it("pins Recent's emergencies above its list, and Following's above its own", async () => {
+    api.fetchRecentFeed.mockResolvedValue(withPinned(["a"], [urgent("r1")]));
+    social.fetchFollowingFeed.mockResolvedValue(withPinned(["f1"], [urgent("f9")]));
+    renderHome();
+    const recent = screen.getByRole("tabpanel", { name: "Recent" });
+    const region = await within(recent).findByRole("region", { name: /emergency posts/i });
+    expect(within(region).getByText(/Warning r1/)).toBeInTheDocument();
+    expect(within(region).getByText("EMERGENCY")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "Following" }));
+    const following = screen.getByRole("tabpanel", { name: "Following" });
+    const theirs = await within(following).findByRole("region", { name: /emergency posts/i });
+    expect(within(theirs).getByText(/Warning f9/)).toBeInTheDocument();
+    expect(within(theirs).queryByText(/Warning r1/)).toBeNull();
+  });
+
+  it("never repeats a pinned post in the list below", async () => {
+    const pinned = urgent("p");
+    api.fetchRecentFeed.mockResolvedValue({
+      items: [feedEntry(pinned), ...page(["a"]).items],
+      nextCursor: null,
+      head: { pinned: [pinned], pinnedTotal: 1 },
+    });
+    renderHome();
+    await waitFor(() => expect(cards()).toHaveLength(2));
+    expect(screen.getAllByText(/Warning p/)).toHaveLength(1);
+  });
+
+  it("says there are no other posts under the pinned ones", async () => {
+    api.fetchRecentFeed.mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      head: { pinned: [urgent("p")], pinnedTotal: 1 },
+    });
+    renderHome();
+    expect(await screen.findByText("No other posts yet")).toBeInTheDocument();
+    expect(screen.queryByText("No posts yet")).toBeNull();
+  });
+
+  it("puts an emergency you just made in the pinned section of both tabs, not the lists", async () => {
+    const created = urgent("mine", { content: "Gas leak on Main Street", is_mine: true });
+    api.createPost.mockResolvedValue(created);
+    renderHome("verified");
+    await userEvent.click(await screen.findByRole("tab", { name: "Following" }));
+    await waitFor(() => expect(cardText("f1")).toBeVisible());
+    await userEvent.click(screen.getByRole("button", { name: /What do you want to say/ }));
+    await userEvent.click(screen.getByRole("radio", { name: "Fact" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Post text" }), "Gas leak");
+    await userEvent.click(await screen.findByRole("switch", { name: "Emergency post" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /I understand/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Post emergency, will be checked" }));
+    const following = screen.getByRole("tabpanel", { name: "Following" });
+    const region = await within(following).findByRole("region", { name: /emergency posts/i });
+    expect(within(region).getByText(/Gas leak on Main Street/)).toBeInTheDocument();
+    expect(within(following).getAllByText(/Gas leak on Main Street/)).toHaveLength(1);
+    await userEvent.click(screen.getByRole("tab", { name: "Recent" }));
+    const recent = screen.getByRole("tabpanel", { name: "Recent" });
+    expect(within(pinnedRegion(recent)!).getByText(/Gas leak on Main Street/)).toBeInTheDocument();
+    expect(within(recent).getAllByText(/Gas leak on Main Street/)).toHaveLength(1);
+    expect(api.fetchRecentFeed).toHaveBeenCalledTimes(1);
+  });
+
+  describe("polling", () => {
+    beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
+    afterEach(() => vi.useRealTimers());
+
+    it("polls a pinned pending post, and one found FALSE leaves the section", async () => {
+      api.fetchRecentFeed.mockResolvedValue(withPinned(["a"], [urgent("p"), urgent("q")]));
+      api.fetchStatuses.mockResolvedValue([
+        { id: "p", status: "verified_false", confidence_score: null, verdict_source: "moderator" },
+        // A post missing from the answer reads as deleted: q is still being checked.
+        { id: "q", status: "pending", confidence_score: null, verdict_source: null },
+      ]);
+      renderHome();
+      const recent = screen.getByRole("tabpanel", { name: "Recent" });
+      await within(recent).findByRole("region", { name: /emergency posts/i });
+      expect(screen.getByText(/Warning p/)).toBeInTheDocument();
+      await act(() => vi.advanceTimersByTimeAsync(10_000));
+      expect(api.fetchStatuses).toHaveBeenCalledWith(["p", "q"], expect.any(AbortSignal));
+      await waitFor(() => expect(screen.queryByText(/Warning p/)).toBeNull());
+      expect(screen.getByText(/Warning q/)).toBeInTheDocument();
+    });
+  });
+});

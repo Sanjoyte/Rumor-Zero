@@ -280,3 +280,55 @@ describe("useCursorFeed", () => {
     });
   });
 });
+
+describe("useCursorFeed: the first page's head (Part 11C)", () => {
+  interface Head {
+    pinned: string[];
+  }
+  const withHead = (ids: string[], head: Head, nextCursor: string | null = null) => ({
+    items: ids.map(item),
+    nextCursor,
+    head,
+  });
+
+  function setupWithHead(fetchPage: (cursor: string | null) => Promise<CursorPage<Item, Head>>) {
+    return renderHook(
+      (props: { resetKey: string | null }) =>
+        useCursorFeed<Item, Head>({ fetchPage, keyOf, enabled: true, ...props }),
+      { initialProps: { resetKey: "u1" } },
+    );
+  }
+
+  it("keeps the first page's head while later pages load", async () => {
+    const fetchPage = vi
+      .fn()
+      .mockResolvedValueOnce(withHead(["a"], { pinned: ["p"] }, "c1"))
+      .mockResolvedValueOnce(withHead(["b"], { pinned: [] }));
+    const { result } = setupWithHead(fetchPage);
+    expect(result.current.head).toBeNull();
+    await waitFor(() => expect(result.current.head).toEqual({ pinned: ["p"] }));
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(ids(result.current.items)).toEqual(["a", "b"]));
+    expect(result.current.head).toEqual({ pinned: ["p"] });
+  });
+
+  it("clears it on a fresh load and takes the new one", async () => {
+    const later = deferred<CursorPage<Item, Head>>();
+    const fetchPage = vi
+      .fn()
+      .mockResolvedValueOnce(withHead(["a"], { pinned: ["p"] }))
+      .mockReturnValueOnce(later.promise);
+    const { result, rerender } = setupWithHead(fetchPage);
+    await waitFor(() => expect(result.current.head).toEqual({ pinned: ["p"] }));
+    rerender({ resetKey: "u2" });
+    expect(result.current.head).toBeNull();
+    await act(async () => later.resolve(withHead(["b"], { pinned: ["q"] })));
+    expect(result.current.head).toEqual({ pinned: ["q"] });
+  });
+
+  it("is null when a page sends none", async () => {
+    const { result } = setup(vi.fn().mockResolvedValue(page(["a"])));
+    await waitFor(() => expect(result.current.phase).toBe("ready"));
+    expect(result.current.head).toBeNull();
+  });
+});

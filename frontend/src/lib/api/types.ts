@@ -44,9 +44,11 @@ export interface Post {
   /** Empty for opinions and for facts without sources. */
   sources: PostSource[];
   is_emergency: boolean;
-  /** Computed by the API with the current time (§4b). */
+  /** Computed by the API with the current time (§4b): still pinned. */
   emergency_active: boolean;
   emergency_expires_at: string | null;
+  /** A moderator ended the priority early: Demote, or Mark FALSE while it was pinned (11C). */
+  emergency_demoted: boolean;
   /** Non-null only for `verified_*` posts with `verdict_source = "pipeline"`, e.g. "94.00". */
   confidence_score: string | null;
   verdict_source: VerdictSource | null;
@@ -92,10 +94,27 @@ export interface CursorPage<T> {
   next_cursor: string | null;
 }
 
-/** Recent, Following and profile post lists. `pinned` is [] until 11C and after the first page. */
+/**
+ * Recent, Following and profile post lists. `pinned` holds up to 3 active emergencies on the first
+ * page of Recent and Following (Part 11C), with `pinned_total` for "Show all"; [] everywhere else.
+ */
 export interface FeedResponse extends CursorPage<FeedItem> {
   pinned: Post[];
   pinned_total: number;
+}
+
+/** Why someone may not post an emergency now (§4b), in the order the server checks them. */
+export type EmergencyReason =
+  "unverified" | "account_too_new" | "score_too_low" | "blocked" | "daily_limit" | "fact_quota";
+
+/** The `emergency` block of `GET /api/v1/me/fact-quota/` (Part 11C). */
+export interface EmergencyEligibility {
+  allowed: boolean;
+  reason: EmergencyReason | null;
+  /** When that rule stops refusing; null when no time will (a paused limit, the score, email). */
+  next_allowed_at: string | null;
+  /** How long a FALSE emergency blocks emergency posting (the confirmation states it). */
+  block_days: number;
 }
 
 /** One entry of `GET /api/v1/posts/status/?ids=` (Part 5): what a badge needs and nothing else. */
@@ -119,6 +138,7 @@ export interface FactQuota {
   window_hours: number;
   /** When a slot frees up: set only when nothing is left and posting isn't paused (limit 0). */
   next_slot_at: string | null;
+  emergency: EmergencyEligibility;
 }
 
 /** `POST /api/v1/posts/` (§9). `sources` is for fact posts only (0 to 5, §4c). */
@@ -126,6 +146,8 @@ export interface CreatePostBody {
   content: string;
   post_type: PostType;
   sources?: string[];
+  /** A fact only, and only when the quota said it is allowed (Part 11C). */
+  is_emergency?: boolean;
 }
 
 /** `GET /api/v1/users/{username}/` (Part 6). The counts of `verified` and `false` include deleted posts. */

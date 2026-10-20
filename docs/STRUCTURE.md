@@ -60,6 +60,8 @@ rumor-zero/
 │   │                            delete with a summary page, Mark email verified), services.py (verify_email_by_staff)
 │   │                        ✅ 11B models.py (a full `User.save()` never writes the two score columns), admin.py (the read-only
 │   │                            Credibility field with its link to the ledger), tests/test_user_save.py
+│   │                        ✅ 11C models.py (nor `emergency_blocked_until`), admin.py (Block / Unblock emergency posting with a
+│   │                            confirmation page, the "Emergency posting" filter, the read-only Emergency blocks field)
 │   │   │                        ✅ 1 adapter.py (AccountAdapter), tokens.py (locked, graceful refresh rotation),
 │   │   │                            cookies.py (rz_refresh + rz_session, secret stripping, revocation), middleware.py
 │   │   │                            (AuthApiMiddleware: allow-list, CSRF guard, Turnstile pre-check, cookie handling),
@@ -73,7 +75,7 @@ rumor-zero/
 │   │   │                            usernames.py, SocialAccountAdapter + the `social_account_added` receiver + `mark_email_verified_by_google`
 │   │   │                        14B Avatar model, avatars.py (Pillow processing), avatar endpoints
 │   │   ├── posts/               4–5 Post model + status constraints, validators.py (sources/DOI), services (the only place
-│   │   │                            status changes), feeds, status polling; 11C emergency eligibility + pinned feeds;
+│   │   │                            status changes), feeds, status polling; ✅ 11C emergency eligibility + pinned feeds;
 │   │   │                            11D stats endpoint; 12 search_vector GeneratedField + search API
 │   │   │                        ✅ 4 models.py (Post + every §2 column but search_vector, 17 CheckConstraints, 6 indexes,
 │   │   │                            PostQuerySet.visible()/for_list()), validators.py (normalize_source, validate_sources,
@@ -89,6 +91,11 @@ rumor-zero/
 │   │   │                            "deleted at" filter, tests test_api_detail/delete/status
 │   │   │                        ✅ 10 `review_started_at` (migration 0002: backfill, `posts_post_review_started_consistent`, the review-queue index
 │   │                            on it), PostAdmin moved to moderation/admin.py (admin.py is one comment)
+│   │                        ✅ 11C emergency.py (+ active_emergency_q, the eligibility rules `refusal` and their words), services.py
+│   │                            (create_post with is_emergency under the author's FOR NO KEY UPDATE lock, fact_quota's emergency_times,
+│   │                            the block after a pipeline FALSE), pinned.py (the pinned query + Window count), pagination.py
+│   │                            (EmergencyPagination, the envelope's pinned list), views.py (Recent's pinned list, the 403,
+│   │                            EmergencyListView, the quota's emergency block), serializers.py (`emergency_demoted`)
 │   │                        ✅ 9 services.record_pipeline_result/record_pipeline_failure (the status writes: claim token, row lock,
 │   │   │                            durable), the inline kick in create_post (on_commit, never raises), shown_verdict_source in the
 │   │   │                            serializer, tests test_services_pipeline
@@ -104,6 +111,8 @@ rumor-zero/
 │   │   │                            timeline.py (the mixed feed's sort key, cursor token, per-page rule and union query), feed.py (cache v2:
 │   │   │                            keys, `load_entries`), RepostView, BookmarkView, BookmarkListView, RepostAdmin, BookmarkAdmin
 │   │   │                            (superuser-only), engagement.py (+ repost count, reposted and bookmarked flags), tests (695 in all)
+│   │   │                        ✅ 11C feed.py (`following_emergencies`; pinnable posts and reposts of them left out of the pages),
+│   │   │                            FeedView (the pinned list on a first page), tests/test_api_feed_pinned.py
 │   │   ├── reports/             ✅ 8 Report (migration 0001: the unique pair, five named checks, `reports_post_created_idx`), services.py
 │   │   │                            (`file_report`: post row lock, own/duplicate checks, `counts_toward_threshold`, the windowed count;
 │   │   │                            calls `posts.services.record_report`), serializers.py, exceptions.py (`cannot_report_own`,
@@ -115,7 +124,8 @@ rumor-zero/
 │   │   │                            MAX_ATTEMPTS, Outcome, apply_pipeline_result, apply_pipeline_failure), processor.py (claim with
 │   │   │                            a lease and SKIP LOCKED, call, apply; process_pending, process_pending's deadline, process_post,
 │   │   │                            start_kick), management/commands/process_pending.py, tests (conftest + 11 files);
-│   │   │                        11C routing imports is_active_emergency from apps/posts/emergency.py
+│   │   │                        ✅ 11C routing imports is_active_emergency (FALSE on an active emergency → review, the
+│   │   │                            emergency report threshold); processor.py orders active emergencies first (active_emergency_q)
 │   │   ├── moderation/          ✅ 10 ModerationAction (append-only; migration 0001; ten kinds, `public_note`),
 │   │   │                            rules.py (pure: `refusal`, `transition`, `Act`, `Effect`), services.py (mark_verified, mark_false,
 │   │   │                            dismiss_reports, remove_post, escalate: row lock, rules re-checked, reports resolved, one audit row),
@@ -129,7 +139,12 @@ rumor-zero/
 │   │   │                            keep_removed, file_appeal), views.py/urls.py/serializers.py/exceptions.py (POST /api/v1/posts/{id}/appeal/),
 │   │   │                            queries.py (appeal_status and removal_reason as annotations of `for_list`), admin.py (the queue holds removal
 │   │   │                            appeals; AppealFilter, AppealInline, AppealAdmin, the two new actions), tests (+ 6 files);
-│   │   │                        11C emergency actions
+│   │   │                        ✅ 11C migrations/0006_emergency_actions.py (`emergency_unblocked`, `blocked_until` + its check, the
+│   │   │                            `block_emergency_posting` permission) and 0007_emergency_permission.py (frozen lists), rules.py (Demote,
+│   │   │                            `now` required, Mark FALSE's demotion, account acts, `standing_block_end`), services.py (demote_emergency,
+│   │   │                            block_after_emergency_false, lift_after_overturn, block/unblock_emergency_posting), admin.py (active
+│   │   │                            emergencies first, EmergencyFilter, Demote; the full log's subject_user), templates/moderation/admin/
+│   │   │                            confirm_account_action.html, tests (+ test_services_emergency, test_races_emergency, test_admin_emergency)
 │   │   │                        ✅ 11B migrations/0005_reputation_permission.py (moderators read the ledger; its own frozen lists),
 │   │   │                            rules.py (`Effect.credits_reporters`), services.py (`settle_post` after every action but
 │   │   │                            Escalate), admin.py (the `ReputationInline` on PostAdmin)
@@ -201,7 +216,7 @@ rumor-zero/
 │       │   │   └── reset-password/[key]/    ✅ 2 ← a6 (ResetPasswordForm)
 │       │   ├── (app)/           ✅ 0C AppShell (sidebar/top bar/mobile nav) + placeholders for every nav destination
 │       │   │   ├── layout.tsx           ✅ 1 route guard (PROTECTED_PREFIXES → /login?next=), loading skeleton, Log out
-│       │   │   ├── home/                    "/home" ← b1 (4, following tab 6, reposts ✅ 7B, pinned emergencies 11C)
+│       │   │   ├── home/                    "/home" ← b1 (4, following tab 6, reposts ✅ 7B, pinned emergencies ✅ 11C)
 │       │   │   ├── p/[id]/                  "/p/:id" ✅ 5 ← b3 (light SSR + generateMetadata; PostDetail; comments 7, repost/bookmark ✅ 7B, appeal 11, stats 11D)
 │       │   │   ├── bookmarks/               "/bookmarks" ✅ 7B ← b1 layout + c4's heading (BookmarkList; noindex)
 │       │   │   ├── search/                  ← b4 (12)
@@ -232,7 +247,9 @@ rumor-zero/
 │       │   │                        ComposerTrigger, HomeFeed, draft.ts, quota.ts, messages.ts, post-card-props.ts (+ test-helpers.tsx);
 │       │   │                        ✅ 5 PostDetail, usePostDetail, VerdictBlock, SourceList, CopyLinkButton, DeletePostModal, post-metadata.ts,
 │       │   │                            useStatusPolling + status-overlay.ts (PostCard/SourceLink link to the page; FeedList/HomeFeed poll);
-│       │   │                        11C EmergencyChip, PinnedEmergencies; 11D PostStats
+│       │   │                        ✅ 11C PinnedEmergencies (+ PinnedEmergenciesBar), pinned-collapse.ts (sessionStorage fold),
+│       │   │                            EmergencyNote, emergency-copy.ts; the composer's toggle/warning/confirmation, FeedCard exported,
+│       │   │                            useCursorFeed's first-page `head`; the chip is 0B's EmergencyBadge; 11D PostStats
 │       │   ├── social/          ✅ 6 FollowButton, UserRow, ProfileHeader, ProfilePage, ProfilePosts, Connections, useProfile,
 │       │   │                        social-api.ts, profile-metadata.ts, messages.ts (+ test-helpers.tsx);
 │       │   │                        ✅ 7 LikeButton, CommentCountLink, PostActions (the card's and the post page's action bar), CommentSection,

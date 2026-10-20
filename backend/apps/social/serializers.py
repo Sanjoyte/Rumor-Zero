@@ -112,13 +112,14 @@ def comment_data(comment, viewer):
     }
 
 
-def timeline_items(entries, request):
+def timeline_items(entries, request, *, now=None):
     """The `results` of a mixed feed (§9): a post item, or a repost item.
 
     A repost whose original is no longer visible carries `{"id", "unavailable": true}` instead of
-    a post ("This post is no longer available"). `activity_at` is the item's own time.
+    a post ("This post is no longer available"). `activity_at` is the item's own time. `now` is
+    the clock the caller filtered with (the Following feed's pinned emergencies).
     """
-    context = {"request": request, "now": timezone.now()}
+    context = {"request": request, "now": now or timezone.now()}
     items = []
     for entry in entries:
         data = PostSerializer(entry.post, context=context).data if entry.post is not None else None

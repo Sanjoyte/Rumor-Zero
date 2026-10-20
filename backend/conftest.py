@@ -110,3 +110,50 @@ def role_groups(db):
     from apps.moderation.roles import sync_role_groups
 
     sync_role_groups()
+
+
+# The six emergency limits of §3 at their documented defaults (Part 11C).
+EMERGENCY_DEFAULTS = {
+    "emergency_duration_hours": 24,
+    "emergency_posts_per_day": 1,
+    "emergency_min_account_age_days": 7,
+    "emergency_min_reputation": 40,
+    "emergency_report_threshold": 2,
+    "emergency_false_cooldown_days": 30,
+}
+
+
+@pytest.fixture
+def emergency_settings(db):
+    """Pin the six emergency settings (Part 11C). The seed comes from the developer's own
+    `backend/.env`, so tests must not rely on it. It saves the singleton (`.update()` would skip
+    the cache invalidation); a `transaction=True` test flushes the row, so it is healed with
+    `get_or_create`, as `fact_limit` does. Call it with values to change them in a test."""
+    from django.conf import settings
+
+    from apps.core.models import PlatformSettings
+    from apps.core.services import get_platform_settings
+
+    def set_values(**values):
+        unknown = set(values) - set(EMERGENCY_DEFAULTS)
+        assert not unknown, f"not an emergency setting: {unknown}"
+        row, _ = PlatformSettings.objects.get_or_create(
+            pk=1, defaults=settings.PLATFORM_SETTINGS_SEED
+        )
+        for name, value in {**EMERGENCY_DEFAULTS, **values}.items():
+            setattr(row, name, value)
+        row.save()
+        return get_platform_settings()
+
+    set_values()
+    return set_values
+
+
+def pin_emergency_settings(request):
+    """For the app conftests' autouse fixtures: pin the emergency settings in every test that uses
+    the database, and leave the pure tests without one."""
+    uses_db = request.node.get_closest_marker("django_db") or {"db", "transactional_db"} & set(
+        request.fixturenames
+    )
+    if uses_db:
+        request.getfixturevalue("emergency_settings")

@@ -13,14 +13,15 @@ const NOW = new Date("2026-10-08T12:00:00Z");
 type Overrides = Partial<
   Pick<ComposerModalProps, "submitting" | "failure" | "verified" | "open" | "onClose">
 > & {
-  draft?: Draft;
+  /** Merged over an empty draft (the emergency fields are off unless given). */
+  draft?: Partial<Draft>;
   quota?: FactQuota | null;
   onSubmit?: ComposerModalProps["onSubmit"];
 };
 
 /** Stands in for the provider: it owns the draft and answers `onSubmit`. */
 function Harness({ draft: initial, onSubmit, quota = makeQuota(), ...rest }: Overrides) {
-  const [draft, setDraft] = useState(initial ?? emptyDraft());
+  const [draft, setDraft] = useState<Draft>({ ...emptyDraft(), ...initial });
   return (
     <ComposerModal
       open
@@ -179,6 +180,7 @@ describe("ComposerModal: sending", () => {
       postType: "opinion",
       sources: [],
       rowIds: [],
+      emergency: false,
     });
   });
 
@@ -199,6 +201,7 @@ describe("ComposerModal: sending", () => {
       postType: "fact",
       sources: ["https://example.org/a", "10.1000/xyz"],
       rowIds: [rows[0].id, rows[2].id],
+      emergency: false,
     });
   });
 
@@ -504,5 +507,126 @@ describe("ComposerModal: an unverified user", () => {
     });
     expect(screen.getByText("Verify your email to post")).toBeInTheDocument();
     expect(text()).toBeDisabled();
+  });
+});
+
+// ---------- Part 11C: emergency posts ----------
+
+const toggle = () => screen.queryByRole("switch", { name: "Emergency post" });
+const confirmBox = () => screen.queryByRole("checkbox", { name: /I understand emergency posts/ });
+const allowed = makeQuota();
+const refused = (
+  reason: NonNullable<FactQuota["emergency"]["reason"]>,
+  next_allowed_at: string | null = null,
+) =>
+  makeQuota({
+    emergency: { allowed: false, reason, next_allowed_at, block_days: 30 },
+  });
+
+describe("ComposerModal: the emergency toggle", () => {
+  it("appears only for a fact", async () => {
+    setup();
+    expect(toggle()).toBeNull();
+    await typeOpinion();
+    expect(toggle()).toBeNull();
+    await typeFact();
+    expect(toggle()).toBeEnabled();
+    expect(
+      screen.getByText("Pinned at the top of feeds and checked before other posts."),
+    ).toBeVisible();
+    expect(toggle()).not.toBeChecked();
+  });
+
+  it("is disabled until the allowance has loaded", async () => {
+    setup({ quota: null, draft: { postType: "fact" } });
+    expect(toggle()).toBeDisabled();
+    expect(toggle()).not.toHaveAttribute("aria-describedby");
+  });
+
+  it.each([
+    ["unverified", null, "Verify your email to post an emergency."],
+    [
+      "account_too_new",
+      "2026-10-14T09:00:00Z",
+      "Your account is too new for emergency posts. You can post one from Oct 14, 2026.",
+    ],
+    ["score_too_low", null, "Your credibility score is below the minimum for emergency posts."],
+    [
+      "blocked",
+      "2026-11-07T12:00:00Z",
+      "Emergency posting is blocked on your account until Nov 7, 2026.",
+    ],
+    [
+      "daily_limit",
+      "2026-10-08T15:05:00Z",
+      "You've posted an emergency in the last 24 hours. Next at 3:05 PM.",
+    ],
+    [
+      "fact_quota",
+      "2026-10-08T15:05:00Z",
+      "You've used all your fact posts for the last 24 hours. Next at 3:05 PM.",
+    ],
+  ] as const)("is disabled with the reason %s in plain words", (reason, at, words) => {
+    setup({ quota: refused(reason, at), draft: { postType: "fact" } });
+    expect(toggle()).toBeDisabled();
+    expect(toggle()).toHaveAccessibleDescription(words);
+  });
+
+  it("shows the warning and the confirmation when it is on, with the real block length", async () => {
+    setup({ quota: makeQuota({ emergency: { ...allowed.emergency, block_days: 14 } }) });
+    await typeFact();
+    expect(confirmBox()).toBeNull();
+    await userEvent.click(toggle()!);
+    expect(toggle()).toBeChecked();
+    expect(
+      screen.getByText("Use this only for urgent safety or public-health news."),
+    ).toBeVisible();
+    expect(confirmBox()).not.toBeChecked();
+    expect(confirmBox()).toHaveAccessibleName(
+      "I understand emergency posts are checked first, and misuse lowers my credibility score and blocks emergency posting for 14 days.",
+    );
+    expect(screen.getByRole("button", { name: "Post emergency, will be checked" })).toBeVisible();
+  });
+
+  it("asks for the tick before sending, focused and linked to the message", async () => {
+    const { onSubmit } = setup({ draft: { content: "Bridge out", postType: "fact" } });
+    await userEvent.click(toggle()!);
+    await userEvent.click(screen.getByRole("button", { name: "Post emergency, will be checked" }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Tick the box to confirm.");
+    expect(confirmBox()).toHaveFocus();
+    expect(confirmBox()).toHaveAccessibleDescription("Tick the box to confirm.");
+    expect(confirmBox()).toHaveAttribute("aria-invalid", "true");
+    await userEvent.click(confirmBox()!);
+    expect(screen.queryByText("Tick the box to confirm.")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Post emergency, will be checked" }));
+    expect(lastPayload(onSubmit)).toMatchObject({ postType: "fact", emergency: true });
+  });
+
+  it("turns the tick off with the toggle", async () => {
+    setup({ draft: { postType: "fact" } });
+    await userEvent.click(toggle()!);
+    await userEvent.click(confirmBox()!);
+    await userEvent.click(toggle()!);
+    await userEvent.click(toggle()!);
+    expect(confirmBox()).not.toBeChecked();
+  });
+
+  it("never sends an emergency the allowance doesn't allow, even from an old draft", async () => {
+    const { onSubmit } = setup({
+      quota: refused("blocked", "2026-11-07T12:00:00Z"),
+      draft: { content: "Claim", postType: "fact", emergency: true, confirmed: true },
+    });
+    expect(toggle()).not.toBeChecked();
+    expect(confirmBox()).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Post fact, will be checked" }));
+    expect(lastPayload(onSubmit)).toMatchObject({ postType: "fact", emergency: false });
+  });
+
+  it("treats an answer without the emergency block as not allowed", () => {
+    const old = { ...makeQuota() } as Partial<FactQuota>;
+    delete old.emergency;
+    setup({ quota: old as FactQuota, draft: { postType: "fact" } });
+    expect(toggle()).toBeDisabled();
   });
 });

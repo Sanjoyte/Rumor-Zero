@@ -18,6 +18,7 @@ describe("/dev/ui", () => {
       "Tabs, SegmentedControl, FilterChips",
       "StatusBadge, CategoryChip, VerdictStripe",
       "Stitch b1: PostCard",
+      "Stitch b1: pinned emergencies",
       "Stitch b2 and d1: modals",
     ]) {
       expect(screen.getByRole("heading", { level: 2, name })).toBeInTheDocument();
@@ -50,6 +51,18 @@ describe("/dev/ui", () => {
     const cards = document.getElementById("stitch-post-cards") as HTMLElement;
     expect(cards.querySelector("[data-tone='tertiary']")).not.toBeNull();
     expect(within(cards).getAllByText("EMERGENCY").length).toBeGreaterThan(0);
+  });
+
+  it("shows the pinned emergencies open and folded (Part 11C)", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    render(<ToastProvider>{DevUiPage()}</ToastProvider>);
+    const pinned = document.getElementById("stitch-pinned") as HTMLElement;
+    const open = within(pinned).getByRole("region", { name: "Emergency posts" });
+    expect(within(open).getAllByRole("article")).toHaveLength(2);
+    expect(within(open).getByRole("button", { name: "Show all (3)" })).toBeInTheDocument();
+    expect(
+      within(pinned).getByRole("region", { name: "2 emergency posts pinned" }),
+    ).toBeInTheDocument();
   });
 
   it("answers 404 in a production build", () => {

@@ -45,7 +45,7 @@ def test_appealing_a_false_label_is_201_and_the_post_comes_back_under_review(aut
     response = appeal(auth_client(post.author), post.pk, reason="  The source was updated.  ")
     assert response.status_code == 201
     body = response.json()
-    assert set(body) == POST_KEYS  # 24 keys: the post as its author now sees it
+    assert set(body) == POST_KEYS  # 25 keys: the post as its author now sees it
     assert body["status"] == "under_review"
     assert body["can_appeal"] is False and body["appeal_status"] == "open"
     assert body["is_mine"] is True and body["id"] == str(post.pk)

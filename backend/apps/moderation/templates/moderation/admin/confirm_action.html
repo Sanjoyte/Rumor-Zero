@@ -27,7 +27,7 @@
   <h2>{{ changing|length }} post{{ changing|length|pluralize }} will change</h2>
   <table>
     <thead>
-      <tr><th>Post</th><th>Type</th><th>Status</th><th>Reason</th><th>Reports</th><th>Pipeline</th><th>Author</th></tr>
+      <tr><th>Post</th><th>Type</th><th>Status</th><th>Reason</th><th>Reports</th><th>Pipeline</th><th>Emergency</th><th>Author</th></tr>
     </thead>
     <tbody>
     {% for row in changing %}
@@ -38,6 +38,7 @@
         <td>{{ row.reason }}</td>
         <td>{{ row.reports }}</td>
         <td>{{ row.pipeline }}</td>
+        <td>{{ row.emergency }}</td>
         <td>{{ row.author }}</td>
       </tr>
     {% endfor %}
@@ -50,13 +51,14 @@
 {% if skipped %}
   <h2>{{ skipped|length }} will be skipped</h2>
   <table class="skipped">
-    <thead><tr><th>Post</th><th>Type</th><th>Status</th><th>Why</th></tr></thead>
+    <thead><tr><th>Post</th><th>Type</th><th>Status</th><th>Emergency</th><th>Why</th></tr></thead>
     <tbody>
     {% for row in skipped %}
       <tr class="skipped">
         <td class="claim"><a href="{% url 'admin:posts_post_change' row.row.post.pk %}">{{ row.row.claim }}</a></td>
         <td>{{ row.row.type }}</td>
         <td>{{ row.row.before }}</td>
+        <td>{{ row.row.emergency }}</td>
         <td>{{ row.why }}</td>
       </tr>
     {% endfor %}

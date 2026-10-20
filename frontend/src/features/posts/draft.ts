@@ -9,6 +9,9 @@ export interface Draft {
   postType: PostType | null;
   /** Always at least one row; empty rows are dropped when sending. */
   rows: SourceRow[];
+  /** The emergency toggle (a fact only, Part 11C) and its required confirmation. */
+  emergency: boolean;
+  confirmed: boolean;
 }
 
 let rowSequence = 0;
@@ -19,11 +22,14 @@ export function newRow(text = ""): SourceRow {
 }
 
 export function emptyDraft(): Draft {
-  return { content: "", postType: null, rows: [newRow()] };
+  return { content: "", postType: null, rows: [newRow()], emergency: false, confirmed: false };
 }
 
 export function isEmptyDraft(draft: Draft): boolean {
   return (
-    draft.content === "" && draft.postType === null && draft.rows.every((row) => row.text === "")
+    draft.content === "" &&
+    draft.postType === null &&
+    draft.rows.every((row) => row.text === "") &&
+    !draft.emergency
   );
 }

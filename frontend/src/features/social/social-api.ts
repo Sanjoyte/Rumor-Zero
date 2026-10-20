@@ -12,7 +12,7 @@ import type {
   UserProfile,
   UserRowData,
 } from "@/lib/api/types";
-import type { FeedPage } from "@/features/posts/posts-api";
+import { type FeedPage, feedHead } from "@/features/posts/posts-api";
 
 export const SOCIAL_PATHS = {
   feed: "/v1/feed/",
@@ -49,7 +49,7 @@ export async function fetchFollowingFeed(
   signal?: AbortSignal,
 ): Promise<FeedPage> {
   const body = await api.get<FeedResponse>(withCursor(SOCIAL_PATHS.feed, cursor), { signal });
-  return { items: body.results, nextCursor: body.next_cursor };
+  return { items: body.results, nextCursor: body.next_cursor, head: feedHead(body) };
 }
 
 export function fetchProfile(username: string, signal?: AbortSignal): Promise<UserProfile> {

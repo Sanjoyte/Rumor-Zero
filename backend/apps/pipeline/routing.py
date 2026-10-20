@@ -4,7 +4,7 @@ They only read and write fields on the `post` they are given. The services that 
 write (`apps/posts/services.py`, and `apps/moderation/services.py` from Part 10) call them inside
 `transaction.atomic()` with the post row locked, so nothing here saves anything. `now` is a
 parameter everywhere so tests control time. Part 8 built the report half and Part 9 the pipeline
-half; Part 11C adds the emergency branches. `is_active_emergency` lives in
+half; Part 11C added the emergency branches. `is_active_emergency` lives in
 `apps/posts/emergency.py`, because `posts` can't import this app (it would be circular).
 """
 
@@ -13,6 +13,7 @@ from datetime import timedelta
 
 from django.db.models import Q
 
+from apps.posts.emergency import is_active_emergency
 from apps.posts.models import FlaggedReason, PipelineVerdict, PostStatus, PostType, VerdictSource
 
 # A failing check is tried this many times in all (each claim counts one), then a moderator decides.
@@ -82,10 +83,13 @@ def apply_report_threshold(post, counting_reports, cfg, now):
     `counting_reports` is the windowed count of its open, counting reports, the new one included
     (§5). A removed post is never touched. A post that is already under review only has its
     reason merged. Returns True when the post **entered** review on this call (the moment Part 13
-    tells its author), False otherwise. `now` starts the queue's clock; Part 11C also uses it,
-    where an active emergency uses `cfg.emergency_report_threshold` instead.
+    tells its author), False otherwise. `now` starts the queue's clock and decides the threshold:
+    an active emergency uses `cfg.emergency_report_threshold` (2) instead of the usual one (§4b).
     """
-    if post.status == PostStatus.REMOVED or counting_reports < cfg.report_threshold:
+    threshold = (
+        cfg.emergency_report_threshold if is_active_emergency(post, now) else cfg.report_threshold
+    )
+    if post.status == PostStatus.REMOVED or counting_reports < threshold:
         return False
     was_under_review = post.status == PostStatus.UNDER_REVIEW
     enter_review(post, FlaggedReason.REPORTS, now)
@@ -153,7 +157,9 @@ def apply_pipeline_result(post, result, cfg, now):
     decisive TRUE becomes `pre_review_status=verified_true` (dismissing the reports restores it);
     a decisive FALSE or a weak result makes the reason `both`, so a moderator decides (user
     decision 2026-10-11: no hidden FALSE is ever stored). Decisive = true/false with
-    `confidence ≥ cfg.confidence_threshold`. Part 11C adds the emergency rule (`now`).
+    `confidence ≥ cfg.confidence_threshold`, **except a FALSE on an active emergency**, which is
+    never applied automatically (§4b): the post goes to review and keeps its priority until it
+    expires or a moderator marks it FALSE.
     """
     if not is_awaiting_check(post):
         return Outcome.IGNORED
@@ -165,6 +171,7 @@ def apply_pipeline_result(post, result, cfg, now):
     decisive = (
         result.verdict in (PipelineVerdict.TRUE, PipelineVerdict.FALSE)
         and result.confidence_score >= cfg.confidence_threshold
+        and not (result.verdict == PipelineVerdict.FALSE and is_active_emergency(post, now))
     )
     if post.status == PostStatus.PENDING:
         if not decisive:

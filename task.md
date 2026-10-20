@@ -98,7 +98,7 @@ not let the review expand the part's scope without user approval.
 | 10 | Human review panel (Django Admin) | 9 | [x] Done (2026-10-13) |
 | 11 | Appeals & removed-post tombstones | 10 | [x] Done (2026-10-13) |
 | 11B | Credibility score | 7B, 10, 11 | [x] Done (2026-10-19) |
-| 11C | Emergency posts | 9, 10, 11B | [ ] |
+| 11C | Emergency posts | 9, 10, 11B | [x] Done (2026-10-20) |
 | 11D | Charts & stats | 7B, 11B | [ ] |
 | 12 | Search | 6, 11B | [ ] |
 | 13 | Notifications | 7, 7B, 10, 11, 11C | [ ] |
@@ -1272,7 +1272,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 ---
 
 ## Part 11C: Emergency posts
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-20)
 **Goal:** authors can flag a fact post as an emergency (D5; ARCHITECTURE §4b):
 - pinned at the top of feeds for 24 hours
 - still fact-checked, first
@@ -1322,17 +1322,43 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 **API endpoints:** `GET /api/v1/posts/emergencies/`; the extended `GET /api/v1/me/fact-quota/`.
 
 **Acceptance criteria**
-- [ ] An emergency opinion is refused by the API and by the DB constraint
-- [ ] Each ineligibility reason is returned and shown: unverified, too new, score below 40, blocked, daily limit, fact quota
-- [ ] Expiry depends only on time: pinned at 23 h 59 min, not pinned at 24 h 01 min (time-controlled test, no job running)
-- [ ] A pipeline FALSE on an active emergency gives UNDER REVIEW (top of the admin queue), never FALSE; after expiry a FALSE result is applied normally
-- [ ] A moderator's Mark FALSE unpins the post at once, blocks the author's emergency posting for 30 days and applies the −3 score event
-- [ ] 2 counting reports send an active emergency to review; the same post after expiry needs 5
-- [ ] At most 3 pinned posts show, none repeated in the list below
-- [ ] The processor handles emergencies before older pending posts
-- [ ] Every new row of the ARCHITECTURE §4 table has a passing test
+- [x] An emergency opinion is refused by the API and by the DB constraint (`test_api_create.py`: 400 on `is_emergency`; `test_services.py`: the service's `ValidationError` and the check `posts_post_emergency_fact_only`)
+- [x] Each ineligibility reason is returned and shown: unverified, too new, score below 40, blocked, daily limit, fact quota (`test_emergency.py`: the matrix, the order, every `next_allowed_at` and the inclusive edges; `test_api_create.py` / `test_api_quota.py`: the 403 and the quota block per reason; `ComposerModal.test.tsx`: the disabled toggle with each reason in plain words; E2E: "Your account is too new…")
+- [x] Expiry depends only on time: pinned at 23 h 59 min, not pinned at 24 h 01 min (time-controlled test, no job running) (`test_api_pinned.py` places posts in time; the routing tests pass two clocks to one post)
+- [x] A pipeline FALSE on an active emergency gives UNDER REVIEW (top of the admin queue), never FALSE; after expiry a FALSE result is applied normally (`test_routing_pipeline.py`, `test_services_emergency.py`, `test_admin_emergency.py`; E2E)
+- [x] A moderator's Mark FALSE unpins the post at once, blocks the author's emergency posting for 30 days and applies the −3 score event (`test_services_emergency.py`: three audit rows, 50 → 38, the block row and column; E2E: gone from the pinned section, FALSE · REVIEWED without the chip)
+- [x] 2 counting reports send an active emergency to review; the same post after expiry needs 5 (`test_threshold.py`, `test_routing.py`)
+- [x] At most 3 pinned posts show, none repeated in the list below (`test_api_pinned.py`, `test_api_feed_pinned.py`, `HomeFeed.test.tsx`, `PinnedEmergencies.test.tsx`)
+- [x] The processor handles emergencies before older pending posts (`test_queue.py`: active first, expired and demoted in normal order, the edge of the expiry)
+- [x] Every new row of the ARCHITECTURE §4 table has a passing test (the routing, rules and service tests named above, including the overturned-appeal lift and the pipeline FALSE after expiry)
 
 **Required tests:** routing rows (pure functions with `now`); eligibility matrix; feed pinning, exclusion and expiry with time control; processor ordering; admin actions and audit rows; composer states; PinnedEmergencies. E2E: an eligible user posts an emergency → it's pinned in Recent → a moderator marks it FALSE (service fixture) → it's no longer pinned and shows FALSE.
+
+**Decisions and deviations (plan approved 2026-10-20; built 2026-10-20; recorded in ARCHITECTURE §2/§3/§4/§4b/§6/§8/§9/§10, ANALYSIS c-45 and f-1, STRUCTURE, MEMORY):**
+- **User decisions (2026-10-19):**
+  - **Block / Unblock emergency posting: moderators and up** (`moderation.block_emergency_posting`, migration `moderation.0007_emergency_permission`). Nobody but a superuser blocks a superuser or themselves.
+  - **How a block ends:** the automatic block lifts by itself when that FALSE label is overturned, unless another block still stands; a manual block lasts `emergency_false_cooldown_days`; a logged Unblock lifts every block early.
+  - **The pinned section's × folds it to one line**, remembered per feed for the tab (sessionStorage) until a post that wasn't pinned before appears.
+  - **The post object gains `emergency_demoted`** (25 keys); the post page says "Priority ended." or "Priority removed by a moderator."
+- **Defaults approved with the plan:** any FALSE label on an emergency blocks (the trigger is the ledger's new `emergency_false` row, so nothing blocks twice); three audit rows 1 µs apart for Mark FALSE on an active emergency; Demote for moderators and up, not on your own post, internal notes only; one refusal code (403 `emergency_not_allowed` + `reason`), a full or paused fact quota included; the daily limit counts deleted and removed emergencies; `block_days` in the quota's emergency block; Remove doesn't demote (a Restore inside the 24 h pins again); the status poll unchanged (`emergencyShown` ends the violet look on a polled FALSE or removal); tests pin the six emergency settings (`emergency_settings` in the root conftest, autoused by the six app packages for database tests).
+- **Built differently from the task text (approved with the plan):**
+  - **The button reads "Post emergency, will be checked"** (a comma, as the shipped "Post fact, will be checked"; the task had a dash).
+  - **No short shared cache for Recent's pinned list** (ARCHITECTURE §9 named one): one indexed query per first page; a cache of ids would still need a query for the viewer's flags.
+  - **`create_post` locks the author with `FOR NO KEY UPDATE`** (Part 11B's rule for user locks), not the `FOR UPDATE` §3 named; ARCHITECTURE §3 corrected.
+  - **`emergency_unblocked`** is a new `ModerationAction` kind (migration `moderation.0006_emergency_actions`, with `blocked_until` and its check); an account's block rows are strictly increasing in time.
+- **Built differently from the plan (found while building):**
+  - **The account's block history on UserAdmin is a read-only field, not an inline:** an inline formset makes the account form's own POST require its management form, which broke the existing admin-form tests; the field shows the same columns to holders of the permission.
+  - **Query-count pins outside the plan's file list moved by the planned +1 first-page query:** `social/tests/{test_engagement_counts,test_feed_cache}.py`, `reports/tests/test_reported_by_me.py`; the fake-feed fixtures in `FeedList.test.tsx` and `CommentList.test.tsx` gained `head: null`; the composer harness takes a partial draft; `social-api.test.ts` expects the `head`.
+  - **The random walks' coverage test needs 32 seeds** (was 12): the walks gained an expired emergency, Demote and a Block/Unblock step, which made `repost_false` rarer.
+  - **The composer treats an allowance without the `emergency` block as "not allowed"** (a frontend deployed before its backend doesn't crash).
+  - **The folded bar has no "·" separator** (it dangled at 390 px); it reads "2 emergency posts pinned" with Show at the right.
+- **Not done (later parts):**
+  - **Part 13:** notify `emergency_demoted` from `moderation.services._perform` (Demote, and Mark FALSE when `effect.demoted`); the hook point is the `emergency_demoted` row.
+  - **Part 15:** the `/how-it-works` emergency section.
+  - **Part 16:** the pinned query on every first page and the Following reposts side's `NOT IN` under load; `posts_pending_queue_idx` no longer serves the processor's `Case` ordering (it still serves the filter); emergency abuse with real data.
+  - **Part 17:** with the stub in production, a late FALSE on an expired emergency also blocks its author (part of the existing launch blocker).
+- **Validated by:** 52 backend mutation checks (all caught) and 30 frontend mutation checks (two first-run survivors became tests: a reopened allowance must not bring the toggle back on, and a 403 turns it off even when the refreshed allowance still says yes); the threaded tests (`moderation/test_races*.py`, `test_pipeline_interplay.py`, `reputation/test_races.py`, `pipeline/test_races.py`, `reports/test_races.py` and the two emergency-race tests in `posts/test_services.py`) 10 runs in a row; migrations applied, rolled back to `moderation 0005` and applied again; `recompute_reputation --check` on the dev database; a scripted headless-Chromium check at 1280 and 390 px (the pinned section open, Show all and folded, the composer's emergency states, the demoted note) and of the admin pages (the emergency filter, Demote's confirmation, Block, the account's blocks), screenshots looked at; the Linux blocks of `docs/test-command.md` Part 11C run verbatim.
+- **Verified:** see HANDOFF (backend 3644 tests, frontend 1782, E2E 43 in dev and CI mode). The PowerShell blocks of the `docs/test-command.md` section were not run on Windows. CI itself runs when you push.
 
 **Recommended models**
 - **Plan:** Opus 5.5 · xhigh. It changes the core state machine and is the highest-harm feature.
@@ -1431,6 +1457,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 - `notifications.services.notify()`, called explicitly (no signals) from: follow, like, comment, repost, pipeline verdict and under-review, moderator remove and verdict, emergency priority removed (11C), appeal resolved (label and removal appeals).
 - Dedupe follow, like and repost; no self-notifications.
 - **From Part 11:** `appeal_resolved` goes from `moderation.services._perform` when `effect.appeal_status` is set (an appeal's Mark verified, Mark FALSE, Remove, Restore or Keep removed), in the same transaction; the recipient is `appeal.author`, the outcome is `upheld` or `overturned`. `file_appeal` itself notifies nobody. `ModerationAction.appeal` links the row.
+- **From Part 11C:** `emergency_demoted` goes from `moderation.services._perform` where it writes an `emergency_demoted` row: the Demote action itself (`effect.kind == emergency_demoted`) and Mark FALSE when `effect.demoted`; the recipient is the post's author. An automatic block or lift (`emergency_blocked` / `emergency_unblocked`) notifies nobody unless Part 13 decides otherwise.
 - `GET /api/v1/notifications/` (cursor), `GET …/unread-count/` (indexed, ≤2 queries, uncached), `POST …/mark-read/` (`ids` or `all`).
 
 **Frontend scope:** `/notifications`: items with a glyph, actor avatar, post excerpt, relative time and unread dot; mark all as read; mark read on click. A sidebar unread badge via `useUnreadCount` (30 s, visible-only). Empty state.
@@ -1561,6 +1588,7 @@ Plus toasts and field errors.
 - `/how-it-works`:
   - the status table rendered with the real StatusBadges (including EMERGENCY), and the lifecycle
   - an FAQ with real answers: why opinions aren't checked, reports, appeals (FALSE labels and removals), the pipeline, emergency posts, and why reposts keep the original's label
+  - **From Part 11C:** the emergency answer covers who may post one (the six rules of ARCHITECTURE §4b and their reasons, which the composer already words), the 24 h pin and "checked first", that a FALSE emergency costs N + 3 and blocks emergency posting for `emergency_false_cooldown_days`, and that the block lifts when that FALSE is overturned
   - a `#credibility` section: how the score is calculated in plain words, what raises and lowers it, when it's shown, and how to appeal. Marked **"needs legal review"** (guide §16).
 - `/privacy`, `/terms`: placeholder text clearly marked **"needs legal review"**. The Terms placeholder has explicit sections on verification labels and the credibility score.
 - `not-found` and `error` pages (with `<Logo/>`).
@@ -1595,6 +1623,7 @@ Plus toasts and field errors.
   - the emergency safeguards
   - the credibility score's appeal and audit path
   - **From Part 11B:** the per-write totals aggregate in `settle_post`, the user-lock fan-out on a post with thousands of reposters, a moderator deciding a post they reposted (their +0.25), and report-credit farming with real data
+  - **From Part 11C:** the pinned query on every first page of Recent and Following, the Following reposts side's `NOT IN` the pinnable ids, `posts_pending_queue_idx` no longer serving the processor's `Case` ordering (it still serves the filter), and emergency abuse with real data (the daily limit, the block, the lower report threshold)
 - `check --deploy` clean.
 - Security headers and cookie flags verified by tests; admin path confirmed.
 - Throttle review; secret-leak scan of the repo (patterns); logging review (no tokens or PII).
@@ -1638,7 +1667,7 @@ Plus toasts and field errors.
 - Anymail Brevo backend; Sentry.
 - A staff-only "send test error" management command.
 - Deploy runbook notes in `docs/`.
-- **Launch blocker from Part 9 (user decision 2026-10-11):** decide how production gets verdicts before deploying. With `PIPELINE_BACKEND=stub` any author can write `#true` to get VERIFIED 95%, and untagged facts get hash-chosen labels that feed the public credibility score (ARCHITECTURE §6).
+- **Launch blocker from Part 9 (user decision 2026-10-11):** decide how production gets verdicts before deploying. With `PIPELINE_BACKEND=stub` any author can write `#true` to get VERIFIED 95%, and untagged facts get hash-chosen labels that feed the public credibility score (ARCHITECTURE §6). From Part 11C a hash-chosen FALSE on an expired emergency also blocks its author's emergency posting.
 
 **Frontend scope:** none.
 

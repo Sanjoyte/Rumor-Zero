@@ -413,7 +413,7 @@ def queries(client):
     return len(captured)
 
 
-def test_the_query_count_with_reposts_is_four_on_a_miss_and_three_on_a_hit(auth_client, me, bo):
+def test_the_query_count_with_reposts_is_five_on_a_miss_and_four_on_a_hit(auth_client, me, bo):
     stranger = VerifiedUserFactory()
     client = auth_client(me)
 
@@ -429,10 +429,11 @@ def test_the_query_count_with_reposts_is_four_on_a_miss_and_three_on_a_hit(auth_
     for i in range(3, 9):
         repost(bo, post(stranger, f"s{i}", 300 + i), 10 + i)
         post(bo, f"b{i}", 20 + i)
-    assert small == counts() == (4, 3)  # the user, the keys (a union), the posts, the reposts
+    # The user, the keys (a union), the posts, the reposts, and the pinned emergencies (11C).
+    assert small == counts() == (5, 4)
 
 
-def test_the_query_count_without_reposts_is_three_and_two(auth_client, me, bo):
+def test_the_query_count_without_reposts_is_four_and_three(auth_client, me, bo):
     client = auth_client(me)
 
     def counts():
@@ -445,10 +446,10 @@ def test_the_query_count_without_reposts_is_three_and_two(auth_client, me, bo):
     small = counts()
     for i in range(3, 20):
         post(bo, f"b{i}", 20 + i)
-    assert small == counts() == (3, 2)  # no reposts on the page: no query for them
+    assert small == counts() == (4, 3)  # no reposts on the page: no query for them
 
 
-def test_a_cursor_page_costs_the_same_as_a_miss(auth_client, me, bo):
+def test_a_cursor_page_costs_a_miss_without_the_pinned_list(auth_client, me, bo):
     stranger = VerifiedUserFactory()
     for i in range(30):
         repost(bo, post(stranger, f"s{i}", 300 + i), 10 + i)

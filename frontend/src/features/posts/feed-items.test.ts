@@ -54,3 +54,21 @@ describe("visibleItems", () => {
     expect(items).toHaveLength(2);
   });
 });
+
+describe("visibleItems: posts already shown above the list (Part 11C)", () => {
+  it("hides a pinned post and a repost of it, and keeps the rest", () => {
+    const items = [
+      feedEntry(post("a")),
+      repostEntry(post("p")),
+      feedEntry(post("p")),
+      feedEntry(post("b")),
+    ];
+    const shown = visibleItems(items, undefined, new Set(["p"]));
+    expect(shown.map((item) => item.post.id)).toEqual(["a", "b"]);
+  });
+
+  it("changes nothing without the set", () => {
+    const items = [feedEntry(post("a")), feedEntry(post("b"))];
+    expect(visibleItems(items)).toEqual(items);
+  });
+});

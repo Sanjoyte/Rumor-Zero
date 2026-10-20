@@ -2,6 +2,7 @@
 
 import pytest
 from django.db import DataError, IntegrityError, connection, transaction
+from django.utils import timezone
 
 from apps.moderation.models import ActionKind, ModerationAction
 from apps.moderation.tests.factories import ModerationActionFactory
@@ -17,8 +18,9 @@ def violated(constraint_name, **fields):
     assert exc.value.__cause__.diag.constraint_name == constraint_name
 
 
-def test_the_whole_list_of_eleven_kinds_exists():
-    """Part 10 made ten; Part 11 added `kept_removed` ("Keep removed" had no kind)."""
+def test_the_whole_list_of_twelve_kinds_exists():
+    """Part 10 made ten; Part 11 added `kept_removed` ("Keep removed" had no kind) and Part 11C
+    `emergency_unblocked` (an Unblock, or the lift when a FALSE label is overturned)."""
     assert [kind.value for kind in ActionKind] == [
         "verified",
         "marked_false",
@@ -29,6 +31,7 @@ def test_the_whole_list_of_eleven_kinds_exists():
         "kept_removed",
         "emergency_demoted",
         "emergency_blocked",
+        "emergency_unblocked",
         "avatar_removed",
         "avatar_blocked",
     ]
@@ -36,8 +39,27 @@ def test_the_whole_list_of_eleven_kinds_exists():
 
 @pytest.mark.parametrize("kind", ActionKind.values)
 def test_every_kind_can_be_stored(kind):
-    ModerationActionFactory(action=kind, post=None, from_status=None, to_status=None)
+    until = timezone.now() if kind == ActionKind.EMERGENCY_BLOCKED else None
+    ModerationActionFactory(
+        action=kind, post=None, from_status=None, to_status=None, blocked_until=until
+    )
     assert ModerationAction.objects.get().action == kind
+
+
+def test_a_block_row_must_say_when_it_ends():
+    violated(
+        "moderation_action_blocked_until_kind",
+        action=ActionKind.EMERGENCY_BLOCKED,
+        post=None,
+        blocked_until=None,
+    )
+
+
+@pytest.mark.parametrize(
+    "kind", [kind for kind in ActionKind.values if kind != ActionKind.EMERGENCY_BLOCKED]
+)
+def test_no_other_row_has_a_block_end(kind):
+    violated("moderation_action_blocked_until_kind", action=kind, blocked_until=timezone.now())
 
 
 def test_an_unknown_kind_is_refused_by_the_database():
@@ -63,6 +85,7 @@ def test_account_level_actions_have_no_statuses_and_no_post():
         action=ActionKind.EMERGENCY_BLOCKED,
         from_status=None,
         to_status=None,
+        blocked_until=timezone.now(),
     )
     row = ModerationAction.objects.get()
     assert (row.post, row.from_status, row.to_status, row.subject_user) == (

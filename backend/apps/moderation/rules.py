@@ -6,7 +6,12 @@ Pure: no database, no clock. `refusal()` says why an action can't be taken on a 
 too, to decide which buttons and rows to offer.
 
 The first five actions are the ones Part 10 builds. Part 11 adds Restore and Keep removed (the
-two ways to resolve a removal appeal) and the appeal rules; Part 11C adds Demote emergency.
+two ways to resolve a removal appeal) and the appeal rules; Part 11C adds Demote emergency, the
+emergency effects of Mark FALSE, the two account acts (Block / Unblock emergency posting) and the
+rule that says how long an account's emergency posting stays blocked (`standing_block_end`).
+
+**Time.** `now` is a required keyword of `refusal`, as `appeal` is: whether a post is an active
+emergency depends on it, and a call site that forgot it must fail loudly.
 
 **Appeals.** `appeal` is the post's *open* appeal, or None, and a required keyword everywhere:
 whether an action resolves an appeal comes from it, never from `flagged_reason` alone (a flagged
@@ -15,10 +20,14 @@ post with no appeal row must not crash). Reading `post.appeal` can query, so the
 
 import enum
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import NamedTuple
+from uuid import UUID
 
 from apps.accounts.models import Role
 from apps.moderation.models import ActionKind, AppealKind, AppealStatus
 from apps.pipeline import routing
+from apps.posts.emergency import is_active_emergency
 from apps.posts.models import FlaggedReason, PostStatus, PostType, VerdictSource
 from apps.reports.models import ReportStatus
 
@@ -31,6 +40,7 @@ class Act(enum.StrEnum):
     ESCALATE = "escalate"
     RESTORE = "restore"
     KEEP_REMOVED = "keep_removed"
+    DEMOTE_EMERGENCY = "demote_emergency"
 
 
 VERDICT_ACTS = (Act.MARK_VERIFIED, Act.MARK_FALSE)
@@ -65,6 +75,7 @@ ALREADY_REMOVED = Refusal("already_removed", "already removed")
 ALREADY_ESCALATED = Refusal("already_escalated", "already escalated")
 NO_REMOVAL_APPEAL = Refusal("no_removal_appeal", "no open removal appeal")
 ORIGINAL_MODERATOR = Refusal("original_moderator", "you made the first decision")
+NOT_ACTIVE_EMERGENCY = Refusal("not_active_emergency", "not an active emergency")
 
 
 @dataclass(frozen=True)
@@ -76,7 +87,10 @@ class Effect:
     `credits_reporters` (Part 11B): whether the reporters whose open reports this action upholds
     earn a `report_upheld` credit. Only when the decision changed the post (user decision
     2026-10-13): Remove always; Mark FALSE unless the post was already FALSE before the review (a
-    pipeline FALSE that reports sent to review, or a label appeal)."""
+    pipeline FALSE that reports sent to review, or a label appeal).
+
+    `demoted` (Part 11C): a Mark FALSE ended an active emergency's priority, so the services log
+    an `emergency_demoted` row after the action's own (Demote's own row is its `kind`)."""
 
     kind: str
     from_status: str
@@ -84,6 +98,7 @@ class Effect:
     report_status: str | None
     appeal_status: str | None = None
     credits_reporters: bool = False
+    demoted: bool = False
 
 
 def can_return_to(post):
@@ -111,12 +126,15 @@ def _made_the_first_decision(appeal, moderator):
     return not (moderator.is_superuser or moderator.role == Role.SENIOR_MODERATOR)
 
 
-def refusal(act, post, moderator, *, appeal):
-    """Why `moderator` can't do `act` to `post`, or None. Checked in this order."""
+def refusal(act, post, moderator, *, appeal, now):
+    """Why `moderator` can't do `act` to `post` at `now`, or None. Checked in this order."""
     if post.deleted_at is not None:
         return DELETED
     if post.author_id == moderator.pk and not moderator.is_superuser:
         return OWN_POST
+    if act == Act.DEMOTE_EMERGENCY:
+        # Any status: a removed post is never active, and Demote resolves no appeal.
+        return None if is_active_emergency(post, now) else NOT_ACTIVE_EMERGENCY
     if act in VERDICT_ACTS and post.post_type != PostType.FACT:
         return OPINION
     if act in REMOVAL_APPEAL_ACTS:
@@ -184,9 +202,14 @@ def transition(act, post, *, moderator, now, appeal, public_note=""):
 
     Only these fields change: `status`, `flagged_reason`, `pre_review_status`,
     `pre_removal_status`, `review_started_at`, `escalated_at`, `verdict_source`, `verdict_note`,
-    `moderated_by` and `moderated_at` (the services add `updated_at` by saving). **No `pipeline_*`
-    field and no `confidence_score`** is touched: `pipeline_attempts` is Part 9's claim token, so a
-    moderator can't make an in-flight answer be dropped or applied.
+    `emergency_demoted_at`, `moderated_by` and `moderated_at` (the services add `updated_at` by
+    saving). **No `pipeline_*` field and no `confidence_score`** is touched: `pipeline_attempts` is
+    Part 9's claim token, so a moderator can't make an in-flight answer be dropped or applied.
+
+    Part 11C: Mark FALSE on an active emergency also ends its priority (`emergency_demoted_at`,
+    `Effect.demoted`); Demote does only that. Mark verified, Dismiss, Remove and Escalate leave the
+    priority alone (a removed post is never active, and a Restore inside the 24 hours pins it
+    again: its removal was the mistake).
 
     `appeal` is the post's open appeal (see the module text). `Effect.appeal_status` says how the
     action closes it: Mark verified overturns a label appeal, Mark FALSE and Remove uphold it
@@ -197,6 +220,7 @@ def transition(act, post, *, moderator, now, appeal, public_note=""):
     report_status = None
     appeal_status = None
     credits_reporters = False
+    demoted = False
     if resolves_appeal(act, post, appeal):
         appeal_status = (
             AppealStatus.OVERTURNED
@@ -207,6 +231,10 @@ def transition(act, post, *, moderator, now, appeal, public_note=""):
         verified = act == Act.MARK_VERIFIED
         # Read before the review fields are cleared: a post that was FALSE already isn't changed.
         credits_reporters = not verified and post.pre_review_status != PostStatus.VERIFIED_FALSE
+        # Read before the status changes: a FALSE always ends an active emergency's priority.
+        demoted = not verified and is_active_emergency(post, now)
+        if demoted:
+            post.emergency_demoted_at = now
         post.status = PostStatus.VERIFIED_TRUE if verified else PostStatus.VERIFIED_FALSE
         post.verdict_source = VerdictSource.MODERATOR
         post.verdict_note = public_note
@@ -241,8 +269,93 @@ def transition(act, post, *, moderator, now, appeal, public_note=""):
         post.flagged_reason = None
         post.escalated_at = None
         kind = ActionKind.KEPT_REMOVED
+    elif act == Act.DEMOTE_EMERGENCY:
+        # The priority ends early; the label, the review and the reports stay as they are.
+        post.emergency_demoted_at = now
+        kind = ActionKind.EMERGENCY_DEMOTED
     else:
         raise ValueError(f"not an action: {act!r}")
     post.moderated_by = moderator
     post.moderated_at = now
-    return Effect(kind, from_status, post.status, report_status, appeal_status, credits_reporters)
+    return Effect(
+        kind, from_status, post.status, report_status, appeal_status, credits_reporters, demoted
+    )
+
+
+# ---------- Part 11C: blocking an account's emergency posting ----------
+
+
+class AccountAct(enum.StrEnum):
+    BLOCK_EMERGENCY = "block_emergency"
+    UNBLOCK_EMERGENCY = "unblock_emergency"
+
+
+NO_ACCOUNT = Refusal("no_account", "no such account")
+SUPERUSER_ACCOUNT = Refusal("superuser_account", "a superuser's account")
+OWN_ACCOUNT = Refusal("own_account", "your own account")
+NO_BLOCK_LENGTH = Refusal("no_block_length", "the block length is 0 days")
+ALREADY_BLOCKED = Refusal("already_blocked", "already blocked at least that long")
+NOT_BLOCKED = Refusal("not_blocked", "not blocked")
+
+
+def account_refusal(act, target, moderator, *, block_days, now):
+    """Why `moderator` can't block or unblock `target`'s emergency posting at `now`, or None.
+
+    Nobody but a superuser may act on a superuser's account or their own (`UserAdmin._may_touch`'s
+    rule). A Block lasts `block_days` (the platform's `emergency_false_cooldown_days`): refused
+    when that is 0, or when the current block already ends at or after `now + block_days`. An
+    Unblock needs a block that hasn't ended. `target` is the account's locked row.
+    """
+    if not moderator.is_superuser:
+        if target.is_superuser:
+            return SUPERUSER_ACCOUNT
+        if target.pk == moderator.pk:
+            return OWN_ACCOUNT
+    blocked_until = target.emergency_blocked_until
+    if act == AccountAct.BLOCK_EMERGENCY:
+        if block_days <= 0:
+            return NO_BLOCK_LENGTH
+        if blocked_until is not None and blocked_until >= now + timedelta(days=block_days):
+            return ALREADY_BLOCKED
+        return None
+    if act == AccountAct.UNBLOCK_EMERGENCY:
+        if blocked_until is None or blocked_until <= now:
+            return NOT_BLOCKED
+        return None
+    raise ValueError(f"not an account action: {act!r}")
+
+
+class BlockRow(NamedTuple):
+    """What `standing_block_end` reads of an `emergency_blocked` / `emergency_unblocked` row."""
+
+    action: str
+    post_id: UUID | None
+    blocked_until: datetime | None
+
+
+def standing_blocks(rows):
+    """The blocks still standing after an account's block and unblock `rows` (in time order).
+
+    A block stands until an unblock lifts it. An unblock with no post (a moderator's Unblock) lifts
+    every block before it; an unblock with post P (the automatic lift when P's FALSE label is
+    overturned) lifts P's own blocks only, so a manual block or another FALSE emergency still
+    stands. A post-linked row loses its post only when the post is hard-deleted, which happens only
+    with the account (ARCHITECTURE §2), so a row with no post is a manual one.
+    """
+    standing = []
+    for row in rows:
+        if row.action == ActionKind.EMERGENCY_BLOCKED:
+            standing.append(row)
+        elif row.action == ActionKind.EMERGENCY_UNBLOCKED:
+            if row.post_id is None:
+                standing = []
+            else:
+                standing = [block for block in standing if block.post_id != row.post_id]
+    return standing
+
+
+def standing_block_end(rows):
+    """When the account's emergency posting is free again: the latest end among the blocks still
+    standing, or None. `users.emergency_blocked_until` always equals this; an end in the past is
+    harmless (the eligibility rule compares it with `now`)."""
+    return max((block.blocked_until for block in standing_blocks(rows)), default=None)

@@ -6,23 +6,27 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 11C (Emergency posts) is planned and approved** (2026-10-20), **not implemented**; the plan file is
-  new and uncommitted. Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11 and 11B are done (Part 11B committed as
-  `9d7edce`, Part 11 as `71c5e14`, Part 10 as `582905b`).
-  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11 and 11B CI have not been reported yet.**
+- **Part:** **Part 11C (Emergency posts) is implemented** (2026-10-20, Claude, Opus 5.5), **uncommitted**, from the
+  approved plan you committed as `132a2c0` ("Plan Part 11C"). Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10,
+  11, 11B and 11C are done (Part 11B committed as `9d7edce`, Part 11 as `71c5e14`, Part 10 as `582905b`).
+  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B and 11C CI have not been
+  reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
   - **Part 17 has a launch blocker from Part 9** (your decision 2026-10-11): decide how production gets verdicts
-    before deploying; the stub lets an author self-label with `#true`, and from Part 11B that feeds the public score.
+    before deploying; the stub lets an author self-label with `#true`, from Part 11B that feeds the public score, and
+    from Part 11C a hash-chosen FALSE on an expired emergency also blocks its author.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after planning Part 11C, as asked).
-- **Phase:** Part 11C plan approved, nothing built. HEAD `9d7edce` ("Part 11B: Credibility score"); the only change since
-  is the new plan file and this file. No migration was run this session, so the dev database is still at `reputation 0001`,
-  `moderation 0005`. Docker and the servers were not checked or started this session.
-- **Next action:** Implement Part 11C from the approved plan.
-- **Approved plan (not implemented):**
-  [`docs/agents/plans/part-11C-emergency-posts.md`](plans/part-11C-emergency-posts.md) (approved 2026-10-20)
+- **Owner:** none (Claude stopped after implementing Part 11C, as asked).
+- **Phase:** Part 11C built and validated; all changes are uncommitted on top of HEAD `132a2c0`. The dev database is at
+  `moderation 0007_emergency_permission` (rolled back to 0005 and re-applied once). Docker is up (I restarted it after
+  the machine rebooted mid-session); no server is running and ports 3000 and 8000 are free.
+- **Next action:** you review the diff and commit Part 11C (git is yours), push, and report CI. Then start a fresh
+  session for the next part (11D per the table; Part 13 now has the `emergency_demoted` hook point recorded).
+- **Implemented plan:**
+  [`docs/agents/plans/part-11C-emergency-posts.md`](plans/part-11C-emergency-posts.md) (approved 2026-10-20,
+  implemented 2026-10-20)
 - **Previous plans:**
   - [`part-11B-credibility-score.md`](plans/part-11B-credibility-score.md), implemented 2026-10-14 to 2026-10-19
     (committed as `9d7edce`);
@@ -48,9 +52,83 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-20 by Claude (Opus 5.5), Part 11C planned and approved.
+- **Last updated:** 2026-10-20 by Claude (Opus 5.5), Part 11C implemented and validated.
 
 ## Completed checkpoints
+
+- 2026-10-20 (Claude, Opus 5.5): **Part 11C implemented** (uncommitted). Started from HEAD `132a2c0` ("Plan Part 11C",
+  committed by you), a clean tree that matched this file (it still said the plan was uncommitted). Docker was up.
+  Baselines measured first: `pytest` 3400, `npm test` 1711, E2E 41. The machine **rebooted mid-session**: the
+  containers came back stopped (a 10-run race loop errored with "connection refused" at setup, not a code failure); I
+  ran `docker compose up -d`, every file was intact, and the loop was run again.
+  - **Backend** (`backend/`):
+    - New: `moderation/migrations/0006_emergency_actions.py` (the `emergency_unblocked` kind, `blocked_until` + check
+      `moderation_action_blocked_until_kind`, the permission option) and `0007_emergency_permission.py` (frozen lists,
+      grants `moderation.block_emergency_posting` to Moderators); `moderation/templates/moderation/admin/
+      confirm_account_action.html`; `posts/pinned.py`; tests `posts/test_api_pinned.py`, `social/test_api_feed_pinned.py`,
+      `moderation/{test_services_emergency,test_races_emergency,test_admin_emergency}.py`.
+    - Changed: `posts/{emergency,services,views,serializers,exceptions,urls,pagination}.py`,
+      `pipeline/{routing,processor}.py`, `moderation/{models,rules,services,admin,roles}.py` and `confirm_action.html`,
+      `social/{feed,views,serializers}.py`, `accounts/{models,admin}.py`, the root `conftest.py` (`emergency_settings`,
+      `pin_emergency_settings`) and the six app test conftests (autouse for database tests).
+    - Existing tests changed on purpose: `posts/tests/{test_emergency,test_services,test_api_create,test_api_detail,
+      test_api_feed,test_api_quota}.py`, `pipeline/tests/{test_routing,test_routing_pipeline,test_queue}.py`,
+      `moderation/tests/{test_rules,test_roles,test_models,test_api_appeal}.py`, `reputation/tests/{test_services,
+      test_api_events,test_sequences}.py` (expired emergencies; the walks gained an expired emergency, Demote and a
+      Block/Unblock step and check the block column after every step; `COVERAGE_SEEDS` 12 → 32), `reports/tests/
+      {test_threshold,test_reported_by_me}.py`, `social/tests/{test_api_feed,test_api_feed_reposts,test_engagement_counts,
+      test_feed_cache}.py`, `accounts/tests/test_user_save.py`.
+  - **Frontend** (`frontend/`): new `features/posts/{PinnedEmergencies,EmergencyNote}.tsx`, `emergency-copy.ts`,
+    `pinned-collapse.ts` (+ tests `PinnedEmergencies.test.tsx`, `EmergencyNote.test.tsx`, `emergency-copy.test.ts`),
+    `e2e/emergency.spec.ts`; changed `lib/api/types.ts`, `lib/post-display.ts`, `lib/format.ts`,
+    `components/ui/Checkbox.tsx`, `features/posts/{useCursorFeed,posts-api,HomeFeed,FeedList,feed-items,post-card-props,
+    PostDetail,ComposerModal,ComposerProvider,draft,messages,test-helpers}`, `features/social/social-api.ts`,
+    `features/dev/StitchSections.tsx`, `e2e/helpers.ts` (`seedAuthor({ ageDays })`, `emergencySettings()`,
+    `demote_emergency`) and the tests of `Checkbox`, `post-display`, `format`, `post-card-props`, `feed-items`,
+    `posts-api`, `useCursorFeed`, `FeedList`, `HomeFeed`, `ComposerModal`, `ComposerProvider`, `PostDetail`,
+    `CommentList` (the fake feed's `head`), `social-api` and `/dev/ui`.
+  - **Docs:** ARCHITECTURE §2/§3/§4/§4b/§6/§8/§9/§10, ANALYSIS c-45 (+ the f-1 note and the component row), STRUCTURE,
+    MEMORY (two Part 11C entries), `task.md` (criteria ticked, decisions and deviations, both status spots, notes in 13,
+    15, 16 and 17), the plan's status line, and `docs/test-command.md`: a `### Part 11C: Emergency posts` section in
+    **both** guides (12 steps each) and "11C" in its intro line; nothing else in that file touched.
+  - Two migrations, no new dependency, service or env variable; `design/` untouched. **I did not read or print
+    `backend/.env` or `frontend/.env.local`** (Django and Next read them themselves; the admin path was read by a shell
+    into a scratch file for the headless check and never printed).
+  - **Validation (all green):**
+    - Backend: `ruff check .` (All checks passed!), `ruff format --check .` (276 files already formatted),
+      `makemigrations --check --dry-run` (No changes detected), `manage.py check` (no issues), `pytest` **3644 passed**
+      (3400 before), Part 11C's six new test files 122 passed, `pytest apps/reputation` 405 passed; the threaded tests
+      (`moderation/test_races.py`, `test_races_emergency.py`, `test_pipeline_interplay.py`, `reputation/test_races.py`,
+      `pipeline/test_races.py`, `reports/test_races.py` and the two emergency races in `posts/test_services.py`, 53
+      tests) 10 runs in a row; migrations applied, rolled back to `moderation 0005`, applied again;
+      `recompute_reputation --check` on the dev database ("Checked 1426 accounts: every stored score matches the
+      ledger.").
+    - **52 backend mutation checks, all caught. 30 frontend mutation checks**, 28 caught at once; the two survivors
+      (the provider's adjust-while-rendering switch-off and its switch-off after a 403) were real gaps and became tests.
+    - Frontend: `npm run lint`, `lint:tokens`, `typecheck`, `format:check` clean; `npm test` **1782 passed** (127 files;
+      1711 before); `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` OK; `npm run test:e2e` **43 passed** in dev mode and
+      with `CI=1` (41 before), both run again on the final code.
+    - Headless Chromium at 1280 and 390 px: the pinned section (open, Show all, folded, kept on reload), the composer's
+      emergency states, the demoted post's note, no horizontal scroll; Django Admin: the emergency filter, Demote's
+      confirmation, Block with its confirmation, the account's Emergency blocks field. Screenshots looked at; the throwaway
+      `vis_` accounts were deleted afterwards. It found one cosmetic issue (a dangling "·" in the folded bar), fixed.
+  - **Test-command notes:**
+    - The section is `### Part 11C` inside each guide (the brief said `## Part <ID>`; the file's parts are `###`
+      sections inside its two `##` guides, as Parts 3 to 11B were), in the same step shape as the other parts.
+    - The file has **no comment marker** at its bottom (as in Parts 3 to 11B): it ends with the last bullet of the
+      Windows Part 11C section. (The brief asked to keep one; there is none to keep.)
+    - The Linux blocks of steps 3 to 9 and 12 were run as written in one shell against live Django with your own
+      settings; a script then confirmed the doc's blocks are byte-identical to what ran and that every expected-output
+      line appears in the recorded output (0 missing); every bash block passes `bash -n`. Steps 10 and 11 (browser,
+      admin) were checked against that same run with a headless-Chromium script at 1280 and 390 px. The **PowerShell
+      blocks were not run** (no PowerShell here): they reuse Part 11B's `Login`, `Mk`, `Send`, `Fetch` and add `$mine`,
+      `ModPost`, `ModAcct`; one expected line differs on purpose (`in_list` is `false` there, `null` in bash).
+  - **Found and fixed on the way** (details in MEMORY and `task.md`): an inline on UserAdmin made the account form's POST
+    require a management form (now a read-only field); a background `cd … && npx next dev` ran from `backend/` and
+    fetched a stray `next` into the npx cache (nothing written; started with an explicit `bash -c` since); an E2E
+    failure before the spec's `try` left a pinned test emergency in the dev DB (demoted by hand; the spec now cleans up
+    from the moment the post exists); after a FALSE emergency the allowance reads `score_too_low` before `blocked`
+    when the score falls below 40 (correct by the rule order; the guide explains it).
 
 - 2026-10-19 to 2026-10-20 (Claude, Opus 5.5): **Part 11C planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `9d7edce` ("Part 11B: Credibility score", committed by you), a clean tree. (The older text of

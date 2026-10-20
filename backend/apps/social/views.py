@@ -1,4 +1,5 @@
 from django.db.models import Exists, OuterRef
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from rest_framework import serializers
@@ -12,6 +13,7 @@ from apps.accounts.permissions import IsEmailVerified
 from apps.posts.exceptions import NotAuthorError
 from apps.posts.models import Post, PostStatus, PostType
 from apps.posts.pagination import FeedPagination
+from apps.posts.pinned import is_first_page, pinned_page
 from apps.posts.serializers import PostSerializer, feed_item, iso
 from apps.posts.views import parse_post_id
 from apps.social import feed, services, timeline
@@ -181,14 +183,28 @@ class FeedView(APIView):
     first (§9; `social.timeline`).
 
     The first page is cached per user as a list of keys (`social.feed`); the posts and reposts
-    themselves are read fresh every time.
+    themselves are read fresh every time. The active emergencies by `followed ∪ me` are pinned
+    above it on the first page (Part 11C), computed on every request, cache hits included.
     """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        entries, next_cursor = feed.following_page(request, request.user)
-        return FeedPagination.envelope(timeline_items(entries, request), next_cursor)
+        now = timezone.now()
+        entries, next_cursor = feed.following_page(request, request.user, now=now)
+        pinned, pinned_total = [], 0
+        if is_first_page(request):
+            rows, pinned_total = pinned_page(
+                feed.following_emergencies(request.user, now), request.user
+            )
+            context = {"request": request, "now": now}
+            pinned = PostSerializer(rows, many=True, context=context).data
+        return FeedPagination.envelope(
+            timeline_items(entries, request, now=now),
+            next_cursor,
+            pinned=pinned,
+            pinned_total=pinned_total,
+        )
 
 
 @method_decorator(never_cache, name="dispatch")

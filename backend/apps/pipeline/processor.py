@@ -22,13 +22,14 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from django.db import connections, transaction
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, Value, When
 from django.utils import timezone
 
 from apps.pipeline import routing
 from apps.pipeline.clients import PipelineError, get_client
 from apps.pipeline.contract import ContractError, PipelineRequest
 from apps.posts import services as post_services
+from apps.posts.emergency import active_emergency_q
 from apps.posts.models import Post
 
 logger = logging.getLogger(__name__)
@@ -42,12 +43,17 @@ _kick_slots = threading.BoundedSemaphore(MAX_KICK_THREADS)
 
 def due_posts(now):
     """The queue: posts still owed a check (`routing.awaiting_check_q`) whose next try is due,
-    emergencies first (`is_emergency DESC`; 11C makes it "active emergency"), then oldest."""
+    **active emergencies first** (§4b: an expired or demoted one waits its turn), then oldest."""
     due = Q(pipeline_next_attempt_at__isnull=True) | Q(pipeline_next_attempt_at__lte=now)
+    emergency_first = Case(
+        When(active_emergency_q(now), then=Value(1)),
+        default=Value(0),
+        output_field=IntegerField(),
+    )
     return (
         Post.objects.filter(routing.awaiting_check_q())
         .filter(due)
-        .order_by("-is_emergency", "created_at", "id")
+        .order_by(emergency_first.desc(), "created_at", "id")
     )
 
 

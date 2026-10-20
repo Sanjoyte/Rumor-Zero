@@ -5,6 +5,13 @@ since Part 7B: a post and a repost are different items). The posts and reposts a
 every request, so a deleted or removed post disappears at once, an undone repost drops out, and
 likes, reposts and counts are never stale. What the cache saves is the expensive part, finding the
 page's keys.
+
+**Pinned emergencies** (Part 11C, §4b): the active emergencies by `followed ∪ me` are pinned above
+the feed (`following_emergencies`) and left out of its pages: the posts side excludes them, and
+the reposts side excludes reposts **of** them (reposts never pin; a repost of someone else's
+emergency stays, with its chip). The pinned list is computed on every first-page request, cache
+hits included; the cached keys were filtered when they were cached. An emergency that ends while
+a follower's first page is cached is in neither list until the cache's 30 s run out (accepted).
 """
 
 from typing import NamedTuple
@@ -15,6 +22,7 @@ from django.db import transaction
 from django.db.models import Q
 
 from apps.accounts.models import User
+from apps.posts.emergency import active_emergency_q
 from apps.posts.models import Post, PostStatus
 from apps.social import timeline
 from apps.social.models import Follow, Repost
@@ -47,6 +55,11 @@ def following_reposts(user):
     """Every repost by the people `user` follows, and by `user`, whatever became of the original
     (one that is gone shows as "no longer available")."""
     return Repost.objects.filter(Q(user_id=user.pk) | Q(user_id__in=_followed(user)))
+
+
+def following_emergencies(user, now):
+    """The active emergencies by the people `user` follows, and by `user`: what Following pins."""
+    return following_posts(user).filter(active_emergency_q(now))
 
 
 def load_posts(ids, viewer):
@@ -127,8 +140,11 @@ def _read_entry(value):
     return None if None in keys else (keys, next_cursor)
 
 
-def following_page(request, user):
-    """`(entries, next_cursor)` for one page. A first page asked with the defaults is cached."""
+def following_page(request, user, *, now):
+    """`(entries, next_cursor)` for one page. A first page asked with the defaults is cached.
+
+    The posts that Following pins at `now` are left out, and so are reposts of them (in the same
+    SQL: `post_id NOT IN` the pinnable ids, both columns non-null)."""
     ttl = settings.FEED_CACHE_SECONDS
     cacheable = (
         ttl > 0 and "cursor" not in request.query_params and "page_size" not in request.query_params
@@ -139,8 +155,13 @@ def following_page(request, user):
         if stored is not None:
             return load_entries(stored[0], user), stored[1]
     size, cursor = timeline.page_request(request)
+    pinned = following_emergencies(user, now)
     keys, next_key = timeline.page(
-        following_posts(user), following_reposts(user), size=size, cursor=cursor, dedupe=True
+        following_posts(user).exclude(active_emergency_q(now)),
+        following_reposts(user).exclude(post_id__in=pinned.values("id")),
+        size=size,
+        cursor=cursor,
+        dedupe=True,
     )
     next_cursor = next_key.token() if next_key else None
     if cacheable:

@@ -232,18 +232,22 @@ export interface SeededAuthor {
 /**
  * Makes a verified author with a password (and the verified `EmailAddress` row that
  * `create_superuser` also makes), so a test can log in without a sign-up: the suite is bounded by
- * allauth's 20 sign-ups a minute. Turnstile guards sign-up only, not log-in.
+ * allauth's 20 sign-ups a minute. Turnstile guards sign-up only, not log-in. `ageDays` makes the
+ * account that many days old (emergency posts need an old enough account, Part 11C).
  */
-export function seedAuthor(prefix = "author"): SeededAuthor {
+export function seedAuthor(prefix = "author", { ageDays = 0 } = {}): SeededAuthor {
   if (!/^[a-z]{1,10}$/.test(prefix)) throw new Error("a short lower-case prefix");
+  if (!Number.isInteger(ageDays) || ageDays < 0 || ageDays > 3650) throw new Error("bad age");
   const out = runShell(
     [
-      "import uuid",
+      "import datetime, uuid",
       "from allauth.account.models import EmailAddress",
+      "from django.utils import timezone",
       "from apps.accounts.models import User",
       "tag = uuid.uuid4().hex[:10]",
       `user = User.objects.create_user(email=f'${prefix}-{tag}@example.test', username=f'${prefix}_{tag}', password='${PASSWORD}', is_email_verified=True)`,
       "EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)",
+      `User.objects.filter(pk=user.pk).update(created_at=timezone.now() - datetime.timedelta(days=${ageDays}))`,
       "print('SEEDED=' + user.email + ',' + user.username)",
     ].join("\n"),
   );
@@ -262,9 +266,14 @@ export async function logIn(page: Page, account: SeededAuthor) {
   await expectLoggedIn(page, account.username);
 }
 
-/** A moderator's decision on a post (Part 10, 11), through the backend's own services. */
+/** A moderator's decision on a post (Part 10, 11, 11C), through the backend's own services. */
 export type ModeratorAction =
-  "mark_verified" | "mark_false" | "remove_post" | "restore_post" | "keep_removed";
+  | "mark_verified"
+  | "mark_false"
+  | "remove_post"
+  | "restore_post"
+  | "keep_removed"
+  | "demote_emergency";
 
 /**
  * Has a brand-new moderator (not the one who made any earlier decision) take `action` on a post,
@@ -290,4 +299,26 @@ export function moderate(postId: string, action: ModeratorAction, reason = ""): 
       "print('MODERATED=1')",
     ].join("\n"),
   );
+}
+
+/** The emergency limits the E2E backend uses: the developer's own PlatformSettings (Part 11C). */
+export interface EmergencySettings {
+  minAccountAgeDays: number;
+  perDay: number;
+  minReputation: number;
+  factPostsPerDay: number;
+}
+
+export function emergencySettings(): EmergencySettings {
+  const out = runShell(
+    [
+      "from apps.core.services import get_platform_settings",
+      "cfg = get_platform_settings()",
+      "print('EMERGENCY=' + ','.join(str(v) for v in (cfg.emergency_min_account_age_days, cfg.emergency_posts_per_day, cfg.emergency_min_reputation, cfg.fact_posts_per_day)))",
+    ].join("\n"),
+  );
+  const match = /EMERGENCY=(\d+),(\d+),(\d+),(\d+)/.exec(out);
+  if (!match) throw new Error(`no settings in: ${out}`);
+  const [minAccountAgeDays, perDay, minReputation, factPostsPerDay] = match.slice(1).map(Number);
+  return { minAccountAgeDays, perDay, minReputation, factPostsPerDay };
 }

@@ -11,6 +11,7 @@ import { makeComment } from "./test-helpers";
 function feedWith(overrides: Partial<CursorFeed<Comment>> = {}): CursorFeed<Comment> {
   return {
     items: [],
+    head: null,
     phase: "ready",
     error: null,
     hasMore: false,

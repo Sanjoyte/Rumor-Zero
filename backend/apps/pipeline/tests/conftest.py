@@ -14,6 +14,7 @@ from apps.pipeline.clients import PipelineError, StubPipelineClient
 from apps.pipeline.contract import PipelineResult
 from apps.posts.models import FlaggedReason, PostStatus
 from apps.posts.tests.factories import PostFactory
+from conftest import pin_emergency_settings
 
 
 @pytest.fixture
@@ -91,3 +92,10 @@ def failing(kind="timeout", detail="no answer in time", **kwargs):
         raise PipelineError(kind, detail)
 
     return FakeClient(answer, **kwargs)
+
+
+@pytest.fixture(autouse=True)
+def _pinned_emergency_settings(request):
+    """The six emergency settings at their defaults in every database test (Part 11C): the seed
+    comes from the developer's own `backend/.env`."""
+    pin_emergency_settings(request)

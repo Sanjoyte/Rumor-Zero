@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { type PostDisplayInput, statusBadgeSpec, stripeTone } from "./post-display";
+import {
+  emergencyShown,
+  type PostDisplayInput,
+  type PostStatus,
+  statusBadgeSpec,
+  stripeTone,
+} from "./post-display";
 
 describe("statusBadgeSpec (ARCHITECTURE section 4 badge table)", () => {
   const rows: [string, PostDisplayInput, ReturnType<typeof statusBadgeSpec>][] = [
@@ -98,5 +104,24 @@ describe("statusBadgeSpec with the pipeline's real answers (Part 9)", () => {
     ],
   ] as [string, PostDisplayInput, string][])("%s", (_tag, input, label) => {
     expect(statusBadgeSpec(input)?.label).toBe(label);
+  });
+});
+
+describe("emergencyShown (Part 11C)", () => {
+  const statuses: PostStatus[] = [
+    "pending",
+    "published",
+    "verified_true",
+    "verified_false",
+    "under_review",
+    "removed",
+  ];
+
+  it("follows the API's flag for every status but FALSE and removed", () => {
+    for (const status of statuses) {
+      const expected = status !== "verified_false" && status !== "removed";
+      expect(emergencyShown({ emergency_active: true, status })).toBe(expected);
+      expect(emergencyShown({ emergency_active: false, status })).toBe(false);
+    }
   });
 });

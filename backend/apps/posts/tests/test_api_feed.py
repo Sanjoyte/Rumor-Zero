@@ -246,19 +246,48 @@ def feed_queries(client):
     return len(queries)
 
 
+def make_emergencies(count, *, minutes_old=10):
+    now = timezone.now()
+    return [
+        PostFactory(
+            fact=True,
+            content=f"Emergency {i}",
+            is_emergency=True,
+            created_at=now - timedelta(minutes=minutes_old, seconds=i),
+            emergency_expires_at=now + timedelta(hours=20),
+        )
+        for i in range(count)
+    ]
+
+
 def test_the_number_of_queries_does_not_grow_with_the_posts(api_client, auth_client):
     reader = auth_client(VerifiedUserFactory())
     sources = [f"10.1000/s{i}" for i in range(5)]
     make_posts(5, fact=True, sources=sources)
+    make_emergencies(1)
     small = (feed_queries(api_client), feed_queries(reader))
     make_posts(15, base=timezone.now() - timedelta(hours=1), fact=True, sources=sources)
+    make_emergencies(4, minutes_old=20)
     large = (feed_queries(api_client), feed_queries(reader))
-    assert small == large == (1, 2)  # anonymous: the page; signed in: the user, then the page
+    # Anonymous: the page and the pinned list (Part 11C); signed in: the user too.
+    assert small == large == (2, 3)
 
 
-def test_a_full_page_of_20_is_one_query_for_an_anonymous_reader(
+def test_a_later_page_has_no_pinned_list_and_costs_what_it_did(api_client, auth_client):
+    make_posts(25)
+    make_emergencies(2)
+    cursor = api_client.get(URL).json()["next_cursor"]
+    reader = auth_client(VerifiedUserFactory())
+    for client, expected in ((api_client, 1), (reader, 2)):
+        with CaptureQueriesContext(connection) as queries:
+            body = client.get(URL, {"cursor": cursor}).json()
+        assert (body["pinned"], body["pinned_total"]) == ([], 0)
+        assert len(queries) == expected
+
+
+def test_a_full_page_of_20_is_two_queries_for_an_anonymous_reader(
     api_client, django_assert_num_queries
 ):
     make_posts(20, fact=True, sources=["10.1000/xyz", "https://example.org/"])
-    with django_assert_num_queries(1):
+    with django_assert_num_queries(2):  # the page, and the pinned list (Part 11C)
         assert len(api_client.get(URL).json()["results"]) == 20

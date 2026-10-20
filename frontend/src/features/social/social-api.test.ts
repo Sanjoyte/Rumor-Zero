@@ -32,10 +32,14 @@ beforeEach(() => {
 });
 
 describe("social-api", () => {
-  it("reads the Following feed with the cursor, as items and nextCursor", async () => {
+  it("reads the Following feed with the cursor, as items, nextCursor and the pinned head", async () => {
     client.get.mockResolvedValue({ pinned: [], pinned_total: 0, results: [1], next_cursor: "c2" });
     const signal = new AbortController().signal;
-    expect(await fetchFollowingFeed(null, signal)).toEqual({ items: [1], nextCursor: "c2" });
+    expect(await fetchFollowingFeed(null, signal)).toEqual({
+      items: [1],
+      nextCursor: "c2",
+      head: { pinned: [], pinnedTotal: 0 },
+    });
     expect(client.get).toHaveBeenCalledWith("/v1/feed/", { signal });
     await fetchFollowingFeed("a b/c");
     expect(client.get).toHaveBeenLastCalledWith("/v1/feed/?cursor=a+b%2Fc", { signal: undefined });
