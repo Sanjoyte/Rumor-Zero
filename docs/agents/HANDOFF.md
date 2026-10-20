@@ -6,8 +6,9 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 13 (Notifications) is implemented** (2026-10-20, Claude, Sonnet 5.5), **uncommitted**. Parts 0A, 0B,
-  0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12 and 13 are done (Part 11D committed as `b2f8ad5`, Part 12 as `30649b4`).
+- **Part:** **Part 14 (Account settings, data export, deletion) is planned and approved** (2026-10-21, Claude, Opus 5.5); no
+  code written yet. Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12 and 13 are done (Part 11D committed as
+  `b2f8ad5`, Part 12 as `30649b4`, Part 13 as `4f2d818`).
   Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12 and 13 CI have not been
   reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
@@ -19,17 +20,19 @@ read-only git output.
     writes): fine before launch.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after Part 13, as asked).
-- **Phase:** Part 13 implemented and verified; nothing is committed (the tree holds Part 13's changes on top of HEAD `30649b4`, "Implemented
-  Part 12: Search"; the plan file and the HANDOFF edit were already staged by you). Docker is up, ports 3000 and 8000 are free, no server
-  is running. The dev database is at `notifications 0001_initial`; every throwaway account of the visual and guide runs was deleted
-  (`recompute_reputation --check`: "Checked 1908 accounts: every stored score matches the ledger."); E2E-made accounts remain in it.
-- **Next action:** **you commit Part 13** (and run CI when you push), then **name the next part** (Part 14, Account settings, data export, deletion,
-  is next in `task.md`; Part 13 left it two notes: delete the items whose `actor` is the account, and decide whether the export holds the table).
-  Baselines now: `pytest` **4073**, `npm test` **2148**, E2E **53**.
+- **Owner:** none (Claude stopped after planning Part 14, as asked).
+- **Phase:** Part 14 plan approved and saved; nothing implemented. HEAD `4f2d818` ("Implemented Part 13: Notifications"); the tree held
+  no changes before the plan was saved (only the new plan file and this HANDOFF edit now). Dependencies 6, 7, 7B, 11B and 11D are `[x] Done`
+  in both task.md spots. The dev database is at `notifications 0001_initial`; E2E-made accounts remain in it.
+- **Next action:** **Implement Part 14 from the approved plan**
+  ([`docs/agents/plans/part-14-account-settings-export-deletion.md`](plans/part-14-account-settings-export-deletion.md)), starting at its
+  step 0 (measure baselines). Last recorded baselines: `pytest` **4073**, `npm test` **2148**, E2E **53**.
 - **Approved plan:**
-  [`docs/agents/plans/part-13-notifications.md`](plans/part-13-notifications.md) (approved and implemented 2026-10-20)
+  [`docs/agents/plans/part-14-account-settings-export-deletion.md`](plans/part-14-account-settings-export-deletion.md) (approved
+  2026-10-21, not implemented). User decisions recorded in it: staff accounts can't delete themselves (403 `staff_account`); the export
+  includes received notifications; username changes are throttle-only; two new emails (password changed, Google connected).
 - **Previous plans:**
+  - [`part-13-notifications.md`](plans/part-13-notifications.md), implemented 2026-10-20 (committed as `4f2d818`);
   - [`part-12-search.md`](plans/part-12-search.md), implemented 2026-10-20 (committed as `30649b4`);
   - [`part-11D-charts-stats.md`](plans/part-11D-charts-stats.md), implemented 2026-10-20 (committed as `b2f8ad5`);
   - [`part-11C-emergency-posts.md`](plans/part-11C-emergency-posts.md), implemented 2026-10-20 (committed as `ee63914`);
@@ -57,7 +60,7 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-20 by Claude (Sonnet 5.5), Part 13 implemented.
+- **Last updated:** 2026-10-21 by Claude (Opus 5.5), Part 14 planned and approved.
 
 ## Completed checkpoints
 
