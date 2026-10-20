@@ -6,8 +6,8 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 11D (Charts & stats) is implemented** (2026-10-20, Claude, Sonnet 5.5), **uncommitted**. Parts 0A, 0B, 0D, 0C, 1, 2,
-  3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C and 11D are done (Part 11C committed as `ee63914`, the Part 11D plan as `5704bb7`).
+- **Part:** **Part 12 (Search) is planned and approved** (2026-10-20, Claude, Sonnet 5.5); **not implemented**. Parts 0A, 0B, 0D, 0C,
+  1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C and 11D are done (Part 11C committed as `ee63914`, Part 11D as `b2f8ad5`).
   Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C and 11D CI have not been
   reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
@@ -17,18 +17,19 @@ read-only git output.
     from Part 11C a hash-chosen FALSE on an expired emergency also blocks its author.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after Part 11D, as asked).
-- **Phase:** Part 11D done and validated, nothing committed. HEAD is `5704bb7` ("Plan Part 11D"); the working tree holds the
-  Part 11D changes (listed in the checkpoint below). No migration: the dev database is still at `moderation 0007_emergency_permission`.
-  Docker is up. **No server is running** (I started and stopped Django and `next dev` myself; ports 3000 and 8000 were free
-  afterwards, no leftover `next`/`workerd` processes).
-- **Next action:** **commit Part 11D** (git is yours), then start the next part you choose. Order in `task.md`: 12 (Search), 13
-  (Notifications), 14 (Settings, which mounts `CredibilityPanel`), 14B, 15, 16, 17, 18. Before planning, read the part in
-  `task.md`, its "From Part 11D" notes and the new MEMORY entry.
+- **Owner:** none (Claude stopped after planning Part 12, as asked).
+- **Phase:** Part 12 planned and approved, nothing implemented. HEAD is `b2f8ad5` ("Implemented Part 11D: Charts & stats", committed by
+  you); the working tree was clean when the plan was written. The only files changed in this session are the new plan file and this
+  file: no code, no setup command, no migration, no `task.md` edit, no env file read, `design/` untouched. The dev database is still at
+  `moderation 0007_emergency_permission` (`posts` at `0002`). Docker is up; no server is running (ports 3000 and 8000 free).
+- **Next action:** **Implement Part 12 from the approved plan** ([`part-12-search.md`](plans/part-12-search.md)), starting at its
+  step 0 (verify the workspace, re-measure the baselines: `pytest` 3715, `npm test` 1933, E2E 45 per the Part 11D checkpoint), then
+  step 1, the generated-column spike, which is a stop-and-ask gate. Implement with Sonnet 5.5 · medium. Then update `task.md`
+  (both status spots), this file and MEMORY, and stop.
 - **Approved plan:**
-  [`docs/agents/plans/part-11D-charts-stats.md`](plans/part-11D-charts-stats.md) (approved and implemented 2026-10-20)
+  [`docs/agents/plans/part-12-search.md`](plans/part-12-search.md) (approved 2026-10-20; not yet implemented)
 - **Previous plans:**
-  - [`part-11D-charts-stats.md`](plans/part-11D-charts-stats.md), implemented 2026-10-20 (uncommitted);
+  - [`part-11D-charts-stats.md`](plans/part-11D-charts-stats.md), implemented 2026-10-20 (committed as `b2f8ad5`);
   - [`part-11C-emergency-posts.md`](plans/part-11C-emergency-posts.md), implemented 2026-10-20 (committed as `ee63914`);
   - [`part-11B-credibility-score.md`](plans/part-11B-credibility-score.md), implemented 2026-10-14 to 2026-10-19
     (committed as `9d7edce`);
@@ -54,9 +55,30 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-20 by Claude (Sonnet 5.5), Part 11D implemented and validated.
+- **Last updated:** 2026-10-20 by Claude (Sonnet 5.5), Part 12 planned and approved.
 
 ## Completed checkpoints
+
+- 2026-10-20 (Claude, Sonnet 5.5): **Part 12 planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `b2f8ad5` ("Implemented Part 11D: Charts & stats", committed by you), a clean tree. (The older text of this
+    file said Part 11D was uncommitted at `5704bb7`; you committed it in between, and those lines were corrected.)
+  - **Dependency check:** Part 12 depends on 6 (Done 2026-10-09) and 11B (Done 2026-10-19); their chains (4, 3, 2, 1, 0C, 0A/0B/0D, 7, 7B,
+    8 to 11) and 11C/11D are Done. Open but not blocking: Part 3 criterion 4, CI for Parts 2 to 11D, the Part 17 stub launch blocker.
+  - **Research (read-only):** direct reads of the docs (task.md, ARCHITECTURE §2/§3/§9/§10, ANALYSIS b-3/c-31, STRUCTURE, MEMORY, the
+    guide's §10 from the PDF text) and of Django's `SearchVector`; two Explore agents (backend; frontend + Stitch b4); a Plan-agent design
+    review that finished **before** approval (its findings are in the plan, marked "(review)").
+  - **Changed this session:** only the new plan file (`plans/part-12-search.md`) and this file.
+  - **User decisions (2026-10-20):** People search matches the username prefix plus any word of the display name (no extension, no new
+    index); the filter chips are one row of six, pick one; `search` is 60/min per client IP, counted by IP for signed-in users too (a small
+    custom throttle class); People order is exact username, then username prefix, then name matches, A to Z inside each, never by credibility.
+  - **Found during planning** (all handled in the plan): `SearchRank("search_vector", …)` with a string re-parses the stored vector with
+    the wrong config (use `F(...)`); a negation-only query like `-foo` matches almost every post (answered as an empty 200 with no query);
+    `ScopedRateThrottle` keys on the user once signed in, so "per IP" needs a subclass; `FeedList` shows `feedErrorMessage`, which knows
+    only 503, and `waitText` says "in a minute" for any wait under 90 s; `FilterChips` toggles a pressed chip to `[]`; a dynamic
+    `/search` page would cost a Worker request per tab or chip change (the page is static with `useSearchParams` in a Suspense);
+    the highlight stemmer must compare stems, not `startsWith`; `for_list` must `defer("search_vector")`; `PostFactory`'s default content
+    would match "post"; the E2E suite shares one IP and the new 60/min limit; two existing tests change on purpose
+    (`test_there_is_no_search_vector_yet`, `test_all_eleven_throttle_scopes…`).
 
 - 2026-10-20 (Claude, Sonnet 5.5): **Part 11D implemented** (uncommitted). Started from HEAD `5704bb7` ("Plan Part 11D", committed
   by you), a clean tree that matched this file; Docker up, ports free. Baselines measured first: `pytest` 3644 passed (the E2E and
