@@ -6,8 +6,8 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 12 (Search) is implemented and verified** (2026-10-20, Claude, Sonnet 5.5); **uncommitted**. Parts 0A, 0B, 0D, 0C,
-  1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D and 12 are done (Part 11C committed as `ee63914`, Part 11D as `b2f8ad5`).
+- **Part:** **Part 13 (Notifications) is planned and approved** (2026-10-20, Claude, Sonnet 5.5); **not implemented**. Parts 0A, 0B,
+  0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D and 12 are done (Part 11D committed as `b2f8ad5`, Part 12 as `30649b4`).
   Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D and 12 CI have not been
   reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
@@ -19,16 +19,18 @@ read-only git output.
     writes): fine before launch.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after implementing Part 12, as asked).
-- **Phase:** Part 12 done, **not committed** (HEAD is `e259253`, "Plan part 12"). Docker is up; no server is running (ports 3000 and
-  8000 free). The dev database is at `posts 0003_search_vector` (`moderation 0007_emergency_permission`). The `part12-` accounts and
-  posts of the guide run were deleted; E2E-made accounts and posts (`seed_`, `srch_`, `e2e_`…) remain in the dev database, as after
-  earlier parts.
-- **Next action:** **commit Part 12** (you do all git operations), then give Claude the next part. Part 13 (Notifications) is next in
-  `task.md`; read its "Depends on" and the notes left by 7, 7B, 10, 11 and 11C first.
+- **Owner:** none (Claude stopped after saving the Part 13 plan, as asked).
+- **Phase:** Part 13 planned; the plan is saved and linked below. HEAD is `30649b4` ("Implemented Part 12: Search", committed by you);
+  the only change in the tree is the new plan file and this file. No code, no setup command, no migration, no `task.md` edit. Docker
+  and the servers were not touched (state as left after Part 12: Docker up, ports 3000/8000 free, dev database at `posts
+  0003_search_vector` / `moderation 0007_emergency_permission`; E2E-made accounts remain in it).
+- **Next action:** **Implement Part 13 from the approved plan** (`docs/agents/plans/part-13-notifications.md`), starting at its step 0
+  (verify the workspace, record the baselines). Commit nothing: you do all git operations. Baselines to re-measure: `pytest` 3894,
+  `npm test` 2043, E2E 51.
 - **Approved plan:**
-  [`docs/agents/plans/part-12-search.md`](plans/part-12-search.md) (approved 2026-10-20; implemented 2026-10-20)
+  [`docs/agents/plans/part-13-notifications.md`](plans/part-13-notifications.md) (approved 2026-10-20; not implemented)
 - **Previous plans:**
+  - [`part-12-search.md`](plans/part-12-search.md), implemented 2026-10-20 (committed as `30649b4`);
   - [`part-11D-charts-stats.md`](plans/part-11D-charts-stats.md), implemented 2026-10-20 (committed as `b2f8ad5`);
   - [`part-11C-emergency-posts.md`](plans/part-11C-emergency-posts.md), implemented 2026-10-20 (committed as `ee63914`);
   - [`part-11B-credibility-score.md`](plans/part-11B-credibility-score.md), implemented 2026-10-14 to 2026-10-19
@@ -55,9 +57,34 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-20 by Claude (Sonnet 5.5), Part 12 implemented.
+- **Last updated:** 2026-10-20 by Claude (Sonnet 5.5), Part 13 planned and approved.
 
 ## Completed checkpoints
+
+- 2026-10-20 (Claude, Sonnet 5.5): **Part 13 planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `30649b4` ("Implemented Part 12: Search", committed by you), a clean tree. (The older text of this file said
+    Part 12 was uncommitted at `e259253`; you committed it in between, and those lines were corrected.)
+  - **Dependency check:** Part 13 depends on 7 (Done 2026-10-10), 7B (Done 2026-10-10), 10 (Done 2026-10-13), 11 (Done 2026-10-13) and 11C
+    (Done 2026-10-20); their chains (0A to 0D, 1 to 6, 8, 9, 11B, 11D, 12) are Done. Open but not blocking: Part 3 criterion 4, CI for
+    Parts 2 to 12, the Part 17 stub launch blocker.
+  - **Research (read-only):** direct reads of the docs (task.md, ARCHITECTURE §2/§3/§4b/§9/§10, ANALYSIS c4, STRUCTURE, MEMORY, the
+    HANDOFF hook notes of Parts 6 to 11C) and of `social/services.py`, `posts/services.py`, `moderation/{services,rules}.py`,
+    `useCursorFeed.ts` and the shell nav; two Explore agents (backend hook points; frontend and Stitch c4); a Plan-agent design review that
+    finished **before** approval (its findings are in the plan).
+  - **Changed this session:** only the new plan file (`plans/part-13-notifications.md`) and this file. No code, no setup command, no
+    migration, no `task.md` edit, no env file read, `design/` untouched.
+  - **User decisions (2026-10-20):** an appeal-closing action sends `appeal_resolved` **plus** the verdict or removal; Mark FALSE on a
+    pinned emergency sends the verdict **and** `emergency_demoted`; Dismiss reports is silent; the open `/notifications` page prepends new
+    items itself when the poll sees the count rise; only the post's author is told (not reposters); the follow item has a Follow back
+    button; nothing is pruned. The plan's "defaults" section lists the rest (an `outcome` column, no moderator shown, items deleted with
+    their post or comment, `notifications` throttle 120/min per user, a verdict item only when the label changes).
+  - **Found during planning** (all handled in the plan): the dedupe key must include `type` (a like and a repost of one post are two
+    items); `get_visible_post` loads `only("id")`, so `author_id` is added; `follow`, `like` and `add_comment` have no `atomic`;
+    `file_report` discards `record_report`'s return value; `record_pipeline_failure` can also enter review; `CommentAdmin._set_hidden` is
+    not in a transaction; a whole-row link cannot contain `FollowButton`; the pending 30 s poll would run in every `layout.test.tsx`
+    render (mock the api module); Mark FALSE on an already-FALSE post would repeat the verdict.
+  - **Left for the implementer:** the plan's "Risks recorded for later parts" (the unbounded idle-tab poll for Parts 16/17; Part 14's
+    deletion order and by-actor cleanup).
 
 - 2026-10-20 (Claude, Sonnet 5.5): **Part 12 implemented** (uncommitted). Started from HEAD `e259253` ("Plan part 12"), a clean tree that
   matched this file; Docker up, ports free. Baselines measured first: `pytest` **3715 passed**, `npm test` **1933 passed** (the E2E
