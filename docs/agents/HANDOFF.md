@@ -6,9 +6,9 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 14 (Account settings, data export, deletion) is implemented** (2026-10-21, Claude, Sonnet 5.5), **uncommitted**:
-  you review and commit. Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13 and 14 are done (Part 11D committed as
-  `b2f8ad5`, Part 12 as `30649b4`, Part 13 as `4f2d818`, the Part 14 plan as `f11aca7`).
+- **Part:** **Part 14B (Photo avatars) is planned and approved** (2026-10-21, Claude, Opus 5.5); nothing of it is implemented.
+  Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13 and 14 are done (Part 11D committed as
+  `b2f8ad5`, Part 12 as `30649b4`, Part 13 as `4f2d818`, the Part 14 plan as `f11aca7`, **Part 14 as `bd59f97`**).
   Part 1 CI is green (user-reported 2026-10-06); **Part 2 to 14 CI have not been reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
@@ -19,17 +19,16 @@ read-only git output.
     writes): fine before launch.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after Part 14, as asked).
-- **Phase:** Part 14 done and validated; nothing is staged. HEAD `f11aca7` ("Plan part 14"). The dev database needs no migration (Part 14 adds none);
-  E2E- and guide-made accounts remain in it. Docker was down at the start of the E2E run (containers gone after a restart) and was brought up with
-  `docker compose up -d`; both containers are up now, ports 3000 and 8000 are free.
-- **Next action:** **Part 14B (Photo avatars)** is next in `task.md` order (depends on 14, now done): start it with
-  `Plan Part 14B from task.md. Do not implement yet.` Review the Part 14 changes and commit first. Baselines for 14B: `pytest` **4205**, `npm test` **2222**, E2E **55**.
-  Part 14 left hooks for it: `avatar_version` is already in `/me`, and the export and `delete_account` must cover the avatar table when it exists
-  (`apps/accounts/export.py` names its columns; deletion relies on the CASCADE).
-- **Approved plan:** [`docs/agents/plans/part-14-account-settings-export-deletion.md`](plans/part-14-account-settings-export-deletion.md) (implemented 2026-10-21).
+- **Owner:** none (Claude stopped after planning Part 14B, as asked).
+- **Phase:** Part 14B planned and approved; no code written, no setup command run, Pillow **not** installed yet. HEAD `bd59f97` ("Implemented
+  Part 14: Account settings, data export, account deletion"); the tree held only the new plan file and this file's edits afterwards. The dev
+  database needs no migration yet (14B will add `accounts.0003`, `moderation.0008`, `moderation.0009`).
+- **Next action:** **Implement Part 14B from the approved plan** (prompt: `Implement only the approved Part 14B plan, validate it, update task.md and
+  HANDOFF.md, then stop.`). Start at the plan's step 0 (baselines `pytest` **4205**, `npm test` **2222**, E2E **55**), then step 1, the Pillow 13.0.0
+  spike, which is a stop-and-ask gate.
+- **Approved plan:** [`docs/agents/plans/part-14B-photo-avatars.md`](plans/part-14B-photo-avatars.md) (approved 2026-10-21, not implemented).
 - **Previous plans:**
-  - [`part-14-account-settings-export-deletion.md`](plans/part-14-account-settings-export-deletion.md), implemented 2026-10-21 (uncommitted);
+  - [`part-14-account-settings-export-deletion.md`](plans/part-14-account-settings-export-deletion.md), implemented 2026-10-21 (committed as `bd59f97`);
   - [`part-13-notifications.md`](plans/part-13-notifications.md), implemented 2026-10-20 (committed as `4f2d818`);
   - [`part-12-search.md`](plans/part-12-search.md), implemented 2026-10-20 (committed as `30649b4`);
   - [`part-11D-charts-stats.md`](plans/part-11D-charts-stats.md), implemented 2026-10-20 (committed as `b2f8ad5`);
@@ -58,9 +57,32 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-21 by Claude (Sonnet 5.5), Part 14 implemented and validated.
+- **Last updated:** 2026-10-21 by Claude (Opus 5.5), Part 14B planned and approved.
 
 ## Completed checkpoints
+
+- 2026-10-21 (Claude, Opus 5.5): **Part 14B planned and approved.** The plan is linked above.
+  - **Starting point:** HEAD `bd59f97` ("Implemented Part 14", committed by you), a clean tree. (The older text of this file said Part 14 was
+    uncommitted at `f11aca7`; you committed it in between, and those lines were corrected.)
+  - **Dependency check:** Part 14B depends on 14 (Done 2026-10-21) and uses 0C's relay (Done 2026-10-01); 14's chain (6, 7, 7B, 11B, 11D and
+    theirs) is Done. Open but not blocking: Part 3 criterion 4, CI for Parts 2 to 14, the Part 17 stub launch blocker.
+  - **Research (read-only):** direct reads of the docs (task.md, ARCHITECTURE §2/§3/§4e/§8/§9/§10/§12/§13, ANALYSIS f-7, SETUP B1, MEMORY, the
+    Part 14 plan) and of `moderation/{rules,services}.py`, `accounts/admin.py`, `confirm_account_action.html`, `core/middleware.py`, `client.ts`;
+    three Explore agents (backend hooks; frontend Avatar and settings; relay, E2E and Stitch c2); Pillow's PyPI metadata, 13.0.0 release notes and
+    `WebPImagePlugin.py` source.
+  - **Changed this session:** only the new plan file (`plans/part-14B-photo-avatars.md`) and this file. No code, no setup command, no
+    migration, no dependency installed, no `task.md` edit, no env file read, `design/` untouched.
+  - **User decisions (2026-10-21):** Pillow **13.0.0** (12.3.0 has no patch; 13.0.0 fixes a critical JPEG decoder overflow and bomb bypasses;
+    SETUP B1 to be updated); Block photo uploads also removes the photo, and a new **Allow photo uploads** action (new kind `avatar_unblocked`)
+    lifts it; the browser accepts originals up to 20 MB and shrinks them first; a real upload percentage (`apiFetch` `onUploadProgress`, an XHR
+    transport). The plan's "Defaults" section lists the rest (256 px on `/me` and profiles, `avatar_uploads_blocked` in `/me`, the codes, an
+    in-memory 5 MB upload handler, one decode at a time site-wide through a Postgres advisory lock, the two fields in `SERVICE_OWNED_FIELDS`).
+  - **Found during planning** (all handled in the plan): the relay already passes PUT, the conditional headers, every avatar response header and
+    304s (no relay change); `avatar_upload` 5/day, `avatar_removed`/`avatar_blocked` and `avatar_url()` already exist, and every payload already
+    loads `avatar_version` (no extra query); `DEFAULT_PARSER_CLASSES` is JSON only (the view declares `MultiPartParser`); Django spools uploads over
+    2.5 MB to a temp file by default; no ETag/304 or CSP code exists; Pillow only warns between 1× and 2× `MAX_IMAGE_PIXELS`; some camera JPEGs open
+    as `MPO` with `is_animated`; Render runs 2 workers × 4 threads in 512 MB; `confirm_account_action.html` has emergency-specific headings;
+    `backend/.venv` has no Pillow while anaconda's `python3` on PATH has PIL 12.0.0.
 
 - 2026-10-21 (Claude, Sonnet 5.5): **Part 14 implemented** (uncommitted). Started from HEAD `f11aca7` ("Plan part 14"); the tree was clean and matched this file.
   - **Backend** (`backend/`): new `apps/accounts/deletion.py` (`delete_account`: every post of the account locked first, then the user, then
