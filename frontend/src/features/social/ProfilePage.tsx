@@ -8,6 +8,8 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { FilterChips } from "@/components/ui/FilterChips";
 import { Skeleton } from "@/components/ui/Skeleton";
 import type { UserProfile } from "@/lib/api/types";
+import { CredibilityPanel } from "@/features/reputation/CredibilityPanel";
+import { CredibilityWidget } from "@/features/reputation/CredibilityWidget";
 import { SOCIAL_MESSAGES } from "./messages";
 import { ProfileHeader } from "./ProfileHeader";
 import { ProfilePosts } from "./ProfilePosts";
@@ -63,7 +65,8 @@ export function ProfileProblem({
 /**
  * `/u/[username]` (Stitch c1): the header card and the person's posts with All / Facts / Opinions
  * chips. The header arrives server-rendered (`initial`, the anonymous view); a signed-in visitor
- * fetches once more for `is_following` and `is_me`.
+ * fetches once more for `is_following` and `is_me`. Under the header: the Credibility widget (Part
+ * 11D) for everyone, and your own credibility history for you.
  */
 export function ProfilePage({
   username,
@@ -96,6 +99,8 @@ export function ProfilePage({
   return (
     <div className={PROFILE_CONTAINER}>
       <ProfileHeader profile={profile} viewerReady={viewerReady} onFollowChange={followed} />
+      <CredibilityWidget profile={profile} />
+      {profile.is_me && viewerReady && <CredibilityPanel publicScore={profile.reputation.score} />}
       <FilterChips
         label="Show"
         chips={CHIPS}

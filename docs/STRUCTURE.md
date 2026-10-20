@@ -76,7 +76,8 @@ rumor-zero/
 │   │   │                        14B Avatar model, avatars.py (Pillow processing), avatar endpoints
 │   │   ├── posts/               4–5 Post model + status constraints, validators.py (sources/DOI), services (the only place
 │   │   │                            status changes), feeds, status polling; ✅ 11C emergency eligibility + pinned feeds;
-│   │   │                            11D stats endpoint; 12 search_vector GeneratedField + search API
+│   │   │                            ✅ 11D stats.py (the pure builders of the stats endpoint; `PostStatsView` in views.py);
+│   │   │                            12 search_vector GeneratedField + search API
 │   │   │                        ✅ 4 models.py (Post + every §2 column but search_vector, 17 CheckConstraints, 6 indexes,
 │   │   │                            PostQuerySet.visible()/for_list()), validators.py (normalize_source, validate_sources,
 │   │   │                            source_kind; never fetches), emergency.py (is_active_emergency, pure; Part 9's
@@ -153,7 +154,8 @@ rumor-zero/
 │   │   │                            only writer of the ledger and of `users.reputation_*`: `settle_post`, `pending_changes`,
 │   │   │                            `totals_for`), serializers.py + views.py + urls.py (GET /api/v1/users/{u}/reputation/, GET
 │   │   │                            /api/v1/me/reputation/events/), admin.py (ReputationEventAdmin, ReputationInline, `events_url`),
-│   │   │                            management/commands/recompute_reputation.py (--user, --check), tests (conftest, factories + 9 files)
+│   │   │                            management/commands/recompute_reputation.py (--user, --check), tests (conftest, factories + 9 files);
+│   │   │                            ✅ 11D trend.py (the pure 30-day trend builder; the view adds the baseline and `DISTINCT ON` queries)
 │   │   └── notifications/       13  Notification model + services + API
 │   │       (every app: models.py, services.py, serializers.py, views.py, urls.py, admin.py,
 │   │        migrations/, tests/ with test_models.py, test_services.py, test_api.py …)
@@ -234,7 +236,8 @@ rumor-zero/
 │       │   │                            Alert, Toast, Skeleton, EmptyState, LoadMore, ProgressBar, PasswordStrengthMeter,
 │       │   │                            Divider, DangerZone (+ field-styles.ts shared by the text-like controls);
 │       │   │                            ✅ 0D Logo (the only brand mark);
-│       │   │                            11D charts/ MeterBar, StatTile, BarChart, RingGauge, Sparkline
+│       │   │                            ✅ 11D charts/ MeterBar, StatTile, BarChart, RingGauge, Sparkline, ChartTable (the hidden
+│       │   │                            table), sparkline-path.ts, no-chart-library.test.ts
 │       │   └── shell/           ✅ 0C  AppShell, Sidebar, TopBar, MobileNav, AccountMenu, ShellLink, nav-items.ts, AuthLayout,
 │       │                                MarketingNav, MarketingFooter, Placeholder (all using <Logo/>); ✅ 1 UnverifiedBanner,
 │       │                                loading skeletons, Log out in AccountMenu; ✅ 2 banner Resend, New post gating
@@ -249,7 +252,7 @@ rumor-zero/
 │       │   │                            useStatusPolling + status-overlay.ts (PostCard/SourceLink link to the page; FeedList/HomeFeed poll);
 │       │   │                        ✅ 11C PinnedEmergencies (+ PinnedEmergenciesBar), pinned-collapse.ts (sessionStorage fold),
 │       │   │                            EmergencyNote, emergency-copy.ts; the composer's toggle/warning/confirmation, FeedCard exported,
-│       │   │                            useCursorFeed's first-page `head`; the chip is 0B's EmergencyBadge; 11D PostStats
+│       │   │                            useCursorFeed's first-page `head`; the chip is 0B's EmergencyBadge; ✅ 11D PostStats, usePostStats
 │       │   ├── social/          ✅ 6 FollowButton, UserRow, ProfileHeader, ProfilePage, ProfilePosts, Connections, useProfile,
 │       │   │                        social-api.ts, profile-metadata.ts, messages.ts (+ test-helpers.tsx);
 │       │   │                        ✅ 7 LikeButton, CommentCountLink, PostActions (the card's and the post page's action bar), CommentSection,
@@ -261,8 +264,8 @@ rumor-zero/
 │       │   ├── reports/         ✅ 8 ReportButton (the flag in the action bars), ReportModal, reasons.ts, reports-api.ts, messages.ts
 │       │   ├── appeals/         ✅ 11 AppealButton, AppealModal, AppealOutcome, appeals-api.ts, messages.ts (`RemovedPostCard` and `Tombstone`
 │       │   │                        live in features/posts/)
-│       │   ├── reputation/      ✅ 11B CredibilityBadge (neutral; `header` in ProfileHeader, `row` in UserRow); 11D CredibilityWidget,
-│       │   │                        CredibilityPanel
+│       │   ├── reputation/      ✅ 11B CredibilityBadge (neutral; `header` in ProfileHeader, `row` in UserRow); ✅ 11D CredibilityWidget,
+│       │   │                        CredibilityPanel (+ CredibilityPanelView), useReputationTrend, reputation-api.ts, ledger-copy.ts
 │       │   ├── search/          12   SearchBar, SearchResults
 │       │   ├── notifications/   13   NotificationList, useUnreadCount
 │       │   ├── settings/        14   ProfileForm, PasswordForm (uses ui/DangerZone); 14B AvatarUploader

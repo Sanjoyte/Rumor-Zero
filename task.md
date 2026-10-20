@@ -99,7 +99,7 @@ not let the review expand the part's scope without user approval.
 | 11 | Appeals & removed-post tombstones | 10 | [x] Done (2026-10-13) |
 | 11B | Credibility score | 7B, 10, 11 | [x] Done (2026-10-19) |
 | 11C | Emergency posts | 9, 10, 11B | [x] Done (2026-10-20) |
-| 11D | Charts & stats | 7B, 11B | [ ] |
+| 11D | Charts & stats | 7B, 11B | [x] Done (2026-10-20) |
 | 12 | Search | 6, 11B | [ ] |
 | 13 | Notifications | 7, 7B, 10, 11, 11C | [ ] |
 | 14 | Account settings, data export, deletion | 6, 7, 7B, 11B, 11D | [ ] |
@@ -1367,7 +1367,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 ---
 
 ## Part 11D: Charts & stats
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-20)
 **Goal:** the Stitch charts, re-purposed for data we really have (D5; ANALYSIS f-6): how a fact post was checked and how it spread, and an account's credibility over time.
 **Depends on:** 7B (repost data), 11B (credibility data).
 **Stitch files to convert:**
@@ -1400,13 +1400,36 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 **API endpoints:** `GET /api/v1/posts/{id}/stats/`; `trend` on the reputation endpoint.
 
 **Acceptance criteria**
-- [ ] Moderator-decided posts never show a confidence %; pending posts show no meter
-- [ ] Every chart has a text alternative (screen-reader table) and uses token colours only (`lint:tokens` passes)
-- [ ] `package.json` has no chart library
-- [ ] The stats and trend endpoints use a constant number of queries; a post with no activity shows empty bars, not an error
-- [ ] Day buckets are correct across UTC midnight (time-controlled test)
+- [x] Moderator-decided posts never show a confidence %; pending posts show no meter
+- [x] Every chart has a text alternative (screen-reader table) and uses token colours only (`lint:tokens` passes)
+- [x] `package.json` has no chart library
+- [x] The stats and trend endpoints use a constant number of queries; a post with no activity shows empty bars, not an error
+- [x] Day buckets are correct across UTC midnight (time-controlled test)
 
 **Required tests:** stats endpoint (shape, visibility per status and viewer, bucket boundaries, query counts); trend endpoint; each chart primitive (render, aria, empty data); PostStats and CredibilityWidget states. E2E: open a `#true` fact → the meter shows 95 % with the threshold at 85 %.
+
+**Decisions and deviations (plan approved 2026-10-20; built 2026-10-20; recorded in ARCHITECTURE §4a/§9/§10, ANALYSIS f-6, STRUCTURE, MEMORY):**
+- **User decisions (2026-10-20):**
+  - **The meter marks today's `confidence_threshold`**, with honest wording when it was raised since ("Below today's threshold of N%" instead of a negative margin). Storing the threshold per verdict is a follow-up (a posts migration and one line in Part 9's routing).
+  - **The owner's CredibilityPanel shows the real score** (50 for a new account) and each row's "score after", with "Others see New until 3 of your posts are checked." while the public score is hidden.
+  - **The spread chart is for fact posts only**; an opinion gets no stats section (the endpoint still answers for it, with null check fields).
+  - **The credibility ring, bar and sparkline are neutral grey** (extends the 2026-10-13 badge decision); the post's confidence meter keeps its verdict tone (teal for TRUE, red for FALSE).
+- **Defaults approved with the plan:** the stats of a **removed** post are a 404 for everyone, its author included (tightens ARCHITECTURE §9's "same visibility as detail"; the rule of likes, comments and reposts); the endpoint is unauthenticated, uncached and unthrottled (Part 16 reviews load); `daily` is always 14 zero-filled UTC calendar days from the post's UTC date (day 0 partial) and counts only rows that still exist; the chart draws reposts and likes, comments are in the payload and the hidden table; `verdict_at` for a pipeline label is the check time and for a moderator's label the audit row (never `moderated_at`); a pending or under-review fact shows a one-line note, not an empty meter; a failed fetch hides the section; "Ask for another look" is a link to the post page where the appeal button already lives; weights print as "+1", "+0.25", "−2".
+- **Built differently from the task text:**
+  - **`StatTile` has no `role="img"`** (it is plain text); every graphic that is a picture (`MeterBar`, `BarChart`, `RingGauge`, `Sparkline`) is a `figure` with a `role="img"` element, an `aria-label` summary and a **sibling** `sr-only` table (children of an image are presentational).
+  - **The endpoint costs 2 queries** (the post with its moderator-verdict time, then one `UNION ALL` of the three daily counts), **plus one when the platform-settings cache is cold** (`get_platform_settings()` reads the table once a minute per process). The reputation endpoint costs **3 queries when the score is public and 2 when hidden** (it was 2).
+  - **The trend** is built by a pure function (`apps/reputation/trend.py`) from a scalar subquery (the score before the window) and one `DISTINCT ON` query (the last row of each UTC day).
+- **Built differently from the plan (found while building):**
+  - **`CredibilityPanel` is split into a presentational `CredibilityPanelView` and the container**, so the dev gallery can show every state without a session.
+  - **The meter's threshold caption sits above the bar** (below it, it collided with the "100%" label when the threshold was 85%).
+  - **Existing tests changed on purpose:** `reputation/tests/test_api_reputation.py` (the `trend` key and the 2/3 query counts), `PostDetail.test.tsx` and `ProfilePage.test.tsx` (their partial API mocks gained the new calls), `app/dev/ui/page.test.tsx`.
+- **Not done (later parts):**
+  - **Part 14:** mount `<CredibilityPanel publicScore={…} defaultOpen />` in Settings (it needs the account's public score, from the profile payload).
+  - **Part 15:** the `/how-it-works#credibility` text and anchor (the widget links to it).
+  - **Part 16:** the unthrottled stats endpoint, and the `DISTINCT ON` trend query and the daily `UNION ALL` under load.
+  - **Later:** store the confidence threshold used per verdict; `verdict_at` for a late pipeline TRUE made public by a moderator's Dismiss shows the earlier check time.
+- **Validated by:** 27 backend and 43 frontend mutation checks (every one caught after fixes; the first runs had survivors that became tests: the baseline row just before the trend window, a zero margin, the "waiting for numbers" state, a stale answer, a failed refetch, the stats request sending a token); a scripted headless-Chromium check at 1280 and 390 px (a pipeline TRUE and FALSE page, a moderator-labelled, pending and under-review one, the spread chart with data and empty, a profile with a score and a new one, the owner's panel with a reversed row and "Ask for another look"), no horizontal scroll, screenshots looked at; `recompute_reputation --check`; the Linux blocks of `docs/test-command.md` Part 11D run in order against live Django.
+- **Verified:** see HANDOFF (backend 3715 tests, frontend 1933, E2E 45 in dev and CI mode). The PowerShell blocks of the `docs/test-command.md` section were not run on Windows. CI itself runs when you push.
 
 **Recommended models**
 - **Plan:** Sonnet 5.5 · high. The data mapping and accessibility need care.
@@ -1496,7 +1519,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 **Frontend scope:** `/settings` with sections:
 - Profile (display name, username, bio with counter; the photo is added in 14B)
 - Account (email read-only with a verified chip; change password, or "Signed in with Google")
-- Credibility (the CredibilityPanel from 11D: score, history, "Ask for another look" links)
+- Credibility (the CredibilityPanel from 11D: score, history, "Ask for another look" links). **From Part 11D:** mount `<CredibilityPanel publicScore={…} defaultOpen />` (it reads `GET /api/v1/me/reputation/events/` itself; `publicScore` is the account's public score, null while it is "New")
 - Your data (Download JSON)
 - Danger zone (delete modal with typed confirmation)
 
@@ -1589,6 +1612,7 @@ Plus toasts and field errors.
   - the status table rendered with the real StatusBadges (including EMERGENCY), and the lifecycle
   - an FAQ with real answers: why opinions aren't checked, reports, appeals (FALSE labels and removals), the pipeline, emergency posts, and why reposts keep the original's label
   - **From Part 11C:** the emergency answer covers who may post one (the six rules of ARCHITECTURE §4b and their reasons, which the composer already words), the 24 h pin and "checked first", that a FALSE emergency costs N + 3 and blocks emergency posting for `emergency_false_cooldown_days`, and that the block lifts when that FALSE is overturned
+  - **From Part 11D:** the profile's Credibility widget and the owner's panel link to `/how-it-works#credibility`, so the anchor must exist
   - a `#credibility` section: how the score is calculated in plain words, what raises and lowers it, when it's shown, and how to appeal. Marked **"needs legal review"** (guide §16).
 - `/privacy`, `/terms`: placeholder text clearly marked **"needs legal review"**. The Terms placeholder has explicit sections on verification labels and the credibility score.
 - `not-found` and `error` pages (with `<Logo/>`).

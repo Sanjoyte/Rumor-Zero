@@ -489,3 +489,18 @@ in `task.md`; transient continuation state belongs in `HANDOFF.md`.
   - **A background `cd dir && npx next dev` can run in the wrong directory:** it fetched a stray `next@16.4.2` into the npx cache and ran from `backend/` ("Couldn't find any pages or app directory"; nothing was written). Start it as `bash -c 'cd …/frontend && exec ./node_modules/.bin/next dev -p 3000'`.
   - **A frontend can ship before its backend** (Workers and Render deploy separately): the composer reads `quota.emergency?.allowed`, so an older answer without the block reads as "not allowed" instead of crashing the render.
 - **Evidence:** Part 11C implementation; 30 frontend mutation checks (two survivors became tests: a reopened allowance must not bring the toggle back on, and a 403 turns it off even when the refreshed allowance still says yes); E2E 43 in dev and CI mode.
+
+### 2026-10-20 — Backend and frontend facts from Part 11D (stats, trend, charts)
+
+- **Applies to:** Parts 12, 14, 16 (any grouped count by day, any chart, any E2E or guide step that reads a text alternative).
+- **Facts (measured, then pinned by tests):**
+  - **A `UNION ALL` of three `values_list(Value("likes", output_field=CharField()), "day", "n")` querysets works in Django 5.2 with psycopg** with no cast on the label: the stats endpoint is 2 queries (the post, then the union) whatever the activity. `TruncDate("created_at", tzinfo=UTC)` groups by UTC day regardless of `TIME_ZONE`, and `.distinct("day")` after `.order_by("day", "-created_at")` is the "last row of each day" (an annotation name is accepted by `distinct`).
+  - **`get_platform_settings()` is cached for 60 s per process, so a cold read is one more query:** a test that pins a query count must call it once first (the stats test does).
+  - **A like or repost taken back is a hard delete**, so a daily bucket only ever shows surviving rows; comments use `shown_comments()` (the partial index's predicate).
+  - **A moderator verdict's time is not `moderated_at`** (every Demote, Dismiss and Escalate overwrites it): read the latest `verified`/`marked_false` audit row whose `to_status` equals the post's current status (`moderation/queries.with_verdict_time`).
+  - **Children of `role="img"` are presentational:** a chart's hidden `<table>` must be a **sibling** of the image element, inside a `figure`. That table repeats every number and its caption, so a Playwright or testing-library `getByText` (case-insensitive substring, strict mode) finds two elements: match the visible one with a selector (`p`) or `exact: true`.
+  - **`a ?? default` swallows an intended `null` in a test helper** (`props.publicScore ?? 62` made "hidden" impossible to test): use `"key" in props`.
+  - **The dev server's inline kick checks a new fact within about 0.03 s**, so a guide or E2E step can't show a fact "still being checked" from a normal post (use an opinion, `#unsure` for review, or leave the kick off as the E2E backend does).
+  - **A mutation script's list must include every test file that can catch the mutation** (`posts-api.test.ts` was missing from the frontend list and "stats sends the token" looked like a survivor).
+- **Evidence:** Part 11D plan and implementation; 27 backend and 43 frontend mutation checks, all caught.
+

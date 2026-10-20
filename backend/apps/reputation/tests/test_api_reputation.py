@@ -30,7 +30,7 @@ from apps.reputation.tests.factories import (
 
 pytestmark = pytest.mark.django_db
 
-KEYS = {"score", "sample", "verified", "false", "removed", "recent"}
+KEYS = {"score", "sample", "verified", "false", "removed", "recent", "trend"}
 RECENT_KEYS = {"kind", "label", "post_id", "created_at", "reversed"}
 
 
@@ -53,6 +53,7 @@ def test_the_shape_of_a_new_account(api_client, ada):
         "false": 0,
         "removed": 0,
         "recent": [],
+        "trend": None,
     }
 
 
@@ -191,16 +192,19 @@ def queries(client, name="ada"):
     return len(captured)
 
 
-def test_two_queries_however_many_events(api_client, ada, auth_client):
+def test_two_queries_while_hidden_and_three_when_public_however_many_events(
+    api_client, ada, auth_client
+):
     viewer = auth_client(VerifiedUserFactory())
     EventFactory(user=ada)
-    one = (queries(api_client), queries(viewer))
+    hidden = (queries(api_client), queries(viewer))
     for i in range(30):
         post = PostFactory(author=ada, post_type=PostType.FACT, status=PostStatus.VERIFIED_TRUE)
         EventFactory(user=ada, post=post, created_at=timezone.now() + timedelta(seconds=i))
     User.objects.filter(pk=ada.pk).update(reputation_sample=31)
-    many = (queries(api_client), queries(viewer))
-    assert one == many == (2, 2)
+    public = (queries(api_client), queries(viewer))
+    assert hidden == (2, 2)
+    assert public == (3, 3)
 
 
 def test_the_profile_and_the_user_rows_carry_the_live_score(api_client, ada):

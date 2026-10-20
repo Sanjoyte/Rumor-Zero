@@ -322,3 +322,16 @@ export function emergencySettings(): EmergencySettings {
   const [minAccountAgeDays, perDay, minReputation, factPostsPerDay] = match.slice(1).map(Number);
   return { minAccountAgeDays, perDay, minReputation, factPostsPerDay };
 }
+
+/** The auto-label threshold the E2E backend uses: the developer's own PlatformSettings (Part 11D). */
+export function confidenceThreshold(): number {
+  const out = runShell(
+    [
+      "from apps.core.services import get_platform_settings",
+      "print('THRESHOLD=' + str(get_platform_settings().confidence_threshold))",
+    ].join("\n"),
+  );
+  const match = /THRESHOLD=(\d+)/.exec(out);
+  if (!match) throw new Error(`no threshold in: ${out}`);
+  return Number(match[1]);
+}

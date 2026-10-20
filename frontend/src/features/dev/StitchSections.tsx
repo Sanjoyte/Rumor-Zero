@@ -18,12 +18,149 @@ import { VerdictStripe } from "@/components/ui/VerdictStripe";
 import { confirmationText, EMERGENCY_COPY } from "@/features/posts/emergency-copy";
 import { PinnedEmergencies, PinnedEmergenciesBar } from "@/features/posts/PinnedEmergencies";
 import { PostCard, type PostCardProps } from "@/features/posts/PostCard";
+import { PostStatsView } from "@/features/posts/PostStats";
+import { CredibilityPanelView } from "@/features/reputation/CredibilityPanel";
+import { CredibilityWidgetView } from "@/features/reputation/CredibilityWidget";
 import { RemovedPostCard } from "@/features/posts/RemovedPostCard";
-import type { Post } from "@/lib/api/types";
+import type { DailyBucket, LedgerEntry, Post, PostStats } from "@/lib/api/types";
 import { scorePassword } from "@/lib/password-strength";
 import { Section } from "./GalleryLayout";
 
 const NOW = new Date("2026-09-30T12:00:00Z");
+
+const STATS_DAILY: DailyBucket[] = Array.from({ length: 14 }, (_, i) => ({
+  date: `2026-10-${String(i + 1).padStart(2, "0")}`,
+  reposts: [0, 3, 5, 2, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0][i],
+  likes: [2, 9, 14, 6, 4, 2, 3, 1, 1, 0, 0, 1, 0, 0][i],
+  comments: [0, 1, 2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0][i],
+}));
+const STATS_PIPELINE: PostStats = {
+  confidence_score: "95.00",
+  confidence_threshold: 85,
+  verdict_source: "pipeline",
+  seconds_to_verdict: 134,
+  verdict_at: "2026-10-02T09:02:14Z",
+  daily: STATS_DAILY,
+};
+const STATS_BLANK: PostStats = {
+  confidence_score: null,
+  confidence_threshold: null,
+  verdict_source: null,
+  seconds_to_verdict: null,
+  verdict_at: null,
+  daily: STATS_DAILY.map((d) => ({ ...d, reposts: 0, likes: 0, comments: 0 })),
+};
+const STATS_SPECIMENS: {
+  label: string;
+  post: Parameters<typeof PostStatsView>[0]["post"];
+  stats: PostStats;
+}[] = [
+  {
+    label: "b3 verified by the pipeline (95% over 85%)",
+    post: { post_type: "fact", status: "verified_true", verdict_source: "pipeline" },
+    stats: STATS_PIPELINE,
+  },
+  {
+    label: "b3 FALSE by the pipeline, threshold raised since (97%)",
+    post: { post_type: "fact", status: "verified_false", verdict_source: "pipeline" },
+    stats: { ...STATS_PIPELINE, confidence_threshold: 97 },
+  },
+  {
+    label: "b3 decided by a moderator (never a percentage)",
+    post: { post_type: "fact", status: "verified_true", verdict_source: "moderator" },
+    stats: {
+      ...STATS_BLANK,
+      verdict_source: "moderator",
+      seconds_to_verdict: 7260,
+      verdict_at: "2026-10-02T11:01:00Z",
+      daily: STATS_DAILY,
+    },
+  },
+  {
+    label: "b3 still being checked (no meter, empty bars)",
+    post: { post_type: "fact", status: "pending", verdict_source: null },
+    stats: STATS_BLANK,
+  },
+  {
+    label: "b3 under review",
+    post: { post_type: "fact", status: "under_review", verdict_source: null },
+    stats: STATS_BLANK,
+  },
+];
+
+const TREND = Array.from({ length: 30 }, (_, i) => ({
+  date: new Date(Date.UTC(2026, 8, 21 + i)).toISOString().slice(0, 10),
+  score: [
+    58, 58, 58, 59, 59, 60, 60, 60, 61, 61, 61, 62, 62, 62, 62, 61, 61, 63, 63, 64, 64, 64, 65, 65,
+    66, 66, 67, 67, 68, 68,
+  ][i],
+}));
+
+let entryCount = 0;
+function entry(overrides: Partial<LedgerEntry>): LedgerEntry {
+  entryCount += 1;
+  return {
+    id: `gallery-${entryCount}`,
+    kind: "fact_true",
+    label: "Fact verified true",
+    positive: "1.00",
+    negative: "0.00",
+    score_after: 68,
+    created_at: "2026-10-12T09:30:00Z",
+    post_id: "11111111-1111-4111-8111-111111111111",
+    reverses: null,
+    reversed: false,
+    appeal: null,
+    ...overrides,
+  };
+}
+const LEDGER: LedgerEntry[] = [
+  entry({
+    label: "Reversed: Fact labelled FALSE",
+    positive: "0.00",
+    negative: "-1.00",
+    kind: "reversal",
+    reverses: "x",
+    score_after: 68,
+  }),
+  entry({
+    label: "Fact labelled FALSE",
+    positive: "0.00",
+    negative: "1.00",
+    kind: "fact_false",
+    score_after: 62,
+    reversed: true,
+    appeal: null,
+  }),
+  entry({
+    label: "Post removed by a moderator",
+    positive: "0.00",
+    negative: "2.00",
+    kind: "post_removed",
+    score_after: 61,
+    created_at: "2026-10-09T08:00:00Z",
+    appeal: { status: null, can_appeal: true },
+  }),
+  entry({
+    label: "Fact labelled FALSE",
+    positive: "0.00",
+    negative: "1.00",
+    kind: "fact_false",
+    score_after: 66,
+    created_at: "2026-10-07T08:00:00Z",
+    appeal: { status: "upheld", can_appeal: false },
+  }),
+  entry({
+    label: "Repost of a fact verified true",
+    positive: "0.25",
+    negative: "0.00",
+    kind: "repost_true",
+    score_after: 67,
+    created_at: "2026-10-05T08:00:00Z",
+    post_id: null,
+  }),
+];
+const NOOP = () => {};
 
 const AUTHOR = { displayName: "Ada Example", username: "ada_example" };
 
@@ -481,6 +618,99 @@ export function StitchSections() {
             fetchAll={async () => ({ items: PINNED_ALL, nextCursor: null })}
           />
           <PinnedEmergenciesBar count={2} onShow={() => {}} />
+        </div>
+      </Section>
+
+      <Section
+        id="stitch-stats"
+        title="Stitch b3: How this was checked"
+        note="Part 11D. b3's gauge, tiles and Exhibit A, re-purposed; the meter keeps its verdict tone."
+      >
+        <div className="max-w-reading space-y-space-xl">
+          {STATS_SPECIMENS.map(({ label, post, stats }) => (
+            <div key={label} className="space-y-space-xs">
+              <p className="font-label-code text-label-code text-outline uppercase">{label}</p>
+              <PostStatsView post={post} stats={stats} />
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <Section
+        id="stitch-credibility"
+        title="Stitch c1, b4 and c2: Credibility"
+        note="Part 11D. The ring and the line are neutral grey. The panel is yours alone."
+      >
+        <div className="max-w-reading space-y-space-lg">
+          <CredibilityWidgetView
+            score={68}
+            verified={20}
+            falseCount={3}
+            trend={TREND}
+            trendPhase="ready"
+          />
+          <CredibilityWidgetView
+            score={null}
+            verified={1}
+            falseCount={0}
+            trend={null}
+            trendPhase="idle"
+          />
+          <CredibilityWidgetView
+            score={68}
+            verified={20}
+            falseCount={3}
+            trend={null}
+            trendPhase="loading"
+          />
+          <CredibilityPanelView
+            phase="ready"
+            entries={LEDGER}
+            hasMore={false}
+            loadingMore={false}
+            moreError={false}
+            publicScore={68}
+            open
+            onToggle={NOOP}
+            onRetry={NOOP}
+            onLoadMore={NOOP}
+          />
+          <CredibilityPanelView
+            phase="ready"
+            entries={LEDGER.slice(2, 3)}
+            hasMore
+            loadingMore={false}
+            moreError={false}
+            publicScore={null}
+            open={false}
+            onToggle={NOOP}
+            onRetry={NOOP}
+            onLoadMore={NOOP}
+          />
+          <CredibilityPanelView
+            phase="ready"
+            entries={[]}
+            hasMore={false}
+            loadingMore={false}
+            moreError={false}
+            publicScore={null}
+            open={false}
+            onToggle={NOOP}
+            onRetry={NOOP}
+            onLoadMore={NOOP}
+          />
+          <CredibilityPanelView
+            phase="error"
+            entries={[]}
+            hasMore={false}
+            loadingMore={false}
+            moreError={false}
+            publicScore={null}
+            open={false}
+            onToggle={NOOP}
+            onRetry={NOOP}
+            onLoadMore={NOOP}
+          />
         </div>
       </Section>
 

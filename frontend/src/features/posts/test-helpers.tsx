@@ -4,7 +4,15 @@ import type { ReactNode } from "react";
 import { vi } from "vitest";
 import { ToastProvider } from "@/components/ui/Toast";
 import { ME, testSession } from "@/features/auth/test-helpers";
-import type { FactQuota, FeedItem, Me, Post, UserSummary } from "@/lib/api/types";
+import type {
+  DailyBucket,
+  FactQuota,
+  FeedItem,
+  Me,
+  Post,
+  PostStats,
+  UserSummary,
+} from "@/lib/api/types";
 import { AuthProvider } from "@/lib/auth/AuthProvider";
 import { ComposerProvider } from "./ComposerProvider";
 
@@ -37,6 +45,30 @@ export function makePost(overrides: Partial<Post> = {}): Post {
     appeal_status: null,
     removal_reason: "",
     created_at: "2026-10-08T12:00:00Z",
+    ...overrides,
+  };
+}
+
+/** 14 zero-filled UTC days from `first` (a `YYYY-MM-DD`). */
+export function makeDaily(first = "2026-10-08"): DailyBucket[] {
+  const start = new Date(`${first}T00:00:00Z`).getTime();
+  return Array.from({ length: 14 }, (_, i) => ({
+    date: new Date(start + i * 86_400_000).toISOString().slice(0, 10),
+    reposts: 0,
+    likes: 0,
+    comments: 0,
+  }));
+}
+
+/** The stats of a fact nobody has checked yet. */
+export function makeStats(overrides: Partial<PostStats> = {}): PostStats {
+  return {
+    confidence_score: null,
+    confidence_threshold: null,
+    verdict_source: null,
+    seconds_to_verdict: null,
+    verdict_at: null,
+    daily: makeDaily(),
     ...overrides,
   };
 }

@@ -2,8 +2,8 @@
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-20, together with the four decisions and the defaults
   below; drafted 2026-10-20 by Claude (Sonnet 5.5). Saved here and linked from HANDOFF at approval (HANDOFF's stale "11C is
-  uncommitted" line was corrected then), so step 0 only needs to verify the workspace and record the baselines. **Not
-  implemented yet.**
+  uncommitted" line was corrected then), so step 0 only needs to verify the workspace and record the baselines.
+  **Implemented 2026-10-20 (Claude, Sonnet 5.5); uncommitted.** Deviations are listed in `task.md` Part 11D.
 - **Implement with:** Sonnet 5.5 · medium (task.md).
 - **Evidence (all read-only):** HANDOFF, MEMORY, `task.md` 11B/11C/11D/14, ARCHITECTURE §2/§4/§4a/§9/§10, ANALYSIS f-5/f-6,
   STRUCTURE; backend `posts/{views,urls,models,serializers}.py`, `pipeline/routing.py`, `moderation/{models,rules,services}.py`,

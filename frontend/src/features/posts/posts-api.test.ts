@@ -4,6 +4,7 @@ import {
   deletePost,
   fetchEmergencies,
   fetchPost,
+  fetchPostStats,
   fetchRecentFeed,
   fetchStatuses,
   MAX_STATUS_IDS,
@@ -30,6 +31,15 @@ describe("fetchPost / deletePost", () => {
   it("encodes the id", async () => {
     await fetchPost("a/b");
     expect(vi.mocked(api.get).mock.calls[0][0]).toBe("/v1/posts/a%2Fb/");
+  });
+});
+
+describe("fetchPostStats", () => {
+  it("reads /v1/posts/{id}/stats/ without the token", async () => {
+    vi.mocked(api.get).mockResolvedValue({ daily: [] });
+    const signal = new AbortController().signal;
+    expect(await fetchPostStats(ID, signal)).toEqual({ daily: [] });
+    expect(api.get).toHaveBeenCalledWith(`/v1/posts/${ID}/stats/`, { signal, token: false });
   });
 });
 

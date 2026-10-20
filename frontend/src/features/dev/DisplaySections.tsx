@@ -5,6 +5,11 @@ import { Alert } from "@/components/ui/Alert";
 import { Avatar } from "@/components/ui/Avatar";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { BarChart } from "@/components/ui/charts/BarChart";
+import { MeterBar } from "@/components/ui/charts/MeterBar";
+import { RingGauge } from "@/components/ui/charts/RingGauge";
+import { Sparkline } from "@/components/ui/charts/Sparkline";
+import { StatTile } from "@/components/ui/charts/StatTile";
 import { CategoryChip } from "@/components/ui/CategoryChip";
 import { DangerAction, DangerZone } from "@/components/ui/DangerZone";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -22,6 +27,44 @@ import { VerdictStripe } from "@/components/ui/VerdictStripe";
 import { scorePassword } from "@/lib/password-strength";
 import type { StripeTone } from "@/lib/post-display";
 import { Section, Specimen } from "./GalleryLayout";
+
+const SPREAD_DAYS = Array.from({ length: 14 }, (_, i) => ({
+  date: `2026-10-${String(i + 1).padStart(2, "0")}`,
+  counts: {
+    reposts: [0, 3, 5, 2, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0][i],
+    likes: [2, 9, 14, 6, 4, 2, 3, 1, 1, 0, 0, 1, 0, 0][i],
+    comments: [0, 1, 2, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0][i],
+  },
+}));
+const EMPTY_DAYS = SPREAD_DAYS.map((d) => ({ date: d.date, counts: {} }));
+const SPREAD_SERIES = [
+  { key: "reposts", label: "Reposts", tone: "secondary" as const },
+  { key: "likes", label: "Likes", tone: "outline" as const },
+];
+const RISING = [58, 58, 60, 60, 61, 63, 62, 64, 66, 66, 67, 68];
+
+function MeterSpecimen({
+  value,
+  threshold,
+  tone,
+}: {
+  value: number;
+  threshold?: number;
+  tone: "primary" | "error" | "neutral";
+}) {
+  return (
+    <div className="w-full max-w-reading">
+      <MeterBar
+        value={value}
+        tone={tone}
+        threshold={threshold}
+        thresholdLabel={threshold === undefined ? undefined : `Auto-label threshold ${threshold}%`}
+        summary={`${value}%${threshold === undefined ? "" : `, threshold ${threshold}%`}`}
+        table={{ caption: "Meter", rows: [["Value", `${value}%`]] }}
+      />
+    </div>
+  );
+}
 
 const STRIPES: StripeTone[] = ["primary", "error", "verdict-review", "tertiary", "outline-variant"];
 
@@ -200,6 +243,74 @@ export function DisplaySections() {
           <ProgressBar value={60} label="Verified" tone="secondary" />
           <ProgressBar value={30} label="False" tone="error" />
         </div>
+      </Section>
+
+      <Section
+        id="charts"
+        title="Charts: MeterBar, StatTile, BarChart, RingGauge, Sparkline"
+        note="Part 11D. Token-built HTML and SVG, no chart library; each graphic is an image with a summary and a hidden table beside it."
+      >
+        <Specimen label="MeterBar: TRUE 95% over a threshold of 85%, FALSE 90%, neutral without a tick">
+          <MeterSpecimen value={95} threshold={85} tone="primary" />
+          <MeterSpecimen value={90} threshold={85} tone="error" />
+          <MeterSpecimen value={50} tone="neutral" />
+        </Specimen>
+        <Specimen label="StatTile">
+          <StatTile label="Confidence" value="95%" className="w-48" />
+          <StatTile label="Threshold and margin" value="85%" sub="+10 points" className="w-48" />
+          <StatTile label="Time to verdict" value="2 min 14 s" className="w-48" />
+        </Specimen>
+        <Specimen label="BarChart: with data and the verdict day marked, then empty">
+          <div className="w-full max-w-reading">
+            <BarChart
+              days={SPREAD_DAYS}
+              series={SPREAD_SERIES}
+              tableOnly={[{ key: "comments", label: "Comments" }]}
+              markerDate="2026-10-02"
+              markerLabel="Verdict"
+              summary="Reposts and likes per day"
+              caption="First 14 days after posting (UTC)"
+            />
+          </div>
+          <div className="w-full max-w-reading">
+            <BarChart
+              days={EMPTY_DAYS}
+              series={SPREAD_SERIES}
+              summary="No reposts or likes yet"
+              caption="First 14 days after posting (UTC)"
+              emptyNote="No reposts or likes yet."
+            />
+          </div>
+        </Specimen>
+        <Specimen label="RingGauge: 68, New, 100">
+          {[68, null, 100].map((value) => (
+            <RingGauge
+              key={String(value)}
+              value={value}
+              centre={
+                <span className="font-headline-md text-headline-md text-on-surface">
+                  {value ?? "New"}
+                </span>
+              }
+              summary={`Credibility ${value ?? "New"}`}
+              table={{ caption: "Credibility", rows: [["Score", String(value ?? "New")]] }}
+            />
+          ))}
+        </Specimen>
+        <Specimen label="Sparkline: rising, flat (does not zoom in), one point">
+          {[RISING, [62, 62, 62, 62], [62]].map((values) => (
+            <Sparkline
+              key={values.join()}
+              values={values}
+              summary="Credibility, last 30 days"
+              table={{
+                caption: "Credibility, last 30 days",
+                columns: ["Day", "Score"],
+                rows: values.map((v, i) => [`Day ${i + 1}`, v]),
+              }}
+            />
+          ))}
+        </Specimen>
       </Section>
 
       <Section

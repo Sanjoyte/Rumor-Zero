@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -9309,6 +9309,503 @@ Checked 1426 accounts: every stored score matches the ledger.
   local database, which is destructive.
 - No real secret was used: the password of the test accounts is a throwaway, and your admin address is the default one
   unless you set `ADMIN_URL_PATH` in `backend/.env` (it is never printed here).
+
+### Part 11D: Charts & stats
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and `frontend/.env.local`.
+Part 11D adds **no app, no migration, no dependency and no variable**. It adds **one endpoint**,
+`GET /api/v1/posts/{id}/stats/`, a `trend` list on `GET /api/v1/users/{username}/reputation/`, and the Stitch charts, built
+by hand from HTML and SVG (no chart library): on a fact's page **"How this was checked"** (a confidence meter with the
+auto-label threshold marked, three tiles and a bar chart of reposts and likes per day), and on every profile a
+**Credibility** widget (a ring, the counts and a 30-day line); on your own profile also **your credibility history**.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 13 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 10 and 14**: the variables and functions you set in step 3 (`id`, `ada`, `bo`, `tr`, `api`, `login`, `mk`, `get`, `send`) and in steps 4 to 6 (`op`, `f1`, `fu`) only live in that one terminal. If you close it, start again from step 3. | 1 to 10, 14 |
+| Window 3 (frontend) | `npm run dev` in `frontend`. Leave it running. | 11 to 13 |
+| Browser | Steps 11 to 13 | 11 to 13 |
+
+Things to know first:
+
+- **The stats are public and say nothing about who asks.** The endpoint never looks at your login, so a stale token is
+  not an error. A deleted post, and a post a moderator removed, are a 404 for everyone (its author included).
+- **What each field means.** `confidence_score` and `confidence_threshold` are set only when the **pipeline** gave the
+  label (never for a moderator's verdict, and never for a late TRUE that is held under review). The threshold is **today's**
+  setting, not the one at the time of the check: if a senior moderator raised it since, the page says "Below today's
+  threshold of N%" instead of a negative margin. `verdict_at` is when the label was decided; for a moderator's verdict it
+  comes from the audit row, so a later Demote or Escalate never moves it. `daily` is always **14 UTC days** starting on the
+  day the post was made (day 0 is a partial day), with zeros for quiet days. Likes and reposts that were taken back are
+  gone; hidden and deleted comments never count.
+- **The trend** is the last credibility score of each UTC day over the 30 days ending today, carried forward over quiet
+  days, starting from 50 for a new ledger. It is `null` until the score is public (three of the person's own posts
+  checked or removed).
+- **The accounts.** Step 3 makes four straight in the database with the throwaway password `correct-horse-battery-42`:
+  `ada` (the author), `bo` (likes and reposts), `tr` (the trend) and `mod1` (a moderator). No sign-up and no email are
+  needed.
+- **The pipeline is the stub** (Part 9). `#true` makes a fact VERIFIED 95%; `#unsure` sends it to review. The threshold you
+  see (85) is your own platform setting; if you changed it, your number differs.
+- **Your admin address** isn't needed in this part.
+- The outputs below were recorded on Linux on 2026-10-20 by running the blocks below in order. The browser steps were
+  checked the same day with headless Chromium (at 1280 and 390 px, screenshots looked at), not by a person at a keyboard.
+  Ids, numbers in names, the date and times differ on every run.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, confirms there is nothing to
+migrate, runs the whole backend test suite and Part 11D's own tests, the linter and the formatter check, and audits the
+credibility ledger of your local database.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                            # No migrations to apply.
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 3715 passed
+python -m pytest apps/posts/tests/test_stats.py apps/posts/tests/test_api_stats.py apps/social/tests/test_daily_engagement.py apps/reputation/tests/test_trend.py apps/reputation/tests/test_api_trend.py -q   # 71 passed
+ruff check . ; ruff format --check .                # All checks passed! / 283 files already formatted
+python manage.py recompute_reputation --check       # Checked … accounts: every stored score matches the ledger.
+```
+
+**You should see:** `No migrations to apply.` (Part 11D has none), `No changes detected`, `System check identified no
+issues (0 silenced).`, then `3715 passed`, `71 passed`, `All checks passed!`, `283 files already formatted` and
+`Checked 1562 accounts: every stored score matches the ledger.` (your number of accounts differs). Counts may grow later;
+what matters is that nothing fails.
+
+- The new tests pin the six keys; every status for an anonymous visitor, another user, the author and a stale token; the
+  404s; the buckets on both sides of UTC midnight and at the 14-day edge; hidden and deleted comments; a taken-back like;
+  that the endpoint costs **2 queries whatever the activity** (the post with its moderator-verdict time, then one
+  `UNION ALL` of the three daily counts) and the trend 3 queries when public and 2 when hidden.
+- Existing tests changed on purpose: `test_api_reputation.py` (the new `trend` key, and the query count is 2 while the
+  score is hidden and 3 when it is public).
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last command) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 141 files, 1933 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 45 passed
+cd ../backend                                       # back to backend/ for steps 3 to 10
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  141 passed (141)` and `Tests  1933
+passed (1933)`. `npm run build` lists the same routes as in Part 11C (Part 11D adds no page). The end-to-end run ends
+with `45 passed`.
+
+- `lint:tokens` passing is part of the acceptance: every chart uses token colours only. `src/components/ui/charts/
+  no-chart-library.test.ts` fails if `package.json` ever lists a chart library.
+- The two new end-to-end tests (`e2e/stats.spec.ts`) sign nobody up. The first has the real pipeline stub check a `#true`
+  fact and opens its page as a visitor: the meter's name says 95% with the threshold read from your platform settings, the
+  three tiles show, and the spread chart has a text alternative. The second checks three facts for an author and opens
+  their profile (ring 62, "3 verified", "0 FALSE", the 30-day line), then logs in as them and opens the history.
+
+#### Step 3: Start the servers and make four accounts
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 10 and
+14.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you make the four accounts with a shell
+command, log three of them in through the API (keeping their login tokens in `ada`, `bo` and `tr`), and save the helpers
+`mk` (make a post, print its id), `get` (a GET, printing the status code and then the answer) and `send` (any request,
+the same way).
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend` with the venv active: steps 1 and 2 leave you there; needs `jq`, `sudo apt install jq`). If you
+opened a new terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the names are new each run
+python manage.py shell -c "
+from allauth.account.models import EmailAddress
+from apps.accounts.models import Role, User
+for name, role in (('ada', Role.USER), ('bo', Role.USER), ('tr', Role.USER), ('mod1', Role.MODERATOR)):
+    user = User.objects.create_user(email=f'part11d-{name}-$id@example.test', username=f'part11d_{name}_$id', password='correct-horse-battery-42', is_email_verified=True, role=role)
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+print(User.objects.filter(email__startswith='part11d-', email__endswith='$id@example.test').count(), 'accounts made')
+" | tail -1
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+login() { jq -nc --arg e "part11d-$1-$id@example.test" '{email: $e, password: "correct-horse-battery-42"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/login | jq -r .meta.access_token; }   # login <name>: prints a login token
+ada=$(login ada); bo=$(login bo); tr=$(login tr)    # $ada, $bo, $tr = their login tokens
+echo ${ada:0:10} ${bo:0:10} ${tr:0:10}               # three token prefixes, not an empty line
+api=http://localhost:8000/api/v1
+mk() { curl -s -H "Authorization: Bearer $1" -H "Content-Type: application/json" --data-binary "$2" $api/posts/ | jq -r .id; }   # mk <token> <json>: makes a post, prints its id
+get() { local out; out=$(curl -s -w '\n%{http_code}' ${2:+-H "Authorization: Bearer $2"} "$api$1"); printf '%s  ' "${out##*$'\n'}"; printf '%s' "${out%$'\n'*}" | jq -c "${3:-.}"; }   # get <path> [token] [jq filter]: prints the status code, then the answer
+send() { local out; out=$(curl -s -w '\n%{http_code}' -X "$1" ${3:+-H "Authorization: Bearer $3"} ${4:+-H "Content-Type: application/json" --data-binary "$4"} "$api$2"); printf '%s  %s\n' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | jq -c "${5:-.}" 2>/dev/null)"; }   # send <METHOD> <path> [token] [json body] [jq filter]: prints the status code, then the answer
+echo "id=$id"                                       # write this down: the browser steps use it
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+4 accounts made
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+id=100647
+```
+
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+
+**If it differs:** `null null null` means the logins failed: `runserver` isn't running in window 1, or `jq` is missing.
+Fix that and run the block again from `id=$(date +%H%M%S)`.
+
+#### Step 4: An opinion's stats, the six keys, and the 404s
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts an opinion and a fact. You read the stats of the opinion (nothing was checked, but the
+14 days are there), the six keys, and what a wrong id, a stale token and the cache header do.
+
+```bash
+op=$(mk "$ada" '{"content":"Opinion: tram lines are lovely","post_type":"opinion"}')
+f1=$(mk "$ada" '{"content":"The city opened a new tram line in May #true","post_type":"fact"}')
+echo "--- an opinion has no check: those fields are null, and the 14 days are there anyway"; get /posts/$op/stats/ "" 'del(.daily) + {days: (.daily | length), first_day: .daily[0]}'
+echo "--- the six keys"; get /posts/$f1/stats/ "" 'keys'
+echo "--- unknown and malformed ids are a JSON 404"; get /posts/00000000-0000-4000-8000-000000000000/stats/ "" '.code'; get /posts/nope/stats/ "" '.code'
+echo "--- a stale token is ignored (the answer doesn't depend on who asks)"; get /posts/$op/stats/ "not-a-token" '.daily | length'
+echo "--- never cached"; curl -s -D - -o /dev/null $api/posts/$f1/stats/ | grep -i '^cache-control'
+```
+
+**You should see:**
+
+```text
+--- an opinion has no check: those fields are null, and the 14 days are there anyway
+200  {"confidence_score":null,"confidence_threshold":null,"verdict_source":null,"seconds_to_verdict":null,"verdict_at":null,"days":14,"first_day":{"date":"2026-10-20","reposts":0,"likes":0,"comments":0}}
+--- the six keys
+200  ["confidence_score","confidence_threshold","daily","seconds_to_verdict","verdict_at","verdict_source"]
+--- unknown and malformed ids are a JSON 404
+404  "not_found"
+404  "not_found"
+--- a stale token is ignored (the answer doesn't depend on who asks)
+200  14
+--- never cached
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+```
+
+- `first_day.date` is today's date in UTC (the day the post was made).
+- A page for an opinion has no stats section; the endpoint still answers so a client never needs to special-case it.
+
+#### Step 5: A fact the pipeline checked: confidence, threshold and time
+
+**Where:** Terminal window 2.
+
+**What this does:** Runs the background check for the fact from step 4 (the stub reads `#true`), then reads its stats and
+the threshold from your settings, and the post object to show they agree.
+
+```bash
+sleep 3; python manage.py process_pending | tail -1       # checks what the background check has not reached yet
+echo "--- the same fact, checked by the pipeline"; get /posts/$f1/stats/ "" 'del(.daily) | .verdict_at |= (. != null) | .seconds_to_verdict |= (. != null and . >= 0)'
+echo "--- the threshold is the one in your platform settings"; python manage.py shell -c "from apps.core.services import get_platform_settings; print(get_platform_settings().confidence_threshold)" | tail -1
+echo "--- the post object agrees"; get /posts/$f1/ "" '{status, confidence_score, verdict_source}'
+```
+
+**You should see:**
+
+```text
+Processed 0 fact posts.
+--- the same fact, checked by the pipeline
+200  {"confidence_score":"95.00","confidence_threshold":85,"verdict_source":"pipeline","seconds_to_verdict":true,"verdict_at":true}
+--- the threshold is the one in your platform settings
+85
+--- the post object agrees
+200  {"status":"verified_true","confidence_score":"95.00","verdict_source":"pipeline"}
+```
+
+- `Processed 0 fact posts.` is normal: the server's own background check had already done it (it may print another
+  number if older facts were still pending). The `true` values come from the filter in the command, which turns the real
+  `verdict_at` and `seconds_to_verdict` (a few hundredths of a second after posting) into booleans so the output is
+  stable.
+
+#### Step 6: A moderator's verdict has no confidence
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts a fact the stub can't decide, so it goes to review (its stats stay empty even though the
+pipeline ran: a held result is private). Then `mod1` marks it FALSE (the shell command does what the admin's **Mark FALSE**
+button does) and you read the stats again.
+
+```bash
+fu=$(mk "$ada" '{"content":"The river reached a record level in March #unsure","post_type":"fact"}')   # the stub can't decide: review
+sleep 3; python manage.py process_pending | tail -1
+echo "--- under review: no check fields, even though the pipeline has already run"; get /posts/$fu/stats/ "" 'del(.daily)'
+python manage.py shell -c "
+from apps.accounts.models import User
+from apps.moderation import services
+services.mark_false('$fu', moderator=User.objects.get(username='part11d_mod1_$id'), public_note='The gauge data says otherwise.')
+print('mod1 marked the post FALSE')
+" | tail -1
+echo "--- a moderator's verdict: no confidence, no threshold"; get /posts/$fu/stats/ "" 'del(.daily) | .verdict_at |= (. != null) | .seconds_to_verdict |= (. != null and . >= 0)'
+echo "--- a later Demote or Escalate would not move verdict_at; it comes from the verdict's own audit row"
+```
+
+**You should see:**
+
+```text
+Processed 0 fact posts.
+--- under review: no check fields, even though the pipeline has already run
+200  {"confidence_score":null,"confidence_threshold":null,"verdict_source":null,"seconds_to_verdict":null,"verdict_at":null}
+mod1 marked the post FALSE
+--- a moderator's verdict: no confidence, no threshold
+200  {"confidence_score":null,"confidence_threshold":null,"verdict_source":"moderator","seconds_to_verdict":true,"verdict_at":true}
+```
+
+- `verdict_at` comes from the moderator's audit row, not from the post's `moderated_at`, which every later moderator action
+  (Demote, Dismiss, Escalate) overwrites.
+
+#### Step 7: Reposts, likes and comments land in today's bucket
+
+**Where:** Terminal window 2.
+
+**What this does:** `bo` likes, reposts and comments on the checked fact. You read today's bucket, check the other 13 days
+are zero, then take the like back.
+
+```bash
+send POST /posts/$f1/like/ "$bo" > /dev/null; send POST /posts/$f1/repost/ "$bo" > /dev/null
+send POST /posts/$f1/comments/ "$bo" '{"content":"Nice."}' > /dev/null
+echo "--- today's bucket (day 0) counts them"; get /posts/$f1/stats/ "" '.daily[0] | del(.date)'
+echo "--- 14 days, and the rest are zero"; get /posts/$f1/stats/ "" '{days: (.daily | length), others_zero: ([.daily[1:][] | .reposts + .likes + .comments] | add)}'
+echo "--- take the like back and the bucket forgets it"; send DELETE /posts/$f1/like/ "$bo" > /dev/null; get /posts/$f1/stats/ "" '.daily[0] | del(.date)'
+```
+
+**You should see:**
+
+```text
+--- today's bucket (day 0) counts them
+200  {"reposts":1,"likes":1,"comments":1}
+--- 14 days, and the rest are zero
+200  {"days":14,"others_zero":0}
+--- take the like back and the bucket forgets it
+200  {"reposts":1,"likes":0,"comments":1}
+```
+
+- Buckets are UTC days. A like at 23:59:59 and one at 00:00:00 land in adjacent days; the automated tests pin both sides
+  of midnight and the edges of the 14 days.
+
+#### Step 8: The 30-day trend appears with the public score
+
+**Where:** Terminal window 2.
+
+**What this does:** `tr` has no posts. You read their summary, then give them one, then three checked facts, and watch `trend`
+stay `null` until the score is public. Then you check the shape of a point and that the last point is today.
+
+```bash
+echo "--- tr has no posts yet: nothing to chart"; get /users/part11d_tr_$id/reputation/ "" '{score, sample, trend}'
+t1=$(mk "$tr" '{"content":"The library extended its hours in June #true","post_type":"fact"}')
+sleep 3; python manage.py process_pending | tail -1
+echo "--- one counted post: the score and the trend are still hidden"; get /users/part11d_tr_$id/reputation/ "" '{score, sample, trend}'
+t2=$(mk "$tr" '{"content":"The museum is free on the first Sunday #true","post_type":"fact"}')
+t3=$(mk "$tr" '{"content":"The harbour dredging finished in April #true","post_type":"fact"}')
+sleep 3; python manage.py process_pending | tail -1
+echo "--- three counted posts: the score is public, and so is the trend"; get /users/part11d_tr_$id/reputation/ "" '{score, sample, points: (.trend | length), point_keys: (.trend[0] | keys), first: .trend[0].score, last: .trend[-1].score}'
+echo "--- the last point is today (UTC)"; get /users/part11d_tr_$id/reputation/ "" '.trend[-1].date' ; date -u +%F
+echo "--- bo has no posts of their own: nothing public to chart"; get /users/part11d_bo_$id/reputation/ "" '{score, trend}'
+```
+
+**You should see:**
+
+```text
+--- tr has no posts yet: nothing to chart
+200  {"score":null,"sample":0,"trend":null}
+Processed 0 fact posts.
+--- one counted post: the score and the trend are still hidden
+200  {"score":null,"sample":1,"trend":null}
+Processed 0 fact posts.
+--- three counted posts: the score is public, and so is the trend
+200  {"score":62,"sample":3,"points":30,"point_keys":["date","score"],"first":50,"last":62}
+--- the last point is today (UTC)
+200  "2026-10-20"
+2026-10-20
+--- bo has no posts of their own: nothing public to chart
+200  {"score":null,"trend":null}
+```
+
+- The first point is 50 (a new ledger starts there) and the last is 62 (`100 · (5 + 3) / (10 + 3)`, rounded half up). The
+  first and last dates are 29 days apart. The two date lines match.
+- Once the score is public the earlier days show the raw score after each row, including days before the third counted
+  post. The point has only `date` and `score`: no weights, no reasons, nothing private.
+
+#### Step 9: Your own ledger
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads `ada`'s own credibility ledger (the endpoint your history panel uses), what `bo` gets when they ask,
+and what a visitor gets.
+
+```bash
+echo "--- ada's own ledger, newest first (the FALSE row can still be appealed)"; get /me/reputation/events/ "$ada" '[.results[] | {label, score_after, reversed, appeal}]'
+echo "--- bo reads only their own ledger"; get /me/reputation/events/ "$bo" '.results'
+echo "--- nobody can read one without logging in"; get /me/reputation/events/ "" '.code'
+```
+
+**You should see:**
+
+```text
+--- ada's own ledger, newest first (the FALSE row can still be appealed)
+200  [{"label":"Fact labelled FALSE","score_after":50,"reversed":false,"appeal":{"status":null,"can_appeal":true}},{"label":"Fact verified true","score_after":55,"reversed":false,"appeal":null}]
+--- bo reads only their own ledger
+200  []
+--- nobody can read one without logging in
+401  "not_authenticated"
+```
+
+- This is where "Ask for another look" comes from: a negative row you can still appeal has `can_appeal: true`. A positive
+  row has `appeal: null`. A row that was overturned shows `reversed: true`, and its reversal appears as a row of its own.
+
+#### Step 10: Deleted and removed posts have no stats
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` deletes the FALSE post, so its stats become a 404. A shell command then marks the checked fact
+"removed" (what a moderator's **Remove** does): the stats are a 404 even for its author. Another command puts it back.
+
+```bash
+echo "--- the author deletes a post: its stats are gone"; send DELETE /posts/$fu/ "$ada"; get /posts/$fu/stats/ "" '.code'
+python manage.py shell -c "
+from apps.posts.models import Post
+Post.objects.filter(pk='$f1').update(status='removed')
+print('post f1 removed')
+" | tail -1
+echo "--- a removed post is a 404 for everyone, its author included"; get /posts/$f1/stats/ "$ada" '.code'; get /posts/$f1/stats/ "" '.code'
+python manage.py shell -c "
+from apps.posts.models import Post
+Post.objects.filter(pk='$f1').update(status='verified_true')
+print('post f1 put back')
+" | tail -1
+echo "--- and it answers again"; get /posts/$f1/stats/ "" '.confidence_score'
+```
+
+**You should see:**
+
+```text
+--- the author deletes a post: its stats are gone
+204  
+404  "not_found"
+post f1 removed
+--- a removed post is a 404 for everyone, its author included
+404  "not_found"
+404  "not_found"
+post f1 put back
+--- and it answers again
+200  "95.00"
+```
+
+#### Step 11: Browser: How this was checked
+
+**Where:** Browser. Window 3 runs `cd ../frontend` then `npm run dev` (leave it running). Open the page of the checked fact
+from step 5: in window 2 run `echo http://localhost:3000/p/$f1` and open that address. (Stop the Django server in window
+1 only after step 13: the browser needs it.)
+
+**What this does:** Shows the stats section on a fact's page, as a visitor.
+
+**You should see:**
+
+- The post, then **Verdict** ("Checked automatically · 95% confidence"), then a heading **How this was checked** with two
+  cards. In the first: a horizontal meter filled in teal to 95%, a thin dark tick at 85% with the caption "Auto-label
+  threshold 85%" above it, "0%" and "100%" under the ends, and three tiles: **Confidence** 95%, **Threshold and margin**
+  85% with "+10 points", **Time to verdict** (for a fact you just made: "under 1 s").
+- In the second card, headed **REPOSTS AND LIKES**: 14 columns, the first one (today's date) with one blue bar (the
+  repost; the like was taken back in step 7, so there is no grey one), a dot under the column of the verdict day, the legend "Reposts ·
+  Likes · Verdict" and the caption "First 14 days after posting (UTC)". For a post with nothing yet, the bars are absent and
+  the line "No reposts or likes yet." appears.
+- Open the page of the **moderator-labelled** fact (the one `mod1` marked FALSE; it was deleted in step 10, so mark a
+  new one if you want to see it): the card says "Reviewed by a moderator" with one tile, **Time to decision**, and **no**
+  percentage and no meter. A fact still being checked shows "Checking facts…" in the first card; one under review shows "A
+  moderator is taking a look."
+- No horizontal scrollbar at 390 px wide (the tiles stack).
+
+#### Step 12: Browser: the Credibility widget and your history
+
+**Where:** Browser, with window 3 still running. Open `http://localhost:3000/u/part11d_tr_<id>` (use your `id` from
+step 3).
+
+**What this does:** Shows the widget as a visitor, then your own history as its owner.
+
+**You should see** (as a visitor):
+
+- Under the profile card a card headed **Credibility**: a grey ring filled clockwise from 12 o'clock with **62** in the
+  middle, "3 verified · 0 FALSE" (green and red dots), a small grey line with a dot at its end captioned "Last 30 days", and
+  the link "How this is calculated". No history, no panel.
+- `http://localhost:3000/u/part11d_bo_<id>` shows an empty grey ring with **New**, the line "A score shows once 3 of their
+  posts have been checked or removed." and no line.
+
+Then log in at `http://localhost:3000/login` as `part11d-tr-<id>@example.test` with `correct-horse-battery-42` and open your
+profile again:
+
+- Below the widget a card headed **Your credibility history**: "Your score: 62" with a grey bar, and a button **Show
+  history (3)**. Open it: three rows "Fact verified true", each with its date, "+1", "score after N", a "View post" link, and
+  no "Ask for another look".
+- Log in as `part11d-ada-<id>@example.test` instead: the history has the FALSE row with the link **Ask for another look**
+  (it goes to the post, where the appeal button is). The panel says "Others see New until 3 of your posts are checked." while
+  the public score is hidden. If a decision had been overturned, that row would be struck through with the word
+  **Reversed**, and its reversal would be a row of its own ("Reversed: …").
+
+#### Step 13: Browser: the gallery
+
+**Where:** Browser: `http://localhost:3000/dev/ui` (a development-only page).
+
+**What this does:** Shows every chart in every state in one place, next to the Stitch sections.
+
+**You should see** three new sections, **Charts**, **Stitch b3: How this was checked** and **Stitch c1, b4 and c2:
+Credibility** (links in the page's top navigation): the meters (teal, red, grey, with and without the threshold tick), the tiles,
+the bar chart with data and empty, the ring (68, New, 100), three sparklines (rising, flat, one point), five stats
+variants (pipeline TRUE, FALSE with a raised threshold, moderator, pending, under review) and the widget and panel in all
+their states.
+
+- Every chart has a text alternative: with a screen reader, or by looking at the page without styles, each graphic is an
+  image with a one-sentence summary and a hidden table beside it that lists the numbers.
+- The colours are tokens only; the credibility ring, bar and line are neutral grey on purpose; the post's meter keeps the
+  verdict colour (teal for TRUE, red for FALSE).
+
+#### Step 14: Clean up
+
+**Where:** Terminal window 2, in `backend` with the venv active. You can stop both servers first (Ctrl+C in windows 1 and 3).
+
+**What this does:** Deletes the accounts and posts this part made (and their audit rows), then audits the ledger again.
+
+```bash
+python manage.py shell -c "
+from apps.accounts.models import User
+from apps.moderation.models import ModerationAction
+from apps.posts.models import Post
+users = User.objects.filter(email__startswith='part11d-')
+print(ModerationAction.objects.filter(moderator__in=users).delete())
+print(Post.objects.filter(author__in=users).delete())
+print(users.delete())
+" | tail -3
+python manage.py recompute_reputation --check          # Checked … accounts: every stored score matches the ledger.
+```
+
+**You should see** (the numbers depend on how many runs you left over):
+
+```text
+(2, {'moderation.ModerationAction': 2})
+(15, {'social.Comment': 2, 'social.Repost': 2, 'posts.Post': 11})
+(25, {'accounts.User_groups': 2, 'account.EmailAddress': 7, 'reputation.ReputationEvent': 9, 'accounts.User': 7})
+Checked 1562 accounts: every stored score matches the ledger.
+```
+
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
+  database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway.
 
 ---
 
@@ -18964,3 +19461,532 @@ Checked 1426 accounts: every stored score matches the ledger.
   local database, which is destructive.
 - No real secret was used: the password of the test accounts is a throwaway, and your admin address is the default one
   unless you set `ADMIN_URL_PATH` in `backend\.env` (it is never printed here).
+
+### Part 11D: Charts & stats
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and `frontend\.env.local`.
+Part 11D adds **no app, no migration, no dependency and no variable**. It adds **one endpoint**,
+`GET /api/v1/posts/{id}/stats/`, a `trend` list on `GET /api/v1/users/{username}/reputation/`, and the Stitch charts, built
+by hand from HTML and SVG (no chart library): on a fact's page **"How this was checked"** (a confidence meter with the
+auto-label threshold marked, three tiles and a bar chart of reposts and likes per day), and on every profile a
+**Credibility** widget (a ring, the counts and a 30-day line); on your own profile also **your credibility history**.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 13 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for steps 3 to 10 and 14**: the variables and functions you set in step 3 (`$id`, `$ada`, `$bo`, `$tr`, `$api`, `Login`, `Mk`, `Send`, `Fetch`) and in steps 4 to 6 (`$op`, `$f1`, `$fu`) only live in that one terminal. If you close it, start again from step 3. | 1 to 10, 14 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 11 to 13 |
+| Browser | Steps 11 to 13 | 11 to 13 |
+
+Things to know first:
+
+- **The stats are public and say nothing about who asks.** The endpoint never looks at your login, so a stale token is
+  not an error. A deleted post, and a post a moderator removed, are a 404 for everyone (its author included).
+- **What each field means.** `confidence_score` and `confidence_threshold` are set only when the **pipeline** gave the
+  label (never for a moderator's verdict, and never for a late TRUE that is held under review). The threshold is **today's**
+  setting, not the one at the time of the check: if a senior moderator raised it since, the page says "Below today's
+  threshold of N%" instead of a negative margin. `verdict_at` is when the label was decided; for a moderator's verdict it
+  comes from the audit row, so a later Demote or Escalate never moves it. `daily` is always **14 UTC days** starting on the
+  day the post was made (day 0 is a partial day), with zeros for quiet days. Likes and reposts that were taken back are
+  gone; hidden and deleted comments never count.
+- **The trend** is the last credibility score of each UTC day over the 30 days ending today, carried forward over quiet
+  days, starting from 50 for a new ledger. It is `null` until the score is public (three of the person's own posts
+  checked or removed).
+- **The accounts.** Step 3 makes four straight in the database with the throwaway password `correct-horse-battery-42`:
+  `ada` (the author), `bo` (likes and reposts), `tr` (the trend) and `mod1` (a moderator). No sign-up and no email are
+  needed.
+- **The pipeline is the stub** (Part 9). `#true` makes a fact VERIFIED 95%; `#unsure` sends it to review. The threshold you
+  see (85) is your own platform setting; if you changed it, your number differs.
+- **Your admin address** isn't needed in this part.
+- The outputs below are the Linux run of 2026-10-20 with the Windows spellings applied (for example the 404 answer is
+  printed as `{"code":"not_found"}`). **The PowerShell blocks were not run** (no PowerShell on the machine that wrote them); the
+  browser steps were checked with headless Chromium (at 1280 and 390 px, screenshots looked at), not by a person at a keyboard.
+  Ids, numbers in names, the date and times differ on every run.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, confirms there is nothing to
+migrate, runs the whole backend test suite and Part 11D's own tests, the linter and the formatter check, and audits the
+credibility ledger of your local database.
+
+```powershell
+# start in the repo root
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                            # No migrations to apply.
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 3715 passed
+python -m pytest apps\posts\tests\test_stats.py apps\posts\tests\test_api_stats.py apps\social\tests\test_daily_engagement.py apps\reputation\tests\test_trend.py apps\reputation\tests\test_api_trend.py -q   # 71 passed
+ruff check . ; ruff format --check .                # All checks passed! / 283 files already formatted
+python manage.py recompute_reputation --check       # Checked … accounts: every stored score matches the ledger.
+```
+
+**You should see:** `No migrations to apply.` (Part 11D has none), `No changes detected`, `System check identified no
+issues (0 silenced).`, then `3715 passed`, `71 passed`, `All checks passed!`, `283 files already formatted` and
+`Checked 1562 accounts: every stored score matches the ledger.` (your number of accounts differs). Counts may grow later;
+what matters is that nothing fails.
+
+- The new tests pin the six keys; every status for an anonymous visitor, another user, the author and a stale token; the
+  404s; the buckets on both sides of UTC midnight and at the 14-day edge; hidden and deleted comments; a taken-back like;
+  that the endpoint costs **2 queries whatever the activity** (the post with its moderator-verdict time, then one
+  `UNION ALL` of the three daily counts) and the trend 3 queries when public and 2 when hidden.
+- Existing tests changed on purpose: `test_api_reputation.py` (the new `trend` key, and the query count is 2 while the
+  score is hidden and 3 when it is public).
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last command) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 141 files, 1933 tests passed
+npm run build
+npm run test:e2e                                    # 45 passed
+cd ..\backend                                       # back to backend\ for steps 3 to 10
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  141 passed (141)` and `Tests  1933
+passed (1933)`. `npm run build` lists the same routes as in Part 11C (Part 11D adds no page). The end-to-end run ends
+with `45 passed`.
+
+- `lint:tokens` passing is part of the acceptance: every chart uses token colours only. `src/components/ui/charts/
+  no-chart-library.test.ts` fails if `package.json` ever lists a chart library.
+- The two new end-to-end tests (`e2e/stats.spec.ts`) sign nobody up. The first has the real pipeline stub check a `#true`
+  fact and opens its page as a visitor: the meter's name says 95% with the threshold read from your platform settings, the
+  three tiles show, and the spread chart has a text alternative. The second checks three facts for an author and opens
+  their profile (ring 62, "3 verified", "0 FALSE", the 30-day line), then logs in as them and opens the history.
+
+#### Step 3: Start the servers and make four accounts
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 10 and
+14.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you make the four accounts with a shell
+command, log three of them in through the API (keeping their login tokens in `ada`, `bo` and `tr`), and save the helpers
+`mk` (make a post, print its id), `get` (a GET, printing the status code and then the answer) and `send` (any request,
+the same way).
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 and 2 leave you there). If you opened a new terminal, first run
+`cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the names are new each run
+@"
+from allauth.account.models import EmailAddress
+from apps.accounts.models import Role, User
+for name, role in (('ada', Role.USER), ('bo', Role.USER), ('tr', Role.USER), ('mod1', Role.MODERATOR)):
+    user = User.objects.create_user(email=f'part11d-{name}-$id@example.test', username=f'part11d_{name}_$id', password='correct-horse-battery-42', is_email_verified=True, role=role)
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+print(User.objects.filter(email__startswith='part11d-', email__endswith='$id@example.test').count(), 'accounts made')
+"@ | python manage.py shell | Select-Object -Last 1
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+# Login <name>: prints a login token
+function Login($name) {
+@"
+{"email": "part11d-$name-$id@example.test", "password": "correct-horse-battery-42"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-login.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-login.json" http://localhost:8000/api/auth/app/v1/auth/login | ConvertFrom-Json).meta.access_token
+}
+$ada = Login ada; $bo = Login bo; $tr = Login tr    # $ada, $bo, $tr = their login tokens
+"$($ada.Substring(0,10)) $($bo.Substring(0,10)) $($tr.Substring(0,10))"    # three token prefixes, not an error
+$api = 'http://localhost:8000/api/v1'
+# Mk <token> <json>: makes a post, prints its id
+function Mk($token, $json) {
+  $json | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+  (curl.exe -s -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | ConvertFrom-Json).id
+}
+# Send <METHOD> <path> [token] [json body] [fields]: prints the HTTP status, then the answer. `fields` is a list
+# of property names to keep, or a script block `{ param($r) ... }` that picks what to show from the answer.
+function Send($method, $path, $token, $json, $show) {
+  $a = @()
+  if ($token) { $a += '-H', "Authorization: Bearer $token" }
+  if ($json) {
+    $json | Set-Content -Encoding ascii $env:TEMP\rz-body.json
+    $a += '-H', 'Content-Type: application/json', '--data-binary', "@$env:TEMP\rz-body.json"
+  }
+  $out = curl.exe -s -w "`n%{http_code}" -X $method @a "$api$path"
+  $body = if ($out.Count -gt 1) { $out[0..($out.Count - 2)] -join '' } else { '' }
+  if ($show -and $body) {
+    $r = $body | ConvertFrom-Json
+    $shown = if ($show -is [scriptblock]) { & $show $r } else { $r | Select-Object $show }
+    $body = ConvertTo-Json -InputObject $shown -Depth 5 -Compress
+  }
+  "$($out[-1])  $body"
+}
+function Fetch($path, $token, $show) { Send GET $path $token $null $show }   # Fetch <path> [token] [fields]
+"id=$id"                                            # write this down: the browser steps use it
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+4 accounts made
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+id=100647
+```
+
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+
+**If it differs:** an error on `.Substring` means the logins failed: `runserver` isn't running in window 1. Start it and run the
+block again from `$id = Get-Date …`.
+
+#### Step 4: An opinion's stats, the six keys, and the 404s
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts an opinion and a fact. You read the stats of the opinion (nothing was checked, but the
+14 days are there), the six keys, and what a wrong id, a stale token and the cache header do.
+
+```powershell
+$op = Mk $ada '{"content":"Opinion: tram lines are lovely","post_type":"opinion"}'
+$f1 = Mk $ada '{"content":"The city opened a new tram line in May #true","post_type":"fact"}'
+"--- an opinion has no check: those fields are null, and the 14 days are there anyway"; Fetch "/posts/$op/stats/" $null { param($r) [ordered]@{ confidence_score = $r.confidence_score; confidence_threshold = $r.confidence_threshold; verdict_source = $r.verdict_source; seconds_to_verdict = $r.seconds_to_verdict; verdict_at = $r.verdict_at; days = $r.daily.Count; first_day_likes = $r.daily[0].likes } }
+"--- the six keys"; Fetch "/posts/$f1/stats/" $null { param($r) @($r.PSObject.Properties.Name | Sort-Object) }
+"--- unknown and malformed ids are a JSON 404"; Fetch "/posts/00000000-0000-4000-8000-000000000000/stats/" $null code; Fetch "/posts/nope/stats/" $null code
+"--- a stale token is ignored (the answer doesn't depend on who asks)"; Fetch "/posts/$op/stats/" "not-a-token" { param($r) $r.daily.Count }
+"--- never cached"; curl.exe -s -D - -o NUL "$api/posts/$f1/stats/" | Select-String '^cache-control'
+```
+
+**You should see:**
+
+```text
+--- an opinion has no check: those fields are null, and the 14 days are there anyway
+200  {"confidence_score":null,"confidence_threshold":null,"verdict_source":null,"seconds_to_verdict":null,"verdict_at":null,"days":14,"first_day_likes":0}
+--- the six keys
+200  ["confidence_score","confidence_threshold","daily","seconds_to_verdict","verdict_at","verdict_source"]
+--- unknown and malformed ids are a JSON 404
+404  {"code":"not_found"}
+404  {"code":"not_found"}
+--- a stale token is ignored (the answer doesn't depend on who asks)
+200  14
+--- never cached
+Cache-Control: max-age=0, no-cache, no-store, must-revalidate, private
+```
+
+- The window's first day is the day the post was made (UTC). PowerShell 5.1 may turn date strings in an answer into dates, so
+  this guide prints a like count instead of the date.
+- A page for an opinion has no stats section; the endpoint still answers so a client never needs to special-case it.
+
+#### Step 5: A fact the pipeline checked: confidence, threshold and time
+
+**Where:** Terminal window 2.
+
+**What this does:** Runs the background check for the fact from step 4 (the stub reads `#true`), then reads its stats and
+the threshold from your settings, and the post object to show they agree.
+
+```powershell
+Start-Sleep 3; python manage.py process_pending | Select-Object -Last 1   # checks what the background check has not reached yet
+"--- the same fact, checked by the pipeline"; Fetch "/posts/$f1/stats/" $null { param($r) [ordered]@{ confidence_score = $r.confidence_score; confidence_threshold = $r.confidence_threshold; verdict_source = $r.verdict_source; seconds_to_verdict = ($null -ne $r.seconds_to_verdict -and $r.seconds_to_verdict -ge 0); verdict_at = ($null -ne $r.verdict_at) } }
+"--- the threshold is the one in your platform settings"
+@"
+from apps.core.services import get_platform_settings
+print(get_platform_settings().confidence_threshold)
+"@ | python manage.py shell | Select-Object -Last 1
+"--- the post object agrees"; Fetch "/posts/$f1/" $null status,confidence_score,verdict_source
+```
+
+**You should see:**
+
+```text
+Processed 0 fact posts.
+--- the same fact, checked by the pipeline
+200  {"confidence_score":"95.00","confidence_threshold":85,"verdict_source":"pipeline","seconds_to_verdict":true,"verdict_at":true}
+--- the threshold is the one in your platform settings
+85
+--- the post object agrees
+200  {"status":"verified_true","confidence_score":"95.00","verdict_source":"pipeline"}
+```
+
+- `Processed 0 fact posts.` is normal: the server's own background check had already done it (it may print another
+  number if older facts were still pending). The `true` values come from the filter in the command, which turns the real
+  `verdict_at` and `seconds_to_verdict` (a few hundredths of a second after posting) into booleans so the output is
+  stable.
+
+#### Step 6: A moderator's verdict has no confidence
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts a fact the stub can't decide, so it goes to review (its stats stay empty even though the
+pipeline ran: a held result is private). Then `mod1` marks it FALSE (the shell command does what the admin's **Mark FALSE**
+button does) and you read the stats again.
+
+```powershell
+$fu = Mk $ada '{"content":"The river reached a record level in March #unsure","post_type":"fact"}'   # the stub can't decide: review
+Start-Sleep 3; python manage.py process_pending | Select-Object -Last 1
+"--- under review: no check fields, even though the pipeline has already run"; Fetch "/posts/$fu/stats/" $null confidence_score,confidence_threshold,verdict_source,seconds_to_verdict,verdict_at
+@"
+from apps.accounts.models import User
+from apps.moderation import services
+services.mark_false('$fu', moderator=User.objects.get(username='part11d_mod1_$id'), public_note='The gauge data says otherwise.')
+print('mod1 marked the post FALSE')
+"@ | python manage.py shell | Select-Object -Last 1
+"--- a moderator's verdict: no confidence, no threshold"; Fetch "/posts/$fu/stats/" $null { param($r) [ordered]@{ confidence_score = $r.confidence_score; confidence_threshold = $r.confidence_threshold; verdict_source = $r.verdict_source; seconds_to_verdict = ($null -ne $r.seconds_to_verdict -and $r.seconds_to_verdict -ge 0); verdict_at = ($null -ne $r.verdict_at) } }
+```
+
+**You should see:**
+
+```text
+Processed 0 fact posts.
+--- under review: no check fields, even though the pipeline has already run
+200  {"confidence_score":null,"confidence_threshold":null,"verdict_source":null,"seconds_to_verdict":null,"verdict_at":null}
+mod1 marked the post FALSE
+--- a moderator's verdict: no confidence, no threshold
+200  {"confidence_score":null,"confidence_threshold":null,"verdict_source":"moderator","seconds_to_verdict":true,"verdict_at":true}
+```
+
+- `verdict_at` comes from the moderator's audit row, not from the post's `moderated_at`, which every later moderator action
+  (Demote, Dismiss, Escalate) overwrites.
+
+#### Step 7: Reposts, likes and comments land in today's bucket
+
+**Where:** Terminal window 2.
+
+**What this does:** `bo` likes, reposts and comments on the checked fact. You read today's bucket, check the other 13 days
+are zero, then take the like back.
+
+```powershell
+$null = Send POST "/posts/$f1/like/" $bo; $null = Send POST "/posts/$f1/repost/" $bo
+$null = Send POST "/posts/$f1/comments/" $bo '{"content":"Nice."}'
+$day0 = { param($r) [ordered]@{ reposts = $r.daily[0].reposts; likes = $r.daily[0].likes; comments = $r.daily[0].comments } }
+"--- today's bucket (day 0) counts them"; Fetch "/posts/$f1/stats/" $null $day0
+"--- 14 days, and the rest are zero"; Fetch "/posts/$f1/stats/" $null { param($r) [ordered]@{ days = $r.daily.Count; others_zero = ($r.daily | Select-Object -Skip 1 | ForEach-Object { $_.reposts + $_.likes + $_.comments } | Measure-Object -Sum).Sum } }
+"--- take the like back and the bucket forgets it"; $null = Send DELETE "/posts/$f1/like/" $bo; Fetch "/posts/$f1/stats/" $null $day0
+```
+
+**You should see:**
+
+```text
+--- today's bucket (day 0) counts them
+200  {"reposts":1,"likes":1,"comments":1}
+--- 14 days, and the rest are zero
+200  {"days":14,"others_zero":0}
+--- take the like back and the bucket forgets it
+200  {"reposts":1,"likes":0,"comments":1}
+```
+
+- Buckets are UTC days. A like at 23:59:59 and one at 00:00:00 land in adjacent days; the automated tests pin both sides
+  of midnight and the edges of the 14 days.
+
+#### Step 8: The 30-day trend appears with the public score
+
+**Where:** Terminal window 2.
+
+**What this does:** `tr` has no posts. You read their summary, then give them one, then three checked facts, and watch `trend`
+stay `null` until the score is public. Then you check the shape of a point and that the last point is today.
+
+```powershell
+"--- tr has no posts yet: nothing to chart"; Fetch "/users/part11d_tr_$id/reputation/" $null score,sample,trend
+$t1 = Mk $tr '{"content":"The library extended its hours in June #true","post_type":"fact"}'
+Start-Sleep 3; python manage.py process_pending | Select-Object -Last 1
+"--- one counted post: the score and the trend are still hidden"; Fetch "/users/part11d_tr_$id/reputation/" $null score,sample,trend
+$t2 = Mk $tr '{"content":"The museum is free on the first Sunday #true","post_type":"fact"}'
+$t3 = Mk $tr '{"content":"The harbour dredging finished in April #true","post_type":"fact"}'
+Start-Sleep 3; python manage.py process_pending | Select-Object -Last 1
+"--- three counted posts: the score is public, and so is the trend"; Fetch "/users/part11d_tr_$id/reputation/" $null { param($r) [ordered]@{ score = $r.score; sample = $r.sample; points = $r.trend.Count; point_keys = @($r.trend[0].PSObject.Properties.Name); first = $r.trend[0].score; last = $r.trend[-1].score } }
+"--- the last point is today (UTC): True when it is"; curl.exe -s "$api/users/part11d_tr_$id/reputation/" | Select-String -SimpleMatch -Quiet ('"date":"' + [DateTime]::UtcNow.ToString('yyyy-MM-dd') + '","score":62}]')
+"--- bo has no posts of their own: nothing public to chart"; Fetch "/users/part11d_bo_$id/reputation/" $null score,trend
+```
+
+**You should see:**
+
+```text
+--- tr has no posts yet: nothing to chart
+200  {"score":null,"sample":0,"trend":null}
+Processed 0 fact posts.
+--- one counted post: the score and the trend are still hidden
+200  {"score":null,"sample":1,"trend":null}
+Processed 0 fact posts.
+--- three counted posts: the score is public, and so is the trend
+200  {"score":62,"sample":3,"points":30,"point_keys":["date","score"],"first":50,"last":62}
+--- the last point is today (UTC): True when it is
+True
+--- bo has no posts of their own: nothing public to chart
+200  {"score":null,"trend":null}
+```
+
+- The first point is 50 (a new ledger starts there) and the last is 62 (`100 · (5 + 3) / (10 + 3)`, rounded half up). The
+  first and last dates are 29 days apart. `True` means the last point is today's date in UTC.
+- Once the score is public the earlier days show the raw score after each row, including days before the third counted
+  post. The point has only `date` and `score`: no weights, no reasons, nothing private.
+
+#### Step 9: Your own ledger
+
+**Where:** Terminal window 2.
+
+**What this does:** Reads `ada`'s own credibility ledger (the endpoint your history panel uses), what `bo` gets when they ask,
+and what a visitor gets.
+
+```powershell
+"--- ada's own ledger, newest first (the FALSE row can still be appealed)"; Fetch "/me/reputation/events/" $ada { param($r) @($r.results | ForEach-Object { [ordered]@{ label = $_.label; score_after = $_.score_after; reversed = $_.reversed; appeal = $_.appeal } }) }
+"--- bo reads only their own ledger"; Fetch "/me/reputation/events/" $bo { param($r) @($r.results) }
+"--- nobody can read one without logging in"; Fetch "/me/reputation/events/" $null code
+```
+
+**You should see:**
+
+```text
+--- ada's own ledger, newest first (the FALSE row can still be appealed)
+200  [{"label":"Fact labelled FALSE","score_after":50,"reversed":false,"appeal":{"status":null,"can_appeal":true}},{"label":"Fact verified true","score_after":55,"reversed":false,"appeal":null}]
+--- bo reads only their own ledger
+200  []
+--- nobody can read one without logging in
+401  {"code":"not_authenticated"}
+```
+
+- This is where "Ask for another look" comes from: a negative row you can still appeal has `can_appeal: true`. A positive
+  row has `appeal: null`. A row that was overturned shows `reversed: true`, and its reversal appears as a row of its own.
+
+#### Step 10: Deleted and removed posts have no stats
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` deletes the FALSE post, so its stats become a 404. A shell command then marks the checked fact
+"removed" (what a moderator's **Remove** does): the stats are a 404 even for its author. Another command puts it back.
+
+```powershell
+"--- the author deletes a post: its stats are gone"; Send DELETE "/posts/$fu/" $ada; Fetch "/posts/$fu/stats/" $null code
+@"
+from apps.posts.models import Post
+Post.objects.filter(pk='$f1').update(status='removed')
+print('post f1 removed')
+"@ | python manage.py shell | Select-Object -Last 1
+"--- a removed post is a 404 for everyone, its author included"; Fetch "/posts/$f1/stats/" $ada code; Fetch "/posts/$f1/stats/" $null code
+@"
+from apps.posts.models import Post
+Post.objects.filter(pk='$f1').update(status='verified_true')
+print('post f1 put back')
+"@ | python manage.py shell | Select-Object -Last 1
+"--- and it answers again"; Fetch "/posts/$f1/stats/" $null confidence_score
+```
+
+**You should see:**
+
+```text
+--- the author deletes a post: its stats are gone
+204  
+404  {"code":"not_found"}
+post f1 removed
+--- a removed post is a 404 for everyone, its author included
+404  {"code":"not_found"}
+404  {"code":"not_found"}
+post f1 put back
+--- and it answers again
+200  {"confidence_score":"95.00"}
+```
+
+#### Step 11: Browser: How this was checked
+
+**Where:** Browser. Window 3 runs `cd ..\frontend` then `npm run dev` (leave it running). Open the page of the checked fact
+from step 5: in window 2 run `"http://localhost:3000/p/$f1"` and open that address. (Stop the Django server in window
+1 only after step 13: the browser needs it.)
+
+**What this does:** Shows the stats section on a fact's page, as a visitor.
+
+**You should see:**
+
+- The post, then **Verdict** ("Checked automatically · 95% confidence"), then a heading **How this was checked** with two
+  cards. In the first: a horizontal meter filled in teal to 95%, a thin dark tick at 85% with the caption "Auto-label
+  threshold 85%" above it, "0%" and "100%" under the ends, and three tiles: **Confidence** 95%, **Threshold and margin**
+  85% with "+10 points", **Time to verdict** (for a fact you just made: "under 1 s").
+- In the second card, headed **REPOSTS AND LIKES**: 14 columns, the first one (today's date) with one blue bar (the
+  repost; the like was taken back in step 7, so there is no grey one), a dot under the column of the verdict day, the legend "Reposts ·
+  Likes · Verdict" and the caption "First 14 days after posting (UTC)". For a post with nothing yet, the bars are absent and
+  the line "No reposts or likes yet." appears.
+- Open the page of the **moderator-labelled** fact (the one `mod1` marked FALSE; it was deleted in step 10, so mark a
+  new one if you want to see it): the card says "Reviewed by a moderator" with one tile, **Time to decision**, and **no**
+  percentage and no meter. A fact still being checked shows "Checking facts…" in the first card; one under review shows "A
+  moderator is taking a look."
+- No horizontal scrollbar at 390 px wide (the tiles stack).
+
+#### Step 12: Browser: the Credibility widget and your history
+
+**Where:** Browser, with window 3 still running. Open `http://localhost:3000/u/part11d_tr_<id>` (use your `id` from
+step 3).
+
+**What this does:** Shows the widget as a visitor, then your own history as its owner.
+
+**You should see** (as a visitor):
+
+- Under the profile card a card headed **Credibility**: a grey ring filled clockwise from 12 o'clock with **62** in the
+  middle, "3 verified · 0 FALSE" (green and red dots), a small grey line with a dot at its end captioned "Last 30 days", and
+  the link "How this is calculated". No history, no panel.
+- `http://localhost:3000/u/part11d_bo_<id>` shows an empty grey ring with **New**, the line "A score shows once 3 of their
+  posts have been checked or removed." and no line.
+
+Then log in at `http://localhost:3000/login` as `part11d-tr-<id>@example.test` with `correct-horse-battery-42` and open your
+profile again:
+
+- Below the widget a card headed **Your credibility history**: "Your score: 62" with a grey bar, and a button **Show
+  history (3)**. Open it: three rows "Fact verified true", each with its date, "+1", "score after N", a "View post" link, and
+  no "Ask for another look".
+- Log in as `part11d-ada-<id>@example.test` instead: the history has the FALSE row with the link **Ask for another look**
+  (it goes to the post, where the appeal button is). The panel says "Others see New until 3 of your posts are checked." while
+  the public score is hidden. If a decision had been overturned, that row would be struck through with the word
+  **Reversed**, and its reversal would be a row of its own ("Reversed: …").
+
+#### Step 13: Browser: the gallery
+
+**Where:** Browser: `http://localhost:3000/dev/ui` (a development-only page).
+
+**What this does:** Shows every chart in every state in one place, next to the Stitch sections.
+
+**You should see** three new sections, **Charts**, **Stitch b3: How this was checked** and **Stitch c1, b4 and c2:
+Credibility** (links in the page's top navigation): the meters (teal, red, grey, with and without the threshold tick), the tiles,
+the bar chart with data and empty, the ring (68, New, 100), three sparklines (rising, flat, one point), five stats
+variants (pipeline TRUE, FALSE with a raised threshold, moderator, pending, under review) and the widget and panel in all
+their states.
+
+- Every chart has a text alternative: with a screen reader, or by looking at the page without styles, each graphic is an
+  image with a one-sentence summary and a hidden table beside it that lists the numbers.
+- The colours are tokens only; the credibility ring, bar and line are neutral grey on purpose; the post's meter keeps the
+  verdict colour (teal for TRUE, red for FALSE).
+
+#### Step 14: Clean up
+
+**Where:** Terminal window 2, in `backend` with the venv active. You can stop both servers first (Ctrl+C in windows 1 and 3).
+
+**What this does:** Deletes the accounts and posts this part made (and their audit rows), then audits the ledger again.
+
+```powershell
+@"
+from apps.accounts.models import User
+from apps.moderation.models import ModerationAction
+from apps.posts.models import Post
+users = User.objects.filter(email__startswith='part11d-')
+print(ModerationAction.objects.filter(moderator__in=users).delete())
+print(Post.objects.filter(author__in=users).delete())
+print(users.delete())
+"@ | python manage.py shell | Select-Object -Last 3
+python manage.py recompute_reputation --check          # Checked … accounts: every stored score matches the ledger.
+```
+
+**You should see** (the numbers depend on how many runs you left over):
+
+```text
+(2, {'moderation.ModerationAction': 2})
+(15, {'social.Comment': 2, 'social.Repost': 2, 'posts.Post': 11})
+(25, {'accounts.User_groups': 2, 'account.EmailAddress': 7, 'reputation.ReputationEvent': 9, 'accounts.User': 7})
+Checked 1562 accounts: every stored score matches the ledger.
+```
+
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
+  database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway.

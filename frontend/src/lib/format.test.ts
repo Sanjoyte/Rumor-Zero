@@ -5,9 +5,12 @@ import {
   formatCompactNumber,
   formatConfidence,
   formatCount,
+  formatDuration,
   formatFullDateTime,
   formatMonthYear,
   formatRelativeTime,
+  formatShortDate,
+  formatWeight,
 } from "./format";
 
 const NOW = new Date("2026-09-30T12:00:00Z");
@@ -120,5 +123,61 @@ describe("formatDate", () => {
 
   it("prints nothing for a value that isn't a date", () => {
     expect(formatDate("not a date")).toBe("");
+  });
+});
+
+describe("formatDuration", () => {
+  it.each([
+    [0, "under 1 s"],
+    [0.4, "under 1 s"],
+    [1, "1 s"],
+    [59, "59 s"],
+    [60, "1 min"],
+    [134, "2 min 14 s"],
+    [3599, "59 min 59 s"],
+    [3600, "1 h"],
+    [11100, "3 h 5 min"],
+    [86400, "1 d"],
+    [100800, "1 d 4 h"],
+    [-5, "under 1 s"],
+  ])("%s seconds is %s", (seconds, text) => {
+    expect(formatDuration(seconds)).toBe(text);
+  });
+
+  it("is empty without a number", () => {
+    expect(formatDuration(null)).toBe("");
+    expect(formatDuration(undefined)).toBe("");
+    expect(formatDuration(Number.NaN)).toBe("");
+  });
+});
+
+describe("formatShortDate", () => {
+  it("prints a UTC day without a year", () => {
+    expect(formatShortDate("2026-10-09")).toBe("Oct 9");
+    expect(formatShortDate("2026-12-31")).toBe("Dec 31");
+  });
+
+  it("is empty for garbage", () => {
+    expect(formatShortDate("nope")).toBe("");
+  });
+});
+
+describe("formatWeight", () => {
+  it.each([
+    ["1.00", "0.00", "+1"],
+    ["0.25", "0.00", "+0.25"],
+    ["0.00", "1.00", "\u22121"],
+    ["0.00", "0.50", "\u22120.5"],
+    ["0.00", "3.00", "\u22123"],
+    // a reversal carries the negated weights of the row it cancels
+    ["0.00", "-1.00", "+1"],
+    ["-1.00", "0.00", "\u22121"],
+    ["0.00", "0.00", "0"],
+  ])("%s / %s reads %s", (positive, negative, text) => {
+    expect(formatWeight(positive, negative)).toBe(text);
+  });
+
+  it("is 0 for garbage", () => {
+    expect(formatWeight("x", "y")).toBe("0");
   });
 });

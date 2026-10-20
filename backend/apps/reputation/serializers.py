@@ -48,8 +48,9 @@ def recent_events(user):
     ]
 
 
-def reputation_data(user, recent):
-    """`GET /api/v1/users/{username}/reputation/`; `user` carries the three status counts."""
+def reputation_data(user, recent, trend=None):
+    """`GET /api/v1/users/{username}/reputation/`; `user` carries the three status counts.
+    `trend` (Part 11D) is the 30 daily points, or None while the score is hidden."""
     return {
         "score": scoring.public_score(user.reputation_score, user.reputation_sample),
         "sample": user.reputation_sample,
@@ -57,6 +58,7 @@ def reputation_data(user, recent):
         "false": user.false_n,
         "removed": user.removed_n,
         "recent": recent,
+        "trend": trend,
     }
 
 

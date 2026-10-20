@@ -25,6 +25,7 @@ import { PostActions } from "@/features/social/PostActions";
 import { CopyLinkButton } from "./CopyLinkButton";
 import { DeletePostModal } from "./DeletePostModal";
 import { EmergencyNote } from "./EmergencyNote";
+import { PostStats } from "./PostStats";
 import { RemovedPostCard } from "./RemovedPostCard";
 import { SourceList } from "./SourceList";
 import { REMOVED_MESSAGES } from "./Tombstone";
@@ -247,6 +248,7 @@ export function PostDetail({ id, initial }: { id: string; initial: Post | null }
         }
       />
       {post.is_mine && <AppealOutcome post={post} />}
+      {isFact && <PostStats post={post} />}
       {isFact && <SourceList sources={post.sources} />}
       <CommentSection
         key={post.id}

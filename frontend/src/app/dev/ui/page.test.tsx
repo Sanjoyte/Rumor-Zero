@@ -19,6 +19,9 @@ describe("/dev/ui", () => {
       "StatusBadge, CategoryChip, VerdictStripe",
       "Stitch b1: PostCard",
       "Stitch b1: pinned emergencies",
+      "Charts: MeterBar, StatTile, BarChart, RingGauge, Sparkline",
+      "Stitch b3: How this was checked",
+      "Stitch c1, b4 and c2: Credibility",
       "Stitch b2 and d1: modals",
     ]) {
       expect(screen.getByRole("heading", { level: 2, name })).toBeInTheDocument();
@@ -75,5 +78,21 @@ describe("/dev/ui", () => {
     }
     expect(thrown).toBeDefined();
     expect(String((thrown as { digest?: string }).digest)).toContain("404");
+  });
+
+  it("shows the charts, each with a text alternative (Part 11D)", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    render(<ToastProvider>{DevUiPage()}</ToastProvider>);
+    const charts = document.getElementById("charts") as HTMLElement;
+    expect(within(charts).getAllByRole("img").length).toBeGreaterThanOrEqual(10);
+    expect(within(charts).getAllByRole("table").length).toBeGreaterThanOrEqual(10);
+    const stats = document.getElementById("stitch-stats") as HTMLElement;
+    expect(within(stats).getAllByRole("heading", { name: "How this was checked" })).toHaveLength(5);
+    expect(within(stats).getByText("Reviewed by a moderator")).toBeInTheDocument();
+    expect(within(stats).getByText("Below today's threshold of 97%")).toBeInTheDocument();
+    const credibility = document.getElementById("stitch-credibility") as HTMLElement;
+    expect(within(credibility).getAllByRole("heading", { name: "Credibility" })).toHaveLength(3);
+    expect(within(credibility).getByText("Ask for another look")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/debunk/i);
   });
 });

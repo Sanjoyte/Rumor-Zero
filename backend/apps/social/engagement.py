@@ -8,8 +8,10 @@ zeros); a post that was just created has none yet, so `engagement_defaults` sets
 explicitly. Bookmarks and reports have no count anywhere: only the viewer's own flag.
 """
 
-from django.db.models import Count, Exists, IntegerField, OuterRef, Subquery, Value
-from django.db.models.functions import Coalesce
+from datetime import UTC
+
+from django.db.models import CharField, Count, Exists, IntegerField, OuterRef, Subquery, Value
+from django.db.models.functions import Coalesce, TruncDate
 
 from apps.reports.models import Report
 from apps.social.models import Bookmark, Comment, Like, Repost
@@ -61,3 +63,24 @@ def engagement_defaults(post):
     post.bookmarked_by_me = False
     post.reported_by_me = False
     return post
+
+
+def daily_engagement(post_id, start, end):
+    """`{(series, date): n}` of a post's reposts, likes and shown comments created in `[start, end)`
+    (UTC days). One `UNION ALL` of three grouped counts, so one query whatever the activity; each
+    arm is a range scan of its `(post, created_at)` index. A like or repost taken back is gone."""
+
+    def arm(series, queryset):
+        return (
+            queryset.filter(post_id=post_id, created_at__gte=start, created_at__lt=end)
+            .annotate(day=TruncDate("created_at", tzinfo=UTC))
+            .order_by()
+            .values("day")
+            .annotate(n=Count("pk"))
+            .values_list(Value(series, output_field=CharField()), "day", "n")
+        )
+
+    rows = arm("reposts", Repost.objects).union(
+        arm("likes", Like.objects), arm("comments", shown_comments()), all=True
+    )
+    return {(series, day): n for series, day, n in rows}

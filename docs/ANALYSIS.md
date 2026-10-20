@@ -789,6 +789,7 @@ The full rules are in ARCHITECTURE (sections named below). This section records 
 - Dropped: the b1/b4 claim-data telemetry boxes and the b4 contributor spotlight.
 - **No chart library.** Charts are token-built HTML/SVG as in Stitch, each with a text alternative for screen readers.
 - Moderator verdicts never show a %.
+- **As built in Part 11D:** the meter marks **today's** threshold (it is not stored per verdict; if it was raised since, the tile says "Below today's threshold of N%"); the spread chart is for fact posts only and draws reposts and likes (comments are in the payload and the hidden table); the stats of a removed post are a 404 for everyone; credibility visuals (ring, bar, sparkline) are **neutral grey**, the confidence meter keeps its verdict tone; the owner's panel shows the real score; Stitch's gauge was a bar without a threshold marker and its ring started at 9 o'clock by mistake (built from 12 o'clock); `StatTile` is plain text (no image role) while every picture-like chart has a summary and a sibling hidden table.
 
 ### f-7 Profile photos (ARCHITECTURE §4e; Part 14B)
 

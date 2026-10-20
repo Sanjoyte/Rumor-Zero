@@ -51,3 +51,16 @@ def appeal_defaults(post):
     post.appeal_status = None
     post.removal_reason = ""
     return post
+
+
+def with_verdict_time(queryset):
+    """Annotate a `Post` queryset with `moderator_verdict_at`: when a moderator last decided the
+    post's current label (Mark verified or Mark FALSE into the status it has now), from the audit
+    row. Not `moderated_at`, which every later moderator action (Demote, Dismiss, Escalate)
+    overwrites. Null when no row matches. `modaction_post_created_idx` serves the subquery."""
+    decided = ModerationAction.objects.filter(
+        post=OuterRef("pk"),
+        action__in=(ActionKind.VERIFIED, ActionKind.MARKED_FALSE),
+        to_status=OuterRef("status"),
+    ).order_by("-created_at")
+    return queryset.annotate(moderator_verdict_at=Subquery(decided.values("created_at")[:1]))

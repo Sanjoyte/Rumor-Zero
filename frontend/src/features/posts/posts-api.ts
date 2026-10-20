@@ -10,6 +10,7 @@ import type {
   FeedItem,
   FeedResponse,
   Post,
+  PostStats,
   PostStatusResponse,
   PostStatusUpdate,
 } from "@/lib/api/types";
@@ -95,6 +96,14 @@ export async function fetchStatuses(
     token: false,
   });
   return body.results;
+}
+
+/** How a post was checked and how it spread (Part 11D). Public: the answer is the same for everyone. */
+export function fetchPostStats(id: string, signal?: AbortSignal): Promise<PostStats> {
+  return api.get<PostStats>(`${POSTS_PATHS.posts}${encodeURIComponent(id)}/stats/`, {
+    signal,
+    token: false,
+  });
 }
 
 export function fetchFactQuota(signal?: AbortSignal): Promise<FactQuota> {

@@ -117,6 +117,31 @@ export interface EmergencyEligibility {
   block_days: number;
 }
 
+/** One UTC day of a post's spread (Part 11D). */
+export interface DailyBucket {
+  /** `YYYY-MM-DD`, UTC. */
+  date: string;
+  reposts: number;
+  likes: number;
+  comments: number;
+}
+
+/**
+ * `GET /api/v1/posts/{id}/stats/` (Part 11D). The check fields are null for a post that has no
+ * label yet and for an opinion; `confidence_*` are non-null only for a pipeline label, never for a
+ * moderator's.
+ */
+export interface PostStats {
+  confidence_score: string | null;
+  /** Today's `confidence_threshold`, not the one at the time of the check (a follow-up). */
+  confidence_threshold: number | null;
+  verdict_source: VerdictSource | null;
+  seconds_to_verdict: number | null;
+  verdict_at: string | null;
+  /** Always 14 days from the post's UTC date, zero-filled. */
+  daily: DailyBucket[];
+}
+
 /** One entry of `GET /api/v1/posts/status/?ids=` (Part 5): what a badge needs and nothing else. */
 export interface PostStatusUpdate {
   id: string;
@@ -180,6 +205,56 @@ export interface UserRowData {
 }
 
 export type UserListResponse = CursorPage<UserRowData>;
+
+/** One point of the 30-day credibility trend (Part 11D). */
+export interface TrendPoint {
+  /** `YYYY-MM-DD`, UTC. */
+  date: string;
+  score: number;
+}
+
+/** A row of the public "recent" list: your own checked or removed posts, newest first. */
+export interface RecentEvent {
+  kind: string;
+  label: string;
+  post_id: string | null;
+  created_at: string;
+  reversed: boolean;
+}
+
+/** `GET /api/v1/users/{username}/reputation/` (Parts 11B and 11D). */
+export interface ReputationSummary {
+  score: number | null;
+  sample: number;
+  verified: number;
+  false: number;
+  removed: number;
+  recent: RecentEvent[];
+  /** 30 daily points, oldest first; null while the score is hidden. */
+  trend: TrendPoint[] | null;
+}
+
+export interface LedgerAppeal {
+  status: AppealStatus | null;
+  can_appeal: boolean;
+}
+
+/** A row of `GET /api/v1/me/reputation/events/`: your own ledger, reversals included. */
+export interface LedgerEntry {
+  id: string;
+  kind: string;
+  label: string;
+  /** Decimal strings: "0.25"; a reversal's are negative ("-1.00"). */
+  positive: string;
+  negative: string;
+  score_after: number;
+  created_at: string;
+  post_id: string | null;
+  reverses: string | null;
+  reversed: boolean;
+  /** Set only on your own negative rows that still stand. */
+  appeal: LedgerAppeal | null;
+}
 
 export type Role = "user" | "moderator" | "senior_moderator";
 

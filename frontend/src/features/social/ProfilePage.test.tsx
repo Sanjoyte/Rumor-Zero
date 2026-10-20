@@ -11,6 +11,7 @@ import {
 } from "@/features/posts/test-helpers";
 import { ApiError } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { makeEntry, makeSummary } from "@/features/reputation/test-helpers";
 import { ProfilePage } from "./ProfilePage";
 import { makeProfile } from "./test-helpers";
 
@@ -33,6 +34,14 @@ vi.mock("@/features/posts/posts-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/posts/posts-api")>()),
   ...posts,
 }));
+const reputation = vi.hoisted(() => ({
+  fetchReputation: vi.fn(),
+  fetchMyReputationEvents: vi.fn(),
+}));
+vi.mock("@/features/reputation/reputation-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/reputation/reputation-api")>()),
+  ...reputation,
+}));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => "/u/bob",
@@ -53,6 +62,10 @@ beforeEach(() => {
   api.followUser.mockResolvedValue({ is_following: true });
   api.unfollowUser.mockReset();
   api.unfollowUser.mockResolvedValue(undefined);
+  reputation.fetchReputation.mockReset();
+  reputation.fetchReputation.mockResolvedValue(makeSummary());
+  reputation.fetchMyReputationEvents.mockReset();
+  reputation.fetchMyReputationEvents.mockResolvedValue({ items: [makeEntry()], nextCursor: null });
   posts.fetchStatuses.mockReset();
   posts.fetchStatuses.mockResolvedValue([]);
   posts.createPost.mockReset();
@@ -375,5 +388,60 @@ describe("ProfilePage: your own new post", () => {
     await postOpinion("Brand new");
     await waitFor(() => expect(posts.createPost).toHaveBeenCalled());
     expect(cards()).toHaveLength(2);
+  });
+});
+
+describe("ProfilePage: the credibility widget and panel (Part 11D)", () => {
+  const scored = (overrides = {}) =>
+    makeProfile({
+      reputation: { score: 68, sample: 23 },
+      counts: { followers: 1, following: 1, posts: 30, verified: 20, false: 3 },
+      ...overrides,
+    });
+
+  it("shows the widget to a visitor, between the header and the filter chips", async () => {
+    api.fetchProfile.mockResolvedValue(scored());
+    renderPage("anonymous", { initial: scored() });
+    const widget = await screen.findByRole("region", { name: "Credibility" });
+    const header = screen.getByRole("region", { name: "Profile" });
+    const chips = screen.getByRole("group", { name: "Show" });
+    expect(header.compareDocumentPosition(widget) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(widget.compareDocumentPosition(chips) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await within(widget).findByText("Last 30 days");
+    expect(reputation.fetchReputation).toHaveBeenCalledWith("bob", expect.any(AbortSignal));
+  });
+
+  it("keeps the header free of the widget's numbers", async () => {
+    renderPage("anonymous", { initial: scored() });
+    const header = await screen.findByRole("region", { name: "Profile" });
+    expect(within(header).queryByText("3 FALSE")).not.toBeInTheDocument();
+    expect(within(header).queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("shows New and makes no trend request for an account with a hidden score", async () => {
+    renderPage("anonymous");
+    const widget = await screen.findByRole("region", { name: "Credibility" });
+    expect(within(widget).getByRole("img", { name: /^Credibility: New/ })).toBeInTheDocument();
+    expect(reputation.fetchReputation).not.toHaveBeenCalled();
+  });
+
+  it("never shows your history panel to a visitor or on someone else's profile", async () => {
+    renderPage("verified");
+    await screen.findByRole("region", { name: "Credibility" });
+    await waitFor(() => expect(api.fetchProfile).toHaveBeenCalled());
+    expect(
+      screen.queryByRole("heading", { name: "Your credibility history" }),
+    ).not.toBeInTheDocument();
+    expect(reputation.fetchMyReputationEvents).not.toHaveBeenCalled();
+  });
+
+  it("shows your history panel on your own profile once the session is settled", async () => {
+    api.fetchProfile.mockResolvedValue(scored({ is_me: true }));
+    renderPage("verified", { initial: scored() });
+    expect(
+      await screen.findByRole("heading", { name: "Your credibility history" }),
+    ).toBeInTheDocument();
+    expect(await screen.findByText(/^Your score:/)).toBeInTheDocument();
+    expect(reputation.fetchMyReputationEvents).toHaveBeenCalled();
   });
 });

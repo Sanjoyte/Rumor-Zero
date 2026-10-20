@@ -12,8 +12,8 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsEmailVerified
 from apps.core.services import get_platform_settings
-from apps.moderation.queries import appeal_defaults
-from apps.posts import services
+from apps.moderation.queries import appeal_defaults, with_verdict_time
+from apps.posts import services, stats
 from apps.posts.emergency import active_emergency_q
 from apps.posts.exceptions import (
     FactPostsPausedError,
@@ -31,7 +31,7 @@ from apps.posts.serializers import (
     iso,
     status_item,
 )
-from apps.social.engagement import engagement_defaults
+from apps.social.engagement import daily_engagement, engagement_defaults
 
 # `GET /api/v1/posts/status/?ids=` takes at most this many posts (ARCHITECTURE §9).
 MAX_STATUS_IDS = 50
@@ -208,6 +208,47 @@ class PostDetailView(APIView):
         except services.NotPostAuthor:
             raise NotAuthorError from None
         return Response(status=204)
+
+
+@method_decorator(never_cache, name="dispatch")
+class PostStatsView(APIView):
+    """`GET /api/v1/posts/{id}/stats/`: how a post was checked and how it spread (Part 11D).
+
+    Public, uncached and it never authenticates (`authentication_classes = []`, like the status
+    poller: the answer doesn't depend on who asks, so a stale token isn't a 401). A deleted post is
+    404, and so is a removed one for everyone, its author included (the rule of likes and comments;
+    nothing renders stats for it). Two queries however much activity there is: the post with its
+    moderator-verdict time, and the three daily counts in one `UNION ALL`. No throttle (Part 16).
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request, post_id):
+        pk = parse_post_id(post_id)
+        post = (
+            None
+            if pk is None
+            else with_verdict_time(Post.objects.visible())
+            .filter(pk=pk)
+            .only(
+                "id",
+                "status",
+                "created_at",
+                "confidence_score",
+                "verdict_source",
+                "pipeline_checked_at",
+            )
+            .first()
+        )
+        if post is None:
+            raise NotFound
+        start, end = stats.window(post.created_at)
+        counts = daily_engagement(post.pk, start, end)
+        threshold = (
+            None if post.confidence_score is None else get_platform_settings().confidence_threshold
+        )
+        return Response(stats.stats_data(post, counts, threshold))
 
 
 @method_decorator(never_cache, name="dispatch")

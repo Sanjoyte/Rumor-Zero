@@ -87,3 +87,48 @@ export function formatConfidence(score: string | number | null | undefined): str
 export function countCharacters(text: string): number {
   return Array.from(text).length;
 }
+
+/** "under 1 s", "42 s", "2 min 14 s", "3 h 5 min", "2 d 4 h": how long a check took. */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "";
+  const total = Math.max(0, Math.floor(seconds));
+  if (total < 1) return "under 1 s";
+  if (total < MINUTE) return `${total} s`;
+  if (total < HOUR) {
+    const rest = total % MINUTE;
+    return rest
+      ? `${Math.floor(total / MINUTE)} min ${rest} s`
+      : `${Math.floor(total / MINUTE)} min`;
+  }
+  if (total < DAY) {
+    const rest = Math.floor((total % HOUR) / MINUTE);
+    return rest ? `${Math.floor(total / HOUR)} h ${rest} min` : `${Math.floor(total / HOUR)} h`;
+  }
+  const rest = Math.floor((total % DAY) / HOUR);
+  return rest ? `${Math.floor(total / DAY)} d ${rest} h` : `${Math.floor(total / DAY)} d`;
+}
+
+/** "Oct 9": a chart's axis label for a `YYYY-MM-DD` day. UTC, like the buckets. */
+export function formatShortDate(value: string | Date): string {
+  const date = typeof value === "string" ? new Date(`${value}T00:00:00Z`) : value;
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+/**
+ * A ledger weight with its sign, as people read it: "+1", "+0.25", "−2" (a real minus sign),
+ * trailing zeros dropped. `net` is `positive + negative`, both decimal strings; a row that adds
+ * reputation is positive, one that costs it is negative (a reversal's are negated).
+ */
+export function formatWeight(positive: string, negative: string): string {
+  const net = Number(positive) - Number(negative);
+  if (!Number.isFinite(net) || net === 0) return "0";
+  const text = Math.abs(net)
+    .toFixed(2)
+    .replace(/\.?0+$/, "");
+  return `${net > 0 ? "+" : "\u2212"}${text}`;
+}

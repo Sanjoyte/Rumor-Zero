@@ -15,9 +15,12 @@ const LINKS = [
   ["avatars", "Avatar"],
   ["logo", "Logo"],
   ["feedback", "Feedback"],
+  ["charts", "Charts"],
   ["password-meter", "Password meter"],
   ["danger", "DangerZone"],
   ["stitch-post-cards", "b1 PostCard"],
+  ["stitch-stats", "b3 stats"],
+  ["stitch-credibility", "Credibility"],
   ["stitch-signup", "a2 sign-up"],
   ["stitch-modals", "b2 and d1 modals"],
 ] as const;

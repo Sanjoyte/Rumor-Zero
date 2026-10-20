@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { DETAIL_MESSAGES, PostDetail } from "./PostDetail";
-import { BO, makePost, renderWithComposer, type SessionKind } from "./test-helpers";
+import { BO, makePost, makeStats, renderWithComposer, type SessionKind } from "./test-helpers";
 
 const api = vi.hoisted(() => ({
   fetchPost: vi.fn(),
@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
   fetchStatuses: vi.fn(),
   fetchRecentFeed: vi.fn(),
   fetchFactQuota: vi.fn(),
+  fetchPostStats: vi.fn(),
 }));
 vi.mock("./posts-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./posts-api")>()),
@@ -62,6 +63,7 @@ beforeEach(() => {
     next_slot_at: null,
   });
   api.fetchStatuses.mockResolvedValue([]);
+  api.fetchPostStats.mockResolvedValue(makeStats());
   social.fetchComments.mockResolvedValue({ items: [], nextCursor: null });
   social.likePost.mockResolvedValue({ liked: true });
   social.unlikePost.mockResolvedValue(undefined);
@@ -719,5 +721,35 @@ describe("PostDetail (the author's removed post)", () => {
     renderDetail(fact({ status: "removed", content: "" }), "verified");
     await user.click(await screen.findByRole("button", { name: "Delete" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+});
+
+describe("PostDetail: how this was checked (Part 11D)", () => {
+  it("shows the stats section for a fact, between the verdict and the sources", async () => {
+    renderDetail(fact());
+    const heading = await screen.findByRole("heading", { name: "How this was checked" });
+    const verdict = screen.getByRole("heading", { name: "Verdict" });
+    const sources = screen.getByRole("heading", { name: /^Sources/ });
+    expect(
+      verdict.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      heading.compareDocumentPosition(sources) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(api.fetchPostStats).toHaveBeenCalledWith(ID, expect.any(AbortSignal));
+  });
+
+  it("shows nothing and asks for nothing on an opinion", () => {
+    renderDetail(makePost({ id: ID, status: "published", is_mine: false }));
+    expect(screen.queryByRole("heading", { name: "How this was checked" })).not.toBeInTheDocument();
+    expect(api.fetchPostStats).not.toHaveBeenCalled();
+  });
+
+  it("keeps the page whole when the stats can't be loaded", async () => {
+    api.fetchPostStats.mockRejectedValue(new Error("down"));
+    renderDetail(fact());
+    await waitFor(() => expect(api.fetchPostStats).toHaveBeenCalled());
+    expect(screen.queryByRole("heading", { name: "How this was checked" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
   });
 });

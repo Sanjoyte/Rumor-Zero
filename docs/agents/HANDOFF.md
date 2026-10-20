@@ -6,10 +6,9 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 11D (Charts & stats) is planned and approved** (2026-10-20, Claude, Sonnet 5.5); **not implemented
-  yet**. Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B and 11C are done (Part 11C committed as
-  `ee63914`, Part 11B as `9d7edce`, Part 11 as `71c5e14`, Part 10 as `582905b`). Part 11D depends on 7B and 11B, both Done.
-  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B and 11C CI have not been
+- **Part:** **Part 11D (Charts & stats) is implemented** (2026-10-20, Claude, Sonnet 5.5), **uncommitted**. Parts 0A, 0B, 0D, 0C, 1, 2,
+  3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C and 11D are done (Part 11C committed as `ee63914`, the Part 11D plan as `5704bb7`).
+  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C and 11D CI have not been
   reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
@@ -18,19 +17,18 @@ read-only git output.
     from Part 11C a hash-chosen FALSE on an expired emergency also blocks its author.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after planning Part 11D, as asked).
-- **Phase:** Part 11D planned and approved, no code written. HEAD is `ee63914` ("Part 11C: Emergency posts", committed by
-  you); the only change on top of it is the new plan file and this file. The dev database is at
-  `moderation 0007_emergency_permission`. Docker, servers and ports were not touched this session (not checked since the
-  Part 11C session).
-- **Next action:** **Implement Part 11D from the approved plan** (prompt: `Implement only the approved Part 11D plan,
-  validate it, update task.md and HANDOFF.md, then stop.`). Step 0 of the plan comes first: verify the workspace (HEAD, clean
-  tree apart from the plan and this file, `docker compose ps`; `docker compose up -d` if the containers are stopped) and
-  record the baselines (`pytest` 3644, `npm test` 1782, E2E 43). You commit the plan and this file (git is yours) whenever you
-  like; they need not be committed first.
+- **Owner:** none (Claude stopped after Part 11D, as asked).
+- **Phase:** Part 11D done and validated, nothing committed. HEAD is `5704bb7` ("Plan Part 11D"); the working tree holds the
+  Part 11D changes (listed in the checkpoint below). No migration: the dev database is still at `moderation 0007_emergency_permission`.
+  Docker is up. **No server is running** (I started and stopped Django and `next dev` myself; ports 3000 and 8000 were free
+  afterwards, no leftover `next`/`workerd` processes).
+- **Next action:** **commit Part 11D** (git is yours), then start the next part you choose. Order in `task.md`: 12 (Search), 13
+  (Notifications), 14 (Settings, which mounts `CredibilityPanel`), 14B, 15, 16, 17, 18. Before planning, read the part in
+  `task.md`, its "From Part 11D" notes and the new MEMORY entry.
 - **Approved plan:**
-  [`docs/agents/plans/part-11D-charts-stats.md`](plans/part-11D-charts-stats.md) (approved 2026-10-20, not yet implemented)
+  [`docs/agents/plans/part-11D-charts-stats.md`](plans/part-11D-charts-stats.md) (approved and implemented 2026-10-20)
 - **Previous plans:**
+  - [`part-11D-charts-stats.md`](plans/part-11D-charts-stats.md), implemented 2026-10-20 (uncommitted);
   - [`part-11C-emergency-posts.md`](plans/part-11C-emergency-posts.md), implemented 2026-10-20 (committed as `ee63914`);
   - [`part-11B-credibility-score.md`](plans/part-11B-credibility-score.md), implemented 2026-10-14 to 2026-10-19
     (committed as `9d7edce`);
@@ -56,9 +54,61 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-20 by Claude (Sonnet 5.5), Part 11D planned and approved.
+- **Last updated:** 2026-10-20 by Claude (Sonnet 5.5), Part 11D implemented and validated.
 
 ## Completed checkpoints
+
+- 2026-10-20 (Claude, Sonnet 5.5): **Part 11D implemented** (uncommitted). Started from HEAD `5704bb7` ("Plan Part 11D", committed
+  by you), a clean tree that matched this file; Docker up, ports free. Baselines measured first: `pytest` 3644 passed (the E2E and
+  `npm test` baselines were taken from this file: 43 and 1782).
+  - **Backend** (`backend/`): new `apps/posts/stats.py` (pure builders: the 14-day window, zero-filled buckets, verdict fields,
+    the six-key payload), `apps/reputation/trend.py` (pure 30-day trend), tests `posts/tests/{test_stats,test_api_stats}.py`,
+    `social/tests/test_daily_engagement.py`, `reputation/tests/{test_trend,test_api_trend}.py` (71 tests). Changed:
+    `posts/{views,urls}.py` (`PostStatsView`, `posts/<id>/stats/`), `social/engagement.py` (`daily_engagement`, one `UNION ALL`),
+    `moderation/queries.py` (`with_verdict_time`), `reputation/{views,serializers}.py` (`trend`: a baseline subquery and one
+    `DISTINCT ON`). Existing test changed on purpose: `reputation/tests/test_api_reputation.py` (the `trend` key; 2 queries hidden,
+    3 public). **No migration, no dependency, no variable.**
+  - **Frontend** (`frontend/`): new `src/components/ui/charts/{MeterBar,StatTile,BarChart,RingGauge,Sparkline,ChartTable,
+    sparkline-path}` (+ tests, `no-chart-library.test.ts`); `features/posts/{PostStats,usePostStats}` (+ test);
+    `features/reputation/{CredibilityWidget,CredibilityPanel,useReputationTrend,reputation-api,ledger-copy,test-helpers}` (+ tests);
+    `e2e/stats.spec.ts`. Changed: `lib/api/types.ts`, `lib/format.ts` (`formatDuration`, `formatShortDate`, `formatWeight`),
+    `features/posts/{posts-api,PostDetail,test-helpers}`, `features/social/ProfilePage`, `features/dev/{DisplaySections,
+    StitchSections,UiGallery}`, `e2e/helpers.ts` (`confidenceThreshold()`), and the tests of `PostDetail`, `ProfilePage`,
+    `posts-api`, `format` and `/dev/ui`.
+  - **Docs:** ARCHITECTURE §4a/§9/§10, ANALYSIS f-6 ("as built"), STRUCTURE, MEMORY (one Part 11D entry), `task.md` (criteria
+    ticked, decisions and deviations, both status spots, notes in 14 and 15), the plan's status line, and `docs/test-command.md`: a
+    `### Part 11D: Charts & stats` section in **both** guides (14 steps each) and "11D" in its intro line; nothing else in that file
+    touched.
+  - **Validation (all green):**
+    - Backend: `ruff check .` (All checks passed!), `ruff format --check .` (283 files already formatted), `makemigrations --check
+      --dry-run` (No changes detected), `manage.py check` (no issues), `pytest` **3715 passed** (3644 before), `recompute_reputation
+      --check` ("Checked 1562 accounts: every stored score matches the ledger.").
+    - **27 backend mutation checks, all caught** (one first-run survivor, the baseline row just before the trend window, became a
+      test; one more was an equivalent mutation, `lt` → `lte` at the window's first midnight, and was dropped).
+    - Frontend: `npm run lint`, `lint:tokens`, `typecheck`, `format:check` clean; `npm test` **1933 passed** (141 files; 1782
+      before); `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` OK; `npm run test:e2e` **45 passed** in dev mode and with `CI=1`
+      (43 before), both run again after the last UI change. **43 frontend mutation checks, all caught** after six survivors became
+      tests (a zero margin, the waiting state, a marker outside the window, a stale answer, a failed refetch, the stats call
+      sending a token).
+    - Headless Chromium at 1280 and 390 px (a scripted run against `runserver` and `next dev`, screenshots looked at): a pipeline
+      TRUE and FALSE page, a moderator-labelled, pending and under-review one, the spread chart with data and empty, a profile with a
+      score and a new one, the owner's panel with a reversed row and "Ask for another look"; **0 px horizontal overflow** everywhere. It
+      found one visual bug (the meter's threshold caption collided with "100%"), fixed by moving the caption above the bar. The
+      throwaway `vis11d_` accounts were deleted afterwards.
+  - **Test-command notes:**
+    - The section is `### Part 11D` inside each guide (the brief said `## Part <ID>`; the file's parts are `###` sections inside its
+      two `##` guides, as Parts 3 to 11C were), in the same step shape as the other parts.
+    - The file has **no comment marker** at its bottom (as in Parts 3 to 11C): it ends with the last bullet of the Windows Part 11D
+      section. (The brief asked to keep one; there is none to keep.)
+    - The Linux blocks of steps 3 to 10 and 14 were **run in order from files, against live Django with your own settings**, and the
+      expected output in the doc is what they printed (ids, dates and the `Processed N` counts normalised); every bash block passes
+      `bash -n`. A first run showed that the dev server's inline kick checks a new fact within 0.03 s, so the guide no longer claims a
+      "still being checked" fact. The browser steps (11 to 13) were checked with the headless script above, not by a person. The
+      **PowerShell blocks were not run** (no PowerShell here): they reuse Part 11B's `Login`, `Mk`, `Send`, `Fetch`; two answers
+      are printed differently there (`{"code":"not_found"}` instead of `"not_found"`, and a `True` instead of the date).
+  - **Found on the way** (details in MEMORY and `task.md`): the endpoint is 2 queries plus one when the platform-settings cache is
+    cold; a `?? 62` in a test helper made "hidden" untestable; the hidden chart table duplicates text for `getByText`; the mutation
+    script missed a test file; a stale guide claim about a pending fact.
 
 - 2026-10-20 (Claude, Sonnet 5.5): **Part 11D planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `ee63914` ("Part 11C: Emergency posts", committed by you), a clean tree. (The older text of this
