@@ -18,11 +18,11 @@ Each action runs in one `transaction.atomic()` and does the same things:
    and settles nothing;
 7. (Part 11C) when a Mark FALSE ended an active emergency's priority, log `emergency_demoted`
    too; when the settle wrote the author's `emergency_false` row, block their emergency posting;
-   when it reversed one (the FALSE was overturned), lift that post's block.
+   when it reversed one (the FALSE was overturned), lift that post's block;
+8. (Part 13) tell the post's author, in this same transaction (`_notify_author`).
 
 A refusal raises `ActionRefused` and writes nothing. There is no HTTP here: the admin turns the
-exception into a message. Part 13 adds the notifications, in this same transaction (and
-`emergency_demoted` from step 7).
+exception into a message.
 
 **The emergency block** (Part 11C, §4b). This module is the only writer of
 `users.emergency_blocked_until` and of the `emergency_blocked` / `emergency_unblocked` rows. The
@@ -49,6 +49,7 @@ from apps.moderation.models import (
     AppealStatus,
     ModerationAction,
 )
+from apps.notifications import services as notification_services
 from apps.pipeline import routing
 from apps.posts import services as post_services
 from apps.posts.models import FlaggedReason, Post, PostStatus, VerdictSource
@@ -98,6 +99,37 @@ def open_appeal(post):
     return Appeal.objects.filter(post=post, status=AppealStatus.OPEN).first()
 
 
+def _notify_author(post, effect, appeal, *, label_before, moderator, now):
+    """Tell the author what the action did (Part 13); `appeal` is the one it resolved, or None.
+
+    Up to three items, 1 µs apart so they read in this order: the outcome (`verdict` when the
+    label changed, or `removed`), `emergency_demoted`, then `appeal_resolved` on top. A Mark FALSE
+    on a post that was FALSE already (a report review, an upheld label appeal) sends no repeat
+    verdict. Dismiss and Escalate are silent, and so is a moderator acting on their own post (only
+    a superuser can). No item names the moderator.
+    """
+    if moderator.pk == post.author_id:
+        return
+    sends = []
+    if effect.kind in (ActionKind.VERIFIED, ActionKind.MARKED_FALSE):
+        if label_before != post.status:
+            sends.append(
+                lambda at: notification_services.verdict_reached(
+                    post=post, label=post.status, now=at
+                )
+            )
+    elif effect.kind == ActionKind.REMOVED:
+        sends.append(lambda at: notification_services.removed(post=post, now=at))
+    if effect.demoted or effect.kind == ActionKind.EMERGENCY_DEMOTED:
+        sends.append(lambda at: notification_services.emergency_demoted(post=post, now=at))
+    if appeal is not None:
+        sends.append(
+            lambda at: notification_services.appeal_resolved(post=post, appeal=appeal, now=at)
+        )
+    for number, send in enumerate(sends):
+        send(now + number * notification_services.TICK)
+
+
 def _perform(act, post_id, *, moderator, notes, public_note, now):
     with transaction.atomic():
         post = (
@@ -117,6 +149,8 @@ def _perform(act, post_id, *, moderator, notes, public_note, now):
         refusal = rules.refusal(act, post, moderator, appeal=appeal, now=now)
         if refusal is not None:
             raise ActionRefused(refusal)
+        # Read before the review fields are cleared: the author hears of a label that changed.
+        label_before = post.pre_review_status
         effect = rules.transition(
             act, post, moderator=moderator, now=now, appeal=appeal, public_note=public_note
         )
@@ -173,6 +207,9 @@ def _perform(act, post_id, *, moderator, notes, public_note, now):
             if post.is_emergency:
                 block_after_emergency_false(post, rows, now=stamp + _TICK, moderator=moderator)
                 lift_after_overturn(post, rows, now=stamp + _TICK, moderator=moderator)
+        _notify_author(
+            post, effect, resolved, label_before=label_before, moderator=moderator, now=now
+        )
         if effect.kind == ActionKind.RESTORED and post.status == PostStatus.PENDING:
             # Restored and not yet checked: check it now, like a new fact (the sweeper is the
             # fallback).

@@ -87,6 +87,7 @@ INSTALLED_APPS = [
     "apps.pipeline",
     "apps.moderation",
     "apps.reputation",
+    "apps.notifications",
 ]
 
 AUTH_USER_MODEL = "accounts.User"
@@ -204,6 +205,8 @@ REST_FRAMEWORK = {
         "status_poll": "120/min",
         # Counted per client IP, signed in or not (apps.core.throttles).
         "search": "60/min",
+        # The list, the unread count and mark-read, per signed-in user (a tab polls 2 a minute).
+        "notifications": "120/min",
     },
 }
 

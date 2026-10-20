@@ -6,6 +6,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { MESSAGES } from "@/features/auth/messages";
+import { UnreadCountProvider, useUnreadCount } from "@/features/notifications/UnreadCountProvider";
 import { useResendVerification } from "@/features/auth/useResendVerification";
 import { ComposerProvider, useComposer } from "@/features/posts/ComposerProvider";
 import { useAuth } from "@/lib/auth/AuthProvider";
@@ -16,19 +17,23 @@ const LOGOUT_FAILED = "Couldn't log out. Check your connection and try again.";
 /**
  * Every app page sits in the shell. Pages that need a user (`PROTECTED_PREFIXES`) show a
  * placeholder while the session is restored, and send anonymous visitors to `/login?next=…`.
- * The composer lives above the shell (Part 4), so every "New post" button opens the same one.
+ * The composer lives above the shell (Part 4), so every "New post" button opens the same one, and so
+ * does the unread count (Part 13): one poll feeds the badge and the notifications page.
  */
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
-    <ComposerProvider>
-      <AppFrame>{children}</AppFrame>
-    </ComposerProvider>
+    <UnreadCountProvider>
+      <ComposerProvider>
+        <AppFrame>{children}</AppFrame>
+      </ComposerProvider>
+    </UnreadCountProvider>
   );
 }
 
 function AppFrame({ children }: { children: ReactNode }) {
   const { status, user, logout } = useAuth();
   const composer = useComposer();
+  const unread = useUnreadCount();
   const pathname = usePathname() ?? "/";
   const router = useRouter();
   const toast = useToast();
@@ -68,6 +73,7 @@ function AppFrame({ children }: { children: ReactNode }) {
       onResend={() => void resend.resend()}
       resendSecondsLeft={resend.secondsLeft}
       resending={resend.busy}
+      unreadCount={unread.count}
     >
       {guarded && status !== "authenticated" ? <PageSkeleton /> : children}
     </AppShell>

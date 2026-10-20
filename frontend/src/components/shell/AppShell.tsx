@@ -26,6 +26,8 @@ export interface AppShellProps {
   onLogout?: () => void;
   /** Overrides the current path for the active item (the `/dev/shell` preview). */
   activePath?: string;
+  /** Unread notifications for the badge on the Notifications link (Part 13); 0 shows none. */
+  unreadCount?: number;
 }
 
 /**
@@ -43,6 +45,7 @@ export function AppShell({
   resending,
   onLogout,
   activePath,
+  unreadCount,
 }: AppShellProps) {
   const currentPath = usePathname();
   const pathname = activePath ?? currentPath ?? "/";
@@ -68,6 +71,7 @@ export function AppShell({
         onNewPost={onNewPost}
         onNewPostBlocked={onNewPostBlocked}
         actions={actions}
+        unreadCount={unreadCount}
       />
       <TopBar user={shownUser} loading={loading} />
       <MobileNav
@@ -77,6 +81,7 @@ export function AppShell({
         onNewPost={onNewPost}
         onNewPostBlocked={onNewPostBlocked}
         actions={actions}
+        unreadCount={unreadCount}
       />
       <main id="main" className="pt-16 pb-16 md:pb-0 md:pl-16 xl:pl-64">
         {shownUser && !shownUser.is_email_verified && (

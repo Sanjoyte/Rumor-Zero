@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -10414,6 +10414,623 @@ print(users.delete())
 (495, {'posts.Post': 495})
 (20, {'account.EmailAddress': 10, 'accounts.User': 10})
 ```
+
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
+  database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway.
+
+### Part 13: Notifications
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and `frontend/.env.local`.
+Part 13 adds **one app** (`backend/apps/notifications`), **one migration** (`notifications.0001_initial`), **three
+endpoints** (`GET /api/v1/notifications/`, `GET /api/v1/notifications/unread-count/`, `POST
+/api/v1/notifications/mark-read/`), **one throttle scope** (`notifications`, 120 a minute per signed-in person), the
+**`/notifications` page** (Stitch c4) and an **unread badge** on the Notifications link in the shell. It adds no
+dependency and no environment variable. Nine kinds of notification exist: someone **followed** you, **liked**,
+**commented on** or **reposted** your post, and (about your own posts, from nobody in particular) a **verdict**, an
+**under review** notice, a **removal**, an **emergency priority removed** and an **appeal resolved**.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 16 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 11 and 14**: the variables and functions you set in step 3 (`id`, `ada`, `bo`, `cy`, `api`, `login`, `mk`, `get`, `send`, `inbox`) and in steps 4, 7 and 8 (`p1`, `f1` to `f4`, `p2`) only live in that one terminal. If you close it, start again from step 3. | 1 to 11, 14 |
+| Window 3 (frontend) | `npm run dev` in `frontend`. Leave it running. | 12 to 16 |
+| Browser | Steps 12, 13, 14, 15 and 16 | 12 to 16 |
+
+Things to know first:
+
+- **Who is told what.** The person whose post it is, and only them (a reposter is **not** told what happens to the
+  original, a decision for a later part). Nobody is told about their own actions. A follow, a like, a comment and a repost
+  say who did it. The five moderation kinds **name nobody**: you are never told which moderator acted, and a reporter is
+  never revealed. A report that sends your post to review says only "under review".
+- **What is silent.** Filing an appeal, a moderator's Dismiss reports or Escalate, the automatic emergency block and its lift,
+  and a bookmark.
+- **One action can send two.** An appeal that a moderator decides sends `appeal_resolved` **plus** the verdict or removal
+  that came with it; Mark FALSE on a pinned emergency sends the verdict **and** "emergency priority removed". A verdict item
+  is sent only when the label **changes**: Mark FALSE on a post that was already FALSE (an upheld appeal) sends only the
+  appeal item.
+- **No repeats.** One item per follower, and one per liker and post (a like and a repost of the same post are two items):
+  like, unlike, like again is one item that stays even after the unlike. Every comment, verdict, review, removal and appeal
+  is its own item.
+- **Items go with what they are about.** When the author deletes the post, or the comment is deleted or hidden by a
+  moderator, its items disappear (the list and the unread count never include them). Unhiding does not bring one back.
+- **The page and the badge.** The shell asks for the unread count when you open the app and then every **30 seconds, only
+  while the tab is in front** (a hidden tab makes no request; it asks at once when you come back). The number shows exactly
+  up to 99, then `99+`. `/notifications` lists 20 at a time, newest first, with **Load more**, and when the poll finds more
+  unread items than before it puts the new ones on top without resetting anything.
+- **The accounts.** Step 3 makes five straight in the database, all with the throwaway password
+  `correct-horse-battery-42`: `ada` (the author whose notifications you read), `bo` and `cy` (the people who act), `mod1`
+  and `mod2` (moderators). No sign-up and no email are needed, so this part works offline.
+- **The pipeline is the stub** (Part 9): `#true` in a fact makes it VERIFIED 95%, `#false` FALSE 95%, `#unsure` sends it to
+  review.
+- **Your admin address** is `http://localhost:8000/admin/` unless `ADMIN_URL_PATH` in `backend/.env` says otherwise (then
+  use that address in step 16).
+- The outputs below were recorded on Linux on 2026-10-20 by running the commands of steps 3 to 11 in order against live
+  Django with your own settings. The browser steps were checked the same day with headless Chromium (at 1280 and 390 px,
+  screenshots looked at, and a 65-second count of the poll's requests), not by a person at a keyboard. Ids, numbers in
+  names, the date, times and the `Processed N` counts differ on every run.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies Part 13's migration, runs
+the whole backend test suite and Part 13's own tests, the linter and the formatter check.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+python manage.py migrate                            # Applying notifications.0001_initial... OK  (or "No migrations to apply." if it was already applied)
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 4073 passed
+python -m pytest apps/notifications -q              # 179 passed
+ruff check . ; ruff format --check .                # All checks passed! / 314 files already formatted
+```
+
+**You should see:** `Applying notifications.0001_initial... OK` (or `No migrations to apply.`), `No changes detected`,
+`System check identified no issues (0 silenced).`, then `4073 passed`, `179 passed`, `All checks passed!` and `314 files
+already formatted`. Counts may grow later; what matters is that nothing fails.
+
+- The new tests pin: every check of the table (the nine types, the outcome and shape of each, no self-notification, the
+  partial unique indexes with the type in the key); one creation test per event (follow, like, comment, repost, the
+  pipeline's label and review, the report threshold, and all the moderator actions including each appeal outcome, Demote
+  and Mark FALSE on an emergency); that Dismiss, Escalate, an appeal being filed and a block say nothing; the
+  like/unlike/like, follow/unfollow/follow and repost/unrepost/repost cases; that **three simultaneous requests make one
+  item** (real threads); that an item is in the transaction of the event (a failed write leaves neither); the three
+  endpoints (shape, 2 queries, the partial index, mark-read bodies, other people's ids, the 120-a-minute limit); and the
+  read-only admin.
+- Existing tests changed on purpose: only `core/tests/test_settings.py` (thirteen throttle scopes, `notifications` is
+  120/min). Every other existing test passes as it was.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last commands) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests, once against the dev servers and once against the production build.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 155 files, 2148 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 53 passed
+CI=1 npm run test:e2e                               # 53 passed (this one runs against the build above)
+cd ../backend                                       # back to backend/ for steps 3 to 11
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  155 passed (155)` and `Tests  2148
+passed (2148)`. `npm run build` lists `○ /notifications` (the page is **static**: the list loads in the browser after the
+login is known, so it costs no extra Worker request). Both end-to-end runs end with `53 passed`.
+
+- The two new end-to-end tests (`e2e/notifications.spec.ts`) sign nobody up (the suite already uses most of the 20 sign-ups
+  a minute): one has a second person like and comment on a post, checks the badge ("Notifications, 2 unread"), the two
+  items, that opening one reads it and lowers the count, a reload, Mark all as read and that your own like says nothing;
+  the other sends a visitor to log in.
+- **Run the build before the `CI=1` run**: that mode serves `.next`, and an old build still has the placeholder page.
+
+#### Step 3: Start the server and make five accounts
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 11 and
+14.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you make the five accounts with a shell
+command, log three of them in through the API (keeping their login tokens in `ada`, `bo` and `cy`), and save the
+helpers `mk` (make a post, print its id), `get` (a GET, printing the status code and then the answer), `send` (any
+request, the same way) and `inbox` (a `jq` filter: one short line per notification).
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend` with the venv active: steps 1 and 2 leave you there; needs `jq`, `sudo apt install jq`). If you
+opened a new terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the names are new each run
+python manage.py shell -c "
+from allauth.account.models import EmailAddress
+from apps.accounts.models import Role, User
+for name, role in (('ada', Role.USER), ('bo', Role.USER), ('cy', Role.USER), ('mod1', Role.MODERATOR), ('mod2', Role.MODERATOR)):
+    user = User.objects.create_user(email=f'part13-{name}-$id@example.test', username=f'part13_{name}_$id', password='correct-horse-battery-42', is_email_verified=True, role=role, display_name=name.capitalize() if name in ('ada', 'bo', 'cy') else '')
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+print(User.objects.filter(email__startswith='part13-', email__endswith='$id@example.test').count(), 'accounts made')
+" | tail -1
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+login() { jq -nc --arg e "part13-$1-$id@example.test" '{email: $e, password: "correct-horse-battery-42"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/login | jq -r .meta.access_token; }   # login <name>: prints a login token
+ada=$(login ada); bo=$(login bo); cy=$(login cy)    # $ada, $bo, $cy = their login tokens
+echo ${ada:0:10} ${bo:0:10} ${cy:0:10}               # three token prefixes, not an empty line
+api=http://localhost:8000/api/v1
+mk() { curl -s -H "Authorization: Bearer $1" -H "Content-Type: application/json" --data-binary "$2" $api/posts/ | jq -r .id; }   # mk <token> <json>: makes a post, prints its id
+get() { local out; out=$(curl -s -w '\n%{http_code}' ${2:+-H "Authorization: Bearer $2"} "$api$1"); printf '%s  ' "${out##*$'\n'}"; printf '%s' "${out%$'\n'*}" | jq -c "${3:-.}"; }   # get <path> [token] [jq filter]: prints the status code, then the answer
+send() { local out; out=$(curl -s -w '\n%{http_code}' -X "$1" ${3:+-H "Authorization: Bearer $3"} ${4:+-H "Content-Type: application/json" --data-binary "$4"} "$api$2"); printf '%s  %s\n' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | jq -c "${5:-.}" 2>/dev/null)"; }   # send <METHOD> <path> [token] [json body] [jq filter]: prints the status code, then the answer
+inbox='[.results[] | {type, outcome, from: (.actor.username // null)}]'   # a jq filter: one short line per notification, newest first
+echo "id=$id"                                       # write this down: the browser steps use it
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+5 accounts made
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+id=222539
+```
+
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- Logging in is limited to 30 a minute per address (Part 1), far more than this part needs. A login token lasts 15 minutes
+  by default: if a later command answers `401`, run `ada=$(login ada)` (or `bo`, `cy`) again.
+
+**If it differs:** `null null null` means the logins failed: `runserver` isn't running in window 1, or `jq` is missing.
+Fix that and run the block again from `id=$(date +%H%M%S)`.
+
+#### Step 4: A follow, a like, a comment and a repost tell the author, once
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts an opinion. `bo` follows her, likes the post and comments on it, and `cy` reposts it; `ada`
+likes her own post. Then `bo` takes the like back and gives it again, and unfollows and follows again.
+
+```bash
+p1=$(mk "$ada" '{"content":"Every school roof should carry solar panels","post_type":"opinion"}')   # ada's opinion
+echo "--- nothing yet"; get /notifications/unread-count/ "$ada"
+send POST /users/part13_ada_$id/follow/ "$bo"               # bo follows ada
+send POST /posts/$p1/like/ "$bo"                            # bo likes the post
+send POST /posts/$p1/comments/ "$bo" '{"content":"Does this include old buildings?"}' '{id, content}'   # bo comments
+send POST /posts/$p1/repost/ "$cy"                          # cy reposts it
+send POST /posts/$p1/like/ "$ada"                           # ada likes her own post: tells nobody
+echo "--- four items, newest first"; get /notifications/unread-count/ "$ada"; get /notifications/ "$ada" "$inbox"
+echo "--- like, unlike, like again; unfollow, follow again: still four"
+send DELETE /posts/$p1/like/ "$bo"; send POST /posts/$p1/like/ "$bo"
+send DELETE /users/part13_ada_$id/follow/ "$bo"; send POST /users/part13_ada_$id/follow/ "$bo"
+get /notifications/unread-count/ "$ada"
+```
+
+**You should see** (the comment's id differs):
+
+```text
+--- nothing yet
+200  {"count":0}
+201  {"is_following":true}
+201  {"liked":true}
+201  {"id":"a0cbf0cb-64f6-4338-bdb2-0aef705c4d49","content":"Does this include old buildings?"}
+201  {"reposted":true}
+201  {"liked":true}
+--- four items, newest first
+200  {"count":4}
+200  [{"type":"repost","outcome":"","from":"part13_cy_222539"},{"type":"comment","outcome":"","from":"part13_bo_222539"},{"type":"like","outcome":"","from":"part13_bo_222539"},{"type":"follow","outcome":"","from":"part13_bo_222539"}]
+--- like, unlike, like again; unfollow, follow again: still four
+204  
+201  {"liked":true}
+204  
+201  {"is_following":true}
+200  {"count":4}
+```
+
+- Four things happened to `ada`'s account and her own like is not among them: four items, not five.
+- After the unlike and the unfollow the items **stay** (an item is a record, not a live state), and doing it again adds
+  nothing: the database refuses a second item for the same person and post (a partial unique index), so two simultaneous
+  requests can't make two either.
+
+#### Step 5: What one item looks like
+
+**Where:** Terminal window 2 (the same one: it needs `p1` from step 4).
+
+**What this does:** Reads one item in full, the follow item and its `following` flag before and after `ada` follows `bo` back,
+a page of one with its cursor, and a made-up cursor.
+
+```bash
+echo "--- one item in full"; get /notifications/ "$ada" '.results[0]'
+echo "--- the follow item"; get /notifications/ "$ada" '.results[] | select(.type=="follow")'
+echo "--- ada follows bo back"; send POST /users/part13_bo_$id/follow/ "$ada"
+get /notifications/ "$ada" '.results[] | select(.type=="follow") | .actor.following'
+echo "--- a page of one, then the next"; get "/notifications/?page_size=1" "$ada" '{n: (.results|length), more: (.next_cursor != null)}'
+echo "--- a crafted cursor"; get "/notifications/?cursor=nonsense" "$ada"
+echo "--- keys"; get /notifications/ "$ada" '.results[0] | keys'
+```
+
+**You should see** (ids and times differ):
+
+```text
+--- one item in full
+200  {"id":"2436e8ce-81a3-4d19-a3fe-036d416bcc24","type":"repost","outcome":"","is_read":false,"created_at":"2026-10-20T16:25:40.222727Z","actor":{"id":"6ceb4731-ae14-4a56-8f27-67787c23d440","username":"part13_cy_222539","display_name":"Cy","avatar_url":null},"post":{"id":"a00980cf-d804-44ff-a54e-a7483563f9a1","excerpt":"Every school roof should carry solar panels","post_type":"opinion","status":"published"},"comment":null}
+--- the follow item
+200  {"id":"73b0940f-9774-4887-8155-9c03aa147c32","type":"follow","outcome":"","is_read":false,"created_at":"2026-10-20T16:25:40.171333Z","actor":{"id":"5e167709-d3ca-42e2-a8f1-0565a4925d63","username":"part13_bo_222539","display_name":"Bo","avatar_url":null,"following":false},"post":null,"comment":null}
+--- ada follows bo back
+201  {"is_following":true}
+200  true
+--- a page of one, then the next
+200  {"n":1,"more":true}
+--- a crafted cursor
+404  {"detail":"Invalid cursor","code":"not_found"}
+--- keys
+200  ["actor","comment","created_at","id","is_read","outcome","post","type"]
+```
+
+- Every item has the same eight keys. `post` is a small summary (an excerpt of at most 140 characters, the kind and the status),
+  never the whole post; `comment` is filled only for a comment; `actor` is `null` for the system kinds. Only a **follow**
+  carries `actor.following`, which is what the page's **Follow back** button reads.
+- The list is two database queries however many items it holds, and `unread-count` is two as well (the signed-in user, then
+  one count on a partial index of the unread rows).
+
+#### Step 6: Marking items read
+
+**Where:** Terminal window 2.
+
+**What this does:** `bo` tries to mark one of `ada`'s items read (nothing happens to it), `ada` marks it herself, four bad
+requests are refused, and then `ada` marks everything read.
+
+```bash
+first=$(curl -s -H "Authorization: Bearer $ada" $api/notifications/ | jq -r '.results[0].id')   # the newest item's id
+echo "--- bo tries to mark ada's item read: ignored"; send POST /notifications/mark-read/ "$bo" "{\"ids\":[\"$first\"]}"
+get /notifications/unread-count/ "$ada"
+echo "--- ada marks that one read"; send POST /notifications/mark-read/ "$ada" "{\"ids\":[\"$first\"]}"
+echo "--- four things that are not a request"
+send POST /notifications/mark-read/ "$ada" '{}'
+send POST /notifications/mark-read/ "$ada" '{"all":false}'
+send POST /notifications/mark-read/ "$ada" '{"ids":["nope"]}'
+send POST /notifications/mark-read/ "$ada" "{\"all\":true,\"ids\":[\"$first\"]}"
+echo "--- mark all read"; send POST /notifications/mark-read/ "$ada" '{"all":true}'
+get /notifications/ "$ada" '[.results[].is_read] | unique'
+```
+
+**You should see:**
+
+```text
+--- bo tries to mark ada's item read: ignored
+200  {"count":1}
+200  {"count":4}
+--- ada marks that one read
+200  {"count":3}
+--- four things that are not a request
+400  {"non_field_errors":["Send either ids or all, not both."]}
+400  {"non_field_errors":["all can only be true."]}
+400  {"ids":{"0":["Must be a valid UUID."]}}
+400  {"non_field_errors":["Send either ids or all, not both."]}
+--- mark all read
+200  {"count":0}
+200  [true]
+```
+
+- `mark-read` answers the **unread count that is left**: `bo`'s answer is his own count (1: `ada` followed him back in step 5)
+  and `ada`'s is still 4, so his request changed nothing of hers. Other people's and unknown ids are ignored, not an
+  error. You send either `ids` (1 to 50 of them) or `{"all": true}`, never both and never neither.
+
+#### Step 7: The pipeline's label and review
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts three facts the stub answers differently, and the background check (and then
+`process_pending`, which checks anything it has not reached) gives each a verdict or sends it to review.
+
+```bash
+f1=$(mk "$ada" '{"content":"The city opened a new tram line in May #true","post_type":"fact"}')
+f2=$(mk "$ada" '{"content":"The moon is made of cheese #false","post_type":"fact"}')
+f3=$(mk "$ada" '{"content":"The ferry is moving to a new pier #unsure","post_type":"fact"}')
+sleep 3; python manage.py process_pending | tail -1
+echo "--- three items, from nobody"; get /notifications/unread-count/ "$ada"; get /notifications/ "$ada" "$inbox"
+```
+
+**You should see** (the number of posts `process_pending` reports depends on how many the background check had already
+done, and it also checks facts left pending by earlier parts' tests):
+
+```text
+Processed 16 fact posts.
+--- three items, from nobody
+200  {"count":3}
+200  [{"type":"under_review","outcome":"","from":null},{"type":"verdict","outcome":"false","from":null},{"type":"verdict","outcome":"true","from":null},{"type":"repost","outcome":"","from":"part13_cy_222539"},{"type":"comment","outcome":"","from":"part13_bo_222539"},{"type":"like","outcome":"","from":"part13_bo_222539"},{"type":"follow","outcome":"","from":"part13_bo_222539"}]
+```
+
+- The verdict item stores `true` or `false` in `outcome`, so an old item never changes meaning if the post is labelled again
+  later. The three new items are unread; the four from step 4 are read (step 6). `from` is `null`: no moderator and no
+  pipeline is named.
+- A report that sends **a post** to review (Part 8) makes the same `under_review` item, and nothing says who reported.
+
+#### Step 8: Moderator decisions, an appeal, a removal and Escalate
+
+**Where:** Terminal window 2 (it needs `f3` from step 7).
+
+**What this does:** Moderator `mod1` marks the ferry fact FALSE; `ada` asks for another look; `mod2` reverses it. Then a
+second post is removed and a second review fact is escalated.
+
+```bash
+python manage.py shell -c "
+from apps.accounts.models import User
+from apps.moderation import services
+mod = User.objects.get(username='part13_mod1_$id')
+services.mark_false('$f3', moderator=mod)
+print('mod1 marked the ferry post FALSE')
+" | tail -1
+echo "--- a moderator's verdict reads the same as the pipeline's; no moderator is named"; get /notifications/ "$ada" "$inbox | .[0]"
+echo "--- ada asks for another look (an appeal is not announced)"; get /notifications/unread-count/ "$ada"
+send POST /posts/$f3/appeal/ "$ada" '{"reason":"The new pier is on the council site"}' '{status, appeal_status}'
+get /notifications/unread-count/ "$ada"
+python manage.py shell -c "
+from apps.accounts.models import User
+from apps.moderation import services
+mod = User.objects.get(username='part13_mod2_$id')
+services.mark_verified('$f3', moderator=mod)
+print('mod2 marked it verified')
+" | tail -1
+echo "--- the appeal was overturned: the new verdict and the appeal, newest first"; get /notifications/ "$ada" "$inbox | .[0:2]"
+p2=$(mk "$ada" '{"content":"A post a moderator will remove","post_type":"opinion"}')
+f4=$(mk "$ada" '{"content":"Another fact for the review queue #unsure","post_type":"fact"}')
+sleep 3; python manage.py process_pending | tail -1
+echo "--- before: Escalate, Remove"; get /notifications/unread-count/ "$ada"
+python manage.py shell -c "
+from apps.accounts.models import User
+from apps.moderation import services
+mod = User.objects.get(username='part13_mod1_$id')
+services.escalate('$f4', moderator=mod)
+print('escalated')
+services.remove_post('$p2', moderator=mod, public_note='Personal attack')
+print('removed')
+" | tail -2
+echo "--- after: one more (the removal); Escalate said nothing"; get /notifications/unread-count/ "$ada"; get /notifications/ "$ada" "$inbox | .[0]"
+```
+
+**You should see** (the `Processed N` line differs):
+
+```text
+mod1 marked the ferry post FALSE
+--- a moderator's verdict reads the same as the pipeline's; no moderator is named
+200  {"type":"verdict","outcome":"false","from":null}
+--- ada asks for another look (an appeal is not announced)
+200  {"count":4}
+201  {"status":"under_review","appeal_status":"open"}
+200  {"count":4}
+mod2 marked it verified
+--- the appeal was overturned: the new verdict and the appeal, newest first
+200  [{"type":"appeal_resolved","outcome":"overturned","from":null},{"type":"verdict","outcome":"true","from":null}]
+Processed 0 fact posts.
+--- before: Escalate, Remove
+200  {"count":7}
+escalated
+removed
+--- after: one more (the removal); Escalate said nothing
+200  {"count":8}
+200  {"type":"removed","outcome":"","from":null}
+```
+
+- A moderator's decision on an appeal sends **two** items (decision 1 of the plan): the verdict that came with it, and
+  `appeal_resolved` on top (`overturned` here; `upheld` if the label had stood). Mark FALSE on a post that was already FALSE
+  sends only the appeal item, since the label did not change.
+- The reason you typed for the removal (`Personal attack`) is on the post for its author, **not** in the notification:
+  the item only says a moderator removed the post.
+- Not run here (the tests cover them): Mark FALSE on a **pinned emergency** (it sends the verdict and "emergency priority
+  removed"), **Demote** (only that item), Restore and Keep removed (only `appeal_resolved`), and Dismiss reports (silent).
+
+#### Step 9: Deleting what an item is about
+
+**Where:** Terminal window 2 (it needs `p1` from step 4).
+
+**What this does:** Lists the items about `ada`'s first post, has `bo` delete his comment, then has `ada` delete the post.
+
+```bash
+kinds='[.results[] | select(.post != null and .post.id == "'$p1'") | .type] | sort'
+echo "--- the items about ada's first post"; get /notifications/ "$ada" "$kinds"
+cid=$(curl -s $api/posts/$p1/comments/ | jq -r '.results[0].id')   # bo's comment
+echo "--- bo deletes his comment: its item goes, the like and the repost stay"
+send DELETE /comments/$cid/ "$bo"
+get /notifications/ "$ada" "$kinds"
+echo "--- ada deletes the post: every item about it goes"
+send DELETE /posts/$p1/ "$ada"
+get /notifications/ "$ada" "$kinds"
+echo "--- the follow, which is not about a post, stays"; get /notifications/ "$ada" '[.results[] | select(.type=="follow") | .actor.username]'
+```
+
+**You should see:**
+
+```text
+--- the items about ada's first post
+200  ["comment","like","repost"]
+--- bo deletes his comment: its item goes, the like and the repost stay
+204  
+200  ["like","repost"]
+--- ada deletes the post: every item about it goes
+204  
+200  []
+--- the follow, which is not about a post, stays
+200  ["part13_bo_222539"]
+```
+
+- A moderator hiding a comment in Django Admin does the same (the item goes in the same transaction), and unhiding it does
+  not bring the item back.
+
+#### Step 10: No login, no notifications
+
+**Where:** Terminal window 2.
+
+**What this does:** Asks for all three endpoints with no login token.
+
+```bash
+for path in /notifications/ /notifications/unread-count/; do get $path; done
+send POST /notifications/mark-read/ "" '{"all":true}'
+```
+
+**You should see:**
+
+```text
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+```
+
+#### Step 11: The allowance: 120 a minute, per person
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes 121 requests in a row as `cy` (not `ada`, whose allowance the browser steps use), counts the answers,
+then reads the headers of the next one and asks as `bo`, who has his own allowance.
+
+```bash
+for i in $(seq 1 121); do curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $cy" $api/notifications/unread-count/; done | sort | uniq -c
+curl -s -i -H "Authorization: Bearer $cy" $api/notifications/unread-count/ | grep -iE "^HTTP|^retry-after"
+send GET /notifications/unread-count/ "$cy"
+echo "--- bo has his own allowance"; get /notifications/unread-count/ "$bo"
+```
+
+**You should see** (the seconds in `Retry-After` differ):
+
+```text
+    120 200
+      1 429
+HTTP/1.1 429 Too Many Requests
+Retry-After: 59
+429  {"detail":"Request was throttled. Expected available in 59 seconds.","code":"throttled"}
+--- bo has his own allowance
+200  {"count":1}
+```
+
+- One tab polls twice a minute, so 120 a minute leaves room for several tabs and for reading the list. The three endpoints
+  share the one allowance, and a request with no login (a 401) never counts against it. `cy` can use the API again after a
+  minute.
+
+#### Step 12: Start the frontend and see the badge
+
+**Where:** Terminal window 3 (frontend) first, then the **Browser**. Both servers must be running: Django in window 1.
+
+**What this does:** Starts the Next dev server, then you log in as `ada` and look at the shell.
+
+Window 3 (in `frontend`):
+
+```bash
+cd frontend
+npm run dev                                         # leave it running: http://localhost:3000
+```
+
+Browser: open `http://localhost:3000/login` and log in as **`part13-ada-<id>@example.test`** (your `id` from step 3) with
+the password `correct-horse-battery-42`.
+
+**You should see:** you land on Home. In the left rail (at 1280 px) the **Notifications** link has a blue number pill with
+**8** after the label (the eight unread items from steps 7 and 8). Narrow the window below 1280 px (about 1000 px): the rail
+becomes icon-only and the 8 sits on the corner of the bell. Below 768 px the bottom bar has the same bell with the number.
+
+- The link's name for a screen reader is "Notifications, 8 unread" (the visible number is hidden from readers so it isn't
+  read twice). Zero unread shows no badge at all, and 100 or more shows `99+`.
+- In dev mode the first load makes **two** requests for the count (React's StrictMode runs the effect twice); a production
+  build makes one.
+
+#### Step 13: The list, reading one item, Mark all as read
+
+**Where:** Browser (still logged in as `ada`).
+
+**What this does:** Opens the page, opens one item, and then marks everything read.
+
+1. Click **Notifications** in the rail (`http://localhost:3000/notifications`).
+2. Click the newest item (the removal).
+3. Press the browser's Back button.
+4. Click **Mark all as read**, then reload the page (F5).
+
+**You should see:**
+
+1. The title **Notifications** with a grey **8 unread** chip and **Mark all as read** at the right. Nine rows, newest first:
+   the removal (a grey block tile, a REMOVED chip, "The reason is on the post."), a review notice (an amber hourglass tile and
+   UNDER REVIEW), "Your appeal was reviewed. The decision was overturned:" (a gavel tile), a VERIFIED verdict (a teal tile),
+   a FALSE verdict (a red tile), a third UNDER REVIEW notice, another FALSE and another VERIFIED verdict, and at the bottom
+   the follow from `bo` with a **Follow back** button (his initials in a round avatar with a small "person added" badge).
+   Eight rows have a small blue dot at the right (the follow, which you marked read in step 6, has none). Each sentence
+   quotes the post in serif type (italic for an opinion).
+2. You go to the post's page (`/p/…`). The rail link now says **7** (hover or focus it: "Notifications, 7 unread"). The whole
+   row is the link; the **Follow back** button is the one thing in a row that is not.
+3. Back on the list: the chip says **7 unread** and the first row's dot is gone, with no flash or reload.
+4. The chip, the dots, the **Mark all as read** link and the rail's number all vanish at once; after the reload the rows are
+   still there and still read, and the rail link has no number.
+
+- Marking read is optimistic: the page changes first and goes back, with a toast ("Couldn't mark your notifications as
+  read. Try again."), if the request fails.
+- Not built from Stitch c4: the filter tabs (All, Verdicts & Audits, Discussions, Mentions), the citation and sensor-audit
+  items, the ledger-sync row and the "Notification preferences" link.
+
+#### Step 14: A new notification arrives while the page is open
+
+**Where:** Terminal window 2 and the Browser. The browser stays on `/notifications`, logged in as `ada`.
+
+**What this does:** `ada` makes a post and `bo` likes it from the terminal; the open page picks it up by itself.
+
+```bash
+p3=$(mk "$ada" '{"content":"A post to like while the page is open","post_type":"opinion"}')
+send POST /posts/$p3/like/ "$bo"
+```
+
+**You should see** (the terminal):
+
+```text
+201  {"liked":true}
+```
+
+Then in the browser, **wait up to 30 seconds without touching the page** (or switch to another tab and back, which asks
+at once).
+
+**You should see:** the rail link shows **1**, the chip says **1 unread**, and a new row, "**Bo** liked your post “A post to
+like while the page is open”", appears at the **top** of the list with a blue dot, while the rows below stay where they were
+and the page does not jump or reload.
+
+- The poll runs every 30 seconds **only while the tab is in front**. Measured in headless Chromium over 65 seconds: requests
+  to `unread-count` at 0, 30 and 60 seconds (plus the doubled first one of dev mode); with the tab hidden for 40 seconds
+  none at all; and one request within 1.5 seconds of coming back. You can watch it yourself: DevTools (F12) → Network →
+  filter `unread-count`.
+- If the page was open when the first poll answered, that answer does not count as "new": only a later rise does.
+
+#### Step 15: A phone, and a visitor
+
+**Where:** Browser.
+
+**What this does:** Checks the page at a phone width, and then without a login.
+
+1. Make the window narrower than 768 px (or use the browser's device mode, 390 px wide) and open `/notifications`.
+2. In a private window (not logged in) open `http://localhost:3000/notifications`.
+
+**You should see:**
+
+1. The bottom bar has Home, Search, New post, **Notifications** (with the number on the bell) and Profile. The list is
+   one column, the rows wrap, **Mark all as read** drops under the title if the title and chip fill the line, and
+   **nothing scrolls sideways** (0 px of horizontal overflow when measured).
+2. You are sent to `http://localhost:3000/login?next=%2Fnotifications` and come back to the list after logging in. Visitors
+   have no Notifications link at all.
+
+#### Step 16: Django Admin
+
+**Where:** Browser.
+
+**What this does:** Looks at the read-only list in Django Admin.
+
+Open `http://localhost:8000/admin/notifications/notification/` and log in with **your own admin account** (Part 0A; use your
+own admin path if you changed `ADMIN_URL_PATH`).
+
+**You should see:** the page **Select notification to view** (the tab title ends "| Rumor Zero moderation") with the columns
+Created at, Recipient, Type, Outcome and Actor (then Post and Is read, if the window is wide enough), the filters By type,
+By is read and By created at, and a search box (recipient or actor username). There is **no Add
+button**, and a row opens read-only with no Save: notifications are written only by the services and go with the post,
+comment or account they are about. Only a superuser sees the list by default (no moderator permission was added).
 
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
   database, which is destructive.
@@ -21231,6 +21848,652 @@ print(users.delete())
 (495, {'posts.Post': 495})
 (20, {'account.EmailAddress': 10, 'accounts.User': 10})
 ```
+
+- `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
+  database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway.
+
+### Part 13: Notifications
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and `frontend\.env.local`.
+Part 13 adds **one app** (`backend\apps\notifications`), **one migration** (`notifications.0001_initial`), **three
+endpoints** (`GET /api/v1/notifications/`, `GET /api/v1/notifications/unread-count/`, `POST
+/api/v1/notifications/mark-read/`), **one throttle scope** (`notifications`, 120 a minute per signed-in person), the
+**`/notifications` page** (Stitch c4) and an **unread badge** on the Notifications link in the shell. It adds no
+dependency and no environment variable. Nine kinds of notification exist: someone **followed** you, **liked**,
+**commented on** or **reposted** your post, and (about your own posts, from nobody in particular) a **verdict**, an
+**under review** notice, a **removal**, an **emergency priority removed** and an **appeal resolved**.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend\`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 16 |
+| Window 2 (commands) | All the `curl.exe` and `python manage.py` commands. **Use the same window for steps 3 to 11 and 14**: the variables and functions you set in step 3 (`$id`, `$ada`, `$bo`, `$cy`, `$api`, `Login`, `Mk`, `Fetch`, `Send`, `$inbox`) and in steps 4, 7 and 8 (`$p1`, `$f1` to `$f4`, `$p2`) only live in that one terminal. If you close it, start again from step 3. | 1 to 11, 14 |
+| Window 3 (frontend) | `npm run dev` in `frontend\`. Leave it running. | 12 to 16 |
+| Browser | Steps 12, 13, 14, 15 and 16 | 12 to 16 |
+
+Things to know first:
+
+- **Who is told what.** The person whose post it is, and only them (a reposter is **not** told what happens to the
+  original, a decision for a later part). Nobody is told about their own actions. A follow, a like, a comment and a repost
+  say who did it. The five moderation kinds **name nobody**: you are never told which moderator acted, and a reporter is
+  never revealed. A report that sends your post to review says only "under review".
+- **What is silent.** Filing an appeal, a moderator's Dismiss reports or Escalate, the automatic emergency block and its lift,
+  and a bookmark.
+- **One action can send two.** An appeal that a moderator decides sends `appeal_resolved` **plus** the verdict or removal
+  that came with it; Mark FALSE on a pinned emergency sends the verdict **and** "emergency priority removed". A verdict item
+  is sent only when the label **changes**: Mark FALSE on a post that was already FALSE (an upheld appeal) sends only the
+  appeal item.
+- **No repeats.** One item per follower, and one per liker and post (a like and a repost of the same post are two items):
+  like, unlike, like again is one item that stays even after the unlike. Every comment, verdict, review, removal and appeal
+  is its own item.
+- **Items go with what they are about.** When the author deletes the post, or the comment is deleted or hidden by a
+  moderator, its items disappear (the list and the unread count never include them). Unhiding does not bring one back.
+- **The page and the badge.** The shell asks for the unread count when you open the app and then every **30 seconds, only
+  while the tab is in front** (a hidden tab makes no request; it asks at once when you come back). The number shows exactly
+  up to 99, then `99+`. `/notifications` lists 20 at a time, newest first, with **Load more**, and when the poll finds more
+  unread items than before it puts the new ones on top without resetting anything.
+- **The accounts.** Step 3 makes five straight in the database, all with the throwaway password
+  `correct-horse-battery-42`: `ada` (the author whose notifications you read), `bo` and `cy` (the people who act), `mod1`
+  and `mod2` (moderators). No sign-up and no email are needed, so this part works offline.
+- **The pipeline is the stub** (Part 9): `#true` in a fact makes it VERIFIED 95%, `#false` FALSE 95%, `#unsure` sends it to
+  review.
+- **Your admin address** is `http://localhost:8000/admin/` unless `ADMIN_URL_PATH` in `backend\.env` says otherwise (then
+  use that address in step 16).
+- The outputs below are the Linux run of 2026-10-20 with the Windows spellings applied. **The PowerShell blocks were not
+  run** (no PowerShell on the machine that wrote them); the browser steps were checked with headless Chromium (at 1280 and
+  390 px, screenshots looked at, and a 65-second count of the poll's requests), not by a person at a keyboard. Two answers
+  print a little differently here: PowerShell 5.1 turns the `created_at` text into a date object, so the two "in full"
+  steps leave `created_at` out, and a one-item list prints as a list. Ids, numbers in names, the date, times and the
+  `Processed N` counts differ on every run.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, applies Part 13's migration, runs
+the whole backend test suite and Part 13's own tests, the linter and the formatter check.
+
+```powershell
+# start in the repo root
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate                            # Applying notifications.0001_initial... OK  (or "No migrations to apply." if it was already applied)
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 4073 passed
+python -m pytest apps\notifications -q              # 179 passed
+ruff check . ; ruff format --check .                # All checks passed! / 314 files already formatted
+```
+
+**You should see:** `Applying notifications.0001_initial... OK` (or `No migrations to apply.`), `No changes detected`,
+`System check identified no issues (0 silenced).`, then `4073 passed`, `179 passed`, `All checks passed!` and `314 files
+already formatted`. Counts may grow later; what matters is that nothing fails.
+
+- The new tests pin: every check of the table (the nine types, the outcome and shape of each, no self-notification, the
+  partial unique indexes with the type in the key); one creation test per event (follow, like, comment, repost, the
+  pipeline's label and review, the report threshold, and all the moderator actions including each appeal outcome, Demote
+  and Mark FALSE on an emergency); that Dismiss, Escalate, an appeal being filed and a block say nothing; the
+  like/unlike/like, follow/unfollow/follow and repost/unrepost/repost cases; that **three simultaneous requests make one
+  item** (real threads); that an item is in the transaction of the event (a failed write leaves neither); the three
+  endpoints (shape, 2 queries, the partial index, mark-read bodies, other people's ids, the 120-a-minute limit); and the
+  read-only admin.
+- Existing tests changed on purpose: only `core\tests\test_settings.py` (thirteen throttle scopes, `notifications` is
+  120/min). Every other existing test passes as it was.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. Playwright (the last commands) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end
+tests against the dev servers.
+
+```powershell
+cd ..\frontend                                      # from backend\
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 155 files, 2148 tests passed
+npm run build
+npm run test:e2e                                    # 53 passed
+cd ..\backend                                       # back to backend\ for steps 3 to 11
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  155 passed (155)` and `Tests  2148
+passed (2148)`. `npm run build` lists `○ /notifications` (the page is **static**: the list loads in the browser after the
+login is known, so it costs no extra Worker request). The end-to-end run ends with `53 passed` (the production-mode run,
+`CI=1`, is in the Linux guide: PowerShell sets it with `$env:CI = "1"`, and the build above must come first).
+
+- The two new end-to-end tests (`e2e\notifications.spec.ts`) sign nobody up (the suite already uses most of the 20 sign-ups
+  a minute): one has a second person like and comment on a post, checks the badge ("Notifications, 2 unread"), the two
+  items, that opening one reads it and lowers the count, a reload, Mark all as read and that your own like says nothing;
+  the other sends a visitor to log in.
+
+#### Step 3: Start the server and make five accounts
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 11 and
+14.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you make the five accounts with a shell
+command, log three of them in through the API (keeping their login tokens in `$ada`, `$bo` and `$cy`), and save the
+helpers `Mk` (make a post, print its id), `Fetch` (a GET, printing the status code and then the answer), `Send` (any
+request, the same way) and `$inbox` (one short line per notification).
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend\` with the venv active: steps 1 and 2 leave you there). If you opened a new terminal, first run
+`cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the names are new each run
+@"
+from allauth.account.models import EmailAddress
+from apps.accounts.models import Role, User
+for name, role in (('ada', Role.USER), ('bo', Role.USER), ('cy', Role.USER), ('mod1', Role.MODERATOR), ('mod2', Role.MODERATOR)):
+    user = User.objects.create_user(email=f'part13-{name}-$id@example.test', username=f'part13_{name}_$id', password='correct-horse-battery-42', is_email_verified=True, role=role, display_name=name.capitalize() if name in ('ada', 'bo', 'cy') else '')
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+print(User.objects.filter(email__startswith='part13-', email__endswith='$id@example.test').count(), 'accounts made')
+"@ | python manage.py shell | Select-Object -Last 1
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+# Login <name>: prints a login token
+function Login($name) {
+@"
+{"email": "part13-$name-$id@example.test", "password": "correct-horse-battery-42"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-login.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-login.json" http://localhost:8000/api/auth/app/v1/auth/login | ConvertFrom-Json).meta.access_token
+}
+$ada = Login ada; $bo = Login bo; $cy = Login cy    # $ada, $bo, $cy = their login tokens
+"$($ada.Substring(0,10)) $($bo.Substring(0,10)) $($cy.Substring(0,10))"    # three token prefixes, not an error
+$api = 'http://localhost:8000/api/v1'
+# Mk <token> <json>: makes a post, prints its id
+function Mk($token, $json) {
+  $json | Set-Content -Encoding ascii $env:TEMP\rz-post.json
+  (curl.exe -s -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-post.json" "$api/posts/" | ConvertFrom-Json).id
+}
+# Send <METHOD> <path> [token] [json body] [fields]: prints the HTTP status, then the answer. `fields` is a list
+# of property names to keep, or a script block `{ param($r) ... }` that picks what to show from the answer.
+function Send($method, $path, $token, $json, $show) {
+  $a = @()
+  if ($token) { $a += '-H', "Authorization: Bearer $token" }
+  if ($json) {
+    $json | Set-Content -Encoding ascii $env:TEMP\rz-body.json
+    $a += '-H', 'Content-Type: application/json', '--data-binary', "@$env:TEMP\rz-body.json"
+  }
+  $out = curl.exe -s -w "`n%{http_code}" -X $method @a "$api$path"
+  $body = if ($out.Count -gt 1) { $out[0..($out.Count - 2)] -join '' } else { '' }
+  if ($show -and $body) {
+    $r = $body | ConvertFrom-Json
+    $shown = if ($show -is [scriptblock]) { & $show $r } else { $r | Select-Object $show }
+    $body = ConvertTo-Json -InputObject $shown -Depth 5 -Compress
+  }
+  "$($out[-1])  $body"
+}
+function Fetch($path, $token, $show) { Send GET $path $token $null $show }   # Fetch <path> [token] [fields]
+# $inbox: one short object per notification, newest first (what each kind is, its outcome, and who did it)
+$inbox = { param($r) @($r.results | ForEach-Object { [ordered]@{ type = $_.type; outcome = $_.outcome; from = $_.actor.username } }) }
+"id=$id"                                            # write this down: the browser steps use it
+```
+
+**You should see** (the number in the names is your `$id`):
+
+```text
+5 accounts made
+eyJhbGciOi eyJhbGciOi eyJhbGciOi
+id=222539
+```
+
+- The shell prints a line about auto-imported objects first; `Select-Object -Last 1` keeps only ours.
+- Logging in is limited to 30 a minute per address (Part 1), far more than this part needs. A login token lasts 15 minutes
+  by default: if a later command answers `401`, run `$ada = Login ada` (or `bo`, `cy`) again.
+
+**If it differs:** an error on `.meta.access_token` or on `.Substring` means the logins failed: `runserver` isn't running in
+window 1. Fix that and run the block again from `$id = Get-Date -Format "HHmmss"`.
+
+#### Step 4: A follow, a like, a comment and a repost tell the author, once
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts an opinion. `bo` follows her, likes the post and comments on it, and `cy` reposts it; `ada`
+likes her own post. Then `bo` takes the like back and gives it again, and unfollows and follows again.
+
+```powershell
+$p1 = Mk $ada '{"content":"Every school roof should carry solar panels","post_type":"opinion"}'   # ada's opinion
+"--- nothing yet"; Fetch /notifications/unread-count/ $ada
+Send POST /users/part13_ada_$id/follow/ $bo               # bo follows ada
+Send POST /posts/$p1/like/ $bo                            # bo likes the post
+Send POST /posts/$p1/comments/ $bo '{"content":"Does this include old buildings?"}' id, content   # bo comments
+Send POST /posts/$p1/repost/ $cy                          # cy reposts it
+Send POST /posts/$p1/like/ $ada                           # ada likes her own post: tells nobody
+"--- four items, newest first"; Fetch /notifications/unread-count/ $ada; Fetch /notifications/ $ada $inbox
+"--- like, unlike, like again; unfollow, follow again: still four"
+Send DELETE /posts/$p1/like/ $bo; Send POST /posts/$p1/like/ $bo
+Send DELETE /users/part13_ada_$id/follow/ $bo; Send POST /users/part13_ada_$id/follow/ $bo
+Fetch /notifications/unread-count/ $ada
+```
+
+**You should see** (the comment's id differs):
+
+```text
+--- nothing yet
+200  {"count":0}
+201  {"is_following":true}
+201  {"liked":true}
+201  {"id":"a0cbf0cb-64f6-4338-bdb2-0aef705c4d49","content":"Does this include old buildings?"}
+201  {"reposted":true}
+201  {"liked":true}
+--- four items, newest first
+200  {"count":4}
+200  [{"type":"repost","outcome":"","from":"part13_cy_222539"},{"type":"comment","outcome":"","from":"part13_bo_222539"},{"type":"like","outcome":"","from":"part13_bo_222539"},{"type":"follow","outcome":"","from":"part13_bo_222539"}]
+--- like, unlike, like again; unfollow, follow again: still four
+204  
+201  {"liked":true}
+204  
+201  {"is_following":true}
+200  {"count":4}
+```
+
+- Four things happened to `ada`'s account and her own like is not among them: four items, not five.
+- After the unlike and the unfollow the items **stay** (an item is a record, not a live state), and doing it again adds
+  nothing: the database refuses a second item for the same person and post (a partial unique index), so two simultaneous
+  requests can't make two either.
+
+#### Step 5: What one item looks like
+
+**Where:** Terminal window 2 (the same one: it needs `$p1` from step 4).
+
+**What this does:** Reads one item in full (without its `created_at`, see the note at the top), the follow item and its
+`following` flag before and after `ada` follows `bo` back, a page of one with its cursor, and a made-up cursor.
+
+```powershell
+"--- one item in full"; Fetch /notifications/ $ada { param($r) $r.results[0] | Select-Object * -ExcludeProperty created_at }
+"--- the follow item"; Fetch /notifications/ $ada { param($r) $r.results | Where-Object type -eq 'follow' | Select-Object * -ExcludeProperty created_at }
+"--- ada follows bo back"; Send POST /users/part13_bo_$id/follow/ $ada
+Fetch /notifications/ $ada { param($r) ($r.results | Where-Object type -eq 'follow').actor.following }
+"--- a page of one, then the next"; Fetch "/notifications/?page_size=1" $ada { param($r) [ordered]@{ n = @($r.results).Count; more = ($null -ne $r.next_cursor) } }
+"--- a crafted cursor"; Fetch "/notifications/?cursor=nonsense" $ada
+"--- keys"; Fetch /notifications/ $ada { param($r) @($r.results[0].PSObject.Properties.Name | Sort-Object) }
+```
+
+**You should see** (ids differ; there is no `created_at` in the first two answers):
+
+```text
+--- one item in full
+200  {"id":"2436e8ce-81a3-4d19-a3fe-036d416bcc24","type":"repost","outcome":"","is_read":false,"actor":{"id":"6ceb4731-ae14-4a56-8f27-67787c23d440","username":"part13_cy_222539","display_name":"Cy","avatar_url":null},"post":{"id":"a00980cf-d804-44ff-a54e-a7483563f9a1","excerpt":"Every school roof should carry solar panels","post_type":"opinion","status":"published"},"comment":null}
+--- the follow item
+200  {"id":"73b0940f-9774-4887-8155-9c03aa147c32","type":"follow","outcome":"","is_read":false,"actor":{"id":"5e167709-d3ca-42e2-a8f1-0565a4925d63","username":"part13_bo_222539","display_name":"Bo","avatar_url":null,"following":false},"post":null,"comment":null}
+--- ada follows bo back
+201  {"is_following":true}
+200  true
+--- a page of one, then the next
+200  {"n":1,"more":true}
+--- a crafted cursor
+404  {"detail":"Invalid cursor","code":"not_found"}
+--- keys
+200  ["actor","comment","created_at","id","is_read","outcome","post","type"]
+```
+
+- Every item has the same eight keys. `post` is a small summary (an excerpt of at most 140 characters, the kind and the status),
+  never the whole post; `comment` is filled only for a comment; `actor` is `null` for the system kinds. Only a **follow**
+  carries `actor.following`, which is what the page's **Follow back** button reads.
+- The list is two database queries however many items it holds, and `unread-count` is two as well (the signed-in user, then
+  one count on a partial index of the unread rows).
+
+#### Step 6: Marking items read
+
+**Where:** Terminal window 2.
+
+**What this does:** `bo` tries to mark one of `ada`'s items read (nothing happens to it), `ada` marks it herself, four bad
+requests are refused, and then `ada` marks everything read.
+
+```powershell
+$first = ((curl.exe -s -H "Authorization: Bearer $ada" "$api/notifications/") | ConvertFrom-Json).results[0].id   # the newest item's id
+"--- bo tries to mark ada's item read: ignored"; Send POST /notifications/mark-read/ $bo ('{"ids":["' + $first + '"]}')
+Fetch /notifications/unread-count/ $ada
+"--- ada marks that one read"; Send POST /notifications/mark-read/ $ada ('{"ids":["' + $first + '"]}')
+"--- four things that are not a request"
+Send POST /notifications/mark-read/ $ada '{}'
+Send POST /notifications/mark-read/ $ada '{"all":false}'
+Send POST /notifications/mark-read/ $ada '{"ids":["nope"]}'
+Send POST /notifications/mark-read/ $ada ('{"all":true,"ids":["' + $first + '"]}')
+"--- mark all read"; Send POST /notifications/mark-read/ $ada '{"all":true}'
+Fetch /notifications/ $ada { param($r) @($r.results.is_read | Select-Object -Unique) }
+```
+
+**You should see:**
+
+```text
+--- bo tries to mark ada's item read: ignored
+200  {"count":1}
+200  {"count":4}
+--- ada marks that one read
+200  {"count":3}
+--- four things that are not a request
+400  {"non_field_errors":["Send either ids or all, not both."]}
+400  {"non_field_errors":["all can only be true."]}
+400  {"ids":{"0":["Must be a valid UUID."]}}
+400  {"non_field_errors":["Send either ids or all, not both."]}
+--- mark all read
+200  {"count":0}
+200  [true]
+```
+
+- `mark-read` answers the **unread count that is left**: `bo`'s answer is his own count (1: `ada` followed him back in step 5)
+  and `ada`'s is still 4, so his request changed nothing of hers. Other people's and unknown ids are ignored, not an
+  error. You send either `ids` (1 to 50 of them) or `{"all": true}`, never both and never neither.
+
+#### Step 7: The pipeline's label and review
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` posts three facts the stub answers differently, and the background check (and then
+`process_pending`, which checks anything it has not reached) gives each a verdict or sends it to review.
+
+```powershell
+$f1 = Mk $ada '{"content":"The city opened a new tram line in May #true","post_type":"fact"}'
+$f2 = Mk $ada '{"content":"The moon is made of cheese #false","post_type":"fact"}'
+$f3 = Mk $ada '{"content":"The ferry is moving to a new pier #unsure","post_type":"fact"}'
+Start-Sleep 3; python manage.py process_pending | Select-Object -Last 1
+"--- three items, from nobody"; Fetch /notifications/unread-count/ $ada; Fetch /notifications/ $ada $inbox
+```
+
+**You should see** (the number of posts `process_pending` reports depends on how many the background check had already
+done, and it also checks facts left pending by earlier parts' tests):
+
+```text
+Processed 16 fact posts.
+--- three items, from nobody
+200  {"count":3}
+200  [{"type":"under_review","outcome":"","from":null},{"type":"verdict","outcome":"false","from":null},{"type":"verdict","outcome":"true","from":null},{"type":"repost","outcome":"","from":"part13_cy_222539"},{"type":"comment","outcome":"","from":"part13_bo_222539"},{"type":"like","outcome":"","from":"part13_bo_222539"},{"type":"follow","outcome":"","from":"part13_bo_222539"}]
+```
+
+- The verdict item stores `true` or `false` in `outcome`, so an old item never changes meaning if the post is labelled again
+  later. The three new items are unread; the four from step 4 are read (step 6). `from` is `null`: no moderator and no
+  pipeline is named.
+- A report that sends **a post** to review (Part 8) makes the same `under_review` item, and nothing says who reported.
+
+#### Step 8: Moderator decisions, an appeal, a removal and Escalate
+
+**Where:** Terminal window 2 (it needs `$f3` from step 7).
+
+**What this does:** Moderator `mod1` marks the ferry fact FALSE; `ada` asks for another look; `mod2` reverses it. Then a
+second post is removed and a second review fact is escalated.
+
+```powershell
+@"
+from apps.accounts.models import User
+from apps.moderation import services
+mod = User.objects.get(username='part13_mod1_$id')
+services.mark_false('$f3', moderator=mod)
+print('mod1 marked the ferry post FALSE')
+"@ | python manage.py shell | Select-Object -Last 1
+"--- a moderator's verdict reads the same as the pipeline's; no moderator is named"; Fetch /notifications/ $ada { param($r) (& $inbox $r)[0] }
+"--- ada asks for another look (an appeal is not announced)"; Fetch /notifications/unread-count/ $ada
+Send POST /posts/$f3/appeal/ $ada '{"reason":"The new pier is on the council site"}' status, appeal_status
+Fetch /notifications/unread-count/ $ada
+@"
+from apps.accounts.models import User
+from apps.moderation import services
+mod = User.objects.get(username='part13_mod2_$id')
+services.mark_verified('$f3', moderator=mod)
+print('mod2 marked it verified')
+"@ | python manage.py shell | Select-Object -Last 1
+"--- the appeal was overturned: the new verdict and the appeal, newest first"; Fetch /notifications/ $ada { param($r) @((& $inbox $r)[0..1]) }
+$p2 = Mk $ada '{"content":"A post a moderator will remove","post_type":"opinion"}'
+$f4 = Mk $ada '{"content":"Another fact for the review queue #unsure","post_type":"fact"}'
+Start-Sleep 3; python manage.py process_pending | Select-Object -Last 1
+"--- before: Escalate, Remove"; Fetch /notifications/unread-count/ $ada
+@"
+from apps.accounts.models import User
+from apps.moderation import services
+mod = User.objects.get(username='part13_mod1_$id')
+services.escalate('$f4', moderator=mod)
+print('escalated')
+services.remove_post('$p2', moderator=mod, public_note='Personal attack')
+print('removed')
+"@ | python manage.py shell | Select-Object -Last 2
+"--- after: one more (the removal); Escalate said nothing"; Fetch /notifications/unread-count/ $ada; Fetch /notifications/ $ada { param($r) (& $inbox $r)[0] }
+```
+
+**You should see** (the `Processed N` line differs):
+
+```text
+mod1 marked the ferry post FALSE
+--- a moderator's verdict reads the same as the pipeline's; no moderator is named
+200  {"type":"verdict","outcome":"false","from":null}
+--- ada asks for another look (an appeal is not announced)
+200  {"count":4}
+201  {"status":"under_review","appeal_status":"open"}
+200  {"count":4}
+mod2 marked it verified
+--- the appeal was overturned: the new verdict and the appeal, newest first
+200  [{"type":"appeal_resolved","outcome":"overturned","from":null},{"type":"verdict","outcome":"true","from":null}]
+Processed 0 fact posts.
+--- before: Escalate, Remove
+200  {"count":7}
+escalated
+removed
+--- after: one more (the removal); Escalate said nothing
+200  {"count":8}
+200  {"type":"removed","outcome":"","from":null}
+```
+
+- A moderator's decision on an appeal sends **two** items (decision 1 of the plan): the verdict that came with it, and
+  `appeal_resolved` on top (`overturned` here; `upheld` if the label had stood). Mark FALSE on a post that was already FALSE
+  sends only the appeal item, since the label did not change.
+- The reason you typed for the removal (`Personal attack`) is on the post for its author, **not** in the notification:
+  the item only says a moderator removed the post.
+- Not run here (the tests cover them): Mark FALSE on a **pinned emergency** (it sends the verdict and "emergency priority
+  removed"), **Demote** (only that item), Restore and Keep removed (only `appeal_resolved`), and Dismiss reports (silent).
+
+#### Step 9: Deleting what an item is about
+
+**Where:** Terminal window 2 (it needs `$p1` from step 4).
+
+**What this does:** Lists the items about `ada`'s first post, has `bo` delete his comment, then has `ada` delete the post.
+
+```powershell
+$kinds = { param($r) @($r.results | Where-Object { $_.post -and $_.post.id -eq $p1 } | ForEach-Object { $_.type } | Sort-Object) }
+"--- the items about ada's first post"; Fetch /notifications/ $ada $kinds
+$cid = (curl.exe -s "$api/posts/$p1/comments/" | ConvertFrom-Json).results[0].id   # bo's comment
+"--- bo deletes his comment: its item goes, the like and the repost stay"
+Send DELETE /comments/$cid/ $bo
+Fetch /notifications/ $ada $kinds
+"--- ada deletes the post: every item about it goes"
+Send DELETE /posts/$p1/ $ada
+Fetch /notifications/ $ada $kinds
+"--- the follow, which is not about a post, stays"; Fetch /notifications/ $ada { param($r) @($r.results | Where-Object type -eq 'follow' | ForEach-Object { $_.actor.username }) }
+```
+
+**You should see:**
+
+```text
+--- the items about ada's first post
+200  ["comment","like","repost"]
+--- bo deletes his comment: its item goes, the like and the repost stay
+204  
+200  ["like","repost"]
+--- ada deletes the post: every item about it goes
+204  
+200  []
+--- the follow, which is not about a post, stays
+200  ["part13_bo_222539"]
+```
+
+- A moderator hiding a comment in Django Admin does the same (the item goes in the same transaction), and unhiding it does
+  not bring the item back.
+
+#### Step 10: No login, no notifications
+
+**Where:** Terminal window 2.
+
+**What this does:** Asks for all three endpoints with no login token.
+
+```powershell
+Fetch /notifications/; Fetch /notifications/unread-count/
+Send POST /notifications/mark-read/ $null '{"all":true}'
+```
+
+**You should see:**
+
+```text
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+401  {"detail":"Authentication credentials were not provided.","code":"not_authenticated"}
+```
+
+#### Step 11: The allowance: 120 a minute, per person
+
+**Where:** Terminal window 2.
+
+**What this does:** Makes 121 requests in a row as `cy` (not `ada`, whose allowance the browser steps use), counts the answers,
+then reads the headers of the next one and asks as `bo`, who has his own allowance.
+
+```powershell
+1..121 | ForEach-Object { curl.exe -s -o NUL -w "%{http_code}`n" -H "Authorization: Bearer $cy" "$api/notifications/unread-count/" } | Group-Object | ForEach-Object { "{0,7} {1}" -f $_.Count, $_.Name }
+curl.exe -s -i -H "Authorization: Bearer $cy" "$api/notifications/unread-count/" | Select-String -Pattern '^HTTP|^retry-after'
+Fetch /notifications/unread-count/ $cy
+"--- bo has his own allowance"; Fetch /notifications/unread-count/ $bo
+```
+
+**You should see** (the seconds in `Retry-After` differ):
+
+```text
+    120 200
+      1 429
+HTTP/1.1 429 Too Many Requests
+Retry-After: 59
+429  {"detail":"Request was throttled. Expected available in 59 seconds.","code":"throttled"}
+--- bo has his own allowance
+200  {"count":1}
+```
+
+- One tab polls twice a minute, so 120 a minute leaves room for several tabs and for reading the list. The three endpoints
+  share the one allowance, and a request with no login (a 401) never counts against it. `cy` can use the API again after a
+  minute.
+
+#### Step 12: Start the frontend and see the badge
+
+**Where:** Terminal window 3 (frontend) first, then the **Browser**. Both servers must be running: Django in window 1.
+
+**What this does:** Starts the Next dev server, then you log in as `ada` and look at the shell.
+
+Window 3 (in `frontend\`):
+
+```powershell
+cd frontend
+npm run dev                                         # leave it running: http://localhost:3000
+```
+
+Browser: open `http://localhost:3000/login` and log in as **`part13-ada-<id>@example.test`** (your `$id` from step 3) with
+the password `correct-horse-battery-42`.
+
+**You should see:** you land on Home. In the left rail (at 1280 px) the **Notifications** link has a blue number pill with
+**8** after the label (the eight unread items from steps 7 and 8). Narrow the window below 1280 px (about 1000 px): the rail
+becomes icon-only and the 8 sits on the corner of the bell. Below 768 px the bottom bar has the same bell with the number.
+
+- The link's name for a screen reader is "Notifications, 8 unread" (the visible number is hidden from readers so it isn't
+  read twice). Zero unread shows no badge at all, and 100 or more shows `99+`.
+- In dev mode the first load makes **two** requests for the count (React's StrictMode runs the effect twice); a production
+  build makes one.
+
+#### Step 13: The list, reading one item, Mark all as read
+
+**Where:** Browser (still logged in as `ada`).
+
+**What this does:** Opens the page, opens one item, and then marks everything read.
+
+1. Click **Notifications** in the rail (`http://localhost:3000/notifications`).
+2. Click the newest item (the removal).
+3. Press the browser's Back button.
+4. Click **Mark all as read**, then reload the page (F5).
+
+**You should see:**
+
+1. The title **Notifications** with a grey **8 unread** chip and **Mark all as read** at the right. Nine rows, newest first:
+   the removal (a grey block tile, a REMOVED chip, "The reason is on the post."), a review notice (an amber hourglass tile and
+   UNDER REVIEW), "Your appeal was reviewed. The decision was overturned:" (a gavel tile), a VERIFIED verdict (a teal tile),
+   a FALSE verdict (a red tile), a third UNDER REVIEW notice, another FALSE and another VERIFIED verdict, and at the bottom
+   the follow from `bo` with a **Follow back** button (his initials in a round avatar with a small "person added" badge).
+   Eight rows have a small blue dot at the right (the follow, which you marked read in step 6, has none). Each sentence
+   quotes the post in serif type (italic for an opinion).
+2. You go to the post's page (`/p/…`). The rail link now says **7** (hover or focus it: "Notifications, 7 unread"). The whole
+   row is the link; the **Follow back** button is the one thing in a row that is not.
+3. Back on the list: the chip says **7 unread** and the first row's dot is gone, with no flash or reload.
+4. The chip, the dots, the **Mark all as read** link and the rail's number all vanish at once; after the reload the rows are
+   still there and still read, and the rail link has no number.
+
+- Marking read is optimistic: the page changes first and goes back, with a toast ("Couldn't mark your notifications as
+  read. Try again."), if the request fails.
+- Not built from Stitch c4: the filter tabs (All, Verdicts & Audits, Discussions, Mentions), the citation and sensor-audit
+  items, the ledger-sync row and the "Notification preferences" link.
+
+#### Step 14: A new notification arrives while the page is open
+
+**Where:** Terminal window 2 and the Browser. The browser stays on `/notifications`, logged in as `ada`.
+
+**What this does:** `ada` makes a post and `bo` likes it from the terminal; the open page picks it up by itself.
+
+```powershell
+$p3 = Mk $ada '{"content":"A post to like while the page is open","post_type":"opinion"}'
+Send POST /posts/$p3/like/ $bo
+```
+
+**You should see** (the terminal):
+
+```text
+201  {"liked":true}
+```
+
+Then in the browser, **wait up to 30 seconds without touching the page** (or switch to another tab and back, which asks
+at once).
+
+**You should see:** the rail link shows **1**, the chip says **1 unread**, and a new row, "**Bo** liked your post “A post to
+like while the page is open”", appears at the **top** of the list with a blue dot, while the rows below stay where they were
+and the page does not jump or reload.
+
+- The poll runs every 30 seconds **only while the tab is in front**. Measured in headless Chromium over 65 seconds: requests
+  to `unread-count` at 0, 30 and 60 seconds (plus the doubled first one of dev mode); with the tab hidden for 40 seconds
+  none at all; and one request within 1.5 seconds of coming back. You can watch it yourself: DevTools (F12) → Network →
+  filter `unread-count`.
+- If the page was open when the first poll answered, that answer does not count as "new": only a later rise does.
+
+#### Step 15: A phone, and a visitor
+
+**Where:** Browser.
+
+**What this does:** Checks the page at a phone width, and then without a login.
+
+1. Make the window narrower than 768 px (or use the browser's device mode, 390 px wide) and open `/notifications`.
+2. In a private window (not logged in) open `http://localhost:3000/notifications`.
+
+**You should see:**
+
+1. The bottom bar has Home, Search, New post, **Notifications** (with the number on the bell) and Profile. The list is
+   one column, the rows wrap, **Mark all as read** drops under the title if the title and chip fill the line, and
+   **nothing scrolls sideways** (0 px of horizontal overflow when measured).
+2. You are sent to `http://localhost:3000/login?next=%2Fnotifications` and come back to the list after logging in. Visitors
+   have no Notifications link at all.
+
+#### Step 16: Django Admin
+
+**Where:** Browser.
+
+**What this does:** Looks at the read-only list in Django Admin.
+
+Open `http://localhost:8000/admin/notifications/notification/` and log in with **your own admin account** (Part 0A; use your
+own admin path if you changed `ADMIN_URL_PATH`).
+
+**You should see:** the page **Select notification to view** (the tab title ends "| Rumor Zero moderation") with the columns
+Created at, Recipient, Type, Outcome and Actor (then Post and Is read, if the window is wide enough), the filters By type,
+By is read and By created at, and a search box (recipient or actor username). There is **no Add button**, and a row opens
+read-only with no Save: notifications are written only by the services and go with the post, comment or account they are
+about. Only a superuser sees the list by default (no moderator permission was added).
 
 - `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
   database, which is destructive.

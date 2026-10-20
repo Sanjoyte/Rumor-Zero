@@ -52,6 +52,20 @@ describe("FollowButton", () => {
     expect(api.followUser).not.toHaveBeenCalled();
   });
 
+  it("says Follow back when a screen asks for it, in every state", async () => {
+    const first = renderButton("verified", { label: "Follow back" });
+    expect(await screen.findByRole("button", { name: "Follow back" })).toBeInTheDocument();
+    first.unmount();
+    const second = renderButton("anonymous", { label: "Follow back" });
+    expect(await screen.findByRole("link", { name: "Follow back" })).toBeInTheDocument();
+    second.unmount();
+    renderButton("unverified", { label: "Follow back" });
+    expect(await screen.findByRole("button", { name: "Follow back" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
   it("renders nothing to click while the session is loading", () => {
     renderButton("loading");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();

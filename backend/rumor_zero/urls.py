@@ -16,6 +16,7 @@ urlpatterns = [
     path("api/", include("apps.reports.urls")),
     path("api/", include("apps.moderation.urls")),
     path("api/", include("apps.reputation.urls")),
+    path("api/", include("apps.notifications.urls")),
     path("api/", include("apps.core.urls")),
     path(settings.ADMIN_URL_PATH, admin.site.urls),
 ]

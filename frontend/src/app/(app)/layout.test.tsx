@@ -10,6 +10,11 @@ import AppLayout from "./layout";
 
 const resendMock = vi.hoisted(() => vi.fn<() => Promise<void>>());
 const quotaMock = vi.hoisted(() => vi.fn());
+const unreadMock = vi.hoisted(() => vi.fn());
+vi.mock("@/features/notifications/notifications-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/notifications/notifications-api")>()),
+  fetchUnreadCount: unreadMock,
+}));
 vi.mock("@/features/posts/posts-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/posts/posts-api")>()),
   fetchFactQuota: quotaMock,
@@ -80,6 +85,8 @@ beforeEach(() => {
   });
   resendMock.mockReset();
   resendMock.mockResolvedValue(undefined);
+  unreadMock.mockReset();
+  unreadMock.mockResolvedValue(0);
   pathname = "/settings";
   window.history.pushState({}, "", "/settings?tab=email");
   replace.mockClear();
@@ -117,6 +124,41 @@ describe("(app) layout guard", () => {
     expect(await screen.findByText("Secret settings")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("complementary")).toBeInTheDocument());
     expect(replace).not.toHaveBeenCalled();
+  });
+});
+
+describe("(app) layout unread badge", () => {
+  beforeEach(() => {
+    pathname = "/home";
+  });
+
+  it("polls the unread count for a signed-in user and shows it on the rail and the phone tab", async () => {
+    unreadMock.mockResolvedValue(4);
+    renderLayout(sessionWith("authenticated"));
+    const sidebar = await screen.findByRole("complementary");
+    expect(
+      await within(sidebar).findByRole("link", { name: "Notifications, 4 unread" }),
+    ).toBeInTheDocument();
+    const [, bottomNav] = screen.getAllByRole("navigation", { name: "Main" });
+    expect(
+      within(bottomNav).getByRole("link", { name: "Notifications, 4 unread" }),
+    ).toBeInTheDocument();
+    expect(unreadMock).toHaveBeenCalledWith(expect.any(AbortSignal));
+  });
+
+  it("shows no badge when nothing is unread", async () => {
+    renderLayout(sessionWith("authenticated"));
+    const sidebar = await screen.findByRole("complementary");
+    await waitFor(() => expect(unreadMock).toHaveBeenCalled());
+    expect(within(sidebar).getByRole("link", { name: "Notifications" })).toBeInTheDocument();
+    expect(screen.queryByTestId("unread-badge")).toBeNull();
+  });
+
+  it("does not ask a visitor for a count", async () => {
+    renderLayout(sessionWith("anonymous"));
+    await screen.findByText("Secret settings");
+    await waitFor(() => expect(screen.getByRole("complementary")).toBeInTheDocument());
+    expect(unreadMock).not.toHaveBeenCalled();
   });
 });
 

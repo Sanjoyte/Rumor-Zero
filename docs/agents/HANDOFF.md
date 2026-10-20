@@ -6,9 +6,9 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 13 (Notifications) is planned and approved** (2026-10-20, Claude, Sonnet 5.5); **not implemented**. Parts 0A, 0B,
-  0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D and 12 are done (Part 11D committed as `b2f8ad5`, Part 12 as `30649b4`).
-  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D and 12 CI have not been
+- **Part:** **Part 13 (Notifications) is implemented** (2026-10-20, Claude, Sonnet 5.5), **uncommitted**. Parts 0A, 0B,
+  0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12 and 13 are done (Part 11D committed as `b2f8ad5`, Part 12 as `30649b4`).
+  Part 1 CI is green (user-reported 2026-10-06); **Part 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12 and 13 CI have not been
   reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
@@ -19,16 +19,16 @@ read-only git output.
     writes): fine before launch.
 - **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
   `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after saving the Part 13 plan, as asked).
-- **Phase:** Part 13 planned; the plan is saved and linked below. HEAD is `30649b4` ("Implemented Part 12: Search", committed by you);
-  the only change in the tree is the new plan file and this file. No code, no setup command, no migration, no `task.md` edit. Docker
-  and the servers were not touched (state as left after Part 12: Docker up, ports 3000/8000 free, dev database at `posts
-  0003_search_vector` / `moderation 0007_emergency_permission`; E2E-made accounts remain in it).
-- **Next action:** **Implement Part 13 from the approved plan** (`docs/agents/plans/part-13-notifications.md`), starting at its step 0
-  (verify the workspace, record the baselines). Commit nothing: you do all git operations. Baselines to re-measure: `pytest` 3894,
-  `npm test` 2043, E2E 51.
+- **Owner:** none (Claude stopped after Part 13, as asked).
+- **Phase:** Part 13 implemented and verified; nothing is committed (the tree holds Part 13's changes on top of HEAD `30649b4`, "Implemented
+  Part 12: Search"; the plan file and the HANDOFF edit were already staged by you). Docker is up, ports 3000 and 8000 are free, no server
+  is running. The dev database is at `notifications 0001_initial`; every throwaway account of the visual and guide runs was deleted
+  (`recompute_reputation --check`: "Checked 1908 accounts: every stored score matches the ledger."); E2E-made accounts remain in it.
+- **Next action:** **you commit Part 13** (and run CI when you push), then **name the next part** (Part 14, Account settings, data export, deletion,
+  is next in `task.md`; Part 13 left it two notes: delete the items whose `actor` is the account, and decide whether the export holds the table).
+  Baselines now: `pytest` **4073**, `npm test` **2148**, E2E **53**.
 - **Approved plan:**
-  [`docs/agents/plans/part-13-notifications.md`](plans/part-13-notifications.md) (approved 2026-10-20; not implemented)
+  [`docs/agents/plans/part-13-notifications.md`](plans/part-13-notifications.md) (approved and implemented 2026-10-20)
 - **Previous plans:**
   - [`part-12-search.md`](plans/part-12-search.md), implemented 2026-10-20 (committed as `30649b4`);
   - [`part-11D-charts-stats.md`](plans/part-11D-charts-stats.md), implemented 2026-10-20 (committed as `b2f8ad5`);
@@ -57,9 +57,63 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-20 by Claude (Sonnet 5.5), Part 13 planned and approved.
+- **Last updated:** 2026-10-20 by Claude (Sonnet 5.5), Part 13 implemented.
 
 ## Completed checkpoints
+
+- 2026-10-20 (Claude, Sonnet 5.5): **Part 13 implemented** (uncommitted). Started from HEAD `30649b4` ("Implemented Part 12: Search"); the tree
+  matched this file (only the plan and this file, which you had staged). Docker was up, ports free. Baselines measured first: `pytest`
+  **3894 passed**; `npm test` 2043 and E2E 51 were taken from this file and re-measured at the end (2148 and 53).
+  - **Backend** (`backend/`): new app `apps/notifications/` (`models.py`: `Notification`, nine types, `outcome`, four named checks + the
+    self check, `notifications_list_idx`, partial `notifications_unread_idx`, three partial FK indexes, two partial unique indexes;
+    `services.py`: `notify` (ids, `ON CONFLICT DO NOTHING`, raises outside a transaction) + one helper per event, `discard_for_post/comment`,
+    `unread_count`, `mark_read`; `serializers.py`, `views.py` (3 endpoints, throttle scope `notifications`), `urls.py`, `admin.py` (read-only),
+    `migrations/0001_initial.py`, `tests/` (conftest, factories + 9 files, 179 tests)). Hooks, all in the caller's transaction: `social/services.py`
+    (`follow`, `like`, `add_comment` now in `atomic`; `repost`; `delete_comment` discards; `get_visible_post` also loads `author_id`),
+    `posts/services.py` (`record_pipeline_result`/`_failure`, `delete_post` discards), `reports/services.py` (`file_report`),
+    `moderation/services.py` (`_notify_author` from `_perform`, label read before `transition`), `social/admin.py` (Hide in `atomic()` + discard).
+    Changed: `rumor_zero/{settings,urls}.py`. Existing test changed on purpose: only `core/tests/test_settings.py` (13 scopes). **One migration, no
+    dependency, no variable.** `makemigrations --check`: clean.
+  - **Frontend** (`frontend/`): new `src/features/notifications/` (`UnreadCountProvider` + `useUnreadCount`, `NotificationsPage`, `NotificationList`,
+    `NotificationItem`, `notifications-api.ts`, `messages.ts`, `test-helpers.tsx` + tests), `src/components/shell/UnreadBadge.tsx`, route
+    `app/(app)/notifications/page.tsx` (+ test), `e2e/notifications.spec.ts` (2 tests). Changed: `lib/api/types.ts`, `app/(app)/layout.tsx`,
+    `components/shell/{AppShell,Sidebar,MobileNav,ShellLink}.tsx`, `features/social/FollowButton.tsx` (`label`), `features/dev/StitchSections.tsx`
+    (a `stitch-notifications` section) and the tests of the layout, `AppShell`, `FollowButton` and `/dev/ui`.
+  - **Docs:** ARCHITECTURE §2/§3/§4b/§8/§9/§10, ANALYSIS c-47, STRUCTURE, MEMORY (one Part 13 entry), `task.md` (criteria ticked, decisions and
+    deviations, both status spots, notes in 14, 16 and earlier parts' forward references), the plan's status line, and `docs/test-command.md`:
+    a `### Part 13: Notifications` section in **both** guides (16 steps each) and "13" in its intro line; nothing else in that file touched.
+  - **Validation (all green, final state):**
+    - Backend: `ruff check .` (All checks passed!), `ruff format --check .` (314 files already formatted), `makemigrations --check --dry-run`
+      (No changes detected), `manage.py check` (no issues), `pytest` **4073 passed** (3894 before), the threaded tests (`notifications/test_races.py`,
+      `social/test_services.py`, `moderation/test_races.py`, `test_pipeline_interplay.py`, 52 tests) 10 runs in a row.
+    - **47 backend mutation checks, all caught** (the harness is `mutate.py` in the scratchpad, not kept). **51 frontend mutation checks:** 46 caught
+      first time; the 5 survivors were 2 real gaps (a stale poll after `set()`, the optimistic count on opening an item: tests added), 1 equivalent
+      filter (removed as dead code), 1 vacuous test (`prefetch` isn't observable in jsdom: removed) and 1 redundant guard (removed); the reruns were all caught.
+    - Frontend: `npm run lint`, `lint:tokens`, `typecheck`, `format:check` clean; `npm test` **2148 passed** (155 files; 2043 before);
+      `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` OK (`○ /notifications` is static); `npm run test:e2e` **53 passed** in dev mode and with `CI=1`
+      (51 before; the `CI=1` run used a build made just before one purely cosmetic class change to the page header, which the dev run and the unit tests cover).
+    - Headless Chromium at 1280, 1024 and 390 px (scripted runs against `runserver` and `next dev`, screenshots looked at): the list with all nine kinds,
+      the rail pill, the dock's corner number, the phone tab; **0 px horizontal overflow** everywhere. It found one visual issue (the "7 unread" chip wrapped
+      to two lines on a phone: `whitespace-nowrap`, and the header wraps) and, through the E2E run, one real accessibility bug (the unread link's name read
+      "Notifications , 2 unread" in Chrome; now one `aria-label`). A 65-second count of the poll: requests at 0, 0 (StrictMode), 30 and 60 s; none during
+      40 s hidden; one at once on return.
+  - **Test-command notes:**
+    - The section is `### Part 13` inside each guide (the brief said `## Part <ID>`; the file's parts are `###` sections inside its two `##` guides, as
+      Parts 3 to 12 were), in the same step shape as the other parts. The file has **no comment marker** at its bottom (as in Parts 3 to 12): it ends with
+      the last bullets of the Windows Part 13 section. (The brief asked to keep one; there is none to keep.)
+    - The Linux blocks of steps 3 to 11 were **run in order against live Django with your own settings** (as five scripts that source one header, since the
+      shell doesn't persist between calls) and the expected output in the doc is what they printed (ids, dates and the `Processed N` count normalised; one
+      echo label differs in order from the run). Every bash block passes `bash -n`, and a script confirmed that every expected line appears verbatim in the
+      recorded output except the two noted. The browser steps (12 to 16) were checked with a headless-Chromium script, not by a person. The **PowerShell
+      blocks were not run** (no PowerShell here): they reuse Part 12's `Send` and `Fetch` with a `$inbox` script block; PowerShell 5.1 turns `created_at` into
+      a date, so the two "in full" steps leave it out.
+    - Step 11 uses up `cy`'s allowance for a minute; the browser steps use `ada`'s, which is why it uses `cy`.
+  - **Found on the way** (details in MEMORY and `task.md`): `like`, `follow` and `add_comment` had no `atomic`; the label-change rule needs `pre_review_status`
+    read before `transition`; Chrome's accessible name adds a space before a separate `sr-only` span; the "only unseen items" filter of the arrival reload was
+    dead code; a subset pytest run (`apps/moderation apps/social apps/posts apps/reports apps/pipeline apps/core`) failed `test_the_search_query_uses_the_gin_index`
+    once while it passes alone and in the full suite (a planner-statistics order effect, unrelated to this part).
+  - **Left for you:** commit; run CI when you push; Part 14 (delete the items whose `actor` is the account; the export), Part 16/17 (the idle cutoff for the
+    poll, retention) have notes in `task.md`.
 
 - 2026-10-20 (Claude, Sonnet 5.5): **Part 13 planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `30649b4` ("Implemented Part 12: Search", committed by you), a clean tree. (The older text of this file said

@@ -256,6 +256,39 @@ export interface LedgerEntry {
   appeal: LedgerAppeal | null;
 }
 
+/** The nine kinds of notification (ARCHITECTURE §2). */
+export type NotificationType =
+  | "follow"
+  | "like"
+  | "comment"
+  | "repost"
+  | "verdict"
+  | "under_review"
+  | "removed"
+  | "emergency_demoted"
+  | "appeal_resolved";
+
+/** Part 13: `true` / `false` on a verdict, `upheld` / `overturned` on an appeal, else blank. */
+export type NotificationOutcome = "" | "true" | "false" | "upheld" | "overturned";
+
+/** The person who did it: null for a system message, a suspended or a deleted account. */
+export interface NotificationActor extends UserSummary {
+  /** Only on a `follow`: whether you follow them already (the Follow back button). */
+  following?: boolean;
+}
+
+/** One item of `GET /api/v1/notifications/` (ARCHITECTURE §9). */
+export interface NotificationData {
+  id: string;
+  type: NotificationType;
+  outcome: NotificationOutcome;
+  is_read: boolean;
+  created_at: string;
+  actor: NotificationActor | null;
+  post: { id: string; excerpt: string; post_type: PostType; status: PostStatus } | null;
+  comment: { id: string; excerpt: string } | null;
+}
+
 export type Role = "user" | "moderator" | "senior_moderator";
 
 /** `GET /api/v1/me/` (Part 1). */

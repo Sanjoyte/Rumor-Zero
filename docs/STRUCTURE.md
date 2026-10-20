@@ -159,7 +159,12 @@ rumor-zero/
 │   │   │                            /api/v1/me/reputation/events/), admin.py (ReputationEventAdmin, ReputationInline, `events_url`),
 │   │   │                            management/commands/recompute_reputation.py (--user, --check), tests (conftest, factories + 9 files);
 │   │   │                            ✅ 11D trend.py (the pure 30-day trend builder; the view adds the baseline and `DISTINCT ON` queries)
-│   │   └── notifications/       13  Notification model + services + API
+│   │   └── notifications/       ✅ 13 Notification (nine types, `outcome`, five named checks, two partial unique indexes; migration 0001),
+│   │       │                        services.py (`notify` + one helper per event, `discard_for_post/comment`, `unread_count`, `mark_read`:
+│   │       │                        called explicitly from social, posts, reports and moderation services in their transaction),
+│   │       │                        serializers.py + views.py + urls.py (GET /api/v1/notifications/, …/unread-count/, POST …/mark-read/),
+│   │       │                        admin.py (read-only NotificationAdmin), tests (conftest, factories + test_models, test_services,
+│   │       │                        test_hooks_social, test_hooks_pipeline, test_hooks_moderation, test_api, test_races, test_admin)
 │   │       (every app: models.py, services.py, serializers.py, views.py, urls.py, admin.py,
 │   │        migrations/, tests/ with test_models.py, test_services.py, test_api.py …)
 │   ├── templates/               ✅ 2   account/email/* (base_message.{txt,html}, email_confirmation{,_signup}_*, password_reset_key_*:
@@ -227,7 +232,7 @@ rumor-zero/
 │       │   │   ├── search/                  "/search" ✅ 12 ← b4 (static page; SearchPage reads `?q=&type=&filter=`)
 │       │   │   ├── u/[username]/            ✅ 6 ← c1 (light SSR + generateMetadata; ProfilePage; credibility 11B/11D)
 │       │   │   ├── u/[username]/followers/, following/   ✅ 6 ← c3 (Connections, client-rendered)
-│       │   │   ├── notifications/           ← c4 (13)
+│       │   │   ├── notifications/           "/notifications" ✅ 13 ← c4 (static page; NotificationsPage; noindex)
 │       │   │   └── settings/                ← c2 (14, photo 14B)
 │       │   ├── dev/shell/       ✅ 0C  dev-only shell preview with a sample user (404 in production)
 │       │   └── api/[...path]/route.ts       ✅ 0C  **API relay** to BACKEND_ORIGIN (not Next's proxy.ts); logic in lib/api/relay.ts
@@ -271,7 +276,8 @@ rumor-zero/
 │       │   │                        CredibilityPanel (+ CredibilityPanelView), useReputationTrend, reputation-api.ts, ledger-copy.ts
 │       │   ├── search/          ✅ 12 SearchPage, SearchBar, PostResults, PeopleResults, Highlight, highlight.ts (stems, split), search-api.ts,
 │       │   │                        search-params.ts, messages.ts
-│       │   ├── notifications/   13   NotificationList, useUnreadCount
+│       │   ├── notifications/   ✅ 13 NotificationsPage, NotificationList, NotificationItem, UnreadCountProvider (+ `useUnreadCount`; the 30 s
+│       │   │                        visible-only poll), notifications-api.ts, messages.ts; the badge is `components/shell/UnreadBadge.tsx`
 │       │   ├── settings/        14   ProfileForm, PasswordForm (uses ui/DangerZone); 14B AvatarUploader
 │       │   └── dev/             ✅ 0B  UiGallery and its sections, served at /dev/ui (404 in production builds); 0C ShellPreview (/dev/shell)
 │       ├── lib/

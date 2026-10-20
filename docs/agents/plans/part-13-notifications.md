@@ -2,7 +2,7 @@
 
 - **Status:** APPROVED by the user (Sanjoy Rozario) on 2026-10-20, together with the decisions and the defaults below; drafted
   2026-10-20 by Claude (Sonnet 5.5). Saved here and linked from HANDOFF at approval, so step 0 only needs to verify the workspace, record
-  the baselines and apply the small corrections noted there. **Not implemented yet.**
+  the baselines and apply the small corrections noted there. **Implemented 2026-10-20 (Claude, Sonnet 5.5); the as-built differences are in `task.md` Part 13 and ANALYSIS c-47.**
 - **Implement with:** Sonnet 5.5 · medium (task.md).
 - **Evidence (read-only):** HANDOFF, MEMORY, `task.md` Part 13 and the notes left by 7/7B/8/9/10/11/11C/12, ARCHITECTURE §2/§3/§4b/§9/§10,
   ANALYSIS c4/c-notes, STRUCTURE; backend `social/services.py`, `posts/services.py`, `pipeline/routing.py`, `reports/services.py`,

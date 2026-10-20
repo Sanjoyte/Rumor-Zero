@@ -27,6 +27,7 @@ function renderShell(props: {
   resendSecondsLeft?: number;
   resending?: boolean;
   onLogout?: () => void;
+  unreadCount?: number;
 }) {
   render(
     <AppShell {...props}>
@@ -353,5 +354,103 @@ describe("AppShell layout", () => {
     expect(screen.getByRole("link", { name: "Skip to content" })).toHaveAttribute("href", "#main");
     expect(screen.getByRole("main")).toHaveAttribute("id", "main");
     expect(screen.getByText("Page content")).toBeInTheDocument();
+  });
+});
+
+describe("AppShell, the unread badge (Part 13)", () => {
+  it("shows nothing for 0 and adds nothing to the link's name", () => {
+    const { railNav, bottomNav } = renderShell({ user, unreadCount: 0 });
+    expect(screen.queryByTestId("unread-badge")).toBeNull();
+    expect(within(railNav).getByRole("link", { name: "Notifications" })).toBeInTheDocument();
+    expect(within(bottomNav).getByRole("link", { name: "Notifications" })).toBeInTheDocument();
+  });
+
+  it("shows nothing when no count is given", () => {
+    renderShell({ user });
+    expect(screen.queryByTestId("unread-badge")).toBeNull();
+  });
+
+  it("puts the number on the rail's link (a pill and a dock corner) and on the phone tab", () => {
+    const { railNav, bottomNav } = renderShell({ user, unreadCount: 3 });
+    expect(
+      within(railNav)
+        .getAllByTestId("unread-badge")
+        .map((b) => b.textContent),
+    ).toEqual(["3", "3"]);
+    expect(
+      within(bottomNav)
+        .getAllByTestId("unread-badge")
+        .map((b) => b.textContent),
+    ).toEqual(["3"]);
+  });
+
+  it("is spoken as part of the link's name, once, and the visible number is hidden from readers", () => {
+    const { railNav, bottomNav } = renderShell({ user, unreadCount: 3 });
+    expect(
+      within(railNav).getByRole("link", { name: "Notifications, 3 unread" }),
+    ).toBeInTheDocument();
+    expect(
+      within(bottomNav).getByRole("link", { name: "Notifications, 3 unread" }),
+    ).toBeInTheDocument();
+    for (const badge of screen.getAllByTestId("unread-badge")) {
+      expect(badge).toHaveAttribute("aria-hidden", "true");
+    }
+  });
+
+  it("gives the whole name as one label, because browsers put a space before a hidden span's text", () => {
+    const { railNav, bottomNav } = renderShell({ user, unreadCount: 3 });
+    expect(within(railNav).getByRole("link", { name: /^Notifications/ })).toHaveAttribute(
+      "aria-label",
+      "Notifications, 3 unread",
+    );
+    expect(within(bottomNav).getByRole("link", { name: /^Notifications/ })).toHaveAttribute(
+      "aria-label",
+      "Notifications, 3 unread",
+    );
+    expect(within(railNav).getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-label");
+  });
+
+  it("caps the number at 99+", () => {
+    const { railNav } = renderShell({ user, unreadCount: 250 });
+    expect(within(railNav).getAllByTestId("unread-badge")[0]).toHaveTextContent("99+");
+    expect(
+      within(railNav).getByRole("link", { name: "Notifications, 99+ unread" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows 99 as 99", () => {
+    const { railNav } = renderShell({ user, unreadCount: 99 });
+    expect(within(railNav).getAllByTestId("unread-badge")[0]).toHaveTextContent("99");
+    expect(within(railNav).getAllByTestId("unread-badge")[0]).not.toHaveTextContent("99+");
+  });
+
+  it("badges only the Notifications link", () => {
+    const { railNav } = renderShell({ user, unreadCount: 4 });
+    for (const name of ["Home", "Search", "Profile", "Bookmarks"]) {
+      const link = within(railNav).getByRole("link", { name });
+      expect(within(link).queryByTestId("unread-badge")).toBeNull();
+    }
+  });
+
+  it("inverts the colours on the active item, which is already filled", () => {
+    pathname = "/notifications";
+    const { railNav } = renderShell({ user, unreadCount: 2 });
+    const link = within(railNav).getByRole("link", { name: "Notifications, 2 unread" });
+    expect(link).toHaveAttribute("aria-current", "page");
+    for (const badge of within(link).getAllByTestId("unread-badge")) {
+      expect(badge).toHaveClass("bg-on-secondary", "text-secondary");
+    }
+  });
+
+  it("uses the filled colours on an inactive item", () => {
+    const { railNav } = renderShell({ user, unreadCount: 2 });
+    for (const badge of within(railNav).getAllByTestId("unread-badge")) {
+      expect(badge).toHaveClass("bg-secondary", "text-on-secondary");
+    }
+  });
+
+  it("gives a visitor no Notifications link and so no badge", () => {
+    renderShell({ user: null, unreadCount: 5 });
+    expect(screen.queryByTestId("unread-badge")).toBeNull();
   });
 });

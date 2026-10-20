@@ -9,11 +9,24 @@ export interface ShellLinkProps {
   /** Shown as a tooltip where the label is visually hidden (the tablet icon dock). */
   title?: string;
   onClick?: MouseEventHandler<HTMLAnchorElement>;
+  /**
+   * The link's whole accessible name, when its content can't give it: "Notifications, 3 unread"
+   * (the unread count is a badge, and browsers put a space before text in a separate hidden span).
+   */
+  label?: string;
   children: ReactNode;
 }
 
 /** One shell destination: `aria-current="page"` when active; external links open a new tab. */
-export function ShellLink({ item, active, className, title, onClick, children }: ShellLinkProps) {
+export function ShellLink({
+  item,
+  active,
+  className,
+  title,
+  onClick,
+  label,
+  children,
+}: ShellLinkProps) {
   if (item.external) {
     return (
       <a
@@ -23,6 +36,7 @@ export function ShellLink({ item, active, className, title, onClick, children }:
         className={className}
         title={title}
         onClick={onClick}
+        aria-label={label}
       >
         {children}
         <span className="sr-only"> (opens in a new tab)</span>
@@ -33,6 +47,7 @@ export function ShellLink({ item, active, className, title, onClick, children }:
     <Link
       href={item.href}
       aria-current={active ? "page" : undefined}
+      aria-label={label}
       className={className}
       title={title}
       onClick={onClick}

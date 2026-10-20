@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
-import { Placeholder } from "@/components/shell/Placeholder";
+import { NotificationsPage } from "@/features/notifications/NotificationsPage";
 
-export const metadata: Metadata = { title: "Notifications" };
+// Behind a login and private: never indexed. The page is static; the list loads on the client.
+export const metadata: Metadata = {
+  title: "Notifications",
+  robots: { index: false, follow: false },
+};
 
-/** Placeholder; the screen arrives in a later part. */
 export default function Page() {
-  return <Placeholder title="Notifications" />;
+  return <NotificationsPage />;
 }

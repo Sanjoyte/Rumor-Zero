@@ -12,6 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.core.services import get_platform_settings
+from apps.notifications import services as notification_services
 from apps.posts import services as post_services
 from apps.posts.models import Post, PostStatus
 from apps.reports.models import Report, ReportStatus
@@ -94,9 +95,12 @@ def file_report(*, reporter, post_id, reason, details, now=None):
             counts_toward_threshold=counts_toward_threshold(reporter, cfg, now),
             created_at=now,
         )
-        post_services.record_report(
+        entered = post_services.record_report(
             post, counting_reports=counting_reports(post, cfg, now), cfg=cfg, now=now
         )
+        if entered:
+            # The author is told the post is under review, never who reported it (Part 13).
+            notification_services.entered_review(post=post, now=now)
     return report
 
 

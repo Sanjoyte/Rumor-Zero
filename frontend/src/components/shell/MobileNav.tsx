@@ -20,6 +20,7 @@ import {
   type ShellUser,
 } from "./nav-items";
 import { ShellLink } from "./ShellLink";
+import { UnreadBadge, unreadHint } from "./UnreadBadge";
 
 export const ACCOUNT_SHEET_ID = "rz-account-sheet";
 export const NEW_POST_HINT_ID = "rz-new-post-hint-tab";
@@ -33,23 +34,29 @@ export interface MobileNavProps {
   onNewPostBlocked?: () => void;
   /** Log out, the last entry of the account sheet. */
   actions?: MenuAction[];
+  /** Unread notifications, shown on the Notifications tab (Part 13). */
+  unreadCount?: number;
 }
 
 const TAB =
   "flex flex-1 flex-col items-center justify-center gap-0.5 font-label-badge text-label-badge transition-colors";
 
-function Tab({ item, pathname }: { item: NavItem; pathname: string }) {
+function Tab({ item, pathname, badge = 0 }: { item: NavItem; pathname: string; badge?: number }) {
   const active = isActive(pathname, item.href);
   return (
     <ShellLink
       item={item}
       active={active}
+      label={badge > 0 ? `${item.label}${unreadHint(badge)}` : undefined}
       className={cn(
         TAB,
         active ? "text-secondary" : "text-on-surface-variant hover:text-on-surface",
       )}
     >
-      <Icon name={item.icon} size="2xl" filled={active} />
+      <span className="relative flex">
+        <Icon name={item.icon} size="2xl" filled={active} />
+        <UnreadBadge count={badge} variant="corner" />
+      </span>
       <span>{item.label}</span>
     </ShellLink>
   );
@@ -66,6 +73,7 @@ export function MobileNav({
   onNewPost,
   onNewPostBlocked,
   actions,
+  unreadCount = 0,
 }: MobileNavProps) {
   const blocked = Boolean(user && !user.is_email_verified);
   return (
@@ -139,7 +147,7 @@ export function MobileNav({
                 {NEW_POST_BLOCKED_HINT}
               </span>
             )}
-            <Tab item={NOTIFICATIONS} pathname={pathname} />
+            <Tab item={NOTIFICATIONS} pathname={pathname} badge={unreadCount} />
             <Tab item={profileItem(user)} pathname={pathname} />
           </>
         ) : (

@@ -101,7 +101,7 @@ not let the review expand the part's scope without user approval.
 | 11C | Emergency posts | 9, 10, 11B | [x] Done (2026-10-20) |
 | 11D | Charts & stats | 7B, 11B | [x] Done (2026-10-20) |
 | 12 | Search | 6, 11B | [x] Done (2026-10-20) |
-| 13 | Notifications | 7, 7B, 10, 11, 11C | [ ] |
+| 13 | Notifications | 7, 7B, 10, 11, 11C | [x] Done (2026-10-20) |
 | 14 | Account settings, data export, deletion | 6, 7, 7B, 11B, 11D | [ ] |
 | 14B | Photo avatars | 14 | [ ] |
 | 15 | Landing & static pages | 4, 11B, 11C | [ ] |
@@ -1106,7 +1106,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
   - **Part 11 (done 2026-10-13):** the `appeal` FK on `moderation_actions` (added with the `Appeal` model), the queue's removed-with-an-open-removal-appeal entries (and Escalate for them), Restore and Keep removed; the author's view of `public_note` (the latest `removed` row); Restore never touches `review_started_at` (the post isn't under review). A post removed while under review for the pipeline or both stores `pre_removal_status=pending`, so a Restore would put an already-checked post back in the pipeline queue: decide how Restore handles it (see also Part 9's note about the attempt count).
   - **Part 11B:** the reputation calls in the five services (`report_upheld` on Remove and Mark FALSE: `resolve_open_reports` will need to return the reporters) and the credibility inline.
   - **Part 11C:** the emergency filter and "active emergencies first" ordering, Mark FALSE's emergency effects, Demote emergency, Block emergency posting.
-  - **Part 13:** notify the author on verdict, removal and review changes, in the same transaction as the services' writes.
+  - **Part 13:** notify the author on verdict, removal and review changes, in the same transaction as the services' writes. *(Done in Part 13.)*
   - **Part 14 or 16:** a suspended account's posts stay visible while its profile is a 404 (Part 6): decide whether suspension hides content. **Part 16:** whether moderators should see emails in the user list.
   - **Admin polish** left for when it bites: the changelist table is wide beside its filter column (it scrolls sideways).
 - **Verified:** see HANDOFF (backend 2709 tests, frontend 1588, E2E 38). The PowerShell blocks of the `docs/test-command.md` section were not run on Windows. CI itself runs when you push.
@@ -1173,7 +1173,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 - **Validated by:** 35 backend mutation checks, every one caught after the fixes (two equivalent ones were removed as dead code, three test gaps were closed: the removal reason's query and serializer guards each tested alone, and a visitor's profile pages); 24 frontend mutation checks, every one caught (one test added for an empty row under the verdict, one ref and test for the same-tick double click); the threaded tests (`test_races.py`, `test_pipeline_interplay.py`) 10 runs in a row; the Linux blocks of `docs/test-command.md` Part 11 extracted from the doc and run verbatim (steps 3 to 6, 9 and 12, output diffed with the doc's) plus a scripted headless-Chromium run of steps 7, 8, 10 and 11 (screenshots of the queue, the dialogs, the post page, the profile and a 390 px phone); migrations applied, rolled back to `moderation 0002` and applied again on a database holding appeals (the groups kept Part 10's lists after the rollback).
 - **Not done (later parts):**
   - **Part 11B:** the reputation calls in `file_appeal`'s outcomes and in `_perform` (Restore reverses `post_removed` for the author and the reposters; an overturned label appeal reverses `fact_false`; Remove on a label appeal records `post_removed`), and the negative ledger rows' link to the appeal.
-  - **Part 13:** `appeal_resolved` notifications from `_perform` when `effect.appeal_status` is set (same transaction).
+  - **Part 13:** `appeal_resolved` notifications from `_perform` when `effect.appeal_status` is set (same transaction). *(Done in Part 13.)*
   - **Part 14:** appeals in the data export (account deletion already cascades them). **Part 16:** whether a deleted post's open appeal should be closed; the `appeal` throttle with real usage.
 - **Verified:** see HANDOFF (backend 2965 tests, frontend 1692, E2E 40 in dev and CI mode). The PowerShell blocks of the `docs/test-command.md` section were not run on Windows. CI itself runs when you push.
 
@@ -1261,6 +1261,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
   - **Part 12:** people search reuses the user row's `reputation` and `counts.verified`.
   - **Part 14:** the export includes the ledger; account deletion cascades it and must never lock a user before its posts.
   - **From Part 12:** the export must skip `posts_post.search_vector` (a stored generated column, nothing to export or restore).
+  - **From Part 13:** delete the notifications whose `actor` is the account (`notifications_actor_idx`; SET_NULL would leave "Someone liked your post" and "Someone followed you" with no link) before the user row, never locking the user before their posts; decide whether the export includes the table (it doesn't now).
   - **Part 15:** the `/how-it-works#credibility` text and anchor.
   - **Part 16:** the per-write aggregate cost, the lock fan-out on a post with thousands of reposters, a moderator deciding a post they reposted (the +0.25 gain), report-credit farming with real data.
   - **Part 17:** the stub in production would feed this public score (the existing launch blocker).
@@ -1307,7 +1308,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
   - the **Demote emergency** action
   - **Block emergency posting** on UserAdmin
   - the "Emergency (active)" filter
-- The `emergency_demoted` notification is wired in Part 13.
+- The `emergency_demoted` notification is wired in Part 13. *(Done in Part 13.)*
 - **From Part 10:** the admin queue, its `QueueFilter` and the five actions exist (`apps/moderation/`): add the emergency filter and put active emergencies first in `PostAdmin.ordering` (above `-report_count`); Mark FALSE's emergency effects go in `rules.transition` and `services.mark_false` (the `ModerationAction` kinds `emergency_demoted` and `emergency_blocked` already exist); the queue's emergency column already says Active / Ended / —; Demote emergency is a sixth action in `ACTIONS` and `rules.py`; Block emergency posting is a logged `UserAdmin` action for seniors or moderators (decide) with `subject_user` on the audit row. A permission or group change needs a new migration with its own frozen lists (`test_roles.py` fails until it exists).
 - **From Part 11B:** an emergency post's Mark FALSE (or pipeline FALSE) already records `emergency_false` (N + 3) and `repost_emergency_false` through `reputation.services.settle_post`, which `_perform` calls after every action but Escalate; a new action that changes `Post.status` must settle too (`pending_changes(post)` must stay empty). Write `emergency_blocked_until` **inside or after** `settle_post`'s user locks (post first, then users sorted, `FOR NO KEY UPDATE`; never a user before a post). Eligibility reads the stored `users.reputation_score` (the last migration is `moderation.0005_reputation_permission`).
 
@@ -1354,7 +1355,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
   - **The composer treats an allowance without the `emergency` block as "not allowed"** (a frontend deployed before its backend doesn't crash).
   - **The folded bar has no "·" separator** (it dangled at 390 px); it reads "2 emergency posts pinned" with Show at the right.
 - **Not done (later parts):**
-  - **Part 13:** notify `emergency_demoted` from `moderation.services._perform` (Demote, and Mark FALSE when `effect.demoted`); the hook point is the `emergency_demoted` row.
+  - **Part 13:** notify `emergency_demoted` from `moderation.services._perform` (Demote, and Mark FALSE when `effect.demoted`); the hook point is the `emergency_demoted` row. *(Done in Part 13.)*
   - **Part 15:** the `/how-it-works` emergency section.
   - **Part 16:** the pinned query on every first page and the Following reposts side's `NOT IN` under load; `posts_pending_queue_idx` no longer serves the processor's `Case` ordering (it still serves the filter); emergency abuse with real data.
   - **Part 17:** with the stub in production, a late FALSE on an expired emergency also blocks its author (part of the existing launch blocker).
@@ -1495,7 +1496,7 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 ---
 
 ## Part 13: Notifications
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-20)
 **Goal:** the DB-backed notifications from guide §11, polled every 30 s while the tab is visible.
 **Depends on:** 7, 7B, 10, 11, 11C (all the event sources).
 **Stitch files to convert:** `c4_notifications`. The item types are rebuilt for the MVP and there are no filter tabs. The emergency item's `tertiary` styling is used for `emergency_demoted`.
@@ -1513,10 +1514,32 @@ The Report action is a **flag button** in the card's action bar and a "Report" b
 **API endpoints:** the three notification endpoints above.
 
 **Acceptance criteria**
-- [ ] Each event creates exactly one notification for the right recipient; none for your own actions; repeated like/unlike or repost/unrepost doesn't spam
-- [ ] The unread count uses ≤2 queries and polling stops on a hidden tab
+- [x] Each event creates exactly one notification for the right recipient; none for your own actions; repeated like/unlike or repost/unrepost doesn't spam
+- [x] The unread count uses ≤2 queries and polling stops on a hidden tab
 
 **Required tests:** one creation test per event type, dedupe, API, NotificationItem variants, hook timers; E2E: B likes A's post → A sees the badge and the item.
+
+**Decisions and deviations (plan approved 2026-10-20; built 2026-10-20; recorded in ARCHITECTURE §2/§3/§4b/§8/§9/§10, ANALYSIS c-47, STRUCTURE, MEMORY):**
+- **User decisions (2026-10-20):**
+  - **An appeal-closing action sends two items:** `appeal_resolved` **plus** the verdict or removal (Mark verified, Mark FALSE and Remove on a label appeal); Restore and Keep removed send `appeal_resolved` only.
+  - **Mark FALSE on a pinned emergency sends the verdict and `emergency_demoted`;** Demote sends `emergency_demoted` only.
+  - **Silent:** Dismiss reports (and Escalate, filing an appeal, the automatic block and lift). Nine types, no tenth.
+  - **The open `/notifications` page reloads itself** (a poll that sees the count rise fetches the first page and puts the new items on top).
+  - **Author only:** reposters are not told (follow-up). **Follow back** button on the follow item. **No retention job.**
+- **Defaults approved with the plan:** a new `outcome` column (§2); moderation items have no actor; permanent database-enforced dedupe for follow, like and repost with the type in the key; items vanish with their post or comment; throttle `notifications` 120/min per user; exact unread count (`99+` only in the badge); a suspended actor shows as "Someone"; server-made excerpts; a verdict item only when the label changes (found in the design review).
+- **Built differently from the plan (found while building):**
+  - **`notify()` takes ids** (`recipient_id`, `actor_id`, `post_id`, `comment_id`) instead of objects, and the named helpers take the objects, so no call site loads a row it doesn't have.
+  - **The "only unseen items" filter of the arrival reload was dead code** (a mutation check): the page now prepends the whole fresh first page, oldest first, and an already-shown item is replaced by its fresher copy.
+  - **The unread link's name is one `aria-label`** (`ShellLink` gained `label`): in Chrome a separate `sr-only` span read "Notifications , 3 unread"; jsdom couldn't show it, the E2E run did. `FollowButton` gained an additive `label` ("Follow back").
+  - **The signed-out guard on the derived count was redundant** (a change of person resets the state) and was removed.
+  - **Existing tests changed on purpose:** only `core/tests/test_settings.py` (thirteen throttle scopes), `app/dev/ui/page.test.tsx` (renders inside an `AuthProvider`; a notifications section), `app/(app)/layout.test.tsx` and `AppShell.test.tsx` (the badge). No existing backend test needed any other change.
+  - **No migration other than `notifications.0001_initial`, no dependency, no variable.**
+- **Not done (later parts):**
+  - **Part 14:** account deletion should delete the items whose `actor` is the account (SET_NULL would leave "Someone liked your post"); decide whether the export includes the table (it doesn't now).
+  - **Part 16/17:** an idle cutoff for the 30 s poll of a visible but untouched tab (each poll is a Worker request and keeps Render and Neon awake); retention (nothing is pruned); the rare stray row from a like that commits just after `delete_post` (the list hides it, the count doesn't).
+  - **Later:** notices to a post's reposters, notification preferences, email or push, grouping ("3 people liked…").
+- **Validated by:** 47 backend and 51 frontend mutation checks (every one caught or shown equivalent after the fixes: five first-run frontend survivors became two tests, one removal of dead code, one removed vacuous test, one removed redundant guard); the threaded tests 10 runs in a row; a 65-second count of the poll's requests and a hidden-tab check in headless Chromium.
+- **Verified:** see HANDOFF (backend 4073 tests, frontend 2148, E2E 53 in dev and CI mode). Headless Chromium at 1280, 1024 and 390 px: 0 px horizontal overflow, screenshots looked at. The PowerShell blocks of the `docs/test-command.md` section were not run on Windows. CI itself runs when you push.
 
 **Recommended models**
 - **Plan:** Sonnet 5.5 · medium. The hooks into existing services are straightforward.
@@ -1673,6 +1696,7 @@ Plus toasts and field errors.
   - the credibility score's appeal and audit path
   - **From Part 11B:** the per-write totals aggregate in `settle_post`, the user-lock fan-out on a post with thousands of reposters, a moderator deciding a post they reposted (their +0.25), and report-credit farming with real data
   - **From Part 11C:** the pinned query on every first page of Recent and Following, the Following reposts side's `NOT IN` the pinnable ids, `posts_pending_queue_idx` no longer serving the processor's `Case` ordering (it still serves the filter), and emergency abuse with real data (the daily limit, the block, the lower report threshold)
+  - **From Part 13:** an idle cutoff for the 30 s unread-count poll of a visible but untouched tab (each poll is one Worker request and keeps Render and Neon awake), a retention rule for old notifications (nothing is pruned), and the stray row a like can leave when it commits just after `delete_post`.
   - **From Part 12:** search under load (a very common word ranks every match before the 20 are cut; `search` is throttled per IP only), the search text in Sentry request URLs and access logs (ARCHITECTURE §12), a trigram index for people, and the Part 17 `migrate` of `posts.0003` (a stored generated column rewrites `posts_post` and the GIN build blocks writes: fine before launch).
 - `check --deploy` clean.
 - Security headers and cookie flags verified by tests; admin path confirmed.

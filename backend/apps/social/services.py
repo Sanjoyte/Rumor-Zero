@@ -15,6 +15,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.accounts.validators import normalize_username
+from apps.notifications import services as notification_services
 from apps.posts.models import Post, PostStatus
 from apps.social.feed import bust_following_feed
 from apps.social.models import Bookmark, Comment, Follow, Like, Repost
@@ -57,11 +58,15 @@ def follow(*, follower, target):
     """Follow `target`. True if this created the follow, False if it already existed.
 
     `get_or_create` survives two simultaneous requests: the unique pair refuses the second insert
-    and Django reads the row back.
+    and Django reads the row back. A new follow tells the target (Part 13), in the same transaction;
+    following again, or after an unfollow, tells nobody twice.
     """
     if follower.pk == target.pk:
         raise SelfFollow
-    _, created = Follow.objects.get_or_create(follower=follower, following=target)
+    with transaction.atomic():
+        _, created = Follow.objects.get_or_create(follower=follower, following=target)
+        if created:
+            notification_services.followed(follower=follower, target=target)
     bust_following_feed(follower.pk)
     return created
 
@@ -90,7 +95,7 @@ def get_visible_post(post_id):
     Likes and comments are allowed on every such post, pending and under review included
     (ANALYSIS c1); a deleted or removed post has none (a removed post's author gets 404 too).
     """
-    post = Post.objects.visible().only("id").filter(pk=post_id).first()
+    post = Post.objects.visible().only("id", "author_id").filter(pk=post_id).first()
     if post is None:
         raise PostNotFound
     return post
@@ -103,7 +108,10 @@ def like(*, user, post_id):
     and Django reads the row back.
     """
     post = get_visible_post(post_id)
-    _, created = Like.objects.get_or_create(user=user, post=post)
+    with transaction.atomic():
+        _, created = Like.objects.get_or_create(user=user, post=post)
+        if created:
+            notification_services.liked(user=user, post=post)
     return created
 
 
@@ -121,9 +129,11 @@ def unlike(*, user, post_id):
 def add_comment(*, author, post_id, content, now=None):
     """Add a comment (already trimmed and length-checked by the serializer)."""
     post = get_visible_post(post_id)
-    return Comment.objects.create(
-        post=post, author=author, content=content, created_at=now or timezone.now()
-    )
+    now = now or timezone.now()
+    with transaction.atomic():
+        comment = Comment.objects.create(post=post, author=author, content=content, created_at=now)
+        notification_services.commented(author=author, post=post, comment=comment, now=now)
+    return comment
 
 
 def delete_comment(*, comment_id, user, now=None):
@@ -151,6 +161,8 @@ def delete_comment(*, comment_id, user, now=None):
             raise NotCommentAuthor
         comment.deleted_at = now
         comment.save(update_fields=["deleted_at"])
+        # The post author's "commented on your post" goes with the comment (Part 13).
+        notification_services.discard_for_comment(comment.pk)
     return comment
 
 
@@ -200,6 +212,8 @@ def repost(*, user, post_id, now=None):
             _, created = Repost.objects.get_or_create(
                 user=user, post=post, defaults={"status_at_repost": post.status, "created_at": now}
             )
+            if created:
+                notification_services.reposted(user=user, post=post, now=now)
         bust_following_feed(user.pk)
     return created
 

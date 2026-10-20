@@ -1,7 +1,9 @@
 from django.contrib import admin, messages
+from django.db import transaction
 from django.utils.text import Truncator
 
 from apps.core.admin_mixins import HistoryNeedsLog
+from apps.notifications import services as notification_services
 from apps.social.models import Bookmark, Comment, Follow, Like, Repost
 
 
@@ -89,9 +91,14 @@ class CommentAdmin(HistoryNeedsLog, admin.ModelAdmin):
         word = "Hidden" if hidden else "Unhidden"
         changed = 0
         for comment in queryset.filter(is_hidden=not hidden):
-            comment.is_hidden = hidden
-            comment.save(update_fields=["is_hidden"])
-            self.log_change(request, comment, word)
+            # Django's changelist actions run outside a transaction: one per comment, so a hidden
+            # comment and the removal of its notification (Part 13) stand or fall together.
+            with transaction.atomic():
+                comment.is_hidden = hidden
+                comment.save(update_fields=["is_hidden"])
+                if hidden:
+                    notification_services.discard_for_comment(comment.pk)
+                self.log_change(request, comment, word)
             changed += 1
         self.message_user(
             request, f"{word}: {changed} comment{'' if changed == 1 else 's'}.", messages.SUCCESS

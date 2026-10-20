@@ -1,7 +1,8 @@
 """Creating, deleting and reporting posts, the fact quota, and writing pipeline results
 (ARCHITECTURE §3, §4, §4b, §5, §6). A pipeline label also settles the author's and the reposters'
 credibility events (§4a) in the same transaction, and a FALSE emergency blocks its author's
-emergency posting (§4b, through `apps/moderation/services.py`, the block's only writer).
+emergency posting (§4b, through `apps/moderation/services.py`, the block's only writer). The
+author is told of a label or a review (Part 13), also in that transaction.
 
 Only this module and `apps/moderation/services.py` change `Post.status`. There is no HTTP
 here: the views turn these domain errors into responses.
@@ -18,6 +19,7 @@ from django.utils import timezone
 
 from apps.accounts.models import User
 from apps.core.services import get_platform_settings
+from apps.notifications import services as notification_services
 from apps.pipeline import routing
 from apps.posts import emergency
 from apps.posts.models import Post, PostStatus, PostType
@@ -230,6 +232,8 @@ def delete_post(*, post_id, user, now=None):
             raise NotPostAuthor
         post.deleted_at = now
         post.save(update_fields=["deleted_at", "updated_at"])
+        # Every notification about the post goes with it (Part 13): a plain DELETE, no new lock.
+        notification_services.discard_for_post(post.pk)
     return post
 
 
@@ -327,6 +331,9 @@ def record_pipeline_result(post_id, result, *, claimed_attempts, now):
             from apps.moderation.services import block_after_emergency_false
 
             block_after_emergency_false(post, rows, now=now, moderator=None)
+            notification_services.verdict_reached(post=post, label=post.status, now=now)
+        elif outcome == routing.Outcome.ENTERED_REVIEW:
+            notification_services.entered_review(post=post, now=now)
         return outcome
 
 
@@ -340,4 +347,6 @@ def record_pipeline_failure(post_id, error, *, claimed_attempts, now):
         outcome = routing.apply_pipeline_failure(post, error, now)
         if outcome != routing.Outcome.IGNORED:
             post.save(update_fields=_FAILURE_FIELDS)
+        if outcome == routing.Outcome.ENTERED_REVIEW:
+            notification_services.entered_review(post=post, now=now)
         return outcome

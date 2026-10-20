@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/Textarea";
 import { Toggle } from "@/components/ui/Toggle";
 import { VerdictStripe } from "@/components/ui/VerdictStripe";
 import { confirmationText, EMERGENCY_COPY } from "@/features/posts/emergency-copy";
+import { NotificationItem } from "@/features/notifications/NotificationItem";
 import { PinnedEmergencies, PinnedEmergenciesBar } from "@/features/posts/PinnedEmergencies";
 import { PostCard, type PostCardProps } from "@/features/posts/PostCard";
 import { PostStatsView } from "@/features/posts/PostStats";
@@ -28,11 +29,56 @@ import { RemovedPostCard } from "@/features/posts/RemovedPostCard";
 import { queryTerms } from "@/features/search/highlight";
 import { SearchBar } from "@/features/search/SearchBar";
 import { UserRow } from "@/features/social/UserRow";
-import type { DailyBucket, LedgerEntry, Post, PostStats, UserRowData } from "@/lib/api/types";
+import type {
+  DailyBucket,
+  LedgerEntry,
+  NotificationData,
+  Post,
+  PostStats,
+  UserRowData,
+} from "@/lib/api/types";
 import { scorePassword } from "@/lib/password-strength";
 import { Section } from "./GalleryLayout";
 
 const NOW = new Date("2026-09-30T12:00:00Z");
+
+/** The nine notification kinds as the API sends them (Part 13; Stitch c4). */
+const NOTE_ACTOR = { id: "d-1", username: "dev_bo", display_name: "Dev Bo", avatar_url: null };
+const NOTE_POST = {
+  id: "11111111-1111-4111-8111-111111111111",
+  excerpt: "Solar capacity grew 30% last year, and capacity auctions broke records.",
+  post_type: "fact" as const,
+  status: "verified_true" as const,
+};
+function note(i: number, fields: Partial<NotificationData>): NotificationData {
+  return {
+    id: `dev-note-${i}`,
+    type: "like",
+    outcome: "",
+    is_read: i > 6,
+    created_at: new Date(NOW.getTime() - (i + 1) * 17 * 60_000).toISOString(),
+    actor: NOTE_ACTOR,
+    post: NOTE_POST,
+    comment: null,
+    ...fields,
+  };
+}
+const NOTIFICATION_SPECIMENS: NotificationData[] = [
+  note(0, { type: "follow", post: null, actor: { ...NOTE_ACTOR, following: false } }),
+  note(1, { type: "like" }),
+  note(2, {
+    type: "comment",
+    comment: { id: "c-1", excerpt: "Does this include rooftop panels?" },
+  }),
+  note(3, { type: "repost", post: { ...NOTE_POST, post_type: "opinion", status: "published" } }),
+  note(4, { type: "verdict", outcome: "true", actor: null }),
+  note(5, { type: "verdict", outcome: "false", actor: null }),
+  note(6, { type: "under_review", actor: null }),
+  note(7, { type: "removed", actor: null }),
+  note(8, { type: "emergency_demoted", actor: null }),
+  note(9, { type: "appeal_resolved", outcome: "upheld", actor: null }),
+  note(10, { type: "appeal_resolved", outcome: "overturned", actor: null }),
+];
 
 const STATS_DAILY: DailyBucket[] = Array.from({ length: 14 }, (_, i) => ({
   date: `2026-10-${String(i + 1).padStart(2, "0")}`,
@@ -803,6 +849,24 @@ export function StitchSections() {
         </div>
         <ComposerModal open={composer} onClose={() => setComposer(false)} />
         <ReportModal open={report} onClose={() => setReport(false)} />
+      </Section>
+
+      <Section
+        id="stitch-notifications"
+        title="Stitch c4: notifications"
+        note="Part 13. Compare with c4_notifications/code.html at 1280px: nine kinds, no filter tabs, no preferences link. The first seven are unread."
+      >
+        <div className="max-w-reading divide-y divide-outline-variant/30 overflow-hidden rounded-lg border border-outline-variant/30 bg-surface-container-lowest">
+          {NOTIFICATION_SPECIMENS.map((item) => (
+            <NotificationItem
+              key={item.id}
+              item={item}
+              read={item.is_read}
+              onOpen={NOOP}
+              now={NOW}
+            />
+          ))}
+        </div>
       </Section>
 
       <Section

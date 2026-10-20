@@ -18,6 +18,8 @@ export interface FollowButtonProps {
   initialFollowing: boolean;
   /** Called at once with the new state, and again with the old one if the request fails. */
   onChange?: (following: boolean) => void;
+  /** The idle word, "Follow" unless a screen says better ("Follow back" under a new follower). */
+  label?: string;
   className?: string;
 }
 
@@ -32,6 +34,7 @@ export function FollowButton({
   username,
   initialFollowing,
   onChange,
+  label = "Follow",
   className,
 }: FollowButtonProps) {
   const { status, user } = useAuth();
@@ -57,7 +60,7 @@ export function FollowButton({
         href={loginRedirectFor(`/u/${username}`)}
         className={buttonClasses({ variant: "primary", className })}
       >
-        Follow
+        {label}
       </Link>
     );
   }
@@ -75,7 +78,7 @@ export function FollowButton({
             className: cn("cursor-not-allowed opacity-60", className),
           })}
         >
-          Follow
+          {label}
         </button>
         <span id={HINT_ID} className="sr-only">
           Verify your email to follow people.
@@ -127,7 +130,7 @@ export function FollowButton({
           </span>
         </span>
       ) : (
-        "Follow"
+        label
       )}
     </Button>
   );

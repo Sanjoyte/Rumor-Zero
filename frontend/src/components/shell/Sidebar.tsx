@@ -12,6 +12,7 @@ import {
   LOG_IN,
   NEW_POST,
   NEW_POST_BLOCKED_HINT,
+  NOTIFICATIONS,
   nameOf,
   primaryItems,
   userMenuItems,
@@ -19,6 +20,7 @@ import {
   type ShellUser,
 } from "./nav-items";
 import { ShellLink } from "./ShellLink";
+import { UnreadBadge, unreadHint } from "./UnreadBadge";
 
 export const USER_MENU_ID = "rz-user-menu";
 export const NEW_POST_HINT_ID = "rz-new-post-hint-rail";
@@ -34,6 +36,8 @@ export interface SidebarProps {
   onNewPostBlocked?: () => void;
   /** Log out, the last entry of the user menu. */
   actions?: MenuAction[];
+  /** Unread notifications, shown on the Notifications link (Part 13). */
+  unreadCount?: number;
 }
 
 /** Stitch b1 L20/L21 (main list) and L32/L33 (footer list): same shape, footer is smaller. */
@@ -53,17 +57,39 @@ function SidebarLink({
   item,
   pathname,
   size,
+  badge = 0,
 }: {
   item: NavItem;
   pathname: string;
   size: "main" | "footer";
+  /** Unread count for this link (only Notifications has one). */
+  badge?: number;
 }) {
   const active = !item.external && isActive(pathname, item.href);
   return (
-    <ShellLink item={item} active={active} title={item.label} className={itemClasses(active, size)}>
-      <Icon name={item.icon} size="xl" />
+    <ShellLink
+      item={item}
+      active={active}
+      title={item.label}
+      label={badge > 0 ? `${item.label}${unreadHint(badge)}` : undefined}
+      className={itemClasses(active, size)}
+    >
+      <span className="relative flex">
+        <Icon name={item.icon} size="xl" />
+        {/* The dock has no room for a pill: a number on the icon's corner. */}
+        {badge > 0 && (
+          <span className="xl:hidden">
+            <UnreadBadge count={badge} variant="corner" inverted={active} />
+          </span>
+        )}
+      </span>
       {/* Hidden in the icon dock, but still the link's name. */}
       <span className="sr-only xl:not-sr-only">{item.label}</span>
+      {badge > 0 && (
+        <span className="ml-auto hidden xl:flex">
+          <UnreadBadge count={badge} variant="pill" inverted={active} />
+        </span>
+      )}
     </ShellLink>
   );
 }
@@ -79,6 +105,7 @@ export function Sidebar({
   onNewPost,
   onNewPostBlocked,
   actions,
+  unreadCount = 0,
 }: SidebarProps) {
   const footer = footerItems(user);
   const blocked = Boolean(user && !user.is_email_verified);
@@ -99,7 +126,13 @@ export function Sidebar({
         <div className="flex flex-col gap-space-sm p-space-sm">
           <nav aria-label="Main" className="flex flex-col gap-space-xs">
             {primaryItems(user).map((item) => (
-              <SidebarLink key={item.href} item={item} pathname={pathname} size="main" />
+              <SidebarLink
+                key={item.href}
+                item={item}
+                pathname={pathname}
+                size="main"
+                badge={item.href === NOTIFICATIONS.href ? unreadCount : 0}
+              />
             ))}
           </nav>
           {user && (
