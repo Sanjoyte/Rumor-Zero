@@ -7,8 +7,8 @@ holds the **extras**.
 
 `sync_role_groups()` applies the lists to the live registry (the tests' `role_groups` fixture and
 `manage.py` shells use it). The database itself is filled by migrations `0002_role_groups`,
-`0004_appeal_permission`, `0005_reputation_permission` and `0007_emergency_permission`, which carry
-their own frozen copies of these lists: a migration must not
+`0004_appeal_permission`, `0005_reputation_permission`, `0007_emergency_permission` and
+`0009_photo_permissions`, which carry their own frozen copies of these lists: a migration must not
 import a list that later parts edit (a fresh `migrate` would then grant permissions on models that
 don't exist yet). A part that
 changes a list here adds a new migration with the new frozen lists; `test_roles.py` fails until it
@@ -23,7 +23,8 @@ from apps.accounts.models import MODERATORS_GROUP, SENIORS_GROUP
 # actions are gated on `posts.change_post`; the page itself stays read-only), hide comments, see
 # who people are and what the settings are, read the appeals (Part 11) and the whole credibility
 # ledger (Part 11B, user decision 2026-10-13), and block or unblock an account's emergency posting
-# (Part 11C, user decision 2026-10-19).
+# (Part 11C, user decision 2026-10-19), and remove profile photos and block or allow photo uploads
+# (Part 14B; `accounts.view_avatar` lets them open the photo list).
 MODERATOR_PERMISSIONS = (
     "posts.view_post",
     "posts.change_post",
@@ -35,6 +36,8 @@ MODERATOR_PERMISSIONS = (
     "moderation.view_appeal",
     "reputation.view_reputationevent",
     "moderation.block_emergency_posting",
+    "moderation.moderate_profile_photos",
+    "accounts.view_avatar",
 )
 
 # Seniors, on top of the above: change roles and suspend (accounts), delete accounts, edit the

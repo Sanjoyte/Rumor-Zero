@@ -282,12 +282,21 @@ def transition(act, post, *, moderator, now, appeal, public_note=""):
     )
 
 
-# ---------- Part 11C: blocking an account's emergency posting ----------
+# ---------- Acts on an account: its emergency posting (11C) and its profile photo (14B) ----------
 
 
 class AccountAct(enum.StrEnum):
     BLOCK_EMERGENCY = "block_emergency"
     UNBLOCK_EMERGENCY = "unblock_emergency"
+    REMOVE_PHOTO = "remove_photo"
+    BLOCK_PHOTO_UPLOADS = "block_photo_uploads"
+    ALLOW_PHOTO_UPLOADS = "allow_photo_uploads"
+
+
+EMERGENCY_ACTS = frozenset({AccountAct.BLOCK_EMERGENCY, AccountAct.UNBLOCK_EMERGENCY})
+PHOTO_ACTS = frozenset(
+    {AccountAct.REMOVE_PHOTO, AccountAct.BLOCK_PHOTO_UPLOADS, AccountAct.ALLOW_PHOTO_UPLOADS}
+)
 
 
 NO_ACCOUNT = Refusal("no_account", "no such account")
@@ -296,21 +305,32 @@ OWN_ACCOUNT = Refusal("own_account", "your own account")
 NO_BLOCK_LENGTH = Refusal("no_block_length", "the block length is 0 days")
 ALREADY_BLOCKED = Refusal("already_blocked", "already blocked at least that long")
 NOT_BLOCKED = Refusal("not_blocked", "not blocked")
+NO_PHOTO = Refusal("no_photo", "no profile photo")
+UPLOADS_ALREADY_BLOCKED = Refusal("uploads_already_blocked", "photo uploads already blocked")
+UPLOADS_NOT_BLOCKED = Refusal("uploads_not_blocked", "photo uploads not blocked")
 
 
 def account_refusal(act, target, moderator, *, block_days, now):
-    """Why `moderator` can't block or unblock `target`'s emergency posting at `now`, or None.
+    """Why `moderator` can't do `act` to `target`'s account at `now`, or None.
 
     Nobody but a superuser may act on a superuser's account or their own (`UserAdmin._may_touch`'s
     rule). A Block lasts `block_days` (the platform's `emergency_false_cooldown_days`): refused
     when that is 0, or when the current block already ends at or after `now + block_days`. An
-    Unblock needs a block that hasn't ended. `target` is the account's locked row.
+    Unblock needs a block that hasn't ended. The photo acts (Part 14B) read the photo state of the
+    account: Remove needs a photo, Block photo uploads needs uploads that aren't blocked yet and
+    Allow photo uploads needs a block to lift. `target` is the account's locked row.
     """
     if not moderator.is_superuser:
         if target.is_superuser:
             return SUPERUSER_ACCOUNT
         if target.pk == moderator.pk:
             return OWN_ACCOUNT
+    if act == AccountAct.REMOVE_PHOTO:
+        return None if target.avatar_version else NO_PHOTO
+    if act == AccountAct.BLOCK_PHOTO_UPLOADS:
+        return UPLOADS_ALREADY_BLOCKED if target.avatar_uploads_blocked else None
+    if act == AccountAct.ALLOW_PHOTO_UPLOADS:
+        return None if target.avatar_uploads_blocked else UPLOADS_NOT_BLOCKED
     blocked_until = target.emergency_blocked_until
     if act == AccountAct.BLOCK_EMERGENCY:
         if block_days <= 0:

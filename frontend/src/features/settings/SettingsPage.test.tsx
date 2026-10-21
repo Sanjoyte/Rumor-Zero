@@ -67,6 +67,26 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("button", { name: /Download your data/ })).toBeInTheDocument();
   });
 
+  it("puts the photo card first in the profile section, above the form", async () => {
+    await setup({ avatar_url: "/api/v1/avatars/u-1/0123456789abcdef-256.webp" });
+    const profile = document.getElementById("section-profile")!;
+    const photoTitle = within(profile).getByRole("heading", { level: 3, name: "Profile photo" });
+    const nameField = within(profile).getByLabelText("Display name");
+    expect(
+      photoTitle.compareDocumentPosition(nameField) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    // The card is outside the profile form and its fieldset, which lock for unverified accounts.
+    expect(nameField.closest("form")?.contains(photoTitle)).toBe(false);
+    expect(within(profile).getByRole("button", { name: "Change photo" })).toBeInTheDocument();
+    expect(within(profile).getByRole("button", { name: "Remove photo" })).toBeInTheDocument();
+  });
+
+  it("an unverified account can't pick a photo but can still use the rest of the page", async () => {
+    await setup({ is_email_verified: false });
+    expect(screen.getByRole("button", { name: "Upload photo" })).toBeDisabled();
+    expect(screen.getByText("Verify your email address to add a photo.")).toBeInTheDocument();
+  });
+
   it("mounts the credibility panel open, with the public score from /me", async () => {
     await setup({ public_score: 62 });
     expect(await screen.findByText(/^Your score:/)).toBeInTheDocument();

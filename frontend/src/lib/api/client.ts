@@ -178,13 +178,85 @@ export interface RequestOptions {
    * in `headers` (so a 401 there can't wait on a refresh that is waiting on it).
    */
   token?: false;
+  /**
+   * Called with how much of the request body has been sent, 0 to 1 (an upload's progress bar). It
+   * is called with 0 when the request starts, and again from 0 on the one retry after a refresh.
+   * Only the transport changes: the request is sent with XMLHttpRequest, the one browser API that
+   * reports upload progress, and its answer becomes an ordinary `Response`, so the token, the
+   * 401 refresh-and-retry, `signal` and the error shape are the same code as for `fetch`.
+   */
+  onUploadProgress?: (fraction: number) => void;
 }
 
-function isRawBody(body: unknown): body is BodyInit {
+function isRawBody(body: unknown): body is FormData | Blob {
   return (
     (typeof FormData !== "undefined" && body instanceof FormData) ||
     (typeof Blob !== "undefined" && body instanceof Blob)
   );
+}
+
+/** The response headers of a finished XMLHttpRequest, as `Headers`. */
+function parseResponseHeaders(raw: string): Headers {
+  const headers = new Headers();
+  for (const line of raw.trim().split(/[\r\n]+/)) {
+    const colon = line.indexOf(":");
+    if (colon <= 0) continue;
+    try {
+      headers.append(line.slice(0, colon).trim(), line.slice(colon + 1).trim());
+    } catch {
+      // A header name or value `Headers` refuses is not one we read.
+    }
+  }
+  return headers;
+}
+
+/**
+ * `fetch`'s counterpart for a request whose upload progress is wanted. Resolves with a `Response`
+ * for any HTTP status; rejects with a TypeError on a network failure (like `fetch`) and with an
+ * AbortError when `signal` aborts.
+ */
+function xhrSend(
+  url: string,
+  init: {
+    method: string;
+    headers: Headers;
+    body?: XMLHttpRequestBodyInit;
+    signal?: AbortSignal;
+  },
+  onProgress: (fraction: number) => void,
+): Promise<Response> {
+  return new Promise<Response>((resolve, reject) => {
+    const abortError = () => new DOMException("The request was aborted.", "AbortError");
+    if (init.signal?.aborted) {
+      reject(abortError());
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open(init.method, url);
+    xhr.responseType = "arraybuffer";
+    init.headers.forEach((value, name) => xhr.setRequestHeader(name, value));
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(Math.min(1, event.loaded / event.total));
+      }
+    };
+    xhr.onload = () => {
+      const bodyless = xhr.status === 204 || xhr.status === 205 || xhr.status === 304;
+      resolve(
+        new Response(bodyless ? null : (xhr.response as ArrayBuffer), {
+          status: xhr.status,
+          statusText: xhr.statusText,
+          headers: parseResponseHeaders(xhr.getAllResponseHeaders()),
+        }),
+      );
+    };
+    xhr.onerror = () => reject(new TypeError("Network request failed"));
+    xhr.ontimeout = () => reject(new TypeError("Network request timed out"));
+    xhr.onabort = () => reject(abortError());
+    init.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    onProgress(0);
+    xhr.send(init.body);
+  });
 }
 
 async function readJson(response: Response): Promise<unknown> {
@@ -211,7 +283,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     const headers = new Headers(options.headers);
     headers.set("Accept", "application/json");
     headers.set("X-Requested-With", "rumor-zero");
-    let body: BodyInit | undefined;
+    let body: FormData | Blob | string | undefined;
     if (options.body !== undefined) {
       if (isRawBody(options.body)) {
         body = options.body;
@@ -222,8 +294,16 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     }
     const token = options.token === false ? null : accessTokenGetter();
     if (token) headers.set("Authorization", `Bearer ${token}`);
+    const method = options.method ?? "GET";
+    if (options.onUploadProgress) {
+      return xhrSend(
+        url,
+        { method, headers, body, signal: options.signal },
+        options.onUploadProgress,
+      );
+    }
     return fetch(url, {
-      method: options.method ?? "GET",
+      method,
       headers,
       body,
       signal: options.signal,

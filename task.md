@@ -103,7 +103,7 @@ not let the review expand the part's scope without user approval.
 | 12 | Search | 6, 11B | [x] Done (2026-10-20) |
 | 13 | Notifications | 7, 7B, 10, 11, 11C | [x] Done (2026-10-20) |
 | 14 | Account settings, data export, deletion | 6, 7, 7B, 11B, 11D | [x] Done (2026-10-21) |
-| 14B | Photo avatars | 14 | [ ] |
+| 14B | Photo avatars | 14 | [x] Done (2026-10-21) |
 | 15 | Landing & static pages | 4, 11B, 11C | [ ] |
 | 16 | Security pass, load test, E2E hardening | every part above | [ ] |
 | 17 | Deploy backend (Render, Neon, Upstash, Brevo, Sentry) | 16 | [ ] |
@@ -1590,7 +1590,7 @@ Plus toasts and field errors.
   - **allauth's `send_mail` reads the request from a context variable**, which is gone when a callback runs after the view returned: `services._send` sets it again (`request_context`).
   - **Existing tests changed on purpose:** `core/tests/test_settings.py` (seventeen scopes), `test_me.py` (`bio`, `public_score`), `test_emails.py` (its "no template of ours" example used allauth's `password_changed`, which we now override: it uses `password_set`; the shared email checks also run on the two new emails), and `Me` fixtures in `layout.test.tsx` and `session.test.ts`.
   - **No migration, no dependency, no variable.**
-- **Not done (later parts):** profile photos in the export and deletion (14B); `clearsessions` for the orphaned `django_session` rows of deleted accounts (Part 17); whether suspension hides a suspended account's content (Part 16); the username-rename race in sign-up (Part 16). Dropped c2 pieces with no backend: affiliation, ORCID, "Update address", "Disconnect", "Manage sessions", notification and visibility checkboxes.
+- **Not done (later parts):** profile photos in the export and deletion (done in 14B); `clearsessions` for the orphaned `django_session` rows of deleted accounts (Part 17); whether suspension hides a suspended account's content (Part 16); the username-rename race in sign-up (Part 16). Dropped c2 pieces with no backend: affiliation, ORCID, "Update address", "Disconnect", "Manage sessions", notification and visibility checkboxes.
 - **Validated by:** mutation checks that each failed a test (no discard of the notifications the account caused, no session delete, posts not locked first, no session re-stamp, no session lock, the admin hook off, `update_fields` replaced by a full save, `pipeline_result` added to the export), plus the control test in which locking the user first deadlocks.
 - **Verified:** see HANDOFF (backend 4205 tests, frontend 2222, E2E 55 in dev and CI mode). Headless Chromium at 1280, 1024 and 390 px: 0 px horizontal overflow, screenshots looked at. The API steps of `docs/test-command.md` Part 14 were run against live Django on Linux; its PowerShell version was not run on Windows.
 
@@ -1601,7 +1601,7 @@ Plus toasts and field errors.
 ---
 
 ## Part 14B: Photo avatars
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-21)
 **Goal:** optional profile photos (D5), with initials as the fallback everywhere (ANALYSIS f-7; ARCHITECTURE §4e):
 - processed so that nothing from the uploaded file survives except resized pixels
 - stored in Postgres, with no new service
@@ -1612,7 +1612,7 @@ Plus toasts and field errors.
 - Every avatar spot, through the 0B `Avatar` primitive now given `avatar_url`: sidebar user card, top bar, post cards, detail author, comments, user rows, notifications, profile header.
 
 **Backend scope**
-- Add `Pillow` 12.3.x to `requirements.txt` (SETUP B1). Why: decoding, validation and re-encoding need a real image library. Pillow is the standard one, with prebuilt wheels for Windows and Render.
+- Add `Pillow` **13.0.0** to `requirements.txt` (SETUP B1; user decision 2026-10-21: 12.3.0 never got a patch release, 13.0.0 fixes a critical JPEG decoder overflow and decompression-bomb bypasses). Why: decoding, validation and re-encoding need a real image library. Pillow is the standard one, with prebuilt wheels for Windows and Render.
 - `accounts.Avatar` per ARCHITECTURE §2, and `apps/accounts/avatars.py` implementing ARCHITECTURE §4e exactly:
   - format checked by decoding
   - pixel and size limits before the full decode
@@ -1639,15 +1639,31 @@ Plus toasts and field errors.
 **API endpoints:** the three avatar endpoints above.
 
 **Acceptance criteria**
-- [ ] A JPEG with GPS EXIF comes back as WebP with no EXIF, GPS, ICC or XMP data
-- [ ] Each of these is refused with a clear error and without large memory use: SVG, GIF, HEIC, a PNG renamed to `.jpg`, a file over 5 MB, an image over 25 MP (decompression bomb), one under 128×128
-- [ ] Only WebP is ever served; the original upload is never stored
-- [ ] Changing the photo changes its URL; old URLs return 404
-- [ ] Image responses carry the immutable cache header, `nosniff` and the sandbox CSP; a repeat request through the relay gets 304
-- [ ] A moderator's Remove photo switches the user to initials everywhere at once; Block photo uploads makes uploads fail with 403
-- [ ] Unverified users get 403 `email_unverified`
+- [x] A JPEG with GPS EXIF comes back as WebP with no EXIF, GPS, ICC or XMP data
+- [x] Each of these is refused with a clear error and without large memory use: SVG, GIF, HEIC, a PNG renamed to `.jpg`, a file over 5 MB, an image over 25 MP (decompression bomb), one under 128×128 (a **PNG renamed to `.jpg` is a PNG**: the name is never read, so it is accepted; a **WebP** over **12 MP** is refused too, user decision 2026-10-21)
+- [x] Only WebP is ever served; the original upload is never stored
+- [x] Changing the photo changes its URL; old URLs return 404
+- [x] Image responses carry the immutable cache header, `nosniff` and the sandbox CSP; a repeat request through the relay gets 304
+- [x] A moderator's Remove photo switches the user to initials everywhere at once; Block photo uploads makes uploads fail with 403
+- [x] Unverified users get 403 `email_unverified`
 
 **Required tests:** processing unit tests with fixtures generated in the test (EXIF/GPS, rotation, each rejected type, bomb, tiny image); API permissions, throttle and headers; admin actions and audit rows; export and deletion; AvatarUploader states; Avatar fallback. E2E: upload a photo → it shows in the sidebar and on your post cards.
+
+**Decisions and deviations (plan approved 2026-10-21, `docs/agents/plans/part-14B-photo-avatars.md`; built 2026-10-21; recorded in ARCHITECTURE §2/§3/§4e/§8/§9/§10/§12, ANALYSIS c-49 and f-7, SETUP B1, STRUCTURE, MEMORY):**
+- **User decisions at planning:** Pillow 13.0.0; Block photo uploads also removes the photo, and a new **Allow photo uploads** action (kind `avatar_unblocked`) lifts the block; the browser accepts originals up to 20 MB and shrinks them first; a real upload percentage (`apiFetch` `onUploadProgress`, an XHR transport).
+- **User decision during the build (the spike's stop-and-ask gate): WebP is capped at 12 MP.** Pillow 13's only WebP decoder is the animation decoder (about 16 bytes a pixel): a 25 MP WebP peaked at about **390 MB** over the baseline on a 512 MB Render instance (JPEG 24 MP: 8 MB, PNG 25 MP: 114 MB). JPEG and PNG keep 25 MP; the web uploader always sends a JPEG of at most 1024 px.
+- **Deviation from the plan's recipe (no documented limit changed):** the centre square is flattened and shrunk **in horizontal bands**, not by a whole-image `reduce()`. `reduce()` converts a whole RGBA image to premultiplied form first: 194 MB on a 25 MP RGBA PNG (the plan's own case, just under its 200 MB line) and **314 MB** on a 300 x 83,000 panorama, which the plan hadn't considered. Bands: 112 MB and 103 MB. Final peaks above the process baseline: 25 MP RGBA PNG 111 MB, 24 MP JPEG 10 MB, 12 MP WebP 189 MB; refused bombs 1 to 5 MB.
+- **Built as planned otherwise:** `accounts.Avatar` (migration `accounts.0003_avatar`, with the verbose name "profile photo" so Django Admin says so), `apps/accounts/avatars.py` (in-memory 5 MB upload handler, `formats=("JPEG", "PNG", "WEBP")`, header checks before any pixel, a fresh image for each WebP, `save_photo` / `delete_photo` under the account's `FOR NO KEY UPDATE` lock, the block re-checked under it, a Postgres advisory-lock decode gate with a 10 s timeout and 503 `photo_busy`), `PUT`/`DELETE /me/avatar/` and the public `GET|HEAD /avatars/<id>/<version>-<size>.webp` (one query, ETag and 304 without loading bytes, a wrong version is 404), `/me` with 12 keys and the 256 px URL (profile 256, lists 96), `avatar_version` and `avatar_uploads_blocked` in `User.SERVICE_OWNED_FIELDS`, `moderation.0008_photo_actions` and `0009_photo_permissions` (the permission `moderation.moderate_profile_photos` and `accounts.view_avatar` for moderators), rules / services / `AvatarAdmin` / the `UserAdmin` actions, filter and Photo field (a shared `AccountActionsMixin`; the confirmation template takes its headings from the context), the export's `account.photo`, and the frontend `AvatarUploader`, `photo-prep.ts`, the `apiFetch` XHR transport, lazy `<Avatar>` images. **No relay change was needed.** No new service, variable or paid dependency.
+- **Existing tests changed on purpose:** `accounts/tests/{test_me,test_export,test_user_save,test_account_delete}.py`, `social/tests/test_api_profile.py`, `moderation/tests/{test_models,test_roles}.py` (thirteen kinds, `0009`), `pyproject.toml` (Pillow's two harmless warnings are ignored in tests), the `Me` fixtures of the frontend tests, and `ProfileHeader.test.tsx` (its misnamed photo test now checks the photo).
+- **Found while building:**
+  - The mutation checks found a **flaw in my own memory test**: a child process starts with its parent's peak in `ru_maxrss`, so after hundreds of tests the test hid a 407 MB regression. It now reads the child's own `VmHWM` (MEMORY 2026-10-21).
+  - One of my patch scripts cut most of `accounts/admin.py` (its anchor text, a docstring, also existed in the code it had just inserted, so the slice ran too far). The file was rebuilt from `git show HEAD:` with asserted exactly-once anchors, and every later patch used them.
+  - `Image.open` refuses nothing between 1x and 2x of `MAX_IMAGE_PIXELS` (it only warns), and a WebP's decoder allocates its canvas at open: the explicit header check is the rule.
+  - Django's `SecurityMiddleware` adds `nosniff` itself, so a test with `SECURE_CONTENT_TYPE_NOSNIFF` off pins that the view sets it too.
+  - `Button` takes no `ref` (focus goes through an id); Next's route announcer is also `role="alert"` in Playwright; `fireEvent.change` can't show that a file input was reset (`userEvent.upload` can).
+- **Not done (follow-ups):** a user-facing "report photo" button (ANALYSIS f-7); colour management of ICC photos; whether suspension hides a suspended account's photo (Part 16); the CSP `img-src 'self'` and a k6 avatar fetch (Part 16); the production upload check through the relay and the Render memory under the gate (Part 18). The PowerShell version of `docs/test-command.md` Part 14B was not run (no Windows machine here).
+- **Validated by:** **35 backend mutation checks, all caught** (no `formats=`, the pixel check after the load, EXIF carried into the output, no orientation, an off-centre crop, no version check when serving, a 304 without the check, no block re-check under the lock, each field out of `SERVICE_OWNED_FIELDS`, the throttle on DELETE, the gate removed, the export without the photo, the admin loading the bytea, whole-square processing, no WebP cap, no 5 MB cap while reading, no declared-length check, the permissions off, each header dropped, authentication on the public image, Block leaving the photo up, no `subject_user`, the account guard off for photo acts, the version not saved or not cleared, a lock timeout as a 500, the profile or `/me` at 96 px, animated files accepted, transparency not flattened, 128 px off by one) and **20 frontend ones, all caught** (the original uploaded instead of the re-encoded blob, progress ignored, abort not wired, progress not restarted, an off-centre crop, the 128 px and 20 MB boundaries, blocked and unverified states, lazy images, the input not reset, the preview URL not revoked, no reload after a removal, Cancel not aborting, the 429 text, no white background, the JPEG quality, no orientation, no 1024 px cap, a forced Content-Type). The first runs missed four (the memory test above, the handler's own 5 MB cap, `nosniff`, a no-op mutation of mine) and one frontend (the input reset): each became a test or a fixed mutation and was caught on the rerun.
+- **Verified:** see HANDOFF (backend 4478 tests, frontend 2325, E2E 58 in dev and CI mode). Headless Chromium at 1280, 1024 and 390 px (every state of the card, the rail, post cards, comments, profile, notifications and people search, and the Django Admin steps as a moderator): 0 px horizontal overflow, screenshots looked at. The Linux blocks of `docs/test-command.md` Part 14B were extracted from the finished doc and run verbatim against live Django (88 of 88 expected lines found in order).
 
 **Recommended models**
 - **Plan:** Opus 5.5 · high. Handling untrusted files is security-sensitive.
@@ -1709,6 +1725,7 @@ Plus toasts and field errors.
   - **From Part 11B:** the per-write totals aggregate in `settle_post`, the user-lock fan-out on a post with thousands of reposters, a moderator deciding a post they reposted (their +0.25), and report-credit farming with real data
   - **From Part 11C:** the pinned query on every first page of Recent and Following, the Following reposts side's `NOT IN` the pinnable ids, `posts_pending_queue_idx` no longer serving the processor's `Case` ordering (it still serves the filter), and emergency abuse with real data (the daily limit, the block, the lower report threshold)
   - **From Part 13:** an idle cutoff for the 30 s unread-count poll of a visible but untouched tab (each poll is one Worker request and keeps Render and Neon awake), a retention rule for old notifications (nothing is pruned), and the stray row a like can leave when it commits just after `delete_post`.
+  - **From Part 14B:** `/api/v1/avatars/` under load (one query per image, uncached by Django, immutable for browsers; a k6 fetch), the `Content-Security-Policy` `img-src 'self'` for the frontend now that images exist (the avatar route sets its own `default-src 'none'; sandbox`), whether suspension hides a suspended account's photo (it is still served), and the decode gate under real traffic (one decode at a time site-wide, 503 `photo_busy` after 10 s).
   - **From Part 12:** search under load (a very common word ranks every match before the 20 are cut; `search` is throttled per IP only), the search text in Sentry request URLs and access logs (ARCHITECTURE §12), a trigram index for people, and the Part 17 `migrate` of `posts.0003` (a stored generated column rewrites `posts_post` and the GIN build blocks writes: fine before launch).
 - `check --deploy` clean.
 - Security headers and cookie flags verified by tests; admin path confirmed.
@@ -1791,6 +1808,7 @@ Plus toasts and field errors.
 - `.github/workflows/keepalive.yml`: runs daily plus `workflow_dispatch`; calls `/api/health/deep/` with the secret header; fails on non-200.
 - UptimeRobot monitor; cron-job.org tick job.
 - A very light k6 smoke run against production.
+- **From Part 14B:** upload a real phone photo in production and check, through the relay on the frontend's host, the image's headers (`immutable`, `nosniff`, the sandbox CSP, `ETag`) and a 304 on the second request; watch Render's memory during an upload (2 workers x 4 threads in 512 MB: one decode at a time, 112 MB for a 25 MP PNG, 189 MB for a 12 MP WebP).
 
 **Acceptance criteria**
 - [ ] `<FRONTEND>` loads; signup with the real Turnstile widget and email login both work; Google sign-in works on the production origin

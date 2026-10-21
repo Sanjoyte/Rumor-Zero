@@ -242,6 +242,47 @@ describe("createRelay", () => {
     expect(new Headers(init.headers).has("content-length")).toBe(false);
   });
 
+  it("passes a multipart photo upload through byte for byte, boundary included (Part 14B)", async () => {
+    const { relay, sent } = relayWith(() => new Response('{"id":"u-1"}', { status: 200 }));
+    const form = new FormData();
+    const photo = new Uint8Array(4096).map((_, index) => (index * 7) % 256);
+    form.set("file", new Blob([photo], { type: "image/jpeg" }), "photo.jpg");
+    const request = new Request("http://localhost:3000/api/v1/me/avatar/", {
+      method: "PUT",
+      body: form,
+    });
+    const contentType = request.headers.get("content-type")!;
+    const original = new Uint8Array(await request.clone().arrayBuffer());
+    expect(contentType).toMatch(/^multipart\/form-data; boundary=/);
+
+    const response = await relay(request);
+
+    expect(response.status).toBe(200);
+    const [, init] = sent();
+    expect(init.method).toBe("PUT");
+    // The boundary in the header is the one inside the body: the backend can still parse it.
+    expect(new Headers(init.headers).get("content-type")).toBe(contentType);
+    expect(new Uint8Array(init.body as ArrayBuffer)).toEqual(original);
+  });
+
+  it("lets a 5 MB photo through under the default limit and refuses 6 MB + 1", async () => {
+    const { relay, fetchMock } = relayWith(() => new Response(null, { status: 200 }));
+    const put = (bytes: number) =>
+      relay(
+        new Request("http://localhost:3000/api/v1/me/avatar/", {
+          method: "PUT",
+          body: new Uint8Array(bytes),
+          headers: { "content-type": "application/octet-stream" },
+        }),
+      );
+    expect((await put(5 * 1024 * 1024 + 64 * 1024)).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const tooBig = await put(6 * 1024 * 1024 + 1);
+    expect(tooBig.status).toBe(413);
+    expect(await tooBig.json()).toMatchObject({ code: "payload_too_large" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("sends no body for HEAD and returns none", async () => {
     const { relay, sent } = relayWith(
       () => new Response("ignored", { headers: { "content-length": "7" } }),

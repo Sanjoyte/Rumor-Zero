@@ -114,8 +114,18 @@ describe("ProfileHeader", () => {
     expect(screen.queryByText("Counting things.")).not.toBeInTheDocument();
   });
 
-  it("shows the photo when there is one, initials otherwise", () => {
+  it("shows the photo when there is one", () => {
+    const url = "/api/v1/avatars/u-9/0123456789abcdef-256.webp";
+    renderHeader(makeProfile({ avatar_url: url }));
+    const photo = document.querySelector(`img[src="${url}"]`);
+    expect(photo).not.toBeNull();
+    expect(photo).toHaveAttribute("width", "80"); // the 256 px image, drawn at 80
+    expect(screen.queryByText("BS")).not.toBeInTheDocument();
+  });
+
+  it("shows initials when there is no photo", () => {
     renderHeader(makeProfile({ avatar_url: null }));
     expect(screen.getByText("BS")).toBeInTheDocument();
+    expect(document.querySelector("img")).toBeNull();
   });
 });

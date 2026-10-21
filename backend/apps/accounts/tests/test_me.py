@@ -21,6 +21,7 @@ FIELDS = {
     "has_usable_password",
     "google_connected",
     "avatar_url",
+    "avatar_uploads_blocked",
     "public_score",
 }
 
@@ -50,6 +51,7 @@ def test_the_fields_for_an_ordinary_user(api_client, django_assert_num_queries):
         "has_usable_password": True,
         "google_connected": False,
         "avatar_url": None,
+        "avatar_uploads_blocked": False,
         "public_score": None,
     }
     assert "no-cache" in response["Cache-Control"]
@@ -79,7 +81,13 @@ def test_an_unusable_password_and_a_photo(api_client):
     user = UserFactory(password=None, avatar_version="v3")
     data = get_me(api_client, user).json()
     assert data["has_usable_password"] is False
-    assert data["avatar_url"] == f"/api/v1/avatars/{user.pk}/v3-96.webp"
+    # `/me` gives the 256 px image: the settings preview and the profile header are 56 and 80 px.
+    assert data["avatar_url"] == f"/api/v1/avatars/{user.pk}/v3-256.webp"
+
+
+def test_the_card_can_see_that_uploads_are_blocked_before_anyone_picks_a_file(api_client):
+    user = UserFactory(avatar_uploads_blocked=True)
+    assert get_me(api_client, user).json()["avatar_uploads_blocked"] is True
 
 
 @pytest.mark.parametrize(

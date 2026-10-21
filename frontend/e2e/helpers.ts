@@ -304,6 +304,62 @@ export function moderate(postId: string, action: ModeratorAction, reason = ""): 
   );
 }
 
+/**
+ * Writes a JPEG photo to `file` with the backend venv's Python (Pillow): the left half blue and the
+ * right half red, a camera maker in its EXIF and, unless `gps` is false, a GPS position. The
+ * browser re-encodes it before upload, and the server does so again; a test can then check that
+ * what comes back carries none of it. `file` is passed as an argument, never as code.
+ */
+export function makePhoto(
+  file: string,
+  {
+    width = 600,
+    height = 400,
+    gps = true,
+  }: { width?: number; height?: number; gps?: boolean } = {},
+): void {
+  const code = [
+    "import sys",
+    "from PIL import Image",
+    "path, width, height, gps = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4] == '1'",
+    "image = Image.new('RGB', (width, height), (210, 40, 40))",
+    "image.paste((20, 20, 220), (0, 0, width // 2, height))",
+    "exif = Image.Exif()",
+    "exif[0x010F] = 'E2ECameraMaker'",
+    "if gps:",
+    "    exif.get_ifd(0x8825).update({1: 'N', 2: (37.0, 25.0, 19.0), 3: 'W', 4: (122.0, 5.0, 24.0)})",
+    "image.save(path, 'JPEG', quality=92, exif=exif)",
+  ].join("\n");
+  execFileSync(python, ["-c", code, file, String(width), String(height), gps ? "1" : "0"], {
+    cwd: backendDir,
+    env: shellEnv,
+    stdio: "pipe",
+  });
+}
+
+/** A moderator's decision on someone's profile photo (Part 14B), through the backend's services. */
+export type AccountAction = "remove_photo" | "block_photo_uploads" | "allow_photo_uploads";
+
+/**
+ * Has a brand-new moderator take `action` on the account `username`, through
+ * `apps/moderation/services.py`, exactly as Django Admin does.
+ */
+export function moderateAccount(username: string, action: AccountAction): void {
+  if (!/^[a-z0-9_]{3,30}$/.test(username)) throw new Error("not a username");
+  runShell(
+    [
+      "import uuid",
+      "from apps.accounts.models import User",
+      "from apps.moderation import services",
+      "tag = uuid.uuid4().hex[:10]",
+      "moderator = User.objects.create_user(email=f'mod-{tag}@example.test', username=f'mod_{tag}', is_email_verified=True, role='moderator')",
+      `account = User.objects.get(username='${username}')`,
+      `services.${action}(account.pk, moderator=moderator)`,
+      "print('MODERATED=1')",
+    ].join("\n"),
+  );
+}
+
 /** The emergency limits the E2E backend uses: the developer's own PlatformSettings (Part 11C). */
 export interface EmergencySettings {
   minAccountAgeDays: number;

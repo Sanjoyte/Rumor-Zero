@@ -15,3 +15,16 @@ class IsEmailVerified(BasePermission):
     def has_permission(self, request, view):
         user = request.user
         return bool(user and user.is_authenticated and user.is_email_verified)
+
+
+class PhotoUploadsAllowed(BasePermission):
+    """403 `photo_uploads_blocked` while a moderator has turned off photo uploads for the account
+    (Part 14B). Like every permission it runs before the throttle, so a refusal never counts
+    against `avatar_upload`."""
+
+    code = "photo_uploads_blocked"
+    message = "A moderator turned off photo uploads for your account."
+
+    def has_permission(self, request, view):
+        user = request.user
+        return not (user and user.is_authenticated and user.avatar_uploads_blocked)

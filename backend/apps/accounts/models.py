@@ -33,9 +33,16 @@ ROLE_GROUPS = {
 MANAGED_GROUP_NAMES = (MODERATORS_GROUP, SENIORS_GROUP)
 # Written only by `apps/reputation/services.py` (and `recompute_reputation`), never by a save.
 REPUTATION_FIELDS = frozenset({"reputation_score", "reputation_sample"})
-# What a full `User.save()` leaves alone: the score (Part 11B) and the emergency block, which only
-# `apps/moderation/services.py` writes, with `.update()` (Part 11C).
-SERVICE_OWNED_FIELDS = REPUTATION_FIELDS | {"emergency_blocked_until"}
+# What a full `User.save()` leaves alone: the score (Part 11B), the emergency block, which only
+# `apps/moderation/services.py` writes (Part 11C), and the photo (Part 14B): `avatar_version` is
+# written by `apps/accounts/avatars.py` and `avatar_uploads_blocked` by the moderation service, each
+# with `.update()`, so a stale full save (the admin form, allauth's `set_password`) can't bring back
+# a removed photo or lift a block.
+SERVICE_OWNED_FIELDS = REPUTATION_FIELDS | {
+    "emergency_blocked_until",
+    "avatar_version",
+    "avatar_uploads_blocked",
+}
 
 
 class UserManager(BaseUserManager):
@@ -83,8 +90,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_email_verified = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
-    # null = no profile photo (initials); set by the avatar service in Part 14B.
+    # null = no profile photo (initials). Written only by `apps/accounts/avatars.py` (Part 14B),
+    # equal to the `Avatar` row's `version`.
     avatar_version = models.CharField(max_length=16, null=True, blank=True)  # noqa: DJ001
+    # Written only by `apps/moderation/services.py` (Part 14B).
     avatar_uploads_blocked = models.BooleanField(default=False)
     # Written only by apps/reputation/services.py (Part 11B).
     reputation_score = models.SmallIntegerField(
@@ -182,3 +191,42 @@ class User(AbstractBaseUser, PermissionsMixin):
         )
         self.groups.remove(*stale)
         self.groups.add(*wanted)
+
+
+class Avatar(models.Model):
+    """A profile photo (ARCHITECTURE §2, §4e; Part 14B): the two re-encoded WebP sizes, in Postgres.
+
+    A separate table keeps the image bytes out of every `users` query. Written only by
+    `apps/accounts/avatars.py`, which also sets `users.avatar_version` to `version`. Nothing of the
+    uploaded file is kept except these resized pixels. The row goes with its account (CASCADE).
+    """
+
+    user = models.OneToOneField(
+        User, primary_key=True, on_delete=models.CASCADE, related_name="avatar"
+    )
+    image_256 = models.BinaryField()
+    image_96 = models.BinaryField()
+    # The first 16 hex characters of the SHA-256 of `image_256`: the URL changes with the pixels.
+    version = models.CharField(max_length=16)
+    # Both images together, for the storage budget (ARCHITECTURE §13).
+    bytes_total = models.IntegerField()
+    # Not auto_now: the service passes `now`, and tests place rows in time.
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        # What Django Admin calls it (Part 14B): moderators look for "profile photos".
+        verbose_name = "profile photo"
+        verbose_name_plural = "profile photos"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(version__regex=r"^[0-9a-f]{16}$"),
+                name="avatars_version_format",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(bytes_total__gt=0), name="avatars_bytes_total_positive"
+            ),
+        ]
+
+    def __str__(self):
+        return f"Photo of {self.user_id}"

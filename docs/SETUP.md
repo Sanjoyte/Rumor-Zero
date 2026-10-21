@@ -425,7 +425,7 @@ Versions are the latest stable releases as of 2026-09-29. Part 0 re-checks patch
 | `django-anymail[brevo]` | 15.2 | Sends email through Brevo's HTTPS API. Switchable to Resend later. |
 | `sentry-sdk[django]` | 2.71.0 | Error tracking, active only when `SENTRY_DSN` is set |
 | `idna` | 3.20 | **Added in Part 4.** Turns a non-ASCII host in a post's source link into punycode with the browsers' rules (UTS #46: `faß.de` → `xn--fa-hia.de`; Python's built-in codec is the old IDNA 2003 and gives `fass.de`, a different site). Already installed through `requests` (allauth) and `anymail`; now pinned because `apps/posts/validators.py` imports it. BSD-licensed, no service. |
-| `Pillow` | 12.3.x (12.3.0 released 2026-07-01; the next quarterly release is due 2026-10-15) | **Added in Part 14B.** Decodes, validates and re-encodes profile photos to WebP, dropping EXIF/GPS. Prebuilt wheels for Windows and Linux (Render), with WebP support built in. |
+| `Pillow` | **13.0.0** (2026-10-16) | **Added in Part 14B.** Decodes, validates and re-encodes profile photos to WebP, dropping EXIF/GPS. Prebuilt cp313 wheels for Windows and Linux (Render), with WebP, JPEG and zlib built in (checked with `PIL.features`). **Why 13.0.0 and not 12.3.x:** 12.3.0 never got a patch release, and 13.0.0 fixes a critical JPEG decoder overflow, an unbounded Exif loop and decompression-bomb bypasses; it is what you get from `pip install -r requirements.txt`. Its WebP decoder is the animation decoder only (about 16 bytes a pixel), which is why the app caps WebP uploads at 12 MP (ARCHITECTURE §4e). Re-run `apps/accounts/tests/test_avatar_processing.py` and `test_avatar_memory.py` before changing the pin. |
 
 ### B2. Backend: `backend/requirements-dev.txt` (dev and test only)
 

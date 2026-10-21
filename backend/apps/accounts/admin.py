@@ -1,6 +1,8 @@
 import uuid
 from collections import Counter
-from datetime import timedelta
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from allauth.socialaccount.models import SocialApp, SocialToken
 from django.contrib import admin, messages
@@ -21,7 +23,8 @@ from django.utils.html import format_html, format_html_join
 from django.utils.text import Truncator, capfirst, get_text_list
 
 from apps.accounts import deletion, services
-from apps.accounts.models import Role, User
+from apps.accounts.models import Avatar, Role, User
+from apps.accounts.serializers import avatar_url
 from apps.core.admin_mixins import HistoryNeedsLog
 from apps.core.services import get_platform_settings
 from apps.moderation import rules as moderation_rules
@@ -59,33 +62,269 @@ def yes_no(value):
     return "yes" if value else "no"
 
 
-# ---------- Part 11C: blocking an account's emergency posting ----------
+# ---------- Actions on an account: its emergency posting (Part 11C) and its photo (14B) ----------
 
 BLOCK_PERMISSION = "moderation.block_emergency_posting"
+PHOTO_PERMISSION = "moderation.moderate_profile_photos"
 ACCOUNT_BATCH_CAP = 100  # accounts per action, as for posts
 BLOCK_KINDS = (ActionKind.EMERGENCY_BLOCKED, ActionKind.EMERGENCY_UNBLOCKED)
+PHOTO_KINDS = (
+    ActionKind.AVATAR_REMOVED,
+    ActionKind.AVATAR_BLOCKED,
+    ActionKind.AVATAR_UNBLOCKED,
+)
 Act = moderation_rules.AccountAct
-
-# action name -> (the rule's act, the label, the service, what it says when done)
-ACCOUNT_ACTIONS = {
-    "block_emergency": (
-        Act.BLOCK_EMERGENCY,
-        "Block emergency posting",
-        moderation_services.block_emergency_posting,
-        lambda n: f"Blocked emergency posting on {n} account{'' if n == 1 else 's'}.",
-    ),
-    "unblock_emergency": (
-        Act.UNBLOCK_EMERGENCY,
-        "Unblock emergency posting",
-        moderation_services.unblock_emergency_posting,
-        lambda n: f"Unblocked emergency posting on {n} account{'' if n == 1 else 's'}.",
-    ),
-}
 
 
 def when(moment):
     """A block's end for the confirmation page, or "—"."""
     return f"{moment:%Y-%m-%d %H:%M} UTC" if moment is not None else "—"
+
+
+def plural(n, word="account"):
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def photo_text(*, has_photo, blocked):
+    photo = "Has a photo" if has_photo else "No photo"
+    return f"{photo}, uploads {'blocked' if blocked else 'allowed'}"
+
+
+def photo_now(account):
+    return photo_text(
+        has_photo=bool(account.avatar_version), blocked=account.avatar_uploads_blocked
+    )
+
+
+@dataclass(frozen=True)
+class AccountActionSpec:
+    """What the shared confirmation page needs to know about one action on accounts."""
+
+    act: Act
+    label: str
+    service: Callable
+    done_text: Callable[[int], str]
+    permission: str
+    now_heading: str
+    after_heading: str
+    # The sentence above the table (`days` is the emergency block length; 0 for the photo acts).
+    explain: Callable[[int], str]
+    current: Callable[[User], str]
+    after: Callable[[User, datetime, int], str]
+
+
+def _block_end(account, now, days):
+    # The latest end of the blocks that stand: a longer block already there stays.
+    end = now + timedelta(days=days)
+    current = account.emergency_blocked_until
+    return when(max(end, current) if current else end)
+
+
+ACCOUNT_ACTIONS = {
+    "block_emergency": AccountActionSpec(
+        act=Act.BLOCK_EMERGENCY,
+        label="Block emergency posting",
+        service=moderation_services.block_emergency_posting,
+        done_text=lambda n: f"Blocked emergency posting on {plural(n)}.",
+        permission=BLOCK_PERMISSION,
+        now_heading="Blocked until now",
+        after_heading="Blocked until after this",
+        explain=lambda days: (
+            f"A block lasts {plural(days, 'day')}, as long as the block after a FALSE emergency, "
+            "and is logged with your notes."
+        ),
+        current=lambda account: when(account.emergency_blocked_until),
+        after=_block_end,
+    ),
+    "unblock_emergency": AccountActionSpec(
+        act=Act.UNBLOCK_EMERGENCY,
+        label="Unblock emergency posting",
+        service=moderation_services.unblock_emergency_posting,
+        done_text=lambda n: f"Unblocked emergency posting on {plural(n)}.",
+        permission=BLOCK_PERMISSION,
+        now_heading="Blocked until now",
+        after_heading="Blocked until after this",
+        explain=lambda days: (
+            "Unblocking lifts every block on the account early, the automatic ones too, and is "
+            "logged with your notes."
+        ),
+        current=lambda account: when(account.emergency_blocked_until),
+        after=lambda account, now, days: "— (every block lifted)",
+    ),
+    "remove_photo": AccountActionSpec(
+        act=Act.REMOVE_PHOTO,
+        label="Remove photo",
+        service=moderation_services.remove_photo,
+        done_text=lambda n: f"Removed the photo of {plural(n)}.",
+        permission=PHOTO_PERMISSION,
+        now_heading="Photo now",
+        after_heading="Photo after this",
+        explain=lambda days: (
+            "The account shows its initials everywhere at once. It can upload another photo "
+            "unless uploads are blocked too. Logged with your notes."
+        ),
+        current=photo_now,
+        after=lambda a, now, days: photo_text(has_photo=False, blocked=a.avatar_uploads_blocked),
+    ),
+    "block_photo_uploads": AccountActionSpec(
+        act=Act.BLOCK_PHOTO_UPLOADS,
+        label="Block photo uploads",
+        service=moderation_services.block_photo_uploads,
+        done_text=lambda n: f"Blocked photo uploads on {plural(n)}.",
+        permission=PHOTO_PERMISSION,
+        now_heading="Photo now",
+        after_heading="Photo after this",
+        explain=lambda days: (
+            "This also removes the account's current photo (logged as two entries). Uploads fail "
+            "with 403 until you allow them again."
+        ),
+        current=photo_now,
+        after=lambda a, now, days: photo_text(has_photo=False, blocked=True),
+    ),
+    "allow_photo_uploads": AccountActionSpec(
+        act=Act.ALLOW_PHOTO_UPLOADS,
+        label="Allow photo uploads",
+        service=moderation_services.allow_photo_uploads,
+        done_text=lambda n: f"Allowed photo uploads on {plural(n)}.",
+        permission=PHOTO_PERMISSION,
+        now_heading="Photo now",
+        after_heading="Photo after this",
+        explain=lambda days: (
+            "The account can upload a photo again. A photo that was removed stays removed. "
+            "Logged with your notes."
+        ),
+        current=photo_now,
+        after=lambda a, now, days: photo_text(has_photo=bool(a.avatar_version), blocked=False),
+    ),
+}
+
+
+class AccountActionsMixin:
+    """The confirmation page and the apply step of the actions on accounts, shared by `UserAdmin`
+    and `AvatarAdmin` (an avatar's primary key *is* its account's id, so both post account ids).
+
+    First POST: show which accounts change (their state now and after) and which are skipped, with
+    the internal notes. The confirmation POST (`apply`): do it, account by account, through the
+    service. As on `PostAdmin`, the apply step acts on exactly the accounts shown (at most 100)
+    and never trusts `select_across`.
+    """
+
+    def accounts_of(self, queryset):
+        """The accounts behind this admin's rows (an avatar's own account)."""
+        return queryset
+
+    def has_moderate_photos_permission(self, request):
+        """Moderators and up (user decision 2026-10-21): `moderation.moderate_profile_photos`."""
+        return request.user.has_perm(PHOTO_PERMISSION)
+
+    def response_action(self, request, queryset):
+        """Django filters by the posted ids itself, and an id that isn't a UUID would raise
+        `ValidationError` (a 500), as on `PostAdmin`. Drop such ids first."""
+        posted = request.POST.copy()
+        valid = []
+        for value in posted.getlist(ACTION_CHECKBOX_NAME):
+            try:
+                valid.append(str(uuid.UUID(value)))
+            except ValueError:
+                continue
+        posted.setlist(ACTION_CHECKBOX_NAME, valid)
+        request.POST = posted
+        return super().response_action(request, queryset)
+
+    @admin.action(description="Remove photo", permissions=["moderate_photos"])
+    def remove_photo(self, request, queryset):
+        return self._account_action(request, queryset, "remove_photo")
+
+    @admin.action(description="Block photo uploads", permissions=["moderate_photos"])
+    def block_photo_uploads(self, request, queryset):
+        return self._account_action(request, queryset, "block_photo_uploads")
+
+    @admin.action(description="Allow photo uploads", permissions=["moderate_photos"])
+    def allow_photo_uploads(self, request, queryset):
+        return self._account_action(request, queryset, "allow_photo_uploads")
+
+    def _account_action(self, request, queryset, name):
+        spec = ACCOUNT_ACTIONS[name]
+        applying = "apply" in request.POST
+        if applying:
+            ids = request.POST.getlist(ACTION_CHECKBOX_NAME)
+            queryset = self.get_queryset(request).filter(pk__in=ids)
+        accounts = list(self.accounts_of(queryset).order_by("pk")[: ACCOUNT_BATCH_CAP + 1])
+        if len(accounts) > ACCOUNT_BATCH_CAP:
+            self.message_user(
+                request,
+                f"Select at most {ACCOUNT_BATCH_CAP} accounts at a time.",
+                messages.ERROR,
+            )
+            return None
+        if not accounts:
+            self.message_user(request, "No accounts to act on.", messages.WARNING)
+            return None
+        form = ConfirmActionForm(request.POST if applying else None, act=spec.act)
+        if applying and form.is_valid():
+            return self._apply_account_action(
+                request, accounts, spec, form.cleaned_data["notes"].strip()
+            )
+
+        now = timezone.now()
+        days = (
+            get_platform_settings().emergency_false_cooldown_days
+            if spec.act in moderation_rules.EMERGENCY_ACTS
+            else 0
+        )
+        changing, skipped = [], []
+        for account in accounts:
+            row = {
+                "account": account,
+                "username": account.username,
+                "current": spec.current(account),
+            }
+            refusal = moderation_rules.account_refusal(
+                spec.act, account, request.user, block_days=days, now=now
+            )
+            if refusal is not None:
+                skipped.append({"row": row, "why": refusal.text})
+                continue
+            row["after"] = spec.after(account, now, days)
+            changing.append(row)
+        context = {
+            **self.admin_site.each_context(request),
+            "title": f"{spec.label}: are you sure?",
+            "opts": self.opts,
+            "action": name,
+            "label": spec.label,
+            "explanation": spec.explain(days),
+            "now_heading": spec.now_heading,
+            "after_heading": spec.after_heading,
+            "changelist_url": reverse(
+                f"admin:{self.opts.app_label}_{self.opts.model_name}_changelist"
+            ),
+            "form": form,
+            "changing": changing,
+            "skipped": skipped,
+            "selected": [str(account.pk) for account in accounts],
+            "form_action": request.get_full_path(),
+            "cancel_url": request.get_full_path(),
+        }
+        return TemplateResponse(request, "moderation/admin/confirm_account_action.html", context)
+
+    def _apply_account_action(self, request, accounts, spec, notes):
+        done = 0
+        skipped = Counter()
+        for account in accounts:
+            try:
+                spec.service(account.pk, moderator=request.user, notes=notes)
+                done += 1
+            except moderation_services.ActionRefused as refused:
+                skipped[refused.refusal.text] += 1
+        if done:
+            self.message_user(request, spec.done_text(done), messages.SUCCESS)
+        if skipped:
+            detail = ", ".join(f"{count} {why}" for why, count in sorted(skipped.items()))
+            self.message_user(
+                request, f"Skipped {sum(skipped.values())}: {detail}.", messages.WARNING
+            )
+        return HttpResponseRedirect(request.get_full_path())
 
 
 class EmergencyPostingFilter(admin.SimpleListFilter):
@@ -108,8 +347,25 @@ class EmergencyPostingFilter(admin.SimpleListFilter):
         return queryset
 
 
+class PhotoUploadsFilter(admin.SimpleListFilter):
+    """Accounts whose photo uploads are blocked (or allowed): Part 14B."""
+
+    title = "photo uploads"
+    parameter_name = "photo_uploads"
+
+    def lookups(self, request, model_admin):
+        return [("blocked", "Blocked"), ("allowed", "Allowed")]
+
+    def queryset(self, request, queryset):
+        if self.value() == "blocked":
+            return queryset.filter(avatar_uploads_blocked=True)
+        if self.value() == "allowed":
+            return queryset.filter(avatar_uploads_blocked=False)
+        return queryset
+
+
 @admin.register(User)
-class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
+class UserAdmin(HistoryNeedsLog, AccountActionsMixin, BaseUserAdmin):
     """Accounts in Django Admin. A **superuser** has the whole form. A **senior moderator** sees
     the page read-only except `role` and `is_active` (suspension), never sees the password hash, and
     can't edit, suspend or delete a superuser or themselves; they also get "Mark email verified"
@@ -136,10 +392,18 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
         "is_email_verified",
         "is_active",
         EmergencyPostingFilter,
+        PhotoUploadsFilter,
     )
     search_fields = ("username", "email")
     filter_horizontal = ()
-    actions = ["verify_email", "block_emergency", "unblock_emergency"]
+    actions = [
+        "verify_email",
+        "block_emergency",
+        "unblock_emergency",
+        "remove_photo",
+        "block_photo_uploads",
+        "allow_photo_uploads",
+    ]
 
     fieldsets = (
         (None, {"fields": ("email", "password")}),
@@ -151,8 +415,7 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
                 "fields": (
                     "is_email_verified",
                     "credibility",
-                    "avatar_version",
-                    "avatar_uploads_blocked",
+                    "photo",
                     "emergency_blocked_until",
                     "emergency_blocks",
                     "last_login",
@@ -166,16 +429,15 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
     )
     # is_staff and groups are derived from role/is_superuser on save. If the form edited them,
     # the admin's save_related would overwrite that sync. The remaining state fields get their own
-    # logged actions ("Mark email verified" and Part 11C's Block / Unblock emergency posting are
-    # below; Part 14B adds the photo ones; Part 2 added none, since allauth's email_confirmed
-    # signal sets is_email_verified).
+    # logged actions ("Mark email verified", Part 11C's Block / Unblock emergency posting and Part
+    # 14B's photo actions are below; Part 2 added none, since allauth's email_confirmed signal sets
+    # is_email_verified).
     readonly_fields = (
         "is_staff",
         "groups",
         "is_email_verified",
         "credibility",
-        "avatar_version",
-        "avatar_uploads_blocked",
+        "photo",
         "emergency_blocked_until",
         "emergency_blocks",
         "last_login",
@@ -227,6 +489,54 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
             body,
         )
 
+    # --- the profile photo (Part 14B): read-only, written by the avatar and moderation services ---
+
+    @admin.display(description="Photo")
+    def photo(self, user):
+        """The thumbnail (or "No photo"), whether uploads are blocked, and the account's photo
+        actions, newest first. Read-only text built from the user row and the audit rows (the
+        image bytes live in another table and are never loaded here); a field and not an inline,
+        which would break the account form's POST."""
+        thumbnail = (
+            format_html(
+                '<img src="{}" width="48" height="48" alt="" style="border-radius:50%">',
+                avatar_url(user, 96),
+            )
+            if user.avatar_version
+            else "No photo"
+        )
+        state = "Uploads blocked" if user.avatar_uploads_blocked else "Uploads allowed"
+        rows = (
+            ModerationAction.objects.filter(subject_user=user, action__in=PHOTO_KINDS)
+            .select_related("moderator")
+            .order_by("-created_at")[:50]
+        )
+        history = format_html_join(
+            "",
+            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+            (
+                (
+                    when(row.created_at),
+                    row.get_action_display(),
+                    row.moderator.username if row.moderator else "—",
+                    row.notes or "—",
+                )
+                for row in rows
+            ),
+        )
+        table = (
+            format_html(
+                "<table><thead><tr><th>Time</th><th>Action</th><th>By</th><th>Notes</th></tr>"
+                "</thead><tbody>{}</tbody></table>",
+                history,
+            )
+            if history
+            else ""
+        )
+        return format_html(
+            "{} · {}{}", thumbnail, state, format_html("<br>{}", table) if table else ""
+        )
+
     # --- the credibility score (Part 11B): read-only, written only by the reputation service ---
 
     @admin.display(description="Credibility")
@@ -253,6 +563,8 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
             hidden.add("password")
         if not request.user.has_perm(BLOCK_PERMISSION):
             hidden.add("emergency_blocks")
+        if not request.user.has_perm(PHOTO_PERMISSION):
+            hidden.add("photo")
         if not hidden:
             return fieldsets
         return [
@@ -403,20 +715,6 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
         """Moderators and up (user decision 2026-10-19): `moderation.block_emergency_posting`."""
         return request.user.has_perm(BLOCK_PERMISSION)
 
-    def response_action(self, request, queryset):
-        """Django filters by the posted ids itself, and an id that isn't a UUID would raise
-        `ValidationError` (a 500), as on `PostAdmin`. Drop such ids first."""
-        posted = request.POST.copy()
-        valid = []
-        for value in posted.getlist(ACTION_CHECKBOX_NAME):
-            try:
-                valid.append(str(uuid.UUID(value)))
-            except ValueError:
-                continue
-        posted.setlist(ACTION_CHECKBOX_NAME, valid)
-        request.POST = posted
-        return super().response_action(request, queryset)
-
     @admin.action(description="Block emergency posting", permissions=["block_emergency"])
     def block_emergency(self, request, queryset):
         return self._account_action(request, queryset, "block_emergency")
@@ -425,93 +723,49 @@ class UserAdmin(HistoryNeedsLog, BaseUserAdmin):
     def unblock_emergency(self, request, queryset):
         return self._account_action(request, queryset, "unblock_emergency")
 
-    def _account_action(self, request, queryset, name):
-        """First POST: show which accounts change (their block now and after) and which are
-        skipped, with the internal notes. The confirmation POST (`apply`): do it, account by
-        account, through the service. As on `PostAdmin`, the apply step acts on exactly the
-        accounts shown (at most 100) and never trusts `select_across`."""
-        act, label, service, done_text = ACCOUNT_ACTIONS[name]
-        applying = "apply" in request.POST
-        if applying:
-            ids = request.POST.getlist(ACTION_CHECKBOX_NAME)
-            queryset = self.get_queryset(request).filter(pk__in=ids)
-        accounts = list(queryset.order_by("pk")[: ACCOUNT_BATCH_CAP + 1])
-        if len(accounts) > ACCOUNT_BATCH_CAP:
-            self.message_user(
-                request,
-                f"Select at most {ACCOUNT_BATCH_CAP} accounts at a time.",
-                messages.ERROR,
-            )
-            return None
-        if not accounts:
-            self.message_user(request, "No accounts to act on.", messages.WARNING)
-            return None
-        form = ConfirmActionForm(request.POST if applying else None, act=act)
-        if applying and form.is_valid():
-            return self._apply_account_action(
-                request, accounts, service, done_text, form.cleaned_data["notes"].strip()
-            )
 
-        now = timezone.now()
-        days = get_platform_settings().emergency_false_cooldown_days
-        changing, skipped = [], []
-        for account in accounts:
-            row = {
-                "account": account,
-                "username": account.username,
-                "current": when(account.emergency_blocked_until),
-            }
-            refusal = moderation_rules.account_refusal(
-                act, account, request.user, block_days=days, now=now
-            )
-            if refusal is not None:
-                skipped.append({"row": row, "why": refusal.text})
-                continue
-            if act == Act.BLOCK_EMERGENCY:
-                # The latest end of the blocks that stand: a longer block already there stays.
-                end = now + timedelta(days=days)
-                current = account.emergency_blocked_until
-                row["after"] = when(max(end, current) if current else end)
-            else:
-                row["after"] = "— (every block lifted)"
-            changing.append(row)
-        explanation = (
-            f"A block lasts {days} day{'' if days == 1 else 's'}, as long as the block after a "
-            "FALSE emergency, and is logged with your notes."
-            if act == Act.BLOCK_EMERGENCY
-            else "Unblocking lifts every block on the account early, the automatic ones too, and "
-            "is logged with your notes."
+# ---------- Profile photos (Part 14B) ----------
+
+
+@admin.register(Avatar)
+class AvatarAdmin(HistoryNeedsLog, AccountActionsMixin, admin.ModelAdmin):
+    """The accounts that have a profile photo, newest change first. Read-only: a photo is changed
+    only by its owner, and taken down by **Remove photo** or **Block photo uploads** (which also
+    removes it), both through the moderation service and logged with `subject_user`. The two image
+    columns are never loaded here; a thumbnail is the public 96 px URL (this admin is on the same
+    host as the API)."""
+
+    list_display = ("thumbnail", "account", "bytes_total", "updated_at")
+    list_select_related = ("user",)
+    ordering = ("-updated_at",)
+    search_fields = ("user__username",)
+    actions = ["remove_photo", "block_photo_uploads"]
+    fields = ("thumbnail", "account", "version", "bytes_total", "created_at", "updated_at")
+    readonly_fields = fields
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).defer("image_256", "image_96")
+
+    def accounts_of(self, queryset):
+        return User.objects.filter(pk__in=queryset.values("pk"))
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    @admin.display(description="Photo")
+    def thumbnail(self, avatar):
+        url = f"/api/v1/avatars/{avatar.user_id}/{avatar.version}-96.webp"
+        return format_html(
+            '<img src="{}" width="48" height="48" alt="" style="border-radius:50%">', url
         )
-        context = {
-            **self.admin_site.each_context(request),
-            "title": f"{label}: are you sure?",
-            "opts": self.opts,
-            "action": name,
-            "label": label,
-            "explanation": explanation,
-            "form": form,
-            "changing": changing,
-            "skipped": skipped,
-            "selected": [str(account.pk) for account in accounts],
-            "form_action": request.get_full_path(),
-            "cancel_url": request.get_full_path(),
-        }
-        return TemplateResponse(request, "moderation/admin/confirm_account_action.html", context)
 
-    def _apply_account_action(self, request, accounts, service, done_text, notes):
-        done = 0
-        skipped = Counter()
-        for account in accounts:
-            try:
-                service(account.pk, moderator=request.user, notes=notes)
-                done += 1
-            except moderation_services.ActionRefused as refused:
-                skipped[refused.refusal.text] += 1
-        if done:
-            self.message_user(request, done_text(done), messages.SUCCESS)
-        if skipped:
-            detail = ", ".join(f"{count} {why}" for why, count in sorted(skipped.items()))
-            self.message_user(
-                request, f"Skipped {sum(skipped.values())}: {detail}.", messages.WARNING
-            )
-        return HttpResponseRedirect(request.get_full_path())
+    @admin.display(description="Account", ordering="user__username")
+    def account(self, avatar):
+        url = reverse("admin:accounts_user_change", args=[avatar.user_id])
+        return format_html('<a href="{}">{}</a>', url, avatar.user.username)

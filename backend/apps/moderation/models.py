@@ -15,7 +15,8 @@ class ActionKind(models.TextChoices):
     """Every kind the audit trail holds (ARCHITECTURE §2). Part 10 writes the first five; Part 11
     writes `restored` and `kept_removed` (the latter was added then: "Keep removed" had no kind),
     Part 11C the three `emergency_*` kinds (`emergency_unblocked` was added then: an Unblock, or the
-    automatic lift when a FALSE label is overturned, had no kind) and `avatar_*` is Part 14B."""
+    automatic lift when a FALSE label is overturned, had no kind) and `avatar_*` is Part 14B
+    (`avatar_unblocked` was added then: "Allow photo uploads" had no kind)."""
 
     VERIFIED = "verified", "Marked verified"
     MARKED_FALSE = "marked_false", "Marked FALSE"
@@ -29,6 +30,7 @@ class ActionKind(models.TextChoices):
     EMERGENCY_UNBLOCKED = "emergency_unblocked", "Emergency posting unblocked"
     AVATAR_REMOVED = "avatar_removed", "Photo removed"
     AVATAR_BLOCKED = "avatar_blocked", "Photo uploads blocked"
+    AVATAR_UNBLOCKED = "avatar_unblocked", "Photo uploads allowed"
 
 
 def _in_or_null(field, choices):
@@ -174,8 +176,15 @@ class ModerationAction(models.Model):
 
     class Meta:
         # Block / Unblock emergency posting, on `UserAdmin` (Part 11C; user decision 2026-10-19:
-        # moderators and up).
-        permissions = [("block_emergency_posting", "Can block or unblock emergency posting")]
+        # moderators and up), and the profile photo actions (Part 14B).
+        permissions = [
+            ("block_emergency_posting", "Can block or unblock emergency posting"),
+            # Remove a profile photo, block or allow photo uploads (Part 14B).
+            (
+                "moderate_profile_photos",
+                "Can remove profile photos and block or allow photo uploads",
+            ),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=Q(action__in=ActionKind.values), name="moderation_action_valid"

@@ -54,20 +54,21 @@ def reputation_block(user):
     }
 
 
-def _person(user):
+def _person(user, avatar_size=96):
     return {
         "id": str(user.pk),
         "username": user.username,
         "display_name": user.display_name,
         "bio": user.bio,
-        "avatar_url": avatar_url(user),
+        "avatar_url": avatar_url(user, avatar_size),
     }
 
 
 def profile_data(user, viewer):
     """`GET /api/v1/users/{username}/`; `user` comes from `profile_queryset`."""
     return {
-        **_person(user),
+        # The header shows the photo at 80 px: the 256 px image, as on `/me`.
+        **_person(user, 256),
         "created_at": iso(user.created_at),
         "counts": {
             "followers": user.followers_n,

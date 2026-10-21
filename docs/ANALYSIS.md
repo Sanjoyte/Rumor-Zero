@@ -524,6 +524,15 @@ The original default was "drop all". Since 2026-09-29 the seven features you nam
     - **Defaults approved with the plan:** `GET /me` gains `bio` and `public_score`; `PATCH /me` needs a verified email (password change, export and delete need only a login); four per-user throttle scopes (`profile_update` 30/h, `password_change`, `data_export`, `account_delete` 10/h); a password change keeps this device signed in and ends the others at their next refresh; a deletion deletes this device's session and expires the cookies; the admin's account delete runs the same routine (`accounts.deletion.delete_account`); after a deletion the browser goes to `/home` with a toast.
     - **c2 subset:** Profile, Account & Security (email, password, the Google link), the CredibilityPanel in place of the "Credibility Index" bar, and Privacy & Data (export, danger zone). Dropped as having no backend: the institutional-avatar card (14B), affiliation, ORCID and DOI provenance, the "Update address", "Disconnect" and "Manage sessions" buttons, notification settings and the three transparency checkboxes.
 
+49. **Part 14B decisions (user, 2026-10-21; one more during the build)** on profile photos (f-7 as built):
+    - **Pillow 13.0.0, not 12.3.x.** 12.3.0 never got a patch release; 13.0.0 (2026-10-16, cp313 wheels for Linux and Windows) fixes a critical JPEG decoder overflow, an unbounded Exif loop and decompression-bomb bypasses (SETUP B1 updated under AGENTS rule 10).
+    - **Block photo uploads also removes the current photo** (logged `avatar_removed` and then `avatar_blocked`, 1 µs apart), and a new **Allow photo uploads** action (kind `avatar_unblocked`, migration `moderation.0008`) lifts the block, mirroring Block / Unblock emergency posting. Allow does not bring the photo back. Remove photo, Block and Allow need the new permission `moderation.moderate_profile_photos` (moderators and up, migration `0009`).
+    - **The browser accepts originals up to 20 MB** and shrinks them first (centre square, at most 1024 px, JPEG 0.9 on white, so GPS never leaves the device). The server's 5 MB / 25 MP / 128 px limits still guard direct API uploads.
+    - **A real upload percentage:** `apiFetch` gained `onUploadProgress`, which swaps only the transport to XMLHttpRequest (wrapped in a `Response`), so the token, the single 401 refresh-and-retry, `signal` and the error shape stay one code path.
+    - **WebP is capped at 12 MP (decided during the build, after the spike).** Pillow 13's only WebP decoder is the animation decoder (two RGBA canvases, the frame bytes and the image: about 16 bytes a pixel), so a 25 MP WebP peaked at about 390 MB over the baseline on a 512 MB Render instance, against about 114 MB for a 25 MP PNG. JPEG and PNG keep 25 MP. The web uploader always sends a JPEG of at most 1024 px, so only direct API uploads can meet the cap. (ARCHITECTURE §3, §4e.)
+    - **Defaults approved with the plan:** `/me` and the profile give the 256 px URL, every list the 96 px one; `/me` gains `avatar_uploads_blocked` (12 keys); refusals are `{detail, code}` (`photo_missing`, `photo_too_large`, `photo_unsupported`, `photo_too_small`, `photo_too_many_pixels`, `photo_busy`, `photo_uploads_blocked`, `email_unverified`) and the permission ones never count against `avatar_upload` (5/day); the original lives only in an in-memory upload handler capped at 5 MB; **one decode at a time site-wide** through a Postgres advisory lock (10 s wait, then 503 `photo_busy`); `avatar_version` and `avatar_uploads_blocked` join the fields a full `User.save()` never writes; a suspended account's photo is still served (Part 16 decides); nobody is notified of a removal or a block; `<Avatar>` images are lazy; the export carries the 256 px photo as base64.
+    - **As built, one deviation from the plan's recipe:** the centre square is flattened and shrunk **in horizontal bands**, not with a whole-image `reduce()`: `reduce()` converts a whole RGBA image to premultiplied form first, which cost 194 MB on a 25 MP RGBA PNG and 314 MB on a 300 × 83,000 panorama (bands: 112 MB and 103 MB, no limit changed).
+
 ---
 
 ## d) Deployment topology (no owned domain)
@@ -829,18 +838,19 @@ Storage options checked on 2026-09-29, with no card allowed:
 
 - **Upload rules:**
   - JPEG, PNG or WebP only, detected by decoding the file, not by its extension. No SVG, GIF, HEIC or animation.
-  - At most 5 MB and 25 megapixels, at least 128×128.
+  - At most 5 MB and 25 megapixels (WebP: 12), at least 128×128. The browser accepts originals up to 20 MB (c-49).
 - **Processing:**
   - EXIF rotation is applied, then **all** metadata (EXIF/GPS/ICC/XMP) is dropped.
   - The image is centre-cropped to a square and re-encoded as WebP at 256 and 96 px. The original is never stored.
-  - The browser shrinks the image before upload, but the server redoes everything.
+  - The browser shrinks the image before upload (centre square, at most 1024 px, JPEG), but the server redoes everything, one decode at a time site-wide.
 - **Serving:** `/api/v1/avatars/<user>/<version>-<size>.webp` through the relay, cached for a year (the URL changes with every new photo), with `nosniff` and a sandbox CSP.
 - **Who and how often:** email-verified users only, 5 changes per day.
 - **Moderation:**
-  - Moderators can remove a photo and block uploads (logged).
+  - Moderators can remove a photo, block uploads (which also removes the photo) and allow them again (all logged with the account, c-49).
   - There is no user-facing "report photo" button in the MVP (follow-up).
   - The Google profile photo is not imported.
 - **Fallback:** initials when there's no photo, while loading, on error, and after removal.
+- **As built (Part 14B):** see c-49 and ARCHITECTURE §4e. Measured decode peaks above the process baseline: 25 MP RGBA PNG about 112 MB, 24 MP JPEG about 10 MB, 12 MP WebP about 189 MB.
 
 ### f-8 Logo (ARCHITECTURE §14; Part 0D)
 

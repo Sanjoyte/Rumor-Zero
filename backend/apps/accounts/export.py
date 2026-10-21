@@ -7,11 +7,16 @@ appear, and nor can anything about another person beyond the public username.
 
 Never included: another person's email, role or credibility; a moderator's identity (`resolved_by`,
 `moderated_by`, `original_moderator`); the moderators' `notes`; `flagged_reason`; `report_count`;
-`counts_toward_threshold`; the pipeline's internals; avatar fields (Part 14B owns the photo).
+`counts_toward_threshold`; the pipeline's internals; `avatar_version` (a cache key, not data).
+
+Your profile photo is included as the 256 px WebP, base64-encoded (Part 14B).
 """
+
+import base64
 
 from allauth.socialaccount.models import SocialAccount
 
+from apps.accounts.models import Avatar
 from apps.moderation.models import Appeal
 from apps.moderation.queries import with_appeal_fields
 from apps.notifications.models import Notification
@@ -209,6 +214,15 @@ def _notifications(user):
     ]
 
 
+def _photo(user):
+    """Your profile photo as it is shown at 256 px, or None. One query, and the only one that
+    reads image bytes (about 20 KB)."""
+    data = Avatar.objects.filter(user=user).values_list("image_256", flat=True).first()
+    if data is None:
+        return None
+    return {"format": "webp", "size": 256, "data": base64.b64encode(bytes(data)).decode("ascii")}
+
+
 def _account(user):
     return {
         "id": str(user.pk),
@@ -221,6 +235,8 @@ def _account(user):
         "created_at": iso(user.created_at),
         "has_usable_password": user.has_usable_password(),
         "google_connected": SocialAccount.objects.filter(user=user, provider="google").exists(),
+        "photo": _photo(user),
+        "photo_uploads_blocked": user.avatar_uploads_blocked,
         "credibility": {
             "score": user.reputation_score,
             "sample": user.reputation_sample,
@@ -230,8 +246,8 @@ def _account(user):
 
 
 def build_export(user, now):
-    """The whole export as a JSON-ready dict: 12 queries (the Google check, then one for each of the
-    11 lists), whatever the volume."""
+    """The whole export as a JSON-ready dict: 13 queries (the Google check, the photo, then one for
+    each of the 11 lists), whatever the volume."""
     return {
         "format": FORMAT,
         "version": VERSION,

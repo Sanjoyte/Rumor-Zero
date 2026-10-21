@@ -9,6 +9,7 @@ export const SETTINGS_PATHS = {
   me: "/v1/me/",
   password: "/v1/me/password/",
   export: "/v1/me/export/",
+  avatar: "/v1/me/avatar/",
 } as const;
 
 /** Any of the three; the server ignores every other key. */
@@ -28,6 +29,27 @@ export function changePassword(currentPassword: string, newPassword: string): Pr
     current_password: currentPassword,
     new_password: newPassword,
   });
+}
+
+export interface UploadOptions {
+  signal?: AbortSignal;
+  /** How much of the photo has been sent, 0 to 1. */
+  onProgress?: (fraction: number) => void;
+}
+
+/**
+ * Sets the profile photo (`PUT /me/avatar/`, multipart `file`) and answers the new `/me` object.
+ * `photo` is the browser-made JPEG (`photo-prep.ts`); the server decodes and re-encodes it anyway.
+ */
+export function uploadAvatar(photo: Blob, { signal, onProgress }: UploadOptions = {}): Promise<Me> {
+  const body = new FormData();
+  body.append("file", photo, "photo.jpg");
+  return api.put<Me>(SETTINGS_PATHS.avatar, body, { signal, onUploadProgress: onProgress });
+}
+
+/** Takes the photo down (204, also when there was none). */
+export function removeAvatar(): Promise<void> {
+  return api.del<void>(SETTINGS_PATHS.avatar);
 }
 
 /** `{password}` for an account with a password, else `{username}` typed to confirm. */

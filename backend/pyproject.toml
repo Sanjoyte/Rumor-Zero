@@ -18,6 +18,11 @@ addopts = "-ra --strict-markers"
 filterwarnings = [
     # WhiteNoise notes that `collectstatic` has not run; tests use plain static storage.
     "ignore:No directory at:UserWarning",
+    # Pillow warns between 1x and 2x of its pixel limit and on a damaged multi-picture JPEG; the
+    # avatar code refuses or reads those itself (apps/accounts/avatars.py), pytest resets the
+    # module-level filter there for each test.
+    "ignore::PIL.Image.DecompressionBombWarning",
+    "ignore:Image appears to be a malformed MPO file:UserWarning",
 ]
 
 [tool.coverage.run]

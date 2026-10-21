@@ -1,20 +1,25 @@
+import re
+import uuid
+
 from django.contrib.admin.models import LogEntry
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import HttpResponse
 from django.utils import timezone
+from django.utils.cache import get_conditional_response
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
-from rest_framework.exceptions import APIException, ValidationError
+from rest_framework.exceptions import APIException, NotFound, ValidationError
+from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from apps.accounts import cookies, deletion, export, services
-from apps.accounts.models import User
-from apps.accounts.permissions import IsEmailVerified
+from apps.accounts import avatars, cookies, deletion, export, services
+from apps.accounts.models import Avatar, User
+from apps.accounts.permissions import IsEmailVerified, PhotoUploadsAllowed
 from apps.accounts.serializers import (
     MAX_USERNAME_INPUT,
     MeSerializer,
@@ -112,6 +117,109 @@ class MeView(APIView):
         deletion.delete_account(user, session_key=session_key_of_payload(request.auth))
         response = Response(status=204)
         cookies.delete_auth_cookies(response)
+        return response
+
+
+def _declared_length(request):
+    try:
+        return int(request.META.get("CONTENT_LENGTH") or 0)
+    except ValueError:
+        return 0
+
+
+@method_decorator(never_cache, name="dispatch")
+class AvatarView(APIView):
+    """`PUT /api/v1/me/avatar/` (multipart `file`) sets the profile photo and answers the new `/me`
+    object; `DELETE` removes it (204, also when there was none). ARCHITECTURE §4e.
+
+    PUT needs a verified email (403 `email_unverified`) and uploads that aren't blocked (403
+    `photo_uploads_blocked`); both are permissions, so they never count against the `avatar_upload`
+    throttle (5 a day, PUT only). A photo that can't be used is a 400 with a code that counts. The
+    file is read by `avatars.PhotoUploadHandler` (memory only, 5 MB) and processed under the decode
+    gate; the original is never kept. DELETE needs a login only: someone blocked or unverified can
+    still take their photo down."""
+
+    parser_classes = [MultiPartParser]
+
+    def get_permissions(self):
+        if self.request.method == "PUT":
+            return [IsAuthenticated(), IsEmailVerified(), PhotoUploadsAllowed()]
+        return [IsAuthenticated()]
+
+    def get_throttles(self):
+        if self.request.method != "PUT":
+            return []
+        self.throttle_scope = "avatar_upload"
+        return [ScopedRateThrottle()]
+
+    def put(self, request):
+        # Refused before the body is read. A body that lies about its length is cut off by the
+        # handler at 5 MB of file data.
+        if _declared_length(request) > avatars.MAX_BODY_BYTES:
+            raise avatars.PhotoRefused("photo_too_large")
+        # Before anything reads the body: Django refuses to swap handlers after parsing.
+        handler = avatars.PhotoUploadHandler(request._request)
+        request._request.upload_handlers = [handler]
+        files = request.FILES
+        if handler.too_large:
+            raise avatars.PhotoRefused("photo_too_large")
+        upload = files.get("file")
+        if upload is None:
+            raise avatars.PhotoRefused("photo_missing")
+        request.user.avatar_version = avatars.save_photo(request.user.pk, upload.read())
+        return _me(request)
+
+    def delete(self, request):
+        avatars.delete_photo(request.user.pk)
+        return Response(status=204)
+
+
+# 16 hex characters of the version, then the size.
+AVATAR_NAME = re.compile(r"([0-9a-f]{16})-(96|256)\.webp")
+AVATAR_IMAGE_COLUMNS = {96: "image_96", 256: "image_256"}
+
+
+class AvatarImageView(APIView):
+    """`GET|HEAD /api/v1/avatars/{user_id}/{version}-{96|256}.webp`: public, the one place photo
+    bytes leave the database (ARCHITECTURE §4e).
+
+    A name that isn't a current version of that account's photo, at one of the two sizes, is a 404,
+    so a replaced or removed photo's old URL stops working. The ETag is the name, so a repeat
+    request with `If-None-Match` is answered 304 after an `exists()` that never loads the bytes. No
+    authentication (a stale token must not turn a public image into a 401), no throttle, and not
+    `never_cache`: the URL changes with the pixels, so the response is `immutable` for a year.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = []
+
+    def get(self, request, user_id, name):
+        match = AVATAR_NAME.fullmatch(name)
+        try:
+            account_id = uuid.UUID(user_id)
+        except ValueError:
+            raise NotFound from None
+        # One address per image: only the canonical spelling of the id.
+        if match is None or str(account_id) != user_id:
+            raise NotFound
+        version, size = match.group(1), int(match.group(2))
+        etag = f'"{version}-{size}"'
+        rows = Avatar.objects.filter(user_id=account_id, version=version)
+        response = get_conditional_response(request, etag=etag)
+        if response is not None and response.status_code == 304:
+            if not rows.exists():
+                raise NotFound
+        else:
+            data = rows.values_list(AVATAR_IMAGE_COLUMNS[size], flat=True).first()
+            if data is None:
+                raise NotFound
+            response = HttpResponse(bytes(data), content_type="image/webp")
+        response["Cache-Control"] = "public, max-age=31536000, immutable"
+        response["ETag"] = etag
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Content-Security-Policy"] = "default-src 'none'; sandbox"
+        response["Content-Disposition"] = 'inline; filename="avatar.webp"'
         return response
 
 

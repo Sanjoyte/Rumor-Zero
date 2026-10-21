@@ -49,6 +49,10 @@ export function Avatar({ name, src, size = 10, decorative, className }: AvatarPr
         alt={decorative ? "" : name}
         width={px}
         height={px}
+        // Each photo is one Worker request per browser (ARCHITECTURE 13): off-screen avatars in a
+        // long feed shouldn't load until they scroll near.
+        loading="lazy"
+        decoding="async"
         onError={() => setFailedSrc(src)}
         // The server-rendered image can fail before React attaches onError. Catch that case here:
         // a finished image with no width is a broken one.

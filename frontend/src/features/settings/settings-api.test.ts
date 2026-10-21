@@ -5,8 +5,10 @@ import {
   deleteAccount,
   exportFilename,
   fetchExport,
+  removeAvatar,
   saveJsonFile,
   updateProfile,
+  uploadAvatar,
 } from "./settings-api";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -111,5 +113,82 @@ describe("settings-api", () => {
     expect(revoke).toHaveBeenCalledWith("blob:test");
     click.mockRestore();
     vi.useRealTimers();
+  });
+});
+
+describe("settings-api: the profile photo", () => {
+  it("PUTs the photo as multipart under the name `file`", async () => {
+    reply(200, { id: "u-1", avatar_url: "/api/v1/avatars/u-1/0123456789abcdef-256.webp" });
+    const photo = new Blob(["jpeg-bytes"], { type: "image/jpeg" });
+    const me = await uploadAvatar(photo);
+
+    expect(me.avatar_url).toContain("-256.webp");
+    const call = lastCall();
+    expect([call.url, call.method]).toEqual(["/api/v1/me/avatar/", "PUT"]);
+    const form = call.body as FormData;
+    expect(form).toBeInstanceOf(FormData);
+    expect([...form.keys()]).toEqual(["file"]);
+    const part = form.get("file") as File;
+    expect(part.name).toBe("photo.jpg");
+    expect(part.size).toBe(photo.size);
+    // The browser sets the multipart boundary; a Content-Type of ours would break it.
+    expect(call.headers.has("Content-Type")).toBe(false);
+    expect(call.headers.get("X-Requested-With")).toBe("rumor-zero");
+  });
+
+  it("reports progress through XMLHttpRequest when asked", async () => {
+    const seen: number[] = [];
+    class Xhr {
+      status = 200;
+      statusText = "";
+      response = new TextEncoder().encode('{"id":"u-1"}').buffer;
+      responseType = "";
+      upload: { onprogress?: (e: ProgressEvent) => void } = {};
+      onload?: () => void;
+      open() {}
+      setRequestHeader() {}
+      getAllResponseHeaders() {
+        return "content-type: application/json\r\n";
+      }
+      send() {
+        this.upload.onprogress?.({ lengthComputable: true, loaded: 3, total: 4 } as ProgressEvent);
+        this.onload?.();
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", Xhr);
+
+    const me = await uploadAvatar(new Blob(["x"]), {
+      onProgress: (fraction) => seen.push(fraction),
+    });
+
+    expect(me.id).toBe("u-1");
+    expect(seen).toEqual([0, 0.75]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("passes the abort signal on", async () => {
+    const controller = new AbortController();
+    fetchMock.mockImplementationOnce(async (_url, init) => {
+      expect(init?.signal).toBe(controller.signal);
+      return new Response('{"id":"u-1"}', { headers: { "content-type": "application/json" } });
+    });
+    await uploadAvatar(new Blob(["x"]), { signal: controller.signal });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a refusal is an ApiError with the server's code", async () => {
+    reply(400, { detail: "We can't read that file.", code: "photo_unsupported" });
+    await expect(uploadAvatar(new Blob(["x"]))).rejects.toMatchObject({
+      status: 400,
+      code: "photo_unsupported",
+    });
+  });
+
+  it("DELETEs the photo", async () => {
+    reply(204);
+    await expect(removeAvatar()).resolves.toBeUndefined();
+    const call = lastCall();
+    expect([call.url, call.method]).toEqual(["/api/v1/me/avatar/", "DELETE"]);
+    expect(call.body).toBeUndefined();
   });
 });

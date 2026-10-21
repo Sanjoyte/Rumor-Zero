@@ -11,6 +11,7 @@ import { CredibilityPanel } from "@/features/reputation/CredibilityPanel";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { AccountSection } from "./AccountSection";
 import { useAccountExit } from "./account-exit";
+import { AvatarUploader } from "./AvatarUploader";
 import { DataExportCard } from "./DataExportCard";
 import { DeleteAccountModal } from "./DeleteAccountModal";
 import { SETTINGS_MESSAGES } from "./messages";
@@ -117,6 +118,7 @@ export function SettingsPage() {
           title="Profile"
           description="What other people see next to your posts."
         >
+          <AvatarUploader user={user} />
           <ProfileForm user={user} />
         </Section>
 

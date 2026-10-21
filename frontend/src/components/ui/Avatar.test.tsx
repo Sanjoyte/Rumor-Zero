@@ -38,6 +38,14 @@ describe("Avatar", () => {
     expect(photo).toHaveAttribute("height", "40");
   });
 
+  it("loads a photo lazily and decodes it off the main thread", () => {
+    // One Worker request per photo per browser (ARCHITECTURE 13): off-screen avatars wait.
+    render(<Avatar name="Ada Lovelace" src="/api/v1/avatars/1/2-96.webp" />);
+    const photo = screen.getByRole("img", { name: "Ada Lovelace" });
+    expect(photo).toHaveAttribute("loading", "lazy");
+    expect(photo).toHaveAttribute("decoding", "async");
+  });
+
   it("falls back to initials when the photo fails to load", () => {
     render(<Avatar name="Ada Lovelace" src="/broken.webp" />);
     fireEvent.error(screen.getByRole("img", { name: "Ada Lovelace" }));

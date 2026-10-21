@@ -147,6 +147,42 @@ def test_the_audit_rows_of_a_deleted_moderator_keep_their_text():
     assert row.moderator is None and row.post_snapshot == "audited"
 
 
+def test_the_photo_goes_with_the_account_and_its_url_stops_working(api_client):
+    from apps.accounts.models import Avatar
+    from apps.accounts.tests import photo_fixtures as fx
+
+    user = VerifiedUserFactory()
+    version = fx.give_photo(user)
+    other = VerifiedUserFactory()
+    fx.give_photo(other, fx.jpeg(colour=fx.BLUE))
+    url = f"/api/v1/avatars/{user.pk}/{version}-256.webp"
+    assert api_client.get(url).status_code == 200
+
+    assert delete_as(api_client, user, with_password()).status_code == 204
+
+    assert not Avatar.objects.filter(user_id=user.pk).exists()
+    assert Avatar.objects.filter(user=other).exists()  # nobody else's
+    assert api_client.get(url).status_code == 404
+
+
+def test_the_photo_audit_rows_stay_with_the_account_nulled(api_client):
+    """Photo actions are about an account (`subject_user`), not a post: the rows are kept for the
+    record when the account goes, as the emergency block rows are."""
+    from apps.accounts.tests import photo_fixtures as fx
+    from apps.moderation import services
+
+    user = VerifiedUserFactory()
+    fx.give_photo(user)
+    services.block_photo_uploads(user.pk, moderator=moderator_user(), notes="Abuse.")
+    assert ModerationAction.objects.filter(subject_user=user).count() == 2
+
+    assert delete_as(api_client, user, with_password()).status_code == 204
+
+    rows = ModerationAction.objects.filter(action__startswith="avatar_").order_by("created_at")
+    assert [row.action for row in rows] == ["avatar_removed", "avatar_blocked"]
+    assert all(row.subject_user is None and row.notes == "Abuse." for row in rows)
+
+
 def test_report_counts_are_never_taken_back(api_client):
     user = VerifiedUserFactory()
     reported = PostFactory(author=VerifiedUserFactory(), report_count=2)

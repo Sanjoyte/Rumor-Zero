@@ -158,3 +158,54 @@ def test_a_block_set_on_the_instance_is_not_written_by_a_full_save():
     user.emergency_blocked_until = timezone.now()
     user.save()
     assert stored_block(user) is None
+
+
+# ---------- Part 14B: the photo is the avatar service's and the moderation service's ----------
+
+
+def test_a_full_save_of_a_stale_instance_leaves_the_photo_version_alone():
+    """A removed photo must not come back because a stale copy was saved (the admin form, allauth's
+    `set_password`), and a new one must not be erased."""
+    user = UserFactory(avatar_version="aaaaaaaaaaaaaaaa")
+    stale = User.objects.get(pk=user.pk)
+    User.objects.filter(pk=user.pk).update(avatar_version=None)  # removed meanwhile
+    stale.bio = "Another bio"
+    stale.save()
+    fresh = User.objects.get(pk=user.pk)
+    assert fresh.avatar_version is None and fresh.bio == "Another bio"
+
+    other = User.objects.get(pk=user.pk)
+    User.objects.filter(pk=user.pk).update(avatar_version="bbbbbbbbbbbbbbbb")  # replaced meanwhile
+    other.save()
+    assert User.objects.get(pk=user.pk).avatar_version == "bbbbbbbbbbbbbbbb"
+
+
+def test_a_full_save_of_a_stale_instance_cannot_lift_a_photo_block():
+    stale = User.objects.get(pk=UserFactory().pk)
+    User.objects.filter(pk=stale.pk).update(avatar_uploads_blocked=True)
+    stale.bio = "Another bio"
+    stale.save()
+    assert User.objects.get(pk=stale.pk).avatar_uploads_blocked is True
+
+
+def test_allauths_set_password_leaves_the_photo_alone():
+    user = UserFactory(avatar_version="aaaaaaaaaaaaaaaa")
+    stale = User.objects.get(pk=user.pk)
+    User.objects.filter(pk=user.pk).update(avatar_version=None, avatar_uploads_blocked=True)
+    get_adapter().set_password(stale, "another-long-password-42")
+    fresh = User.objects.get(pk=user.pk)
+    assert (fresh.avatar_version, fresh.avatar_uploads_blocked) == (None, True)
+
+
+def test_the_photo_fields_are_service_owned():
+    from apps.accounts.models import SERVICE_OWNED_FIELDS
+
+    assert {"avatar_version", "avatar_uploads_blocked"} <= SERVICE_OWNED_FIELDS
+
+
+def test_update_fields_naming_the_photo_still_writes_it():
+    """Only the full save is narrowed; the service writes with `.update()`."""
+    user = UserFactory()
+    user.avatar_version = "cccccccccccccccc"
+    user.save(update_fields=["avatar_version"])
+    assert User.objects.get(pk=user.pk).avatar_version == "cccccccccccccccc"

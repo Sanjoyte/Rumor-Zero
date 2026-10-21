@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13, 14).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13, 14, 14B).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -11402,6 +11402,588 @@ Set-Cookie: rz_session=""; expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Pat
 - Window 1 and 3 can be stopped with Ctrl+C when you are done. `docker compose down` (repo root) stops the containers and
   keeps the data; `docker compose down -v` wipes the whole local database, which is destructive.
 - No real secret was used: the password of the test accounts is a throwaway.
+
+### Part 14B: Profile photos
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend/.env` and `frontend/.env.local`.
+Part 14B adds **three endpoints** (`PUT` and `DELETE /api/v1/me/avatar/`, and the public image `GET /api/v1/avatars/{user_id}/{version}-{96|256}.webp`),
+the **photo card** at the top of `/settings` (Stitch c2), **one table** (`accounts.Avatar`) and **three migrations**
+(`accounts.0003_avatar`, `moderation.0008_photo_actions`, `moderation.0009_photo_permissions`), **one dependency** (Pillow
+13.0.0) and **three moderator actions** in Django Admin (Remove photo, Block photo uploads, Allow photo uploads) plus a
+"Profile photos" list. `GET /api/v1/me/` gains `avatar_uploads_blocked` (12 keys) and its `avatar_url` is now the 256 px
+image. It adds no environment variable.
+
+**Which window for what.** Open the windows once and keep using the same ones:
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (server) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 3, **after** step 2 (Playwright starts its own servers and needs ports 3000 and 8000 free). | 3 to 12 |
+| Window 2 (commands) | All the `curl` and `python manage.py` commands. **Use the same window for steps 3 to 10**: the variables and functions you set in step 3 (`id`, `work`, `ada`, `r1`, `r2`, `cy`, `blk`, `eve`, `mod`, `una`, `api`, `send`, `put`, `modact`, `login`) only live in that one terminal. If you close it, start again from step 3. | 1 to 10 |
+| Window 3 (frontend) | `npm run dev` in `frontend`. Leave it running. | 11, 12 |
+| Browser | Steps 11 and 12 | 11, 12 |
+
+Things to know first:
+
+- **What happens to a photo.** The server decodes it with Pillow (only as JPEG, PNG or WebP, whatever the file is called),
+  checks its size **from the header before decoding a pixel** (at most 5 MB, 25 megapixels and WebP 12, at least 128 × 128),
+  applies the camera's rotation, crops the centre square and builds two **new** WebP images (256 and 96 px). Nothing of the
+  upload is kept except those pixels: no GPS, no camera name, no colour profile, no XMP. The original is never stored, and
+  never written to the disk. One photo is decoded at a time on the whole site (a busy answer is 503 `photo_busy`).
+- **The browser shrinks it first.** The settings page accepts originals up to 20 MB, crops the centre square, caps it at 1024
+  px and re-encodes it as a JPEG, so the location data never leaves your device. The `curl` steps below talk to the server
+  directly, so they show the server's own rules.
+- **Who may upload.** A verified email (403 `email_unverified`) and uploads that aren't blocked (403 `photo_uploads_blocked`).
+  Those two never count against the **5 uploads a day** limit; a photo that is refused with a 400 does. Taking a photo down
+  (`DELETE`) needs only a login and has no limit.
+- **The URL changes with the pixels.** `/api/v1/avatars/<user id>/<version>-<size>.webp`, where the version is a fingerprint
+  of the image. A new photo means a new URL, the old one is a 404, and the answer is cached for a year (`immutable`).
+- **The moderators** (Moderators and Senior moderators) can Remove a photo, Block photo uploads (which also removes the
+  photo) and Allow photo uploads again. Each is logged with the account. Nobody is notified.
+- **The accounts.** Step 3 makes nine straight in the database, all with the throwaway password `correct-horse-battery-42`:
+  `ada` (the main one), `r1` and `r2` (for refusals), `cy` (to use up the allowance), `blk` (blocked from uploading), `eve`
+  (the moderators act on her), `mod` (a moderator), `una` (email not verified) and `web` (for the browser steps). No sign-up
+  and no email provider are needed.
+- The outputs below were recorded on Linux on 2026-10-21 by running the commands of steps 3 to 10 in order against live
+  Django. Steps 11 and 12 were checked the same day with headless Chromium (Playwright's `e2e/avatar.spec.ts`, screenshots
+  at 1280, 1024 and 390 px with 0 px of horizontal overflow, and a script that walked the Django Admin steps as the
+  moderator), not by a person at a keyboard. Ids, the numbers in names and your counts differ on every run.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root.
+
+**What this does:** Starts the database containers, activates the Python environment, installs Pillow, applies the three
+migrations, confirms there is nothing left to migrate, runs the whole backend test suite and Part 14B's own tests, the
+linter and the formatter check.
+
+```bash
+# start in the repo root
+docker compose up -d
+cd backend
+source .venv/bin/activate
+pip install -r requirements.txt                     # Requirement already satisfied: Pillow==13.0.0 (installs it the first time)
+python manage.py migrate                            # Applying accounts.0003_avatar... OK, moderation.0008 ... OK, moderation.0009 ... OK
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 4478 passed
+python -m pytest apps/accounts/tests/test_avatar_processing.py apps/accounts/tests/test_avatar_memory.py apps/accounts/tests/test_api_avatar_upload.py apps/accounts/tests/test_api_avatar_serve.py apps/accounts/tests/test_api_avatar_delete.py apps/accounts/tests/test_avatar_urls.py apps/moderation/tests/test_services_photos.py apps/moderation/tests/test_admin_photos.py -q   # 256 passed
+ruff check . ; ruff format --check .                # All checks passed! / 335 files already formatted
+```
+
+**You should see:** `No changes detected`, `System check identified no issues (0 silenced).`, `4478 passed`, `256 passed`,
+`All checks passed!` and `335 files already formatted`. Counts may grow later; what matters is that nothing fails. `migrate`
+says `No migrations to apply.` if you already applied them.
+
+- The new tests pin: the processing (a JPEG with GPS, a camera maker, an ICC profile and XMP comes out as a bare WebP with
+  none of it, read from the file's own bytes; all eight EXIF orientations against Pillow's own rotation; the exact centre
+  crop; transparency on white; every refusal; a bomb that is refused without decoding a pixel; 400 randomly damaged files
+  that never become a 500); the memory of a decode in a fresh interpreter (25 MP RGBA PNG about 112 MB, 24 MP JPEG about 10
+  MB, 12 MP WebP about 189 MB); the upload API (permissions, the throttle, the 5 MB limit enforced while reading, nothing
+  written to a temp file, the block checked again under the account's lock, the decode gate in real threads); the image
+  endpoint (every header, 304 without loading the bytes, a wrong version or size is a 404); and the moderator actions, their
+  log rows and Django Admin.
+- Existing tests changed on purpose: `test_me.py` (12 keys, the 256 px URL), `test_api_profile.py` (256), `test_export.py`
+  (the photo, 14 queries), `test_user_save.py` and the moderation `test_models.py` / `test_roles.py` (thirteen kinds, the new
+  migration's permission lists).
+- A first mutation run found that the memory test could be fooled: a child process starts with its parent's peak memory in
+  `ru_maxrss`, so after hundreds of tests it hid a 400 MB regression. The test now reads the child's own `VmHWM`.
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ../frontend`. Playwright (the last commands) starts Django and Next itself, so **no
+servers may be running on ports 3000 and 8000**.
+
+**What this does:** Runs the linters, the type check, the component tests, the production build and the end-to-end tests,
+once against the dev servers and once against the production build.
+
+```bash
+cd ../frontend                                      # from backend/
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 165 files, 2325 tests passed
+NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build
+npm run test:e2e                                    # 58 passed
+CI=1 npm run test:e2e                               # 58 passed (this one runs against the build above)
+cd ../backend                                       # back to backend/ for steps 3 to 10
+```
+
+**You should see:** the first line prints nothing from ESLint and TypeScript and ends with `lint:tokens OK (…)` and
+`All matched files use Prettier code style!`. `npm test` ends with `Test Files  165 passed (165)` and `Tests  2325
+passed (2325)`. `npm run build` lists `○ /settings`. Both end-to-end runs end with `58 passed`.
+
+- The three new end-to-end tests (`e2e/avatar.spec.ts`) sign nobody up. One uploads a GPS photo, sees the square preview and
+  the progress bar (the request is held for a moment so the bar can be seen), checks the rail, the cards and the profile,
+  and fetches the image through the relay: all the headers, a bare WebP (no EXIF, ICC or XMP chunk), and a repeat request
+  that answers 304. One has a moderator remove the photo, the person put a new one up and take it down, then Block and Allow.
+  One shows a too-small file and a non-image refused before anything is sent.
+- **Run the build before the `CI=1` run**: that mode serves `.next`.
+
+#### Step 3: Start the server, make nine accounts and some test pictures
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 10.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you make the accounts, log eight of them in
+through the API (tokens in `$ada`, `$r1`, `$r2`, `$cy`, `$blk`, `$eve`, `$mod` and `$una`), save four helpers (`send`: any
+request, prints the status code then the answer; `put`: uploads a photo; `modact`: a moderator's action, through the same
+service Django Admin calls; `login`) and make the test pictures in a temporary folder `$work`: a JPEG with a GPS position, a
+camera name, a colour profile and an XMP note (`gps.jpg`), a second picture, a PNG with a `.jpg` name, a 100 px picture, a
+64-megapixel "bomb" (a few KB of file), a GIF, an SVG and a JPEG padded past 5 MB.
+
+Window 1 (in `backend`, venv active):
+
+```bash
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend` with the venv active; needs `jq`, `sudo apt install jq`, and the `file` command). If you opened a new
+terminal, first run `cd backend` from the repo root and `source .venv/bin/activate`:
+
+```bash
+id=$(date +%H%M%S)                                  # a unique suffix so the names are new each run
+python manage.py shell -c "
+from allauth.account.models import EmailAddress
+from apps.accounts.models import Role, User
+for name in ('ada', 'r1', 'r2', 'cy', 'blk', 'eve', 'mod', 'una', 'web'):
+    user = User.objects.create_user(email=f'part14b-{name}-$id@example.test', username=f'part14b_{name}_$id', password='correct-horse-battery-42', is_email_verified=(name != 'una'), role=Role.MODERATOR if name == 'mod' else Role.USER)
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+print(User.objects.filter(email__startswith='part14b-', email__endswith='$id@example.test').count(), 'accounts made')
+" | tail -1
+h=(-H 'Origin: http://localhost:3000' -H 'X-Requested-With: rumor-zero')   # headers every auth call needs
+login() { jq -nc --arg e "part14b-$1-$id@example.test" '{email: $e, password: "correct-horse-battery-42"}' | curl -s "${h[@]}" -H "Content-Type: application/json" --data-binary @- http://localhost:8000/api/auth/app/v1/auth/login | jq -r .meta.access_token; }   # login <name>: prints a login token
+ada=$(login ada); r1=$(login r1); r2=$(login r2); cy=$(login cy); blk=$(login blk); eve=$(login eve); mod=$(login mod); una=$(login una)
+echo ${ada:0:10} ${r1:0:10} ${r2:0:10} ${cy:0:10} ${blk:0:10} ${eve:0:10} ${mod:0:10} ${una:0:10}   # eight token prefixes, not empty lines
+api=http://localhost:8000/api/v1
+send() { local out; out=$(curl -s -w '\n%{http_code}' -X "$1" ${3:+-H "Authorization: Bearer $3"} ${4:+-H "Content-Type: application/json" --data-binary "$4"} "$api$2"); printf '%s  %s\n' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | jq -c "${5:-.}" 2>/dev/null)"; }   # send <METHOD> <path> [token] [json body] [jq filter]: prints the status code, then the answer
+put() { local out; out=$(curl -s -w '\n%{http_code}' -H 'Expect:' -X PUT -H "Authorization: Bearer $2" -F "file=@$1;type=${3:-image/jpeg}" "$api/me/avatar/"); printf '%s  %s\n' "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | jq -c "${4:-.}" 2>/dev/null)"; }   # put <file> <token> [mime] [jq filter]: uploads a photo, prints the status code, then the answer
+modact() {   # modact <remove_photo|block_photo_uploads|allow_photo_uploads> <name>: a moderator's action, through the same service Django Admin calls
+  python manage.py shell -c "
+from apps.accounts.models import User
+from apps.moderation import services
+target = User.objects.get(username='part14b_$2_$id')
+try:
+    print('logged:', services.$1(target.pk, moderator=User.objects.get(username='part14b_mod_$id'), notes='part14b $id').action)
+except services.ActionRefused as refused:
+    print('refused:', refused.refusal.text)" | tail -1; }
+work=$(mktemp -d)                                   # the test pictures go here (removed in step 10)
+python - "$work" <<'EOF'
+import sys
+from PIL import Image, ImageCms
+
+work = sys.argv[1]
+red, green, blue, yellow = (230, 20, 20), (20, 200, 20), (20, 20, 230), (240, 220, 20)
+
+def quadrants(width, height, colours):
+    image = Image.new("RGB", (width, height))
+    for i, colour in enumerate(colours):
+        left, top = (i % 2) * width // 2, (i // 2) * height // 2
+        image.paste(colour, (left, top, left + width // 2, top + height // 2))
+    return image
+
+exif = Image.Exif()
+exif[0x010F] = "SecretCameraMaker"
+exif.get_ifd(0x8825).update({1: "N", 2: (37.0, 25.0, 19.0), 3: "W", 4: (122.0, 5.0, 24.0)})   # a GPS position
+icc = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+xmp = b"<x:xmpmeta xmlns:x='adobe:ns:meta/'>SecretXmpMarker</x:xmpmeta>"
+quadrants(640, 480, (red, green, blue, yellow)).save(f"{work}/gps.jpg", "JPEG", exif=exif, icc_profile=icc, xmp=xmp, quality=92)
+quadrants(640, 480, (blue, yellow, red, green)).save(f"{work}/other.jpg", "JPEG", quality=92)
+quadrants(300, 300, (red, green, blue, yellow)).save(f"{work}/renamed.jpg", "PNG")           # a PNG with a .jpg name
+Image.new("RGB", (100, 100), red).save(f"{work}/small.png")                                  # under 128 px
+Image.new("L", (8000, 8000)).save(f"{work}/bomb.png")                                        # 64 million pixels in a few KB
+Image.new("RGB", (200, 200), red).save(f"{work}/animated.gif")                               # a GIF
+open(f"{work}/picture.svg", "w").write("<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><rect width='200' height='200'/></svg>")
+open(f"{work}/big.jpg", "wb").write(open(f"{work}/gps.jpg", "rb").read() + bytes(6 * 1024 * 1024))   # a real JPEG padded past 5 MB
+EOF
+ls "$work" | tr '\n' ' '; echo
+echo "id=$id"                                       # write this down
+```
+
+**You should see** (the number in the names is your `id`):
+
+```text
+9 accounts made
+eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi eyJhbGciOi
+animated.gif big.jpg bomb.png gps.jpg other.jpg picture.svg renamed.jpg small.png 
+id=042851
+```
+
+- The shell prints a line about auto-imported objects first; `tail -1` keeps only ours.
+- A login token lasts 15 minutes by default: if a later command answers `401`, run `ada=$(login ada)` again (or the other name).
+
+**If it differs:** an empty or `null` token line means the logins failed: `runserver` isn't running in window 1, or `jq` is
+missing. A `ModuleNotFoundError: No module named 'PIL'` means step 1's `pip install -r requirements.txt` wasn't run in this
+venv. Fix that and run the block again from `id=$(date +%H%M%S)`.
+
+#### Step 4: Upload a photo with GPS in it
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` uploads `gps.jpg`, then you download her 256 px and 96 px images from the address `/me` gives and
+read them: their size, the list of chunks in the file (read from the bytes, not through an image library) and whether the
+camera name or the XMP note is anywhere inside.
+
+```bash
+put "$work/gps.jpg" "$ada" image/jpeg '{avatar_url: (.avatar_url | sub("[0-9a-f]{8}-[0-9a-f-]{27}"; "<user id>") | sub("[0-9a-f]{16}"; "<version>")), avatar_uploads_blocked}'
+url=$(curl -s -H "Authorization: Bearer $ada" $api/me/ | jq -r .avatar_url)
+curl -s -o "$work/p256.webp" "http://localhost:8000$url"; curl -s -o "$work/p96.webp" "http://localhost:8000${url/-256/-96}"
+python - "$work" <<'EOF'
+import struct, sys
+from PIL import Image
+
+work = sys.argv[1]
+source = open(f"{work}/gps.jpg", "rb").read()
+print("the upload had GPS:", bool(Image.open(f"{work}/gps.jpg").getexif().get_ifd(0x8825)), "| maker in the file:", b"SecretCameraMaker" in source)
+for name in ("p256.webp", "p96.webp"):
+    data = open(f"{work}/{name}", "rb").read()
+    chunks, pos = [], 12
+    while pos + 8 <= len(data):
+        chunks.append(data[pos:pos + 4].decode("latin1"))
+        size = struct.unpack("<I", data[pos + 4:pos + 8])[0]
+        pos += 8 + size + (size & 1)
+    print(name, Image.open(f"{work}/{name}").size, chunks, "| maker in the file:", b"SecretCameraMaker" in data, "| XMP marker:", b"SecretXmpMarker" in data)
+EOF
+```
+
+**You should see:**
+
+```text
+200  {"avatar_url":"/api/v1/avatars/<user id>/<version>-256.webp","avatar_uploads_blocked":false}
+the upload had GPS: True | maker in the file: True
+p256.webp (256, 256) ['VP8 '] | maker in the file: False | XMP marker: False
+p96.webp (96, 96) ['VP8 '] | maker in the file: False | XMP marker: False
+```
+
+- `['VP8 ']` is the whole file: one picture chunk. A WebP that carried metadata would also list `EXIF`, `ICCP` or `XMP `.
+- `/me` answers the 256 px image; every list (post authors, comments, people, notifications) answers the 96 px one.
+
+#### Step 5: The headers, the 304 and the 404s
+
+**Where:** Terminal window 2 (the same one: it needs `$url`).
+
+**What this does:** Reads the image's headers, asks for it again with its `ETag` (the server answers 304 and no body), sends
+a HEAD request, asks for a size and a version that don't exist, and asks with a made-up login token (a public image must
+not turn into a 401).
+
+```bash
+curl -s -D - -o /dev/null "http://localhost:8000$url" | tr -d '\r' | grep -iE "^(HTTP|content-type|cache-control|etag|x-content-type-options|content-security-policy|content-disposition)"
+etag=$(curl -s -D - -o /dev/null "http://localhost:8000$url" | tr -d '\r' | awk -F': ' 'tolower($1)=="etag"{print $2}')
+curl -s -o /dev/null -w 'again with If-None-Match: %{http_code}, %{size_download} bytes\n' -H "If-None-Match: $etag" "http://localhost:8000$url"
+curl -sI "http://localhost:8000$url" | head -1 | tr -d '\r'
+curl -s -o /dev/null -w 'a made-up size:    %{http_code}\n' "http://localhost:8000${url/-256/-97}"
+curl -s -o /dev/null -w 'a made-up version: %{http_code}\n' "http://localhost:8000$(echo "$url" | sed -E 's/[0-9a-f]{16}-/0000000000000000-/')"
+curl -s -o /dev/null -w 'with a stale token: %{http_code}\n' -H "Authorization: Bearer not-a-token" "http://localhost:8000$url"
+```
+
+**You should see** (your `ETag` letters differ; they are a fingerprint of the picture):
+
+```text
+HTTP/1.1 200 OK
+Content-Type: image/webp
+Cache-Control: public, max-age=31536000, immutable
+ETag: "ace134db2be85a3a-256"
+X-Content-Type-Options: nosniff
+Content-Security-Policy: default-src 'none'; sandbox
+Content-Disposition: inline; filename="avatar.webp"
+again with If-None-Match: 304, 0 bytes
+HTTP/1.1 200 OK
+a made-up size:    404
+a made-up version: 404
+with a stale token: 200
+```
+
+- The same requests through the frontend (`http://localhost:3000/api/v1/avatars/...`) give the same headers and the same 304:
+  the relay passes them back unchanged. The end-to-end test checks exactly that.
+
+#### Step 6: What is refused, and who may upload
+
+**Where:** Terminal window 2.
+
+**What this does:** `r1` tries five things that can't be a profile photo; `r2` uploads a PNG named `.jpg` (fine: the name is
+never read), a JSON body and a form with the wrong field name; an unverified account and an anonymous request try too.
+
+```bash
+echo "--- r1: five photos that can't be used"
+put "$work/picture.svg" "$r1" image/svg+xml
+put "$work/animated.gif" "$r1" image/gif
+put "$work/small.png" "$r1" image/png
+put "$work/bomb.png" "$r1" image/png
+put "$work/big.jpg" "$r1" image/jpeg
+echo "--- r2: a PNG named .jpg is fine, and bodies that are no photo"
+put "$work/renamed.jpg" "$r2" image/jpeg '{avatar_url: (.avatar_url | sub("[0-9a-f]{8}-[0-9a-f-]{27}"; "<user id>") | sub("[0-9a-f]{16}"; "<version>"))}'
+send PUT /me/avatar/ "$r2" '{"file":"x"}'
+curl -s -w '  %{http_code}\n' -X PUT -H "Authorization: Bearer $r2" -F "photo=@$work/gps.jpg" $api/me/avatar/
+echo "--- who may upload"
+put "$work/gps.jpg" "$una"
+curl -s -w '  %{http_code}\n' -X PUT -F "file=@$work/gps.jpg" $api/me/avatar/
+```
+
+**You should see:**
+
+```text
+--- r1: five photos that can't be used
+400  {"detail":"We can't read that file. Use a JPEG, PNG or WebP photo that isn't animated.","code":"photo_unsupported"}
+400  {"detail":"We can't read that file. Use a JPEG, PNG or WebP photo that isn't animated.","code":"photo_unsupported"}
+400  {"detail":"That photo is too small. Use one at least 128 × 128 pixels.","code":"photo_too_small"}
+400  {"detail":"That photo has too many pixels. Use one under 25 megapixels (WebP: 12).","code":"photo_too_many_pixels"}
+400  {"detail":"That file is over 5 MB.","code":"photo_too_large"}
+--- r2: a PNG named .jpg is fine, and bodies that are no photo
+200  {"avatar_url":"/api/v1/avatars/<user id>/<version>-256.webp"}
+415  {"detail":"Unsupported media type \"application/json\" in request.","code":"unsupported_media_type"}
+{"detail":"Choose a photo to upload.","code":"photo_missing"}  400
+--- who may upload
+403  {"detail":"Verify your email address first. Check your inbox for the link.","code":"email_unverified"}
+{"detail":"Authentication credentials were not provided.","code":"not_authenticated"}  401
+```
+
+- In order: the SVG, the GIF, the 100 px picture, the 64-megapixel bomb (refused from its header, before a single pixel is
+  decoded) and the 6 MB file (refused before its body is read).
+- The bomb, the SVG and the GIF are rejected by what is **inside** the file. The browser also refuses a file by its type, but
+  that is only for your convenience: the server never reads the name or the type you send.
+
+#### Step 7: Change, repeat and remove a photo
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` uploads a different picture (a new address, the old one is a 404), uploads the same picture again
+(the same address: it is a fingerprint), then takes the photo down (`/me` says `null` at once, the address is a 404, and
+doing it twice is fine) and puts `gps.jpg` back for the later steps.
+
+```bash
+old=$url
+put "$work/other.jpg" "$ada" image/jpeg '{avatar_url: (.avatar_url | sub("[0-9a-f]{8}-[0-9a-f-]{27}"; "<user id>") | sub("[0-9a-f]{16}"; "<version>"))}'
+new=$(curl -s -H "Authorization: Bearer $ada" $api/me/ | jq -r .avatar_url)
+echo "same URL as before the new photo? $([ "$old" = "$new" ] && echo yes || echo no)"
+curl -s -o /dev/null -w 'old photo URL: %{http_code}\n' "http://localhost:8000$old"
+curl -s -o /dev/null -w 'new photo URL: %{http_code}\n' "http://localhost:8000$new"
+put "$work/other.jpg" "$ada" image/jpeg "{same_url_again: (.avatar_url == \"$new\")}"
+echo "--- taking it down"
+send DELETE /me/avatar/ "$ada"
+send GET /me/ "$ada" "" '{avatar_url}'
+curl -s -o /dev/null -w 'the photo URL now: %{http_code}\n' "http://localhost:8000$new"
+send DELETE /me/avatar/ "$ada"
+put "$work/gps.jpg" "$ada" image/jpeg '{has_photo: (.avatar_url != null)}'
+url=$(curl -s -H "Authorization: Bearer $ada" $api/me/ | jq -r .avatar_url)
+```
+
+**You should see:**
+
+```text
+200  {"avatar_url":"/api/v1/avatars/<user id>/<version>-256.webp"}
+same URL as before the new photo? no
+old photo URL: 404
+new photo URL: 200
+200  {"same_url_again":true}
+--- taking it down
+204  
+200  {"avatar_url":null}
+the photo URL now: 404
+204  
+200  {"has_photo":true}
+```
+
+#### Step 8: The allowance, and a blocked account
+
+**Where:** Terminal window 2.
+
+**What this does:** `cy` sends five photos that are refused (each counts) and then a good one, which is the sixth attempt of the
+day and answers 429; taking a photo down is never limited. Then a moderator blocks `blk`'s uploads and `blk` tries six times:
+always 403, never 429, because a permission refusal doesn't count.
+
+```bash
+echo "--- cy: five refused photos use up the five, the sixth upload is a 429 even though it is fine"
+for i in 1 2 3 4 5; do put "$work/picture.svg" "$cy" image/svg+xml '.code'; done
+put "$work/gps.jpg" "$cy" image/jpeg '.code'
+send DELETE /me/avatar/ "$cy"
+echo "--- blk: a moderator blocked uploads; six tries, always 403, never 429"
+modact block_photo_uploads blk
+for i in 1 2 3 4 5 6; do put "$work/gps.jpg" "$blk" image/jpeg '.code'; done
+```
+
+**You should see:**
+
+```text
+--- cy: five refused photos use up the five, the sixth upload is a 429 even though it is fine
+400  "photo_unsupported"
+400  "photo_unsupported"
+400  "photo_unsupported"
+400  "photo_unsupported"
+400  "photo_unsupported"
+429  "throttled"
+204  
+--- blk: a moderator blocked uploads; six tries, always 403, never 429
+logged: avatar_blocked
+403  "photo_uploads_blocked"
+403  "photo_uploads_blocked"
+403  "photo_uploads_blocked"
+403  "photo_uploads_blocked"
+403  "photo_uploads_blocked"
+403  "photo_uploads_blocked"
+```
+
+- The five a day are per person over a 24-hour window. Run the `cy` lines of step 8 a second time in the same terminal and the
+  very first (refused) photo already answers 429: the allowance is used up until tomorrow.
+
+#### Step 9: What a moderator can do
+
+**Where:** Terminal window 2.
+
+**What this does:** `eve` uploads a photo. The moderator **removes** it (`/me` says `null`, her old address is a 404, and she can
+upload again), then **blocks** her uploads (which removes her new photo too, and uploading answers 403) and then **allows**
+them (she uploads again). Three actions the rules refuse are tried, and the log is printed. These calls go through the same
+service functions Django Admin's buttons call (step 12 shows the buttons).
+
+```bash
+put "$work/gps.jpg" "$eve" image/jpeg '{has_photo: (.avatar_url != null)}'
+eveurl=$(curl -s -H "Authorization: Bearer $eve" $api/me/ | jq -r .avatar_url)
+echo "--- Remove photo"
+modact remove_photo eve
+send GET /me/ "$eve" "" '{avatar_url, avatar_uploads_blocked}'
+curl -s -o /dev/null -w 'her old photo URL: %{http_code}\n' "http://localhost:8000$eveurl"
+put "$work/other.jpg" "$eve" image/jpeg '{has_photo: (.avatar_url != null)}'
+echo "--- Block photo uploads (also removes the new photo)"
+modact block_photo_uploads eve
+send GET /me/ "$eve" "" '{avatar_url, avatar_uploads_blocked}'
+put "$work/gps.jpg" "$eve" image/jpeg '.'
+echo "--- Allow photo uploads"
+modact allow_photo_uploads eve
+put "$work/gps.jpg" "$eve" image/jpeg '{has_photo: (.avatar_url != null), avatar_uploads_blocked}'
+eveurl=$(curl -s -H "Authorization: Bearer $eve" $api/me/ | jq -r .avatar_url)
+echo "--- what the moderators' actions are refused for"
+modact remove_photo una
+modact allow_photo_uploads ada
+modact remove_photo mod
+echo "--- the log, oldest first"
+python manage.py shell -c "
+from apps.moderation.models import ModerationAction
+for row in ModerationAction.objects.filter(notes='part14b $id').order_by('created_at'):
+    print(row.action, '| account:', row.subject_user.username.replace('_$id', ''), '| by:', row.moderator.username.replace('_$id', ''), '| post:', row.post_id)" | grep -vE "imported automatically|^$"
+```
+
+**You should see:**
+
+```text
+200  {"has_photo":true}
+--- Remove photo
+logged: avatar_removed
+200  {"avatar_url":null,"avatar_uploads_blocked":false}
+her old photo URL: 404
+200  {"has_photo":true}
+--- Block photo uploads (also removes the new photo)
+logged: avatar_blocked
+200  {"avatar_url":null,"avatar_uploads_blocked":true}
+403  {"detail":"A moderator turned off photo uploads for your account.","code":"photo_uploads_blocked"}
+--- Allow photo uploads
+logged: avatar_unblocked
+200  {"has_photo":true,"avatar_uploads_blocked":false}
+--- what the moderators' actions are refused for
+refused: no profile photo
+refused: photo uploads not blocked
+refused: your own account
+--- the log, oldest first
+avatar_blocked | account: part14b_blk | by: part14b_mod | post: None
+avatar_removed | account: part14b_eve | by: part14b_mod | post: None
+avatar_removed | account: part14b_eve | by: part14b_mod | post: None
+avatar_blocked | account: part14b_eve | by: part14b_mod | post: None
+avatar_unblocked | account: part14b_eve | by: part14b_mod | post: None
+```
+
+- The first log row is `blk`'s block from step 8. Block photo uploads on an account that has a photo writes **two** rows,
+  `avatar_removed` and then `avatar_blocked`, a microsecond apart. Every row names the account and has no post.
+- Nobody is sent a notification for any of this.
+
+#### Step 10: The export and deleting an account
+
+**Where:** Terminal window 2.
+
+**What this does:** Downloads `eve`'s data export and shows her photo in it (the 256 px WebP, base64), decodes it to check it is a
+WebP, then deletes her account. Her photo's address becomes a 404 and the log rows about her stay, with the account gone.
+
+```bash
+curl -s -H "Authorization: Bearer $eve" $api/me/export/ | jq -c '.account | {photo: (.photo | {format, size, base64_characters: (.data | length)}), photo_uploads_blocked}'
+curl -s -H "Authorization: Bearer $eve" $api/me/export/ | jq -r .account.photo.data | base64 -d | file -b - | cut -d, -f1-4
+send DELETE /me/ "$eve" '{"password":"correct-horse-battery-42"}'
+curl -s -o /dev/null -w 'her photo URL after deleting the account: %{http_code}\n' "http://localhost:8000$eveurl"
+python manage.py shell -c "
+from apps.moderation.models import ModerationAction
+rows = ModerationAction.objects.filter(notes='part14b $id').order_by('created_at')
+print([(row.action, 'account gone' if row.subject_user is None else 'account kept') for row in rows if row.action.startswith('avatar_')])" | grep -vE "imported automatically|^$"
+```
+
+**You should see:**
+
+```text
+{"photo":{"format":"webp","size":256,"base64_characters":516},"photo_uploads_blocked":false}
+RIFF (little-endian) data, Web/P image, VP8 encoding, 256x256
+204  
+her photo URL after deleting the account: 404
+[('avatar_blocked', 'account kept'), ('avatar_removed', 'account gone'), ('avatar_removed', 'account gone'), ('avatar_blocked', 'account gone'), ('avatar_unblocked', 'account gone')]
+```
+
+- `base64_characters` is about 4/3 of the image's bytes. The first row in the last line is `blk`'s block (her account is
+  still there); the other four were `eve`'s.
+
+#### Step 11: The photo card in the browser
+
+**Where:** Window 1 keeps `runserver`; window 3: `cd frontend` and `npm run dev`. Then the Browser. Keep window 2's `$work`
+folder: `echo "$work"` prints where the test pictures are.
+
+**What this does:** Walks the card a person uses. Log in as `web`, the account step 3 made for this.
+
+1. **Browser:** open `http://localhost:3000/login` and log in with `part14b-web-<id>@example.test` (use your `id`) and
+   `correct-horse-battery-42`. **You should see** the home feed.
+2. **Browser:** open `http://localhost:3000/settings`. **You should see** the Profile section start with a card, **Profile
+   photo**: your initials in a circle, the line "JPEG, PNG or WebP, at least 128 × 128 pixels. We crop it to a square and
+   remove location and camera data." and an **Upload photo** button; the Display name, Username and Bio fields follow.
+3. **Browser:** click **Upload photo** and choose `$work/gps.jpg`. **You should see** "Preparing your photo…" for an instant,
+   then a square 96 px preview with **Use this photo** (focused) and **Cancel**. Nothing has been sent yet. Cancel brings the
+   card back to how it was.
+4. **Browser:** choose the file again and click **Use this photo**. **You should see** a progress bar with "Uploading… 42%"
+   (it flashes by on your own computer; with the browser's network throttling set to "Slow 3G" you can watch it) and then
+   "Saving…", the toast **Photo saved.**, and your photo in the card, in the left rail's user card and in the top-right
+   corner. The buttons are now **Change photo** and **Remove photo**.
+5. **Browser:** open `http://localhost:3000/u/part14b_web_<id>`. **You should see** the photo large in the profile header.
+   Post something from the **New post** button and open your profile again: the card has the small photo beside your name.
+6. **Browser:** on `/settings` choose `$work/small.png`. **You should see** a red message, "That photo is too small. Use one at
+   least 128 × 128 pixels.", and your photo unchanged. Choose `$work/picture.svg` (switch the file window to "All files"):
+   "Choose a JPEG, PNG or WebP photo." Neither sent anything.
+7. **Browser:** click **Remove photo**. **You should see** the toast **Photo removed.** and your initials again at once, with
+   no "are you sure?" window.
+8. **Browser:** log out and log in as `part14b_blk_<id>`'s email (`part14b-blk-<id>@example.test`). **You should see** an
+   amber notice, "A moderator turned off photo uploads for your account.", and no upload button. Log in as
+   `part14b-una-<id>@example.test`: "Verify your email address to add a photo." and a greyed **Upload photo**.
+9. **Browser:** make the window narrow (about 390 px wide, or the browser's phone view). **You should see** the card stack
+   neatly and no sideways scroll.
+
+**If it differs:** a page stuck on "Loading…" means `npm run dev` isn't running or Django isn't (the relay needs it).
+
+#### Step 12: Moderating photos in Django Admin
+
+**Where:** Window 1 keeps `runserver`. The Browser, in a **private window** (so it doesn't touch your `web` login).
+
+**What this does:** Walks what a moderator sees. Log in with the moderator step 3 made.
+
+1. **Browser:** open `http://localhost:8000/admin/` (if it 404s, `ADMIN_URL_PATH` in `backend/.env` isn't `admin/`; use that
+   path) and log in with `part14b-mod-<id>@example.test` and `correct-horse-battery-42`. **You should see** the sidebar
+   group **Accounts** with **Profile photos** and **Users**.
+2. **Browser:** open **Profile photos**. **You should see** a list with a round thumbnail, the account, its size and when it
+   changed, newest first; an **Action** menu with **Remove photo** and **Block photo uploads** (not Allow: an account with a
+   photo isn't blocked) and no Add button.
+3. **Browser:** tick one account, choose **Remove photo**, **Go**. **You should see** "Remove photo: are you sure?" with a
+   table (Account, **Photo now** "Has a photo, uploads allowed", **Photo after this** "No photo, uploads allowed") and an
+   **Internal notes** box. Click **Yes, remove photo**: the message "Removed the photo of 1 account." and the row is gone.
+   That person's pages show initials at once.
+4. **Browser:** open **Users**, open one account. **You should see** a **Photo** field: the thumbnail (or "No photo"),
+   "Uploads allowed" or "Uploads blocked", and a small table of the account's photo actions (time, action, by, notes).
+5. **Browser:** on the Users list, tick an account that has a photo and choose **Block photo uploads**. **You should see**
+   the page explain that it also removes the photo (logged as two entries); confirm: "Blocked photo uploads on 1 account."
+   In the filter panel, **By photo uploads → Blocked** lists it. Tick it and choose **Allow photo uploads**, confirm:
+   "Allowed photo uploads on 1 account."
+6. **Browser:** tick an account with no photo and choose **Remove photo**. **You should see** "None of the selected accounts
+   can have this done to them." and a **1 will be skipped** table whose reason is "no profile photo". A moderator can't
+   act on a superuser's account or their own either (the reasons "a superuser's account" and "your own account").
+
+- When you are done: window 1 and 3 stop with Ctrl+C, and `rm -rf "$work"` in window 2 removes the test pictures.
+  `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
+  database, which is destructive.
+- No real secret was used: the password of the test accounts is a throwaway, and the moderator's login is one of them.
 
 ---
 
@@ -23129,3 +23711,423 @@ The browser steps are the same as the Linux guide's step 9 (log in at `http://lo
 the same things; that step lists each one with what you should see. `Ctrl+C` stops windows 1 and 3. `docker compose down`
 stops the containers and keeps the data; `docker compose down -v` wipes the local database, which is destructive. No real
 secret was used.
+
+### Part 14B: Profile photos
+
+Needs Part 0A's containers and virtualenv, Part 0C's frontend, and your own `backend\.env` and `frontend\.env.local`.
+Part 14B adds **three endpoints** (`PUT` and `DELETE /api/v1/me/avatar/`, and the public image `GET /api/v1/avatars/{user_id}/{version}-{96|256}.webp`),
+the **photo card** at the top of `/settings` (Stitch c2), **one table** (`accounts.Avatar`) and **three migrations**
+(`accounts.0003_avatar`, `moderation.0008_photo_actions`, `moderation.0009_photo_permissions`), **one dependency** (Pillow
+13.0.0) and **three moderator actions** in Django Admin (Remove photo, Block photo uploads, Allow photo uploads) plus a
+"Profile photos" list. `GET /api/v1/me/` gains `avatar_uploads_blocked` (12 keys) and its `avatar_url` is now the 256 px
+image. It adds no environment variable.
+
+**Which window for what.** As in the Linux guide: window 1 runs `python manage.py runserver` in `backend\` (start it in step 3,
+**after** step 2, because Playwright starts its own servers and needs ports 3000 and 8000 free); window 2 runs every `curl.exe`
+and `python manage.py` command (**use the same window for steps 3 to 10**: `$id`, `$work`, `$ada`, `$r1`, `$r2`, `$cy`,
+`$blk`, `$eve`, `$mod`, `$una`, `$api`, `Send`, `Put`, `ModAct` and `Login` only live in that terminal); window 3 runs
+`npm run dev` in `frontend\` (steps 11 and 12); steps 11 and 12 also need the Browser.
+
+Things to know first (the same rules as the Linux guide):
+
+- **What happens to a photo.** The server decodes it with Pillow (only as JPEG, PNG or WebP, whatever the file is called),
+  checks its size from the header before decoding a pixel (at most 5 MB, 25 megapixels and WebP 12, at least 128 × 128),
+  applies the camera's rotation, crops the centre square and builds two **new** WebP images (256 and 96 px). Nothing of the
+  upload is kept except those pixels: no GPS, no camera name, no colour profile, no XMP. The original is never stored.
+- **The browser shrinks it first** (originals up to 20 MB, centre square, at most 1024 px, JPEG), so the location data never
+  leaves your device. The `curl.exe` steps talk to the server directly, so they show the server's own rules.
+- **Who may upload.** A verified email (403 `email_unverified`) and uploads that aren't blocked (403 `photo_uploads_blocked`);
+  those never count against the **5 uploads a day** limit, a photo refused with a 400 does. `DELETE` has no limit.
+- **The URL changes with the pixels**: a new photo is a new address, the old one is a 404, cached for a year.
+- **The moderators** can Remove a photo, Block photo uploads (which also removes the photo) and Allow them again, each logged
+  with the account. Nobody is notified.
+- **The accounts.** Step 3 makes nine straight in the database with the throwaway password `correct-horse-battery-42`: `ada`
+  (the main one), `r1` and `r2` (refusals), `cy` (the allowance), `blk` (blocked), `eve` (the moderators act on her), `mod` (a
+  moderator), `una` (email not verified) and `web` (the browser steps). No sign-up and no email provider are needed.
+- **Not run on Windows.** The Linux guide's commands were run for real on 2026-10-21 and their outputs recorded. These
+  PowerShell versions are the same requests written for PowerShell 5.1 (JSON goes through a file, see MEMORY 2026-10-03; the
+  `ETag` header goes through a file too, because PowerShell 5.1 strips the double quotes it holds); they were **not** run on
+  a Windows machine, so a wrong quote or property name here is possible. The answers you should get are the ones shown in the
+  Linux guide's steps 4 to 10 (ids, numbers in names and your `ETag` letters differ). Two lines differ on purpose and are
+  noted where they come up.
+
+#### Step 1: Run the automated backend checks
+
+**Where:** Terminal window 2 (commands), starting in the repo root `C:\Users\Nafis\Downloads\Rumor-Zero`.
+
+**What this does:** Starts the database containers, activates the Python environment, installs Pillow, applies the three
+migrations, confirms there is nothing left to migrate, runs the whole backend test suite and Part 14B's own tests, the
+linter and the formatter check.
+
+```powershell
+docker compose up -d
+cd backend
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt                     # Requirement already satisfied: Pillow==13.0.0 (installs it the first time)
+python manage.py migrate                            # Applying accounts.0003_avatar... OK, moderation.0008 ... OK, moderation.0009 ... OK
+python manage.py makemigrations --check --dry-run   # No changes detected
+python manage.py check                              # System check identified no issues (0 silenced).
+python -m pytest                                    # 4478 passed (on Windows the memory test skips: it needs Linux's /proc, so 4471)
+python -m pytest apps\accounts\tests\test_avatar_processing.py apps\accounts\tests\test_avatar_memory.py apps\accounts\tests\test_api_avatar_upload.py apps\accounts\tests\test_api_avatar_serve.py apps\accounts\tests\test_api_avatar_delete.py apps\accounts\tests\test_avatar_urls.py apps\moderation\tests\test_services_photos.py apps\moderation\tests\test_admin_photos.py -q   # 256 passed on Linux, 249 passed and 7 skipped on Windows
+ruff check . ; ruff format --check .                # All checks passed! / 335 files already formatted
+```
+
+**You should see:** `No changes detected`, `System check identified no issues (0 silenced).`, the pass counts in the
+comments, `All checks passed!` and `335 files already formatted`. Counts may grow later; what matters is that nothing fails.
+(These numbers were recorded on Linux.)
+
+#### Step 2: Run the automated frontend checks
+
+**Where:** Terminal window 2, then `cd ..\frontend`. **No servers may be running on ports 3000 and 8000** (Playwright starts
+its own). The production build and `CI=1` run need Linux (`@opennextjs/cloudflare` doesn't build on Windows), so on Windows
+run the development end-to-end run only. The end-to-end spec makes its test photo with the backend virtualenv's Python
+(Pillow), so step 1's `pip install` has to have run.
+
+**What this does:** Runs the linters, the type check, the component tests and the end-to-end tests against the dev servers.
+
+```powershell
+cd ..\frontend
+npm run lint ; npm run lint:tokens ; npm run typecheck ; npm run format:check
+npm test                                            # 165 files, 2325 tests passed
+npm run test:e2e                                    # 58 passed
+cd ..\backend                                       # back to backend\ for steps 3 to 10
+```
+
+**You should see:** nothing from ESLint and TypeScript, `lint:tokens OK (…)`, `All matched files use Prettier code style!`,
+`Test Files  165 passed (165)`, `Tests  2325 passed (2325)` and `58 passed`.
+
+#### Step 3: Start the server, make nine accounts and some test pictures
+
+**Where:** First window 1 (the Django server), then window 2 (the commands). **Keep using window 2 for steps 4 to 10.**
+
+**What this does:** Window 1 runs Django with your own settings. In window 2 you make the accounts, log eight of them in
+through the API (tokens in `$ada`, `$r1`, `$r2`, `$cy`, `$blk`, `$eve`, `$mod` and `$una`), save the helpers `Send` (any
+request: prints the status code, then the answer), `Put` (uploads a photo) and `ModAct` (a moderator's action, through the
+same service Django Admin calls), and make the test pictures in a temporary folder `$work`: a JPEG with a GPS position, a
+camera name, a colour profile and an XMP note (`gps.jpg`), a second picture, a PNG with a `.jpg` name, a 100 px picture, a
+64-megapixel "bomb" (a few KB of file), a GIF, an SVG and a JPEG padded past 5 MB.
+
+Window 1 (in `backend\`, venv active):
+
+```powershell
+python manage.py runserver                          # leave it running
+```
+
+Window 2 (in `backend\` with the venv active). If you opened a new terminal, first run
+`cd C:\Users\Nafis\Downloads\Rumor-Zero\backend` and `.\.venv\Scripts\Activate.ps1`:
+
+```powershell
+$id = Get-Date -Format "HHmmss"                     # a unique suffix so the names are new each run
+@"
+from allauth.account.models import EmailAddress
+from apps.accounts.models import Role, User
+for name in ('ada', 'r1', 'r2', 'cy', 'blk', 'eve', 'mod', 'una', 'web'):
+    user = User.objects.create_user(email=f'part14b-{name}-$id@example.test', username=f'part14b_{name}_$id', password='correct-horse-battery-42', is_email_verified=(name != 'una'), role=Role.MODERATOR if name == 'mod' else Role.USER)
+    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+print(User.objects.filter(email__startswith='part14b-', email__endswith='$id@example.test').count(), 'accounts made')
+"@ | python manage.py shell | Select-Object -Last 1
+$h = '-H', 'Origin: http://localhost:3000', '-H', 'X-Requested-With: rumor-zero'   # headers every auth call needs
+# Login <name>: prints a login token
+function Login($name) {
+@"
+{"email": "part14b-$name-$id@example.test", "password": "correct-horse-battery-42"}
+"@ | Set-Content -Encoding ascii $env:TEMP\rz-login.json
+  (curl.exe -s @h -H "Content-Type: application/json" --data-binary "@$env:TEMP\rz-login.json" http://localhost:8000/api/auth/app/v1/auth/login | ConvertFrom-Json).meta.access_token
+}
+$ada = Login ada; $r1 = Login r1; $r2 = Login r2; $cy = Login cy; $blk = Login blk; $eve = Login eve; $mod = Login mod; $una = Login una
+($ada, $r1, $r2, $cy, $blk, $eve, $mod, $una | ForEach-Object { $_.Substring(0, 10) }) -join ' '   # eight token prefixes
+$api = 'http://localhost:8000/api/v1'
+# Send <METHOD> <path> [token] [json body] [fields]: prints the HTTP status, then the answer. `fields` is a list of
+# property names to keep, or a script block `{ param($r) ... }` that picks what to show from the answer.
+function Send($method, $path, $token, $json, $show) {
+  $a = @()
+  if ($token) { $a += '-H', "Authorization: Bearer $token" }
+  if ($json) {
+    $json | Set-Content -Encoding ascii $env:TEMP\rz-body.json
+    $a += '-H', 'Content-Type: application/json', '--data-binary', "@$env:TEMP\rz-body.json"
+  }
+  $out = curl.exe -s -w "`n%{http_code}" -X $method @a "$api$path"
+  $body = if ($out.Count -gt 1) { $out[0..($out.Count - 2)] -join '' } else { '' }
+  if ($show -and $body) {
+    $r = $body | ConvertFrom-Json
+    $shown = if ($show -is [scriptblock]) { & $show $r } else { $r | Select-Object $show }
+    $body = ConvertTo-Json -InputObject $shown -Depth 5 -Compress
+  }
+  "$($out[-1])  $body"
+}
+# Put <file> <token> [mime] [fields]: uploads a photo (multipart `file`), prints the status code, then the answer
+function Put($file, $token, $mime = 'image/jpeg', $show) {
+  $out = curl.exe -s -w "`n%{http_code}" -H 'Expect:' -X PUT -H "Authorization: Bearer $token" -F "file=@$file;type=$mime" "$api/me/avatar/"
+  $body = if ($out.Count -gt 1) { $out[0..($out.Count - 2)] -join '' } else { '' }
+  if ($show -and $body) {
+    $r = $body | ConvertFrom-Json
+    $shown = if ($show -is [scriptblock]) { & $show $r } else { $r | Select-Object $show }
+    $body = ConvertTo-Json -InputObject $shown -Depth 5 -Compress
+  }
+  "$($out[-1])  $body"
+}
+# ModAct <remove_photo|block_photo_uploads|allow_photo_uploads> <name>: a moderator's action, through the same service Django Admin calls
+function ModAct($service, $name) {
+@"
+from apps.accounts.models import User
+from apps.moderation import services
+target = User.objects.get(username='part14b_${name}_$id')
+try:
+    print('logged:', services.$service(target.pk, moderator=User.objects.get(username='part14b_mod_$id'), notes='part14b $id').action)
+except services.ActionRefused as refused:
+    print('refused:', refused.refusal.text)
+"@ | python manage.py shell | Select-Object -Last 1
+}
+$work = Join-Path $env:TEMP "rz-part14b-$id"; New-Item -ItemType Directory -Force $work | Out-Null   # the test pictures go here
+@'
+import sys
+from PIL import Image, ImageCms
+
+work = sys.argv[1]
+red, green, blue, yellow = (230, 20, 20), (20, 200, 20), (20, 20, 230), (240, 220, 20)
+
+def quadrants(width, height, colours):
+    image = Image.new("RGB", (width, height))
+    for i, colour in enumerate(colours):
+        left, top = (i % 2) * width // 2, (i // 2) * height // 2
+        image.paste(colour, (left, top, left + width // 2, top + height // 2))
+    return image
+
+exif = Image.Exif()
+exif[0x010F] = "SecretCameraMaker"
+exif.get_ifd(0x8825).update({1: "N", 2: (37.0, 25.0, 19.0), 3: "W", 4: (122.0, 5.0, 24.0)})   # a GPS position
+icc = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+xmp = b"<x:xmpmeta xmlns:x='adobe:ns:meta/'>SecretXmpMarker</x:xmpmeta>"
+quadrants(640, 480, (red, green, blue, yellow)).save(f"{work}/gps.jpg", "JPEG", exif=exif, icc_profile=icc, xmp=xmp, quality=92)
+quadrants(640, 480, (blue, yellow, red, green)).save(f"{work}/other.jpg", "JPEG", quality=92)
+quadrants(300, 300, (red, green, blue, yellow)).save(f"{work}/renamed.jpg", "PNG")           # a PNG with a .jpg name
+Image.new("RGB", (100, 100), red).save(f"{work}/small.png")                                  # under 128 px
+Image.new("L", (8000, 8000)).save(f"{work}/bomb.png")                                        # 64 million pixels in a few KB
+Image.new("RGB", (200, 200), red).save(f"{work}/animated.gif")                               # a GIF
+open(f"{work}/picture.svg", "w").write("<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><rect width='200' height='200'/></svg>")
+open(f"{work}/big.jpg", "wb").write(open(f"{work}/gps.jpg", "rb").read() + bytes(6 * 1024 * 1024))   # a real JPEG padded past 5 MB
+'@ | python - $work
+(Get-ChildItem $work).Name -join ' '
+"id=$id"                                            # write this down
+```
+
+**You should see:** `9 accounts made`, then eight token prefixes such as `eyJhbGciOi eyJhbGciOi ...`, the eight picture names
+(`animated.gif big.jpg bomb.png gps.jpg other.jpg picture.svg renamed.jpg small.png`) and `id=` with your suffix.
+
+**If it differs:** an error on `.Substring` means a login failed: `runserver` isn't running in window 1. A
+`ModuleNotFoundError: No module named 'PIL'` means step 1's `pip install -r requirements.txt` wasn't run in this venv. Fix
+that and run the block again from `$id = ...`. A login token lasts 15 minutes: run `$ada = Login ada` again if a later
+command answers `401`.
+
+#### Step 4: Upload a photo with GPS in it
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` uploads `gps.jpg`, then you download her 256 px and 96 px images from the address `/me` gives and
+read them: their size, the list of chunks in the file (read from the bytes) and whether the camera name or the XMP note is
+anywhere inside.
+
+```powershell
+Put "$work\gps.jpg" $ada 'image/jpeg' { param($r) [ordered]@{ avatar_url = ($r.avatar_url -replace '[0-9a-f]{8}-[0-9a-f-]{27}', '<user id>' -replace '[0-9a-f]{16}', '<version>'); avatar_uploads_blocked = $r.avatar_uploads_blocked } }
+$url = (curl.exe -s -H "Authorization: Bearer $ada" "$api/me/" | ConvertFrom-Json).avatar_url
+curl.exe -s -o "$work\p256.webp" "http://localhost:8000$url"
+curl.exe -s -o "$work\p96.webp" ("http://localhost:8000" + $url.Replace('-256', '-96'))
+@'
+import struct, sys
+from PIL import Image
+
+work = sys.argv[1]
+source = open(f"{work}/gps.jpg", "rb").read()
+print("the upload had GPS:", bool(Image.open(f"{work}/gps.jpg").getexif().get_ifd(0x8825)), "| maker in the file:", b"SecretCameraMaker" in source)
+for name in ("p256.webp", "p96.webp"):
+    data = open(f"{work}/{name}", "rb").read()
+    chunks, pos = [], 12
+    while pos + 8 <= len(data):
+        chunks.append(data[pos:pos + 4].decode("latin1"))
+        size = struct.unpack("<I", data[pos + 4:pos + 8])[0]
+        pos += 8 + size + (size & 1)
+    print(name, Image.open(f"{work}/{name}").size, chunks, "| maker in the file:", b"SecretCameraMaker" in data, "| XMP marker:", b"SecretXmpMarker" in data)
+'@ | python - $work
+```
+
+**You should see:** `200` and `{"avatar_url":"/api/v1/avatars/<user id>/<version>-256.webp","avatar_uploads_blocked":false}`, then the three lines of the Linux guide's step 4: `the upload had GPS: True | maker
+in the file: True`, then `p256.webp (256, 256) ['VP8 '] | maker in the file: False | XMP marker: False` and the same for
+`p96.webp (96, 96)`. `['VP8 ']` is the whole file: one picture chunk.
+
+#### Step 5: The headers, the 304 and the 404s
+
+**Where:** Terminal window 2 (the same one: it needs `$url`).
+
+**What this does:** Reads the image's headers, asks for it again with its `ETag` (the server answers 304 and no body), sends a
+HEAD request, asks for a size and a version that don't exist, and asks with a made-up login token.
+
+```powershell
+curl.exe -s -D - -o NUL "http://localhost:8000$url" | Select-String -Pattern '^(HTTP|content-type|cache-control|etag|x-content-type-options|content-security-policy|content-disposition)'
+$etag = (((curl.exe -s -D - -o NUL "http://localhost:8000$url") | Where-Object { $_ -match '^etag:' }) -replace '^etag:\s*', '').Trim()
+# PowerShell 5.1 strips the double quotes of an ETag from a native program's arguments: send the header from a file
+"If-None-Match: $etag" | Set-Content -Encoding ascii $env:TEMP\rz-inm.txt
+curl.exe -s -o NUL -w "again with If-None-Match: %{http_code}, %{size_download} bytes`n" -H "@$env:TEMP\rz-inm.txt" "http://localhost:8000$url"
+(curl.exe -sI "http://localhost:8000$url")[0]
+curl.exe -s -o NUL -w "a made-up size:    %{http_code}`n" ("http://localhost:8000" + $url.Replace('-256', '-97'))
+curl.exe -s -o NUL -w "a made-up version: %{http_code}`n" ("http://localhost:8000" + ($url -replace '[0-9a-f]{16}-', '0000000000000000-'))
+curl.exe -s -o NUL -w "with a stale token: %{http_code}`n" -H "Authorization: Bearer not-a-token" "http://localhost:8000$url"
+```
+
+**You should see:** the same lines as the Linux guide's step 5: `HTTP/1.1 200 OK`, `Content-Type: image/webp`,
+`Cache-Control: public, max-age=31536000, immutable`, an `ETag: "<version>-256"`, `X-Content-Type-Options: nosniff`,
+`Content-Security-Policy: default-src 'none'; sandbox` and `Content-Disposition: inline; filename="avatar.webp"` (`Select-String`
+may add its own prefix), then `again with If-None-Match: 304, 0 bytes`, `HTTP/1.1 200 OK`, `a made-up size:    404`, `a made-up
+version: 404` and `with a stale token: 200`.
+
+#### Step 6: What is refused, and who may upload
+
+**Where:** Terminal window 2.
+
+**What this does:** `r1` tries five things that can't be a profile photo; `r2` uploads a PNG named `.jpg` (fine: the name is
+never read), a JSON body and a form with the wrong field name; an unverified account and an anonymous request try too.
+
+```powershell
+"--- r1: five photos that can't be used"
+Put "$work\picture.svg" $r1 'image/svg+xml'
+Put "$work\animated.gif" $r1 'image/gif'
+Put "$work\small.png" $r1 'image/png'
+Put "$work\bomb.png" $r1 'image/png'
+Put "$work\big.jpg" $r1 'image/jpeg'
+"--- r2: a PNG named .jpg is fine, and bodies that are no photo"
+Put "$work\renamed.jpg" $r2 'image/jpeg' { param($r) [ordered]@{ avatar_url = ($r.avatar_url -replace '[0-9a-f]{8}-[0-9a-f-]{27}', '<user id>' -replace '[0-9a-f]{16}', '<version>') } }
+Send PUT /me/avatar/ $r2 '{"file":"x"}'
+curl.exe -s -w "  %{http_code}`n" -X PUT -H "Authorization: Bearer $r2" -F "photo=@$work\gps.jpg" "$api/me/avatar/"
+"--- who may upload"
+Put "$work\gps.jpg" $una
+curl.exe -s -w "  %{http_code}`n" -X PUT -F "file=@$work\gps.jpg" "$api/me/avatar/"
+```
+
+**You should see:** the answers of the Linux guide's step 6: four `400`s with the codes `photo_unsupported` (the SVG and the
+GIF), `photo_too_small`, `photo_too_many_pixels` and `photo_too_large`; `200` with the new address; `415` `unsupported_media_type`
+for the JSON; `photo_missing` and `400`; `403` `email_unverified`; and `not_authenticated` and `401`.
+
+#### Step 7: Change, repeat and remove a photo
+
+**Where:** Terminal window 2.
+
+**What this does:** `ada` uploads a different picture (a new address, the old one is a 404), uploads the same picture again
+(the same address), then takes the photo down (`/me` says `null`, the address is a 404, doing it twice is fine) and puts
+`gps.jpg` back for the later steps.
+
+```powershell
+$old = $url
+Put "$work\other.jpg" $ada 'image/jpeg' { param($r) [ordered]@{ avatar_url = ($r.avatar_url -replace '[0-9a-f]{8}-[0-9a-f-]{27}', '<user id>' -replace '[0-9a-f]{16}', '<version>') } }
+$new = (curl.exe -s -H "Authorization: Bearer $ada" "$api/me/" | ConvertFrom-Json).avatar_url
+"same URL as before the new photo? $(if ($old -eq $new) { 'yes' } else { 'no' })"
+curl.exe -s -o NUL -w "old photo URL: %{http_code}`n" "http://localhost:8000$old"
+curl.exe -s -o NUL -w "new photo URL: %{http_code}`n" "http://localhost:8000$new"
+Put "$work\other.jpg" $ada 'image/jpeg' { param($r) [ordered]@{ same_url_again = ($r.avatar_url -eq $new) } }
+"--- taking it down"
+Send DELETE /me/avatar/ $ada
+Send GET /me/ $ada $null avatar_url
+curl.exe -s -o NUL -w "the photo URL now: %{http_code}`n" "http://localhost:8000$new"
+Send DELETE /me/avatar/ $ada
+Put "$work\gps.jpg" $ada 'image/jpeg' { param($r) [ordered]@{ has_photo = ($null -ne $r.avatar_url) } }
+$url = (curl.exe -s -H "Authorization: Bearer $ada" "$api/me/" | ConvertFrom-Json).avatar_url
+```
+
+**You should see:** the lines of the Linux guide's step 7: `200` with an address, `same URL as before the new photo? no`,
+`old photo URL: 404`, `new photo URL: 200`, `200 {"same_url_again":true}`, `204`, `200 {"avatar_url":null}`,
+`the photo URL now: 404`, `204` and `200 {"has_photo":true}`.
+
+#### Step 8: The allowance, and a blocked account
+
+**Where:** Terminal window 2.
+
+**What this does:** `cy` sends five photos that are refused (each counts) and then a good one, which is the sixth attempt of the day
+and answers 429; taking a photo down is never limited. Then a moderator blocks `blk`'s uploads and `blk` tries six times: always
+403, never 429, because a permission refusal doesn't count.
+
+```powershell
+"--- cy: five refused photos use up the five, the sixth upload is a 429 even though it is fine"
+1..5 | ForEach-Object { Put "$work\picture.svg" $cy 'image/svg+xml' code }
+Put "$work\gps.jpg" $cy 'image/jpeg' code
+Send DELETE /me/avatar/ $cy
+"--- blk: a moderator blocked uploads; six tries, always 403, never 429"
+ModAct block_photo_uploads blk
+1..6 | ForEach-Object { Put "$work\gps.jpg" $blk 'image/jpeg' code }
+```
+
+**You should see:** the lines of the Linux guide's step 8: five `400` (`photo_unsupported`), then `429` (`throttled`), `204`,
+`logged: avatar_blocked` and six `403` (`photo_uploads_blocked`).
+
+#### Step 9: What a moderator can do
+
+**Where:** Terminal window 2.
+
+**What this does:** `eve` uploads a photo. The moderator **removes** it (`/me` says `null`, her old address is a 404, she can
+upload again), then **blocks** her uploads (which removes her new photo too, and uploading answers 403) and then **allows**
+them (she uploads again). Three actions the rules refuse are tried, and the log is printed. These go through the same service
+functions Django Admin's buttons call.
+
+```powershell
+Put "$work\gps.jpg" $eve 'image/jpeg' { param($r) [ordered]@{ has_photo = ($null -ne $r.avatar_url) } }
+$eveurl = (curl.exe -s -H "Authorization: Bearer $eve" "$api/me/" | ConvertFrom-Json).avatar_url
+"--- Remove photo"
+ModAct remove_photo eve
+Send GET /me/ $eve $null avatar_url, avatar_uploads_blocked
+curl.exe -s -o NUL -w "her old photo URL: %{http_code}`n" "http://localhost:8000$eveurl"
+Put "$work\other.jpg" $eve 'image/jpeg' { param($r) [ordered]@{ has_photo = ($null -ne $r.avatar_url) } }
+"--- Block photo uploads (also removes the new photo)"
+ModAct block_photo_uploads eve
+Send GET /me/ $eve $null avatar_url, avatar_uploads_blocked
+Put "$work\gps.jpg" $eve 'image/jpeg'
+"--- Allow photo uploads"
+ModAct allow_photo_uploads eve
+Put "$work\gps.jpg" $eve 'image/jpeg' { param($r) [ordered]@{ has_photo = ($null -ne $r.avatar_url); avatar_uploads_blocked = $r.avatar_uploads_blocked } }
+$eveurl = (curl.exe -s -H "Authorization: Bearer $eve" "$api/me/" | ConvertFrom-Json).avatar_url
+"--- what the moderators' actions are refused for"
+ModAct remove_photo una
+ModAct allow_photo_uploads ada
+ModAct remove_photo mod
+"--- the log, oldest first"
+@"
+from apps.moderation.models import ModerationAction
+for row in ModerationAction.objects.filter(notes='part14b $id').order_by('created_at'):
+    print(row.action, '| account:', row.subject_user.username.replace('_$id', ''), '| by:', row.moderator.username.replace('_$id', ''), '| post:', row.post_id)
+"@ | python manage.py shell | Select-String -NotMatch -Pattern 'imported automatically|^\s*$'
+```
+
+**You should see:** the lines of the Linux guide's step 9: `logged: avatar_removed`, `her old photo URL: 404`, `logged: avatar_blocked`,
+`403` `photo_uploads_blocked`, `logged: avatar_unblocked`, `refused: no profile photo`, `refused: photo uploads not blocked`,
+`refused: your own account`, and the five log rows (the first is `blk`'s block from step 8; Block on an account with a photo
+writes two rows, `avatar_removed` and `avatar_blocked`).
+
+#### Step 10: The export and deleting an account
+
+**Where:** Terminal window 2.
+
+**What this does:** Downloads `eve`'s data export and shows her photo in it (the 256 px WebP, base64), decodes it to check it is a
+WebP, then deletes her account. Her photo's address becomes a 404 and the log rows about her stay, with the account gone.
+
+```powershell
+$photo = (curl.exe -s -H "Authorization: Bearer $eve" "$api/me/export/" | ConvertFrom-Json).account
+ConvertTo-Json -Compress ([ordered]@{ photo = [ordered]@{ format = $photo.photo.format; size = $photo.photo.size; base64_characters = $photo.photo.data.Length }; photo_uploads_blocked = $photo.photo_uploads_blocked })
+[System.IO.File]::WriteAllBytes("$work\export.webp", [Convert]::FromBase64String($photo.photo.data))
+python -c "import sys; from PIL import Image; im = Image.open(sys.argv[1]); print(im.format, im.size)" "$work\export.webp"
+Send DELETE /me/ $eve '{"password":"correct-horse-battery-42"}'
+curl.exe -s -o NUL -w "her photo URL after deleting the account: %{http_code}`n" "http://localhost:8000$eveurl"
+@"
+from apps.moderation.models import ModerationAction
+rows = ModerationAction.objects.filter(notes='part14b $id').order_by('created_at')
+print([(row.action, 'account gone' if row.subject_user is None else 'account kept') for row in rows if row.action.startswith('avatar_')])
+"@ | python manage.py shell | Select-String -NotMatch -Pattern 'imported automatically|^\s*$'
+```
+
+**You should see:** `{"photo":{"format":"webp","size":256,"base64_characters":516},"photo_uploads_blocked":false}`, then
+`WEBP (256, 256)` (the Linux guide prints `file`'s description here instead), `204`, `her photo URL after deleting the account:
+404` and the list from the Linux guide's step 10 (`blk`'s row `account kept`, `eve`'s four `account gone`).
+
+#### Steps 11 and 12: The photo card and Django Admin in the browser
+
+The browser steps are the same as the Linux guide's steps 11 and 12 (log in as `part14b-web-<id>@example.test` and use the
+card on `http://localhost:3000/settings`; then log in to `http://localhost:8000/admin/` as `part14b-mod-<id>@example.test`
+and use **Profile photos** and **Users**) and show the same things; those steps list each one with what you should see. The
+file window opens in `$work` (`echo $work` prints it): choose `gps.jpg`, `small.png` and `picture.svg` there. `Ctrl+C` stops
+windows 1 and 3, and `Remove-Item -Recurse $work` removes the test pictures. `docker compose down` stops the containers and
+keeps the data; `docker compose down -v` wipes the local database, which is destructive. No real secret was used.

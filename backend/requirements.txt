@@ -10,3 +10,4 @@ gunicorn==26.2.0
 django-anymail[brevo]==15.2
 sentry-sdk[django]==2.71.0
 idna==3.20
+Pillow==13.0.0

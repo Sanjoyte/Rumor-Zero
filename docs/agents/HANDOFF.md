@@ -6,10 +6,10 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 14B (Photo avatars) is planned and approved** (2026-10-21, Claude, Opus 5.5); nothing of it is implemented.
-  Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13 and 14 are done (Part 11D committed as
-  `b2f8ad5`, Part 12 as `30649b4`, Part 13 as `4f2d818`, the Part 14 plan as `f11aca7`, **Part 14 as `bd59f97`**).
-  Part 1 CI is green (user-reported 2026-10-06); **Part 2 to 14 CI have not been reported yet.**
+- **Part:** **Part 14B (Photo avatars) is implemented** (2026-10-21, Claude, Sonnet 5.5) and **not committed yet**.
+  Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13, 14 and 14B are done (Part 11D committed as
+  `b2f8ad5`, Part 12 as `30649b4`, Part 13 as `4f2d818`, Part 14 as `bd59f97`, **the Part 14B plan as `cdaa870`**).
+  Part 1 CI is green (user-reported 2026-10-06); **Part 2 to 14B CI have not been reported yet.**
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
   - **Part 17 has a launch blocker from Part 9** (your decision 2026-10-11): decide how production gets verdicts
@@ -17,17 +17,19 @@ read-only git output.
     from Part 11C a hash-chosen FALSE on an expired emergency also blocks its author.
   - **Part 17 also runs `posts.0003_search_vector`** (a stored generated column rewrites `posts_post`; the GIN build blocks
     writes): fine before launch.
-- **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and
-  `frontend/node_modules` exist there.
-- **Owner:** none (Claude stopped after planning Part 14B, as asked).
-- **Phase:** Part 14B planned and approved; no code written, no setup command run, Pillow **not** installed yet. HEAD `bd59f97` ("Implemented
-  Part 14: Account settings, data export, account deletion"); the tree held only the new plan file and this file's edits afterwards. The dev
-  database needs no migration yet (14B will add `accounts.0003`, `moderation.0008`, `moderation.0009`).
-- **Next action:** **Implement Part 14B from the approved plan** (prompt: `Implement only the approved Part 14B plan, validate it, update task.md and
-  HANDOFF.md, then stop.`). Start at the plan's step 0 (baselines `pytest` **4205**, `npm test` **2222**, E2E **55**), then step 1, the Pillow 13.0.0
-  spike, which is a stop-and-ask gate.
-- **Approved plan:** [`docs/agents/plans/part-14B-photo-avatars.md`](plans/part-14B-photo-avatars.md) (approved 2026-10-21, not implemented).
+- **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` (now with **Pillow 13.0.0**) and
+  `frontend/node_modules` exist there. Docker was down at the start (`docker compose up -d` brought it back); it is up now.
+- **Owner:** none (Claude stopped after Part 14B, as asked).
+- **Phase:** Part 14B implemented and validated; nothing is running (ports 3000 and 8000 are free). HEAD `cdaa870` ("Plan part 14B");
+  the tree holds Part 14B's changes (66 entries: 48 modified, 18 new). The dev database **has the three migrations applied**
+  (`accounts.0003`, `moderation.0008`, `moderation.0009`; rolled back to `accounts 0002` / `moderation 0007` and applied again,
+  clean). The throwaway `viz_` and `part14b_` accounts were deleted; the E2E specs' seeded accounts stay, as after every run.
+- **Next action:** **commit Part 14B** (the user does all git), then start the next part: **Part 15 (Landing & static pages)**, whose
+  dependencies (4, 11B, 11C) are done. Prompt for the plan: `Plan Part 15 only, save the plan, update HANDOFF.md, then stop.`
+- **Approved plan:** none pending ([`part-14B-photo-avatars.md`](plans/part-14B-photo-avatars.md) was implemented, with two
+  recorded differences: WebP capped at 12 MP, and the centre square processed in bands).
 - **Previous plans:**
+  - [`part-14B-photo-avatars.md`](plans/part-14B-photo-avatars.md), implemented 2026-10-21 (uncommitted);
   - [`part-14-account-settings-export-deletion.md`](plans/part-14-account-settings-export-deletion.md), implemented 2026-10-21 (committed as `bd59f97`);
   - [`part-13-notifications.md`](plans/part-13-notifications.md), implemented 2026-10-20 (committed as `4f2d818`);
   - [`part-12-search.md`](plans/part-12-search.md), implemented 2026-10-20 (committed as `30649b4`);
@@ -57,9 +59,69 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-21 by Claude (Opus 5.5), Part 14B planned and approved.
+- **Last updated:** 2026-10-21 by Claude (Sonnet 5.5), Part 14B implemented.
 
 ## Completed checkpoints
+
+- 2026-10-21 (Claude, Sonnet 5.5): **Part 14B implemented** (uncommitted). Started from HEAD `cdaa870` ("Plan part 14B", committed by you); the
+  tree was clean and matched this file (it still said the plan was uncommitted). Docker was down: `docker compose up -d`. Baseline measured
+  first: `pytest` **4205 passed**; `npm test` 2222 and E2E 55 were taken from this file and re-measured at the end (2325 and 58).
+  - **Step 1 spike (the stop-and-ask gate):** Pillow 13.0.0 installed from a wheel (WebP, JPEG, zlib, lcms all on). 31 of 32 checks passed;
+    the miss was my own strict `(255,0,0)` pixel equality on a lossy JPEG (`(254,0,0)`, the first MPO frame is the red one). Measuring the
+    decode memory found two things the plan hadn't: `Image.reduce()` of an RGBA image copies the whole image first (194 MB on the plan's
+    25 MP RGBA PNG, **314 MB** on a 300 x 83,000 panorama), solved by processing the centre square **in bands** (112 MB and 103 MB, no limit
+    changed); and **a 25 MP WebP peaks at about 390 MB** (Pillow 13's only WebP decoder is the animation decoder, about 16 bytes a pixel).
+    That one is a documented limit, so I stopped and asked: **your decision: WebP capped at 12 MP** (about 189 MB); JPEG and PNG keep 25 MP.
+  - **Backend** (`backend/`): new `apps/accounts/avatars.py` (`process_photo`, `PhotoUploadHandler`, the advisory-lock decode gate,
+    `save_photo` / `delete_photo`), migrations `accounts/0003_avatar.py` (`Avatar`, verbose name "profile photo"),
+    `moderation/0008_photo_actions.py` (`avatar_unblocked`, `moderate_profile_photos`) and `0009_photo_permissions.py` (frozen lists).
+    Changed: `accounts/{models,views,urls,permissions,serializers,admin,export}.py` (`AvatarView`, `AvatarImageView`, `PhotoUploadsAllowed`,
+    `/me` 12 keys at 256 px, `AccountActionsMixin` + `AccountActionSpec` + `AvatarAdmin`, the `UserAdmin` actions, filter and Photo field,
+    the export's `photo`), `moderation/{models,rules,services,roles}.py` and the confirmation template, `social/serializers.py` (profile
+    256 px), `requirements.txt`, `pyproject.toml`. New tests: `photo_fixtures.py`, `test_avatar_processing` (72), `test_avatar_memory` (7,
+    subprocess `VmHWM`), `test_api_avatar_{upload,serve,delete}`, `test_avatar_urls`, `test_services_photos`, `test_admin_photos` (**256
+    new tests in the eight files**); additions to `test_me`, `test_export`, `test_user_save`, `test_account_delete`, `test_api_profile`,
+    `test_models`, `test_roles`. **Three migrations, one dependency (Pillow 13.0.0), no variable.**
+  - **Frontend** (`frontend/`): new `features/settings/{AvatarUploader,photo-prep}.ts(x)` (+ tests), `e2e/avatar.spec.ts` (3 tests); changed
+    `lib/api/client.ts` (`onUploadProgress`: an XHR transport wrapped in a `Response`), `types.ts`, `settings/{SettingsPage,settings-api,messages}`,
+    `components/ui/Avatar.tsx` (`loading="lazy" decoding="async"`), `e2e/helpers.ts` (`makePhoto`, `moderateAccount`), and the tests of the
+    client, relay (a multipart body passes byte for byte; a 5 MB body goes through), `Avatar`, `ProfileHeader`, settings and the `Me` fixtures.
+    **No relay change was needed.**
+  - **Docs:** ARCHITECTURE §2/§3/§4e (rewritten as built)/§8/§9/§10/§12, ANALYSIS c-49 and f-7, SETUP B1 (Pillow 13.0.0 and why), STRUCTURE,
+    MEMORY (one 2026-10-21 Part 14B entry), `task.md` (criteria ticked, both status spots, decisions and deviations, notes in Parts 14, 16 and
+    18), the plan's status, and `docs/test-command.md` (below).
+  - **Validation (all run on Linux, 2026-10-21):**
+    - `cd backend && pytest` **4478 passed** (was 4205); `ruff check .` and `ruff format --check .` clean (335 files);
+      `makemigrations --check --dry-run`: No changes detected; `manage.py check`: no issues; migrations applied, rolled back to
+      `accounts 0002` / `moderation 0007` and applied again.
+    - `cd frontend`: `npm run lint`, `lint:tokens`, `typecheck`, `format:check` clean; `npm test` **165 files, 2325 tests passed** (was 2222);
+      `NEXT_PUBLIC_GOOGLE_CLIENT_ID= npm run build` OK (`○ /settings`); `npm run test:e2e` **58 passed** and `CI=1 npm run test:e2e` **58 passed**
+      (was 55; the CI run after a fresh build).
+    - **Decode memory** (fresh interpreter, `test_avatar_memory.py`; peak above the process baseline): 25 MP RGBA PNG **111 MB**, 300 x 83,000
+      RGBA panorama 103 MB, 25 MP RGB PNG 106 MB, 24 MP JPEG 10 MB, 12 MP WebP 189 MB, a 25 MP WebP and a 64 MP PNG refused at 5 MB and 1 MB.
+    - **Mutation checks: 35 backend, all caught; 20 frontend, all caught.** The first runs missed five: a flaw in my own memory test (the child's
+      `ru_maxrss` starts at its parent's peak, so a big pytest process hid a 407 MB regression; now `VmHWM`), the upload handler's own 5 MB cap
+      (now a unit test), `nosniff` (Django's middleware adds it too; now a test with the setting off), a no-op mutation I wrote, and, in the
+      frontend, the input reset (a test with `userEvent.upload`). Each was caught on the rerun.
+    - Headless Chromium at 1280, 1024 and 390 px (every state of the card, the rail, post cards, comments, profile, notifications and people
+      search; the Admin steps as a moderator): **0 px horizontal overflow on all 37 states checked** (33 in the main run, 4 more for a photo-bearing post card and a comment), screenshots looked at.
+  - **Test-command notes (`docs/test-command.md`):**
+    - The section is `### Part 14B: Profile photos` inside each guide (the brief said `## Part <ID>`; the file's parts are `###` sections inside its two
+      `##` guides, as Parts 3 to 14 were), in the same step shape as the others (12 steps: 10 Terminal, then the photo card and Django Admin in the
+      Browser), and "14B" is in the file's intro line. The file has **no comment marker** at its bottom (as in Parts 3 to 14): it ends with the last
+      paragraph of the Windows Part 14B section. (The brief asked to keep one; there is none to keep.) Nothing else in the file changed.
+    - The Linux bash blocks of steps 3 to 10 were **extracted from the finished doc by script and run verbatim in one shell against live Django
+      with your own settings**; **88 of 88 expected lines were found in order** (ids, the ETag and the `<user id>` / `<version>` placeholders
+      normalised), and every block passes `bash -n`. Steps 11 and 12 (browser) were checked with `e2e/avatar.spec.ts` and headless-Chromium scripts
+      (the Admin walk-through ran as the moderator `mod`, no superuser needed). The **PowerShell blocks were not run** (no PowerShell here); they
+      reuse Part 14's `Login` and `Send` and add `Put` and `ModAct`; the `ETag` header goes through a file because PowerShell 5.1 strips its quotes.
+  - **Found on the way** (details in MEMORY 2026-10-21 and `task.md`): the `ru_maxrss` trap above; one of my patch scripts cut 260 lines out of
+    `accounts/admin.py` (its anchor text also existed in the code it had just inserted; the file was rebuilt from `git show HEAD:` with
+    asserted exactly-once anchors); I twice wrote a file to a mistyped scratchpad path (`.../-home-sanjoy-rozario/Rumor-Zero/...`) and removed
+    each stray file and the empty directories the write created; the admin first said "Avatars" (now "Profile photos").
+  - **Left for you:** commit; run CI when you push; Parts 16, 17 and 18 have notes in `task.md` (a k6 avatar fetch, `img-src`, suspension
+    visibility, the production upload check and Render's memory under the gate). The 12 MP WebP cap is a change to a documented limit (ARCHITECTURE
+    §3 and §4e, ANALYSIS c-49, task.md): say so if you'd rather have a different number.
 
 - 2026-10-21 (Claude, Opus 5.5): **Part 14B planned and approved.** The plan is linked above.
   - **Starting point:** HEAD `bd59f97` ("Implemented Part 14", committed by you), a clean tree. (The older text of this file said Part 14 was

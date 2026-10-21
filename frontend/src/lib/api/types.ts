@@ -181,6 +181,7 @@ export interface UserProfile {
   username: string;
   display_name: string;
   bio: string;
+  /** The 256 px photo (the header shows it at 80 px, crisp at 2x), or null for initials. */
   avatar_url: string | null;
   created_at: string;
   counts: { followers: number; following: number; posts: number; verified: number; false: number };
@@ -196,6 +197,7 @@ export interface UserRowData {
   username: string;
   display_name: string;
   bio: string;
+  /** The 96 px photo, or null for initials. */
   avatar_url: string | null;
   reputation: Reputation;
   /** The person's verified posts, deleted ones included (as on their profile). */
@@ -303,8 +305,13 @@ export interface Me {
   role: Role;
   has_usable_password: boolean;
   google_connected: boolean;
-  /** The shell's avatar; null (initials) until photos exist in 14B. */
+  /**
+   * The profile photo at 256 px (the settings preview and the profile header), or null for
+   * initials. Lists and cards carry the 96 px image instead (`UserSummary.avatar_url`).
+   */
   avatar_url: string | null;
+  /** A moderator turned off photo uploads: the uploader shows why instead of a button (14B). */
+  avatar_uploads_blocked: boolean;
   /** The score others see: null until the sample is big enough (§4a). Part 14 mounts the panel. */
   public_score: number | null;
   /** Django Admin URL, sent to staff only. */

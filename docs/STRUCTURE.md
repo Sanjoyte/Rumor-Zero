@@ -77,7 +77,10 @@ rumor-zero/
 │   │   │                            VerificationEmailView (`POST /api/v1/me/verification-email/`), middleware.py + adapter.py extended
 │   │   │                            (verify/reset endpoints, reset daily cap, no Django messages, email context); ✅ 3 Google: google.py (request pre-check),
 │   │   │                            usernames.py, SocialAccountAdapter + the `social_account_added` receiver + `mark_email_verified_by_google`
-│   │   │                        14B Avatar model, avatars.py (Pillow processing), avatar endpoints
+│   │   │                        ✅ 14B Avatar model (migration 0003_avatar), avatars.py (Pillow processing, the in-memory upload handler,
+│   │   │                            the decode gate, save_photo / delete_photo), AvatarView + AvatarImageView in views.py, PhotoUploadsAllowed,
+│   │   │                            AvatarAdmin + AccountActionsMixin in admin.py, export `photo`; tests photo_fixtures.py, test_avatar_processing,
+│   │   │                            test_avatar_memory (subprocess peak RSS, Linux), test_api_avatar_{upload,serve,delete}, test_avatar_urls
 │   │   ├── posts/               4–5 Post model + status constraints, validators.py (sources/DOI), services (the only place
 │   │   │                            status changes), feeds, status polling; ✅ 11C emergency eligibility + pinned feeds;
 │   │   │                            ✅ 11D stats.py (the pure builders of the stats endpoint; `PostStatsView` in views.py);
@@ -152,6 +155,10 @@ rumor-zero/
 │   │   │                            block_after_emergency_false, lift_after_overturn, block/unblock_emergency_posting), admin.py (active
 │   │   │                            emergencies first, EmergencyFilter, Demote; the full log's subject_user), templates/moderation/admin/
 │   │   │                            confirm_account_action.html, tests (+ test_services_emergency, test_races_emergency, test_admin_emergency)
+│   │   │                        ✅ 14B migrations/0008_photo_actions.py (`avatar_unblocked`, `moderate_profile_photos`) and
+│   │   │                            0009_photo_permissions.py (frozen lists), rules.py (REMOVE_PHOTO, BLOCK_PHOTO_UPLOADS, ALLOW_PHOTO_UPLOADS),
+│   │   │                            services.py (remove_photo, block_photo_uploads, allow_photo_uploads), tests (+ test_services_photos,
+│   │   │                            test_admin_photos)
 │   │   │                        ✅ 11B migrations/0005_reputation_permission.py (moderators read the ledger; its own frozen lists),
 │   │   │                            rules.py (`Effect.credits_reporters`), services.py (`settle_post` after every action but
 │   │   │                            Escalate), admin.py (the `ReputationInline` on PostAdmin)
@@ -206,7 +213,8 @@ rumor-zero/
 │   │                                helpers.ts (shared sign-up; ✅ 4 signUpVerified, marker; ✅ 9 processPost: the real stub pipeline for
 │   │                                one post), mailbox.ts (reads backend/tmp/mail); one flow per later part. ✅ 9 playwright.config.ts
 │   │                                pins PIPELINE_BACKEND=stub and PIPELINE_INLINE_KICK=False for the E2E backend; ✅ 11B
-│   │                                credibility.spec.ts and `seedCheckedFacts` (checked facts for a seeded author)
+│   │                                credibility.spec.ts and `seedCheckedFacts` (checked facts for a seeded author); ✅ 14B avatar.spec.ts,
+│   │                                `makePhoto` (a GPS JPEG made with the backend venv's Pillow) and `moderateAccount`
 │   └── src/
 │       ├── app/                 🅑 App Router (routes below)
 │       │   ├── layout.tsx       🔨 0B  fonts (next/font), <html lang="en">, providers
@@ -282,7 +290,7 @@ rumor-zero/
 │       │   ├── notifications/   ✅ 13 NotificationsPage, NotificationList, NotificationItem, UnreadCountProvider (+ `useUnreadCount`; the 30 s
 │       │   │                        visible-only poll), notifications-api.ts, messages.ts; the badge is `components/shell/UnreadBadge.tsx`
 │       │   ├── settings/        ✅ 14 SettingsPage, ProfileForm, AccountSection, ChangePasswordModal, DataExportCard, DeleteAccountModal,
-│       │   │                        account-exit.tsx (`AccountExitContext`), settings-api.ts, messages.ts (uses ui/DangerZone); 14B AvatarUploader
+│       │   │                        account-exit.tsx (`AccountExitContext`), settings-api.ts, messages.ts (uses ui/DangerZone); ✅ 14B AvatarUploader, photo-prep.ts
 │       │   └── dev/             ✅ 0B  UiGallery and its sections, served at /dev/ui (404 in production builds); 0C ShellPreview (/dev/shell)
 │       ├── lib/
 │       │   ├── api/             ✅ 0C  client.ts (fetch wrapper: base "/api", bearer token, single-flight 401 hook with one retry,

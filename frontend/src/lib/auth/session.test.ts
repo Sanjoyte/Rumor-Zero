@@ -36,6 +36,7 @@ function me(id = "user-1", username = "ada"): Me {
     has_usable_password: true,
     google_connected: false,
     avatar_url: null,
+    avatar_uploads_blocked: false,
     public_score: null,
   };
 }

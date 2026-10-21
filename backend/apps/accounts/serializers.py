@@ -12,7 +12,9 @@ from apps.reputation.scoring import public_score
 
 
 def avatar_url(user, size=96):
-    """`/api/v1/avatars/{user_id}/{avatar_version}-{size}.webp`, or None for initials (§9)."""
+    """`/api/v1/avatars/{user_id}/{avatar_version}-{size}.webp`, or None for initials (§9). Lists
+    use the default 96 px; `/me` and a profile ask for 256 (the settings preview and the header are
+    56 and 80 px, crisp at 2x)."""
     if not user.avatar_version:
         return None
     return f"/api/v1/avatars/{user.pk}/{user.avatar_version}-{size}.webp"
@@ -59,6 +61,7 @@ class MeSerializer(serializers.ModelSerializer):
             "has_usable_password",
             "google_connected",
             "avatar_url",
+            "avatar_uploads_blocked",
             "public_score",
         ]
         read_only_fields = fields
@@ -70,7 +73,7 @@ class MeSerializer(serializers.ModelSerializer):
         return SocialAccount.objects.filter(user=user, provider="google").exists()
 
     def get_avatar_url(self, user):
-        return avatar_url(user)
+        return avatar_url(user, 256)
 
     def get_public_score(self, user):
         return public_score(user.reputation_score, user.reputation_sample)

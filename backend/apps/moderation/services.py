@@ -39,6 +39,7 @@ from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 
+from apps.accounts import avatars
 from apps.accounts.models import User
 from apps.core.services import get_platform_settings
 from apps.moderation import rules
@@ -331,7 +332,13 @@ def _lock_account(user_id):
     None. Inside a post's transaction `settle_post` already holds it, so this costs nothing new."""
     return (
         User.objects.select_for_update(no_key=True)
-        .only("pk", "is_superuser", "emergency_blocked_until")
+        .only(
+            "pk",
+            "is_superuser",
+            "emergency_blocked_until",
+            "avatar_version",
+            "avatar_uploads_blocked",
+        )
         .filter(pk=user_id)
         .first()
     )
@@ -443,6 +450,41 @@ def lift_after_overturn(post, rows, *, now, moderator):
     )
 
 
+def _write_photo_row(user_id, *, moderator, action, at, notes):
+    """Append one `avatar_*` row about the account (no post); the caller holds its lock."""
+    return ModerationAction.objects.create(
+        post=None,
+        subject_user_id=user_id,
+        post_snapshot="",
+        moderator=moderator,
+        action=action,
+        notes=notes,
+        created_at=at,
+    )
+
+
+def _photo_action(act, target, *, moderator, notes, now):
+    """The three photo actions (Part 14B), inside `_account_action`'s transaction and lock.
+
+    Block photo uploads also takes down the current photo (user decision 2026-10-21), logged as
+    `avatar_removed` and then `avatar_blocked`, 1 µs apart so the log reads in that order.
+    """
+    write = {"moderator": moderator, "notes": notes}
+    if act == rules.AccountAct.REMOVE_PHOTO:
+        avatars.delete_photo(target.pk)
+        return _write_photo_row(target.pk, action=ActionKind.AVATAR_REMOVED, at=now, **write)
+    if act == rules.AccountAct.ALLOW_PHOTO_UPLOADS:
+        User.objects.filter(pk=target.pk).update(avatar_uploads_blocked=False)
+        return _write_photo_row(target.pk, action=ActionKind.AVATAR_UNBLOCKED, at=now, **write)
+    at = now
+    if target.avatar_version:
+        avatars.delete_photo(target.pk)
+        _write_photo_row(target.pk, action=ActionKind.AVATAR_REMOVED, at=at, **write)
+        at += _TICK
+    User.objects.filter(pk=target.pk).update(avatar_uploads_blocked=True)
+    return _write_photo_row(target.pk, action=ActionKind.AVATAR_BLOCKED, at=at, **write)
+
+
 def _account_action(act, user_id, *, moderator, notes, now):
     with transaction.atomic():
         target = _lock_account(user_id)
@@ -450,10 +492,16 @@ def _account_action(act, user_id, *, moderator, notes, now):
         now = now or timezone.now()
         if target is None:
             raise ActionRefused(rules.NO_ACCOUNT)
-        days = get_platform_settings().emergency_false_cooldown_days
+        days = (
+            get_platform_settings().emergency_false_cooldown_days
+            if act in rules.EMERGENCY_ACTS
+            else 0
+        )
         refusal = rules.account_refusal(act, target, moderator, block_days=days, now=now)
         if refusal is not None:
             raise ActionRefused(refusal)
+        if act in rules.PHOTO_ACTS:
+            return _photo_action(act, target, moderator=moderator, notes=notes, now=now)
         if act == rules.AccountAct.BLOCK_EMERGENCY:
             return _write_block_row(
                 target.pk,
@@ -488,6 +536,33 @@ def unblock_emergency_posting(user_id, *, moderator, notes="", now=None):
     included. Logged `emergency_unblocked` with `subject_user` and no post."""
     return _account_action(
         rules.AccountAct.UNBLOCK_EMERGENCY, user_id, moderator=moderator, notes=notes, now=now
+    )
+
+
+def remove_photo(user_id, *, moderator, notes="", now=None):
+    """A moderator takes down an account's profile photo: initials show everywhere at once.
+    Logged `avatar_removed` with `subject_user` and no post. The account may upload another one
+    unless uploads are blocked too. Refusals (`rules.account_refusal`) raise `ActionRefused`."""
+    return _account_action(
+        rules.AccountAct.REMOVE_PHOTO, user_id, moderator=moderator, notes=notes, now=now
+    )
+
+
+def block_photo_uploads(user_id, *, moderator, notes="", now=None):
+    """A moderator turns off photo uploads for an account and takes down its current photo (user
+    decision 2026-10-21). Logged `avatar_removed` (when there was a photo) and then
+    `avatar_blocked`; returns the `avatar_blocked` row. Uploads then answer 403 until someone
+    allows them again."""
+    return _account_action(
+        rules.AccountAct.BLOCK_PHOTO_UPLOADS, user_id, moderator=moderator, notes=notes, now=now
+    )
+
+
+def allow_photo_uploads(user_id, *, moderator, notes="", now=None):
+    """A moderator lifts a photo-upload block. Logged `avatar_unblocked`. The photo that was taken
+    down stays gone: the account uploads a new one."""
+    return _account_action(
+        rules.AccountAct.ALLOW_PHOTO_UPLOADS, user_id, moderator=moderator, notes=notes, now=now
     )
 
 

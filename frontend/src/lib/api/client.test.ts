@@ -272,3 +272,237 @@ describe("apiFetch", () => {
     expect(baseFor("auth")).toBe("/api");
   });
 });
+
+/** The parts of XMLHttpRequest that `apiFetch` uses, with buttons for the test to push. */
+class FakeXhr {
+  static instances: FakeXhr[] = [];
+  method = "";
+  url = "";
+  headers: Record<string, string> = {};
+  body: unknown;
+  responseType = "";
+  response: ArrayBuffer | null = null;
+  status = 0;
+  statusText = "";
+  responseHeaders = "";
+  aborted = false;
+  upload: {
+    onprogress:
+      ((event: { lengthComputable: boolean; loaded: number; total: number }) => void) | null;
+  } = { onprogress: null };
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  ontimeout: (() => void) | null = null;
+  onabort: (() => void) | null = null;
+
+  constructor() {
+    FakeXhr.instances.push(this);
+  }
+
+  open(method: string, url: string) {
+    this.method = method;
+    this.url = url;
+  }
+
+  setRequestHeader(name: string, value: string) {
+    this.headers[name.toLowerCase()] = value;
+  }
+
+  send(body: unknown) {
+    this.body = body;
+  }
+
+  getAllResponseHeaders() {
+    return this.responseHeaders;
+  }
+
+  abort() {
+    this.aborted = true;
+    this.onabort?.();
+  }
+
+  progress(loaded: number, total: number, lengthComputable = true) {
+    this.upload.onprogress?.({ lengthComputable, loaded, total });
+  }
+
+  finish(status: number, body?: unknown, headers: Record<string, string> = {}) {
+    this.status = status;
+    this.response =
+      body === undefined ? null : new TextEncoder().encode(JSON.stringify(body)).buffer;
+    this.responseHeaders = Object.entries({ "content-type": "application/json", ...headers })
+      .map(([name, value]) => `${name}: ${value}\r\n`)
+      .join("");
+    this.onload?.();
+  }
+}
+
+describe("apiFetch with onUploadProgress", () => {
+  const fetchMock = vi.fn<typeof fetch>();
+
+  beforeEach(() => {
+    FakeXhr.instances = [];
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("XMLHttpRequest", FakeXhr);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    setAccessTokenGetter(() => null);
+    setUnauthorizedHandler(null);
+  });
+
+  const photo = () => {
+    const form = new FormData();
+    form.set("file", new Blob(["x"]), "photo.jpg");
+    return form;
+  };
+  const xhr = (index = 0) => FakeXhr.instances[index];
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("sends with XMLHttpRequest, not fetch, with the same headers and token", async () => {
+    setAccessTokenGetter(() => "token-1");
+    const form = photo();
+    const result = api.put<{ ok: boolean }>("/v1/me/avatar/", form, { onUploadProgress: vi.fn() });
+    xhr().finish(200, { ok: true });
+
+    expect(await result).toEqual({ ok: true });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(xhr()).toMatchObject({ method: "PUT", url: "/api/v1/me/avatar/", body: form });
+    expect(xhr().responseType).toBe("arraybuffer");
+    expect(xhr().headers).toMatchObject({
+      accept: "application/json",
+      "x-requested-with": "rumor-zero",
+      authorization: "Bearer token-1",
+    });
+    // FormData brings its own multipart boundary: no Content-Type of ours.
+    expect(xhr().headers["content-type"]).toBeUndefined();
+  });
+
+  it("reports 0 at the start and then how much of the body was sent", async () => {
+    const onUploadProgress = vi.fn();
+    const result = api.put("/v1/me/avatar/", photo(), { onUploadProgress });
+    xhr().progress(250, 1000);
+    xhr().progress(1000, 1000);
+    xhr().finish(200, {});
+    await result;
+    expect(onUploadProgress.mock.calls.map(([fraction]) => fraction)).toEqual([0, 0.25, 1]);
+  });
+
+  it("ignores progress events with no known length and never reports past 1", async () => {
+    const onUploadProgress = vi.fn();
+    const result = api.put("/v1/me/avatar/", photo(), { onUploadProgress });
+    xhr().progress(10, 0, false);
+    xhr().progress(10, 0);
+    xhr().progress(1200, 1000);
+    xhr().finish(200, {});
+    await result;
+    expect(onUploadProgress.mock.calls.map(([fraction]) => fraction)).toEqual([0, 1]);
+  });
+
+  it("does not use XMLHttpRequest when no progress callback is given", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { ok: true }));
+    await api.put("/v1/me/avatar/", photo());
+    expect(FakeXhr.instances).toHaveLength(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers an empty 204 with undefined", async () => {
+    const result = api.del("/v1/me/avatar/", { onUploadProgress: vi.fn() });
+    xhr().finish(204);
+    expect(await result).toBeUndefined();
+  });
+
+  it("throws the same ApiError for an error status, with Retry-After", async () => {
+    const result = api.put("/v1/me/avatar/", photo(), { onUploadProgress: vi.fn() });
+    xhr().finish(
+      429,
+      { detail: "Request was throttled.", code: "throttled" },
+      { "retry-after": "3600" },
+    );
+    await expect(result).rejects.toMatchObject({
+      name: "ApiError",
+      status: 429,
+      code: "throttled",
+      retryAfter: 3600,
+    });
+  });
+
+  it("reads a photo refusal's code", async () => {
+    const result = api.put("/v1/me/avatar/", photo(), { onUploadProgress: vi.fn() });
+    xhr().finish(400, { detail: "We can't read that file.", code: "photo_unsupported" });
+    await expect(result).rejects.toMatchObject({ status: 400, code: "photo_unsupported" });
+  });
+
+  it("retries once after a 401 with the new token, and progress starts again from 0", async () => {
+    let token = "old";
+    setAccessTokenGetter(() => token);
+    setUnauthorizedHandler(async () => {
+      token = "new";
+      return true;
+    });
+    const onUploadProgress = vi.fn();
+    const result = api.put("/v1/me/avatar/", photo(), { onUploadProgress });
+    xhr(0).progress(500, 1000);
+    xhr(0).finish(401, { detail: "Expired.", code: "not_authenticated" });
+    await settle();
+    expect(FakeXhr.instances).toHaveLength(2);
+    xhr(1).progress(1000, 1000);
+    xhr(1).finish(200, { ok: true });
+
+    expect(await result).toEqual({ ok: true });
+    expect(xhr(0).headers.authorization).toBe("Bearer old");
+    expect(xhr(1).headers.authorization).toBe("Bearer new");
+    expect(onUploadProgress.mock.calls.map(([fraction]) => fraction)).toEqual([0, 0.5, 0, 1]);
+  });
+
+  it("never loops: a second 401 is thrown", async () => {
+    setUnauthorizedHandler(async () => true);
+    const result = api.put("/v1/me/avatar/", photo(), { onUploadProgress: vi.fn() });
+    xhr(0).finish(401, { detail: "No.", code: "not_authenticated" });
+    await settle();
+    xhr(1).finish(401, { detail: "No.", code: "not_authenticated" });
+    await expect(result).rejects.toMatchObject({ status: 401 });
+    expect(FakeXhr.instances).toHaveLength(2);
+  });
+
+  it("token: false sends no managed token", async () => {
+    setAccessTokenGetter(() => "token-1");
+    const result = api.put("/v1/me/avatar/", photo(), { onUploadProgress: vi.fn(), token: false });
+    xhr().finish(200, {});
+    await result;
+    expect(xhr().headers.authorization).toBeUndefined();
+  });
+
+  it("a network failure is network_error", async () => {
+    const result = api.put("/v1/me/avatar/", photo(), { onUploadProgress: vi.fn() });
+    xhr().onerror?.();
+    await expect(result).rejects.toMatchObject({ status: 0, code: "network_error" });
+  });
+
+  it("a timeout is network_error too", async () => {
+    const result = api.put("/v1/me/avatar/", photo(), { onUploadProgress: vi.fn() });
+    xhr().ontimeout?.();
+    await expect(result).rejects.toMatchObject({ status: 0, code: "network_error" });
+  });
+
+  it("aborting the signal aborts the request and rethrows the abort, not a network error", async () => {
+    const controller = new AbortController();
+    const result = api.put("/v1/me/avatar/", photo(), {
+      onUploadProgress: vi.fn(),
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(result).rejects.toMatchObject({ name: "AbortError" });
+    expect(xhr().aborted).toBe(true);
+  });
+
+  it("an already-aborted signal never starts a request", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      api.put("/v1/me/avatar/", photo(), { onUploadProgress: vi.fn(), signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(FakeXhr.instances).toHaveLength(0);
+  });
+});

@@ -24,6 +24,7 @@ export const ME: Me = {
   has_usable_password: true,
   google_connected: false,
   avatar_url: null,
+  avatar_uploads_blocked: false,
   public_score: null,
 };
 

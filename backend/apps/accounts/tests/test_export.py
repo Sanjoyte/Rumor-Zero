@@ -9,6 +9,8 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from apps.accounts import export
+from apps.accounts.models import Avatar, User
+from apps.accounts.tests import photo_fixtures as fx
 from apps.accounts.tests.conftest import access_token_for, walk_strings
 from apps.accounts.tests.populate import fill
 from apps.posts.tests.factories import PostFactory, UserFactory, VerifiedUserFactory
@@ -87,6 +89,8 @@ def test_the_account_section(api_client):
         "created_at": account["created_at"],
         "has_usable_password": True,
         "google_connected": True,
+        "photo": None,
+        "photo_uploads_blocked": False,
         "credibility": {"score": 61, "sample": 4, "public_score": 61},
     }
 
@@ -204,9 +208,8 @@ def test_the_query_count_is_fixed_whatever_the_volume(api_client):
     small_count, small_data = count(small)
     large_count, large_data = count(large)
     assert len(large_data["posts"]) == 3 * len(small_data["posts"])
-    assert (
-        small_count == large_count == 13
-    )  # the user, the Google check, 11 sections, savepoint-free
+    # the user, the Google check, the photo, 11 sections
+    assert small_count == large_count == 14
 
 
 def test_a_unicode_post_survives_the_round_trip(api_client):
@@ -247,3 +250,56 @@ def test_a_post_view_that_is_not_json_serialisable_cannot_slip_in():
     user = VerifiedUserFactory()
     fill(user)
     json.dumps(export.build_export(user, timezone.now()))
+
+
+# ---------- Part 14B: your photo is yours, so it is in the file ----------
+
+
+def test_the_photo_is_the_256_px_webp_as_base64(api_client):
+    import base64
+
+    user = VerifiedUserFactory()
+    fx.give_photo(user, fx.gps_jpeg())
+    photo = get_export(api_client, user).json()["account"]["photo"]
+
+    assert set(photo) == {"format", "size", "data"}
+    assert (photo["format"], photo["size"]) == ("webp", 256)
+    raw = base64.b64decode(photo["data"], validate=True)
+    assert raw == bytes(Avatar.objects.get(user=user).image_256)
+    assert fx.riff_chunks(raw) == ["VP8 "] and fx.decode(raw).size == (256, 256)
+
+
+def test_the_export_carries_no_photo_after_it_was_taken_down(api_client):
+    user = VerifiedUserFactory()
+    fx.give_photo(user)
+    from apps.accounts import avatars
+
+    avatars.delete_photo(user.pk)
+    assert get_export(api_client, user).json()["account"]["photo"] is None
+
+
+def test_the_upload_block_is_in_the_account_section(api_client):
+    user = VerifiedUserFactory()
+    User.objects.filter(pk=user.pk).update(avatar_uploads_blocked=True)
+    assert get_export(api_client, user).json()["account"]["photo_uploads_blocked"] is True
+
+
+def test_the_version_key_and_the_other_images_never_appear(api_client):
+    user = VerifiedUserFactory()
+    version = fx.give_photo(user)
+    other = VerifiedUserFactory()
+    other_version = fx.give_photo(other, fx.jpeg(colour=fx.BLUE))
+    text = get_export(api_client, user).content.decode()
+    assert version not in text and "avatar_version" not in text and "avatar_url" not in text
+    assert other_version not in text and str(other.pk) not in text
+
+
+def test_another_accounts_photo_is_never_in_my_export(api_client):
+    import base64
+
+    mine, theirs = VerifiedUserFactory(), VerifiedUserFactory()
+    fx.give_photo(mine, fx.jpeg(colour=fx.RED))
+    fx.give_photo(theirs, fx.jpeg(colour=fx.BLUE))
+    photo = get_export(api_client, mine).json()["account"]["photo"]
+    assert base64.b64decode(photo["data"]) == bytes(Avatar.objects.get(user=mine).image_256)
+    assert base64.b64decode(photo["data"]) != bytes(Avatar.objects.get(user=theirs).image_256)

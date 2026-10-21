@@ -1,8 +1,15 @@
 # Part 14B: Photo avatars
 
-**Status:** approved by the user on 2026-10-21 (planned by Claude, Opus 5.5). Not implemented yet. The plan is saved
-here and linked from HANDOFF, so step 0's saving and linking are already done; its HANDOFF correction (Part 14
-committed as `bd59f97`) was also made at approval.
+**Status:** approved by the user on 2026-10-21 (planned by Claude, Opus 5.5). **Implemented 2026-10-21 (Claude, Sonnet 5.5).**
+The plan is saved here and linked from HANDOFF, so step 0's saving and linking are already done; its HANDOFF correction
+(Part 14 committed as `bd59f97`) was also made at approval.
+
+**As built, two differences from this text** (details in `task.md` Part 14B, ANALYSIS c-49 and ARCHITECTURE §4e):
+- **WebP is capped at 12 MP** (user decision at the step 1 stop-and-ask gate): Pillow 13's only WebP decoder is the animation
+  decoder, about 16 bytes a pixel, so a 25 MP WebP peaked at about 390 MB. JPEG and PNG keep 25 MP.
+- **The centre square is flattened and shrunk in horizontal bands**, not by `reduce()` of the whole image (decoding item 7
+  below): `reduce()` copies a whole RGBA image first, 194 MB on the plan's own 25 MP RGBA PNG and 314 MB on a 300 x 83,000
+  panorama. Bands: 112 MB and 103 MB. No documented limit changed.
 
 ## Context
 

@@ -145,9 +145,9 @@ def test_the_reputation_block_hides_the_score_until_three_events(api_client):
     assert api_client.get(url("known")).json()["reputation"] == {"score": 77, "sample": 3}
 
 
-def test_a_photo_builds_the_avatar_url(api_client):
+def test_a_photo_builds_the_avatar_url_at_256_for_the_header(api_client):
     user = VerifiedUserFactory(username="pic", avatar_version="abc123")
-    expected = f"/api/v1/avatars/{user.pk}/abc123-96.webp"
+    expected = f"/api/v1/avatars/{user.pk}/abc123-256.webp"
     assert api_client.get(url("pic")).json()["avatar_url"] == expected
 
 
