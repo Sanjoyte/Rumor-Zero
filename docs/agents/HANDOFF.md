@@ -24,12 +24,15 @@ read-only git output.
   the tree holds Part 14B's changes (66 entries: 48 modified, 18 new). The dev database **has the three migrations applied**
   (`accounts.0003`, `moderation.0008`, `moderation.0009`; rolled back to `accounts 0002` / `moderation 0007` and applied again,
   clean). The throwaway `viz_` and `part14b_` accounts were deleted; the E2E specs' seeded accounts stay, as after every run.
-- **Next action:** **commit Part 14B** (the user does all git), then start the next part: **Part 15 (Landing & static pages)**, whose
-  dependencies (4, 11B, 11C) are done. Prompt for the plan: `Plan Part 15 only, save the plan, update HANDOFF.md, then stop.`
-- **Approved plan:** none pending ([`part-14B-photo-avatars.md`](plans/part-14B-photo-avatars.md) was implemented, with two
-  recorded differences: WebP capped at 12 MP, and the centre square processed in bands).
+- **Next action:** Implement Part 15 from the approved plan.
+- **Approved plan:** [`part-15-landing-static-pages.md`](plans/part-15-landing-static-pages.md) (approved 2026-10-21; Part 15 planned by
+  Claude, Sonnet 5.5; **not implemented, no code written**). Dependencies 4, 11B and 11C verified `[x] Done`. Decisions: no hero pill; FAQ
+  numbers hard-coded and pinned by a test; Lighthouse via `@lhci/cli` devDependency + CI step. At planning time HEAD was `159411c`
+  ("Implemented Part 14B") and the tree was clean, so Part 14B is committed. `task.md` is untouched (Part 15 still `[ ] Not started`).
+  ([`part-14B-photo-avatars.md`](plans/part-14B-photo-avatars.md) was implemented, with two recorded differences: WebP capped at 12 MP,
+  and the centre square processed in bands.)
 - **Previous plans:**
-  - [`part-14B-photo-avatars.md`](plans/part-14B-photo-avatars.md), implemented 2026-10-21 (uncommitted);
+  - [`part-14B-photo-avatars.md`](plans/part-14B-photo-avatars.md), implemented 2026-10-21 (committed as `159411c`);
   - [`part-14-account-settings-export-deletion.md`](plans/part-14-account-settings-export-deletion.md), implemented 2026-10-21 (committed as `bd59f97`);
   - [`part-13-notifications.md`](plans/part-13-notifications.md), implemented 2026-10-20 (committed as `4f2d818`);
   - [`part-12-search.md`](plans/part-12-search.md), implemented 2026-10-20 (committed as `30649b4`);
