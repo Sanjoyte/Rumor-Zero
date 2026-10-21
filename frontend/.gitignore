@@ -42,3 +42,6 @@ next-env.d.ts
 
 # keep the tracked example env file (the ".env*" rule above would ignore it)
 !.env.example
+
+# Lighthouse CI (Part 15)
+.lighthouseci/

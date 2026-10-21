@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Reputation } from "@/lib/api/types";
 import { formatCount } from "@/lib/format";
 
-/** Where the score is explained (the text and the anchor arrive with Part 15's page). */
+/** Where the score is explained (Part 15 built it: `features/info/CredibilitySection.tsx`). */
 export const CREDIBILITY_HELP_HREF = "/how-it-works#credibility";
 export const NEW_SCORE_HINT = "A score shows once 3 of their posts have been checked or removed.";
 

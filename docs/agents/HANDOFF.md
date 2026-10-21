@@ -6,10 +6,10 @@ read-only git output.
 
 ## Active work
 
-- **Part:** **Part 14B (Photo avatars) is implemented** (2026-10-21, Claude, Sonnet 5.5) and **not committed yet**.
-  Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13, 14 and 14B are done (Part 11D committed as
-  `b2f8ad5`, Part 12 as `30649b4`, Part 13 as `4f2d818`, Part 14 as `bd59f97`, **the Part 14B plan as `cdaa870`**).
-  Part 1 CI is green (user-reported 2026-10-06); **Part 2 to 14B CI have not been reported yet.**
+- **Part:** **Part 15 (Landing & static pages) is implemented** (2026-10-21, Claude, Sonnet 5.5) and **not committed yet**.
+  Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13, 14, 14B and 15 are done (Part 14 committed as
+  `bd59f97`, Part 14B as `159411c`, **the Part 15 plan as `400bf9c`**).
+  Part 1 CI is green (user-reported 2026-10-06); **Part 2 to 15 CI have not been reported yet** (Part 15 adds a Lighthouse step to the frontend job).
   - **Part 3 acceptance criterion 4 is still pending you:** the real-Google sign-in check
     (`docs/test-command.md` Part 3, steps 7 and 8). It doesn't block anything.
   - **Part 17 has a launch blocker from Part 9** (your decision 2026-10-11): decide how production gets verdicts
@@ -17,21 +17,22 @@ read-only git output.
     from Part 11C a hash-chosen FALSE on an expired emergency also blocks its author.
   - **Part 17 also runs `posts.0003_search_vector`** (a stored generated column rewrites `posts_post`; the GIN build blocks
     writes): fine before launch.
-- **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` (now with **Pillow 13.0.0**) and
-  `frontend/node_modules` exist there. Docker was down at the start (`docker compose up -d` brought it back); it is up now.
-- **Owner:** none (Claude stopped after Part 14B, as asked).
-- **Phase:** Part 14B implemented and validated; nothing is running (ports 3000 and 8000 are free). HEAD `cdaa870` ("Plan part 14B");
-  the tree holds Part 14B's changes (66 entries: 48 modified, 18 new). The dev database **has the three migrations applied**
-  (`accounts.0003`, `moderation.0008`, `moderation.0009`; rolled back to `accounts 0002` / `moderation 0007` and applied again,
-  clean). The throwaway `viz_` and `part14b_` accounts were deleted; the E2E specs' seeded accounts stay, as after every run.
-- **Next action:** Implement Part 15 from the approved plan.
-- **Approved plan:** [`part-15-landing-static-pages.md`](plans/part-15-landing-static-pages.md) (approved 2026-10-21; Part 15 planned by
-  Claude, Sonnet 5.5; **not implemented, no code written**). Dependencies 4, 11B and 11C verified `[x] Done`. Decisions: no hero pill; FAQ
-  numbers hard-coded and pinned by a test; Lighthouse via `@lhci/cli` devDependency + CI step. At planning time HEAD was `159411c`
-  ("Implemented Part 14B") and the tree was clean, so Part 14B is committed. `task.md` is untouched (Part 15 still `[ ] Not started`).
-  ([`part-14B-photo-avatars.md`](plans/part-14B-photo-avatars.md) was implemented, with two recorded differences: WebP capped at 12 MP,
-  and the centre square processed in bands.)
+- **Machine:** the **Linux PC** (Ubuntu/Debian/Mint, bash). `backend/.venv` and `frontend/node_modules` exist there (the latter now holds
+  `@lhci/cli`). Docker is up (`docker compose up -d`).
+- **Owner:** none (Claude stopped after Part 15, as asked).
+- **Phase:** Part 15 implemented and validated; nothing is running (ports 3000 and 8000 are free). HEAD `400bf9c` ("Plan Part 15"); the tree holds
+  Part 15's changes (21 entries: 16 modified, 5 new). No backend change, no migration.
+- **Next action:** **commit Part 15** (the user does all git), then start the next part: **Part 16 (Security pass, load test, E2E hardening)**, which
+  needs k6 (SETUP A6). Prompt for the plan: `Plan Part 16 only, save the plan, update HANDOFF.md, then stop.` Part 16 also inherits two items from
+  Part 15 (below).
+- **Approved plan:** none pending ([`part-15-landing-static-pages.md`](plans/part-15-landing-static-pages.md) was implemented as planned; recorded
+  differences: the footer and the preview heading use `text-on-surface-variant` because `text-outline` fails contrast, and `RecentPreview` keeps the first
+  four plain posts of the default page instead of asking for `page_size=4`).
+- **Part 15 follow-ups for Part 16 / you:** (1) Stitch's `outline` colour (`#6c7a76`) measures 4.06 to 4.48 : 1 and still fails Lighthouse's
+  `color-contrast` in `CategoryChip` and the `PostCard` timestamp (the page scores 0.96, gate 0.95); decide whether to darken it (every screen).
+  (2) `@lhci/cli` adds dev-only audit advisories (26 in all, `npm audit --omit=dev` is 0): triage.
 - **Previous plans:**
+  - [`part-15-landing-static-pages.md`](plans/part-15-landing-static-pages.md), implemented 2026-10-21 (uncommitted);
   - [`part-14B-photo-avatars.md`](plans/part-14B-photo-avatars.md), implemented 2026-10-21 (committed as `159411c`);
   - [`part-14-account-settings-export-deletion.md`](plans/part-14-account-settings-export-deletion.md), implemented 2026-10-21 (committed as `bd59f97`);
   - [`part-13-notifications.md`](plans/part-13-notifications.md), implemented 2026-10-20 (committed as `4f2d818`);
@@ -62,9 +63,27 @@ read-only git output.
     2026-10-07;
   - [`chore-linux-machine-switch.md`](plans/chore-linux-machine-switch.md), done 2026-10-06;
   - [`part-1-auth-core.md`](plans/part-1-auth-core.md), done 2026-10-03.
-- **Last updated:** 2026-10-21 by Claude (Sonnet 5.5), Part 14B implemented.
+- **Last updated:** 2026-10-21 by Claude (Sonnet 5.5), Part 15 implemented.
 
 ## Completed checkpoints
+
+- 2026-10-21 (Claude, Sonnet 5.5): **Part 15 implemented** (uncommitted). Started from HEAD `400bf9c` ("Plan Part 15"); the tree was clean. Docker was down:
+  `docker compose up -d`. (A `next dev` and a `runserver` of yours appeared on ports 3000 and 8000 for a while mid-session and then stopped; I ran only
+  the read-only `marketing` and `smoke` specs against them, then ran the full suite once the ports were free.)
+  - **Frontend only** (`frontend/`): new `features/info/` (`numbers.ts`, `InfoPage.tsx`, `HowItWorks.tsx`, `CredibilitySection.tsx`, `PrivacyPage.tsx`,
+    `TermsPage.tsx`) and `features/landing/` (`LandingHero`, `FeatureCards`, `RecentPreview`); the four `(marketing)` pages now render them (titles
+    unchanged: "How verification works", "Privacy", "Terms"; the landing keeps the root "Rumor Zero"). `not-found` and `error` gained a second link;
+    `MarketingFooter` text moved to `text-on-surface-variant`. New `lighthouserc.json`, `npm run lhci`, `@lhci/cli` 0.15.1 (devDependency, your approval),
+    `.lighthouseci/` in `frontend/.gitignore`, a "Lighthouse accessibility (landing page)" step in `.github/workflows/ci.yml` after `npm test`
+    (`npm run build && npm run lhci`). New `e2e/marketing.spec.ts`.
+  - **Tests added:** 53 vitest tests in `info/numbers.test.ts` (pins each FAQ number and the ten event kinds to `ARCHITECTURE.md`), `info/info-pages.test.tsx`,
+    `landing/landing.test.tsx` and `app/page-titles.test.ts` (every `page.tsx` sets a title); 2 E2E.
+  - **Results:** `npm run lint`, `typecheck`, `lint:tokens`, `format:check` clean; `npm test` **2378 passed** (was 2325); `npm run build` marks `/`,
+    `/how-it-works`, `/privacy`, `/terms` static (○); `npm run lhci` accessibility **0.96** (gate 0.95); `npm run test:e2e` **60 passed** (was 58).
+    Backend untouched, `pytest` not re-run (last: 4478 passed at Part 14B).
+  - **Docs:** `task.md` (both status places, criteria ticked, done notes), `ARCHITECTURE.md` §4a, §10 (new "Landing and help pages" bullet) and the CI line,
+    `MEMORY.md` (the contrast and audit entry), `test-command.md` Part 15 in both guides (Linux outputs recorded; the Windows guide uses the same commands
+    in PowerShell and was **not** re-run on Windows).
 
 - 2026-10-21 (Claude, Sonnet 5.5): **Part 14B implemented** (uncommitted). Started from HEAD `cdaa870` ("Plan part 14B", committed by you); the
   tree was clean and matched this file (it still said the plan was uncommitted). Docker was down: `docker compose up -d`. Baseline measured

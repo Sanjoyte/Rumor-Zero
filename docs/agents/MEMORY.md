@@ -573,3 +573,16 @@ in `task.md`; transient continuation state belongs in `HANDOFF.md`.
 - **Consequence:** a new decoder or a Pillow upgrade re-runs `test_avatar_processing.py` and `test_avatar_memory.py` first; anything that decodes user images in a worker keeps the gate and the header checks.
 - **Left for later parts:** a user-facing "report photo" button; ICC colour management; whether suspension hides a suspended account's photo (Part 16); the CSP `img-src` and a k6 avatar fetch (Part 16); the production upload check and Render's memory under the gate (Part 18).
 - **Evidence:** Part 14B plan and implementation; backend 4478 tests, frontend 2325, E2E 58 in dev and CI mode; 35 backend and 20 frontend mutation checks (all caught after the fixes above); `docs/test-command.md` Part 14B run against live Django and headless Chromium.
+
+### 2026-10-21 — The `outline` colour fails WCAG contrast at small sizes; `@lhci/cli` is dev-only audit noise
+
+- **Applies to:** Part 16 (security pass, E2E hardening), any screen with small grey text.
+- **Fact:** Stitch's `outline` token (`#6c7a76`) measures 4.06 to 4.48 : 1 on the light surfaces, under the 4.5 : 1 that
+  Lighthouse's `color-contrast` audit wants for 12 to 13 px text. `CategoryChip` and the `PostCard` timestamp still use
+  `text-outline`. Part 15's gate passes (accessibility 0.96 on `/`) only because the rest of the page scores well.
+  `MarketingFooter` and the landing preview heading were moved to `text-on-surface-variant`.
+- **Also:** `@lhci/cli` 0.15.1 (devDependency, Part 15) brings Lighthouse, puppeteer and proxy-agent, so `npm audit`
+  reports 26 advisories in the dev tree while `npm audit --omit=dev` stays at 0.
+- **Consequence:** decide whether to darken `outline` in `globals.css` (it touches every screen) and triage the dev advisories
+  in Part 16.
+- **Evidence:** `npm run lhci` report `color-contrast` items; `npm audit` and `npm audit --omit=dev` on 2026-10-21.

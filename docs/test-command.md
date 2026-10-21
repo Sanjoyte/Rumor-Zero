@@ -1,6 +1,6 @@
 # Test commands by part
 
-Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13, 14, 14B).
+Hands-on commands for trying each finished part yourself, in build order (Parts 0A, 0B, 0D, 0C, 1, 2, 3, 4, 5, 6, 7, 7B, 8, 9, 10, 11, 11B, 11C, 11D, 12, 13, 14, 14B, 15).
 The file has two complete guides. Pick the one for your computer and stay in it:
 
 - [Guide 1: Linux (bash)](#guide-1-linux-bash)
@@ -11984,6 +11984,201 @@ folder: `echo "$work"` prints where the test pictures are.
   `docker compose down` (repo root) stops the containers and keeps the data; `docker compose down -v` wipes the whole local
   database, which is destructive.
 - No real secret was used: the password of the test accounts is a throwaway, and the moderator's login is one of them.
+
+### Part 15: Landing and static pages
+
+Needs Part 0C's frontend. The browser steps also need the backend (Part 0A) so the landing page's "Recent posts" can load.
+Part 15 is **frontend only**: it adds no endpoint, no table, no migration and no environment variable. It replaces the
+placeholders of `/`, `/how-it-works`, `/privacy` and `/terms`, polishes the 404 and error pages, adds one **dev dependency**
+(`@lhci/cli`, Lighthouse CI) with `frontend/lighthouserc.json`, an `npm run lhci` script and a CI step, and a new E2E spec
+(`frontend/e2e/marketing.spec.ts`).
+
+**Which window for what.**
+
+| Window | What runs in it | Used in steps |
+|---|---|---|
+| Window 1 (backend) | `python manage.py runserver` in `backend`, venv active. Leave it running. Start it in step 4, **after** steps 1 to 3 (Lighthouse starts its own server on port 3000, and Playwright in step 9 starts both servers, so those need the ports free). | 4 to 8 |
+| Window 2 (frontend) | `npm run dev` in `frontend`. Leave it running. | 4 to 8 |
+| Window 3 (commands) | Every other command. | 1 to 4, 9 |
+| Browser | Steps 5 to 8 | 5 to 8 |
+
+Things to know first:
+
+- **What is static.** `/`, `/how-it-works`, `/privacy` and `/terms` are prerendered at build time. Only two small parts of the
+  landing page run in the browser: the "Recent posts" preview (it fetches the public Recent feed and shows 4 plain posts, with
+  no like or repost buttons) and the hero's buttons (a signed-in visitor sees "Go to your feed" instead of the two sign-up links).
+- **The numbers on `/how-it-works`** (5 reports in 24 hours, 85% confidence, 7 days, score 40, 30 days and so on) are the
+  **defaults** of ARCHITECTURE §3, written into the page (user decision 2026-10-21). If a moderator changes a setting in Django
+  Admin, the page keeps saying the default. A test (`numbers.test.ts`) fails if the document and the page drift apart.
+- **"Needs legal review"** marks the Privacy page, the Terms page and the credibility section on purpose: the texts are
+  placeholders until a lawyer has read them (guide §16). No company name, address or contact was invented.
+- **Lighthouse** scored the landing page **0.96** for accessibility (the gate is 0.95). The only misses left are small grey
+  texts in shared components (the OPINION chip and the post timestamps, `text-outline` at 4.06 to 4.48 : 1 against the 4.5 : 1
+  rule), a Stitch palette value that is a follow-up for a later part.
+- The outputs below were recorded on Linux on 2026-10-21 by running the commands of steps 1 to 4 and 9, and by loading the
+  pages in headless Chromium for steps 5, 7 and 8 (screenshots at 1280 px; Playwright's `e2e/marketing.spec.ts`). Step 6 is
+  covered by a unit test (`landing.test.tsx`), not by a person logging in. Your counts and the posts you see will differ.
+
+#### Step 1: Run the automated frontend checks
+
+**Where:** Terminal window 3 (commands), starting in the repo root.
+
+**What this does:** Runs the linter, the type check, the design-token check, the formatter check and every frontend test,
+then Part 15's own tests on their own.
+
+```bash
+cd frontend
+npm run lint                                  # no output = clean
+npm run typecheck                             # no output = clean
+npm run lint:tokens                           # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
+npm run format:check                          # All matched files use Prettier code style!
+npm test                                      # Test Files  169 passed (169) / Tests  2378 passed (2378)
+npm test -- src/features/info src/features/landing src/app/page-titles.test.ts   # Test Files  4 passed (4) / Tests  53 passed (53)
+```
+
+**You should see:** the lines in the comments. The counts drift as parts are added; the last command is Part 15's share
+(the help pages and the number-pinning test, the landing page, and the "every route has a title" test).
+
+#### Step 2: Build and check the pages are static
+
+**Where:** Terminal window 3 (commands), in `frontend/`.
+
+**What this does:** Makes a production build and lists every route. A circle (○) means the page was prerendered.
+
+```bash
+npm run build
+```
+
+**You should see:** `✓ Compiled successfully` and, in the route list, a ○ in front of `/`, `/how-it-works`, `/privacy` and
+`/terms` (and not ƒ). The list ends with `○ (Static) prerendered as static content`.
+
+#### Step 3: Run Lighthouse on the landing page
+
+**Where:** Terminal window 3 (commands), in `frontend/`, right after step 2. Port 3000 must be free and Google Chrome (or
+Chromium) installed.
+
+**What this does:** `npm run lhci` starts the production server (`npm run start`), opens `/` in headless Chrome, measures only
+accessibility, and fails if the score is under 0.95. Nothing is uploaded anywhere.
+
+```bash
+npm run lhci
+rm -rf .lighthouseci                          # the report folder (git-ignored); keep it if you want to open the report
+```
+
+**You should see:** `Healthcheck passed!`, `Started a web server with "npm run start"...`, `Running Lighthouse 1 time(s) on
+http://localhost:3000/`, `All results processed!` and `Done running autorun.` with no assertion error. (The score itself is in
+`.lighthouseci/lhr-*.json`, `categories.accessibility.score`: 0.96 when recorded.) **If it differs:** `Chrome installation not found`
+means Chrome isn't installed (`CHROME_PATH=/path/to/chrome npm run lhci` points it at one, for example Playwright's
+`~/.cache/ms-playwright/chromium-*/chrome-linux*/chrome`); an assertion error lists the audits that dropped the score.
+
+#### Step 4: Start the servers and read each page's title
+
+**Where:** Window 1 (backend), window 2 (frontend), then window 3 (commands).
+
+**What this does:** Starts Django and the frontend dev server, then asks for each page's HTML and prints its `<title>`.
+
+```bash
+# window 1, in backend/
+docker compose up -d                          # from the repo root, once
+source .venv/bin/activate
+python manage.py runserver
+
+# window 2, in frontend/
+npm run dev
+
+# window 3, in frontend/
+for p in / /how-it-works /privacy /terms /nope; do printf '%s -> ' $p; curl -s -o /dev/null -w '%{http_code} ' http://localhost:3000$p; curl -s http://localhost:3000$p | grep -o '<title>[^<]*' | head -1; done
+curl -s http://localhost:3000/how-it-works | grep -o 'id="credibility"' | head -1
+```
+
+**You should see:**
+
+```text
+/ -> 200 <title>Rumor Zero
+/how-it-works -> 200 <title>How verification works · Rumor Zero
+/privacy -> 200 <title>Privacy · Rumor Zero
+/terms -> 200 <title>Terms · Rumor Zero
+/nope -> 404 <title>Page not found · Rumor Zero
+id="credibility"
+```
+
+The landing page keeps the plain site name on purpose; every other page is "<Page> · Rumor Zero".
+
+#### Step 5: Look at the landing page
+
+**Where:** Browser, while step 4's servers run: `http://localhost:3000/`
+
+**What this does:** Checks the layout of Stitch a1 with real content.
+
+**You should see:**
+
+- the Rumor Zero logo in the top bar with "How it works", "Log in" and "Sign up", and no pill or tagline above the headline;
+- the headline "A social platform where opinions are labelled, and facts are checked.", a short paragraph and two buttons,
+  **Create account** and **I already have an account**;
+- three cards: "1. You say what it is", "2. Facts are checked", "3. Colour means the result";
+- **Recent posts** with up to four post cards in two columns (a skeleton first), each with its OPINION or status label and
+  no like or repost buttons, and a **See more posts** link to `/home`. With the backend stopped you see "Recent posts couldn't
+  be loaded right now." instead, and the rest of the page still works; on an empty database, "No posts yet";
+- the footer: the logo, "How verification works", "Privacy", "Terms" and "© 2026 Rumor Zero". No company name.
+
+#### Step 6: See "Go to your feed" when you are signed in
+
+**Where:** Browser: `http://localhost:3000/login`, then `http://localhost:3000/`
+
+**What this does:** Checks that a signed-in visitor isn't asked to sign up again. Use any account you already have (or create
+one at `/signup`; the verification email is printed in window 1 with the default development email setting).
+
+**You should see:** after logging in you land on `/home`; opening `/` shows a single **Go to your feed** button in place of the
+two sign-up buttons (for a moment after a reload you may see the two buttons, until the session is restored). It goes to `/home`.
+
+#### Step 7: Read How verification works
+
+**Where:** Browser: `http://localhost:3000/how-it-works`
+
+**What this does:** Checks the status table, the FAQ and the credibility section that profiles link to.
+
+**You should see:**
+
+- **What the labels mean:** a table of nine rows with the real badges: OPINION, CHECKING FACTS…, VERIFIED 94%, VERIFIED · REVIEWED,
+  FALSE 88%, FALSE · REVIEWED, UNDER REVIEW, REMOVED and the violet EMERGENCY chip. The word is FALSE everywhere, never "debunked";
+- **From post to label:** six numbered steps;
+- **Questions and answers:** why opinions aren't checked, how the check works, reports (5 in 24 hours, 2 for an emergency),
+  appeals of FALSE labels and removals, emergency posts (the six rules, the 24-hour pin, "checked before other posts", the
+  30-day block and that it lifts when the FALSE is overturned) and why a repost keeps the original's label;
+- **How your credibility score is calculated**, under an amber "Needs legal review" box: the formula, "Others see "New" until 3
+  of your posts have been checked or removed", a table with all ten events (`fact_true` … `reversal`), what changes nothing,
+  and the appeal path.
+
+Now open `http://localhost:3000/how-it-works#credibility` directly: the page scrolls so the credibility heading sits just below
+the top bar. On a profile (`/u/<someone>`), the **How this is calculated** link goes to the same place.
+
+#### Step 8: Read Privacy and Terms, and see the 404
+
+**Where:** Browser: `http://localhost:3000/privacy`, `http://localhost:3000/terms`, `http://localhost:3000/no-such-page`
+
+**You should see:** each of Privacy and Terms has the amber "Needs legal review" box under its title. Terms has sections
+"Verification labels" and "Credibility score" (with a link to `/how-it-works#credibility`). The last address shows the logo,
+"Page not found" and two buttons, **Go to the home page** and **Browse posts**, with a 404 status and the tab title
+"Page not found · Rumor Zero". (The error page, "Something went wrong" with **Try again** and **Go to the home page**, shows only
+when a page crashes; `src/app/error-pages.test.tsx` covers it.)
+
+#### Step 9: Run the browser tests
+
+**Where:** Terminal window 3 (commands), in `frontend/`. **Stop windows 1 and 2 first (Ctrl+C)**: Playwright starts its own
+Django and frontend and needs ports 3000 and 8000 free (otherwise it reuses what is running).
+
+**What this does:** Runs Part 15's spec (landing → how it works → the credibility anchor → sign up; privacy, terms and the 404),
+then the whole suite.
+
+```bash
+npx playwright test e2e/marketing.spec.ts     # 2 passed
+npm run test:e2e                              # 60 passed (1.0m)
+```
+
+**You should see:** `2 passed` and then `60 passed`.
+
+- When you are done: Ctrl+C in windows 1 and 2. `docker compose down` (repo root) stops the containers and keeps the data.
+- No real secret was used.
 
 ---
 
@@ -24131,3 +24326,149 @@ and use **Profile photos** and **Users**) and show the same things; those steps 
 file window opens in `$work` (`echo $work` prints it): choose `gps.jpg`, `small.png` and `picture.svg` there. `Ctrl+C` stops
 windows 1 and 3, and `Remove-Item -Recurse $work` removes the test pictures. `docker compose down` stops the containers and
 keeps the data; `docker compose down -v` wipes the local database, which is destructive. No real secret was used.
+
+### Part 15: Landing and static pages
+
+Needs Part 0C's frontend. The browser steps also need the backend (Part 0A) so the landing page's "Recent posts" can load.
+Part 15 is **frontend only**: no endpoint, table, migration or environment variable. It replaces the placeholders of `/`,
+`/how-it-works`, `/privacy` and `/terms`, polishes the 404 and error pages, and adds one **dev dependency** (`@lhci/cli`, Lighthouse
+CI) with `frontend\lighthouserc.json`, an `npm run lhci` script and a CI step, plus `frontend\e2e\marketing.spec.ts`.
+
+**Which window for what.** As in the Linux guide: window 1 runs `python manage.py runserver` in `backend\` (step 4, **after** steps
+1 to 3, because Lighthouse starts its own server on port 3000 and Playwright in step 9 starts both servers, so those need the ports
+free); window 2 runs `npm run dev` in `frontend\`; window 3 runs every other command; steps 5 to 8 use the Browser.
+
+Things to know first (the same rules as the Linux guide):
+
+- `/`, `/how-it-works`, `/privacy` and `/terms` are prerendered. Only the "Recent posts" preview (4 plain posts, no buttons) and the
+  hero's buttons ("Go to your feed" when signed in) run in the browser.
+- The numbers on `/how-it-works` are the **defaults** of ARCHITECTURE §3, written into the page; a test fails if the two drift.
+- "Needs legal review" marks Privacy, Terms and the credibility section: placeholders until a lawyer has read them.
+- Lighthouse scored the landing page **0.96** for accessibility (the gate is 0.95); the remaining misses are small grey texts in
+  shared components (`text-outline`), a follow-up for a later part.
+- The outputs below were recorded **on Linux on 2026-10-21** (steps 1 to 4 and 9 by running the commands, steps 5, 7 and 8 with
+  headless Chromium); on Windows the commands are the same apart from the shell syntax shown, and Windows was not re-run.
+
+#### Step 1: Run the automated frontend checks
+
+**Where:** Terminal window 3 (commands), starting in the repo root.
+
+```powershell
+cd frontend
+npm run lint                                  # no output = clean
+npm run typecheck                             # no output = clean
+npm run lint:tokens                           # lint:tokens OK (no default palette, raw hex, stray radius, shadow or type size)
+npm run format:check                          # All matched files use Prettier code style!
+npm test                                      # Test Files  169 passed (169) / Tests  2378 passed (2378)
+npm test -- src/features/info src/features/landing src/app/page-titles.test.ts   # Test Files  4 passed (4) / Tests  53 passed (53)
+```
+
+**You should see:** the lines in the comments (counts drift as parts are added).
+
+#### Step 2: Build and check the pages are static
+
+**Where:** Terminal window 3, in `frontend\`.
+
+```powershell
+npm run build
+```
+
+**You should see:** `✓ Compiled successfully` and, in the route list, a ○ in front of `/`, `/how-it-works`, `/privacy` and `/terms`.
+(The OpenNext build, `npm run preview`, does not run on Windows; this plain `next build` does.)
+
+#### Step 3: Run Lighthouse on the landing page
+
+**Where:** Terminal window 3, in `frontend\`, right after step 2, with port 3000 free and Chrome installed.
+
+```powershell
+npm run lhci
+Remove-Item -Recurse -Force .lighthouseci     # the report folder (git-ignored)
+```
+
+**You should see:** `Healthcheck passed!`, `Running Lighthouse 1 time(s) on http://localhost:3000/`, `All results processed!` and
+`Done running autorun.` with no assertion error. **If it differs:** `Chrome installation not found` means Chrome isn't installed
+(`$env:CHROME_PATH = "C:\Path\To\chrome.exe"` points it at one).
+
+#### Step 4: Start the servers and read each page's title
+
+**Where:** Window 1 (backend), window 2 (frontend), then window 3.
+
+```powershell
+# window 1, in backend\
+docker compose up -d                          # from the repo root, once
+.\.venv\Scripts\Activate.ps1
+python manage.py runserver
+
+# window 2, in frontend\
+npm run dev
+
+# window 3, in frontend\
+foreach ($p in "/", "/how-it-works", "/privacy", "/terms", "/nope") {
+  $r = curl.exe -s -w "`n%{http_code}" "http://localhost:3000$p"
+  $code = ($r | Select-Object -Last 1)
+  $title = ($r | Select-String -Pattern "<title>[^<]*").Matches[0].Value
+  "$p -> $code $title"
+}
+curl.exe -s http://localhost:3000/how-it-works | Select-String -Pattern 'id="credibility"' -List | ForEach-Object { 'id="credibility"' }
+```
+
+**You should see:**
+
+```text
+/ -> 200 <title>Rumor Zero
+/how-it-works -> 200 <title>How verification works · Rumor Zero
+/privacy -> 200 <title>Privacy · Rumor Zero
+/terms -> 200 <title>Terms · Rumor Zero
+/nope -> 404 <title>Page not found · Rumor Zero
+id="credibility"
+```
+
+#### Step 5: Look at the landing page
+
+**Where:** Browser: `http://localhost:3000/`
+
+**You should see:** the logo with "How it works", "Log in" and "Sign up" and no pill or tagline; the headline "A social platform
+where opinions are labelled, and facts are checked."; the buttons **Create account** and **I already have an account**; three cards
+("1. You say what it is", "2. Facts are checked", "3. Colour means the result"); **Recent posts** with up to four cards, no like or
+repost buttons, and **See more posts** (with the backend stopped: "Recent posts couldn't be loaded right now."; on an empty
+database: "No posts yet"); the footer with the logo, three links and "© 2026 Rumor Zero".
+
+#### Step 6: See "Go to your feed" when you are signed in
+
+**Where:** Browser: `http://localhost:3000/login`, then `http://localhost:3000/`
+
+**You should see:** after logging in with any account, `/` shows one **Go to your feed** button (to `/home`) instead of the two
+sign-up buttons (for a moment after a reload you may see the two, until the session is restored). Checked by a unit test, not by a person.
+
+#### Step 7: Read How verification works
+
+**Where:** Browser: `http://localhost:3000/how-it-works`, then `http://localhost:3000/how-it-works#credibility`
+
+**You should see:** a nine-row table of the real badges (OPINION, CHECKING FACTS…, VERIFIED 94%, VERIFIED · REVIEWED, FALSE 88%,
+FALSE · REVIEWED, UNDER REVIEW, REMOVED, EMERGENCY), six numbered lifecycle steps, the FAQ (opinions, the check, reports, appeals,
+emergencies with the six rules, reposts), and **How your credibility score is calculated** under an amber "Needs legal review" box
+with a table of all ten events (`fact_true` … `reversal`). The `#credibility` address scrolls to that heading. The word is FALSE
+everywhere, never "debunked".
+
+#### Step 8: Read Privacy and Terms, and see the 404
+
+**Where:** Browser: `http://localhost:3000/privacy`, `/terms` and `/no-such-page`
+
+**You should see:** the amber "Needs legal review" box on Privacy and Terms; Terms has "Verification labels" and "Credibility score"
+sections; the last address shows the logo, "Page not found" and the buttons **Go to the home page** and **Browse posts** (tab title
+"Page not found · Rumor Zero").
+
+#### Step 9: Run the browser tests
+
+**Where:** Terminal window 3, in `frontend\`. **Stop windows 1 and 2 first (Ctrl+C)**: Playwright starts its own servers and needs
+ports 3000 and 8000 free (otherwise it reuses what is running).
+
+```powershell
+npx playwright test e2e/marketing.spec.ts     # 2 passed
+npm run test:e2e                              # 60 passed (1.0m)
+```
+
+**You should see:** `2 passed` and then `60 passed`.
+
+- When you are done: Ctrl+C in windows 1 and 2. `docker compose down` stops the containers and keeps the data.
+- No real secret was used.

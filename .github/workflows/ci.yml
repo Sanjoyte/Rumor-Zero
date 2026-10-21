@@ -79,6 +79,10 @@ jobs:
       - run: npm run lint:tokens
       - run: npm run format:check
       - run: npm test
+      # Part 15: accessibility score of the landing page (>= 95) on the production build. It
+      # starts `npm run start` itself and uploads nothing.
+      - name: Lighthouse accessibility (landing page)
+        run: npm run build && npm run lhci
       # Runs `next build` itself, then bundles the Worker. Linux only (OpenNext doesn't support
       # Windows). No env file here: the OpenNext build copies .env* files into the bundle.
       - name: OpenNext build (next build + Cloudflare Worker bundle)

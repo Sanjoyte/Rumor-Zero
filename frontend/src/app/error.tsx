@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { AuthLayout } from "@/components/shell/AuthLayout";
-import { Button } from "@/components/ui/Button";
+import { Button, buttonClasses } from "@/components/ui/Button";
 
-/** Basic error page for a failed render (Part 15 polishes it). The error itself isn't shown. */
+/** Basic error page for a failed render (Part 15 added the home link). The error itself isn't shown. */
 export default function ErrorPage({
   reset,
 }: {
@@ -17,7 +18,12 @@ export default function ErrorPage({
         <p className="font-body-md text-body-md text-outline">
           The page couldn&apos;t be shown. Try again in a moment.
         </p>
-        <Button onClick={() => reset()}>Try again</Button>
+        <div className="flex flex-wrap justify-center gap-space-md">
+          <Button onClick={() => reset()}>Try again</Button>
+          <Link href="/" className={buttonClasses({ variant: "secondary" })}>
+            Go to the home page
+          </Link>
+        </div>
       </div>
     </AuthLayout>
   );

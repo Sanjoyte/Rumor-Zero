@@ -5,7 +5,7 @@ import { buttonClasses } from "@/components/ui/Button";
 
 export const metadata: Metadata = { title: "Page not found" };
 
-/** Basic 404 (ARCHITECTURE §14 places the logo here in 0C; Part 15 polishes the page). */
+/** Basic 404 (ARCHITECTURE §14 places the logo here in 0C; Part 15 added the second link). */
 export default function NotFound() {
   return (
     <AuthLayout>
@@ -14,9 +14,14 @@ export default function NotFound() {
         <p className="font-body-md text-body-md text-outline">
           This page doesn&apos;t exist, or it has moved.
         </p>
-        <Link href="/" className={buttonClasses()}>
-          Go to the home page
-        </Link>
+        <div className="flex flex-wrap justify-center gap-space-md">
+          <Link href="/" className={buttonClasses()}>
+            Go to the home page
+          </Link>
+          <Link href="/home" className={buttonClasses({ variant: "secondary" })}>
+            Browse posts
+          </Link>
+        </div>
       </div>
     </AuthLayout>
   );

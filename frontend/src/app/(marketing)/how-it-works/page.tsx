@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import { Placeholder } from "@/components/shell/Placeholder";
+import { HowItWorks } from "@/features/info/HowItWorks";
 
 export const metadata: Metadata = { title: "How verification works" };
 
-/** Placeholder; Part 15 writes this page. */
 export default function Page() {
-  return <Placeholder title="How verification works" />;
+  return <HowItWorks />;
 }

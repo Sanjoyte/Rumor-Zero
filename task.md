@@ -104,7 +104,7 @@ not let the review expand the part's scope without user approval.
 | 13 | Notifications | 7, 7B, 10, 11, 11C | [x] Done (2026-10-20) |
 | 14 | Account settings, data export, deletion | 6, 7, 7B, 11B, 11D | [x] Done (2026-10-21) |
 | 14B | Photo avatars | 14 | [x] Done (2026-10-21) |
-| 15 | Landing & static pages | 4, 11B, 11C | [ ] |
+| 15 | Landing & static pages | 4, 11B, 11C | [x] Done (2026-10-21) |
 | 16 | Security pass, load test, E2E hardening | every part above | [ ] |
 | 17 | Deploy backend (Render, Neon, Upstash, Brevo, Sentry) | 16 | [ ] |
 | 18 | Deploy frontend, keep-alive & monitoring | 17 | [ ] |
@@ -1672,7 +1672,7 @@ Plus toasts and field errors.
 ---
 
 ## Part 15: Landing & static pages
-**Status:** [ ] Not started
+**Status:** [x] Done (2026-10-21)
 **Goal:** the public face: a landing page, "How verification works", Privacy and Terms (required by Google OAuth and guide §16), error pages, and proper titles everywhere.
 **Depends on:** 4 (the landing preview uses the Recent feed), 11B and 11C (the page explains them).
 **Stitch files to convert:** `a1_logged_out_home`; `design/stitch/code.html` (layout for the taxonomy table, the confidence-ramp illustration and the FAQ only, with copy rewritten); marketing footer.
@@ -1697,16 +1697,22 @@ Plus toasts and field errors.
 **API endpoints:** none new.
 
 **Acceptance criteria**
-- [ ] The landing page matches the a1 layout, and none of the Stitch sample names, organisations or taglines appear anywhere
-- [ ] `/how-it-works#credibility` explains every event in the ARCHITECTURE §4a table and the appeal path
-- [ ] `next build` output marks these pages as static
-- [ ] Every route has a proper title; Lighthouse accessibility ≥ 95 on `/`
+- [x] The landing page matches the a1 layout, and none of the Stitch sample names, organisations or taglines appear anywhere
+- [x] `/how-it-works#credibility` explains every event in the ARCHITECTURE §4a table and the appeal path
+- [x] `next build` output marks these pages as static
+- [x] Every route has a proper title; Lighthouse accessibility ≥ 95 on `/`
 
 **Required tests:** render tests for each page; E2E: landing → how it works → sign up navigation.
 
 **Recommended models**
 - **Plan:** Sonnet 5.5 · low. Content and layout only; the decisions are already made.
 - **Implement:** Haiku 4.5 (no effort setting). Static markup built from existing components, where a fast model is enough.
+
+**Done notes (2026-10-21, Claude, Sonnet 5.5; plan [`part-15-landing-static-pages.md`](docs/agents/plans/part-15-landing-static-pages.md))**
+- Built as planned. User decisions: no hero pill; the FAQ quotes the §3 defaults hard-coded (`features/info/numbers.ts`, pinned to `ARCHITECTURE.md` by `numbers.test.ts`); Lighthouse via `@lhci/cli` 0.15.1 (devDependency, `lighthouserc.json`, `npm run lhci`, a CI step after `npm test`).
+- Lighthouse accessibility on `/`: **0.96** (gate 0.95). The remaining `color-contrast` misses are all `text-outline` (`#6c7a76`, 4.06 to 4.48 against 4.5) in shared components (`CategoryChip`, the `PostCard` timestamp), a Stitch palette value. Deviation: `MarketingFooter` and the preview heading now use `text-on-surface-variant` instead. **Follow-up for you / Part 16:** darken `outline` (or stop using it for small text), which touches every screen.
+- `npm audit --omit=dev` is still 0; `@lhci/cli` adds dev-only advisories (lighthouse, puppeteer-core, proxy-agent, tmp, braces): triage in Part 16.
+- The privacy and terms pages are placeholders marked "Needs legal review"; no company name or contact address was invented.
 
 ---
 

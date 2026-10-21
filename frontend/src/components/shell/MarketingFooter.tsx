@@ -14,7 +14,7 @@ export const FOOTER_LINKS = [
  */
 export function MarketingFooter() {
   return (
-    <footer className="w-full border-t border-outline-variant/30 bg-surface-container-lowest py-space-xl font-body-sm text-body-sm text-outline">
+    <footer className="w-full border-t border-outline-variant/30 bg-surface-container-lowest py-space-xl font-body-sm text-body-sm text-on-surface-variant">
       <div className="mx-auto max-w-wide px-space-lg">
         <div className="flex flex-col justify-between gap-space-md border-b border-outline-variant/30 pb-space-lg md:flex-row md:items-center">
           <Link href="/" className="self-start rounded-lg md:self-auto">
@@ -32,7 +32,7 @@ export function MarketingFooter() {
             ))}
           </nav>
         </div>
-        <div className="flex flex-col items-center justify-between gap-space-sm pt-space-lg font-label-badge text-label-badge font-normal text-outline sm:flex-row">
+        <div className="flex flex-col items-center justify-between gap-space-sm pt-space-lg font-label-badge text-label-badge font-normal text-on-surface-variant sm:flex-row">
           <p>© 2026 Rumor Zero</p>
         </div>
       </div>
